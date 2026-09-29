@@ -75,8 +75,9 @@ asyncio.run(main())
   buffer), so reach for `.parallel()` only for independent items.
 - `.collect()` only batches when the consumer reads **straight from the
   generator**. Behind another per-item op it hands over one-item lists.
-- `.parallel(max=N)` does not limit anything yet; bound concurrency with
-  the graph's `concurrency=N` (default 64).
+- `.parallel(max=N)` runs at most N items through that consumer at once
+  (`w["word"].parallel(max=4)`). The graph's `concurrency=N` (default 64)
+  still caps all async ops together.
 - A stream has no "end" signal besides `.collect()`.
 
 ## Loops

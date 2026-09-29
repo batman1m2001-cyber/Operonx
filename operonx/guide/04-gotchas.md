@@ -422,8 +422,6 @@ asyncio.run(main())
   mutable object.
 - **Inputs and outputs are traced as JSON.** A dict with tuple keys breaks
   the trace; use string keys.
-- **`.parallel(max=N)` does not limit concurrency**; use the graph's
-  `concurrency=N`.
 - **`operonx.toml` rejects `on_error = "record"`**; set it on a Python
   `Job(...)` instead.
 - **HTTP doors reply after the run ends**; stream with a websocket door.

@@ -34,6 +34,10 @@ def _ctx_within(child: tuple, parent: tuple) -> bool:
     return len(child) >= n and child[:n] == parent
 
 
+# Route policy of an edge nothing was declared on: sequential.
+_SEQUENTIAL = (False, 1)
+
+
 class InterruptTargetError(ValueError):
     """``Interrupt.SELF`` was emitted where it cannot mean anything."""
 
@@ -86,6 +90,24 @@ def _stamped(
     return replace(event, op=op_name, ctx=ctx, ctx_to_cancel=target)
 
 
+def _edge_policy(graph, src: str, dst: str) -> tuple:
+    """``(collect, limit)`` for the edge ``src -> dst``, read off dst's Ref.
+
+    The policy lives on the Ref that dst's input holds to src
+    (``src["x"].parallel(max=4)``); the first input referencing src wins.
+    """
+    dst_op = graph._ops.get(dst)
+    for param in getattr(dst_op, "inputs", {}).values():
+        ref = getattr(param, "value", None)
+        if isinstance(ref, Ref) and getattr(ref.raw_source, "name", None) == src:
+            if ref._stream_collect:
+                return True, None
+            if ref._stream_parallel:
+                return False, ref._stream_parallel_max or None
+            break
+    return False, 1
+
+
 def _ctxs_within(cell, iter_ctx: tuple) -> list:
     """Contexts in ``cell`` belonging to the iteration rooted at ``iter_ctx``.
 
@@ -127,10 +149,19 @@ class Scheduler:
             └─ EOF   → _on_eof()    flush collect, advance seq queue, check loop
     """
 
-    __slots__ = ("graph",)
+    __slots__ = ("graph", "_route_policy")
 
     def __init__(self, graph):
         self.graph = graph  # static compiled data — never mutated after build()
+        # (src, dst) -> (collect, limit) for every edge, resolved once here
+        # rather than by scanning dst's inputs for every routed item.
+        # ``limit`` caps how many items of the edge run through dst at once:
+        # 1 for sequential (the default), N for ``.parallel(max=N)``, None
+        # for an unbounded ``.parallel()``.
+        self._route_policy: Dict[Tuple[str, str], Tuple[bool, object]] = {}
+        for src, links in graph._adj.items():
+            for link in links:
+                self._route_policy[(src, link.dst)] = _edge_policy(graph, src, link.dst)
 
     async def run(
         self,
@@ -205,6 +236,7 @@ class Scheduler:
             whatever happened to be in the cells, not a result.
         """
         g = self.graph
+        route_policy = self._route_policy
         _start_time = datetime.now(timezone.utc)
         _perf_start = perf_counter()
 
@@ -259,14 +291,20 @@ class Scheduler:
         # Root context seeded from _initial_ready; item contexts seeded in _route().
         ready: Dict[tuple, Dict[str, int]] = {context_id: dict(g._initial_ready)}
 
-        # seq_queues[gen_ctx][dst_op] = deque of item_ctx values waiting to run.
-        # Sequential mode (default): only one item runs through dst_op at a time.
-        # New items queue here and dispatch one-by-one as each finishes.
-        seq_queues: Dict[tuple, Dict[str, deque]] = {}
+        # The stream gate. Keyed by the edge (src, dst) alone, not by the
+        # generator context: "sequential" means one item at a time through
+        # dst for that edge across the whole run, which is what keeps per-op
+        # state (a counter, a buffer) safe when the same consumer serves
+        # several streams at once — two nested streams feeding one consumer
+        # still take turns. `.parallel(max=N)` is the same gate with room
+        # for N; an unbounded `.parallel()` bypasses it.
+        #
+        # seq_queues[(src, dst)] = deque of item contexts waiting for room.
+        seq_queues: Dict[Tuple[str, str], deque] = {}
 
-        # seq_active[gen_ctx][dst_op] = True while an item is in flight for dst_op.
-        # Guards against double-dispatch: next item only starts after current EOF.
-        seq_active: Dict[tuple, Dict[str, bool]] = {}
+        # seq_running[(src, dst)] = items of that edge in flight through dst.
+        # The next queued item starts only when one of them reaches EOF.
+        seq_running: Dict[Tuple[str, str], int] = {}
         # Contexts minted by a transient producer. Everything in them belongs
         # to one item, so the whole context is released when its last op
         # finishes rather than only the cells marked transient.
@@ -534,32 +572,26 @@ class Scheduler:
 
         def _route(src: str, dst: str, ctx: tuple, result: dict) -> None:
             """Dispatch dst using the correct stream policy (seq/parallel/collect)."""
-            dst_op = g._ops[dst]
             if getattr(g._ops.get(src), "transient", False):
                 transient_ctxs.add(ctx)
 
-            # Resolve per-var stream policy from schema (O(1)).
-            # Find which input var of dst references src, then look up its policy.
-            policy = None
-            for var_name, param in dst_op.inputs.items():
-                ref = getattr(param, "value", None)
-                if isinstance(ref, Ref) and ref.raw_source.name == src:
-                    policy = state.schema._stream_policies.get((dst_op.full_name, var_name))
-                    break
+            collect, limit = route_policy.get((src, dst), _SEQUENTIAL)
 
-            if policy and policy.collect:
+            if collect:
                 # Buffer — flush all at once when generator EOF arrives.
                 collect_bufs.setdefault((src, dst), []).append((ctx, result))
 
-            elif policy and policy.parallel:
-                # All items run concurrently — dispatch immediately.
+            elif limit is None:
+                # Unbounded `.parallel()` — dispatch immediately.
                 dispatch(dst, ctx)
 
             else:
-                # Sequential (default) — one item at a time through dst.
+                # Sequential (limit 1) or `.parallel(max=N)`: at most
+                # `limit` items of this edge in flight through dst.
                 key = (src, dst)
-                if not seq_active.get(key):
-                    seq_active[key] = True
+                running = seq_running.get(key, 0)
+                if running < limit:
+                    seq_running[key] = running + 1
                     seq_origins[(dst, ctx)] = key
                     dispatch(dst, ctx)
                 else:
@@ -592,7 +624,7 @@ class Scheduler:
                     seq_origins[(dst, next_ctx)] = key
                     dispatch(dst, next_ctx)
                 else:
-                    seq_active[key] = False
+                    seq_running[key] -= 1
 
             # 3. Loop check — a synthetic loop op (the cycle rewrite's hidden
             #    loop; `_loop_config` is set on nothing else) just finished an
@@ -765,14 +797,14 @@ class Scheduler:
                     ready.pop(ctx, None)
 
             # Sequential edges: every cancelled (op_name, ctx) that was
-            # holding a `seq_active` slot must release it — otherwise the
+            # holding a `seq_running` slot must release it — otherwise the
             # next item waiting in `seq_queues` for the same edge stays
             # stuck forever (the cancelled pump emitted no EOF, so
             # `_on_eof`'s normal advance path never runs). This mirrors
             # the EOF advance logic at lines ~363-373: drop the
             # seq_origins entry, then either dispatch the next queued
             # item (filtering descendants of ctx_prefix, which are being
-            # swept too) or reset seq_active=False.
+            # swept too) or give the slot back.
             for key in list(seq_origins):
                 _op_name, _ctx = key
                 if not _is_descendant_or_equal(_ctx, ctx_prefix) or _ctx == emitter_ctx:
@@ -785,7 +817,7 @@ class Scheduler:
                 _src, dst = seq_key
                 q = seq_queues.get(seq_key)
                 if not q:
-                    seq_active[seq_key] = False
+                    seq_running[seq_key] -= 1
                     continue
 
                 # Filter queued ctxs to keep only siblings (not descendants
@@ -798,7 +830,7 @@ class Scheduler:
                     dispatch(dst, next_ctx)
                 else:
                     seq_queues.pop(seq_key, None)
-                    seq_active[seq_key] = False
+                    seq_running[seq_key] -= 1
 
             for key in list(collect_bufs):
                 buf = collect_bufs[key]
