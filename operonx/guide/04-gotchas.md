@@ -140,64 +140,10 @@ async def main():
 asyncio.run(main())
 ```
 
-## Never compare two Refs inside `if_()`
-
-`if_(p["a"] >= p["b"], ...)` treats the right-hand Ref as a plain value, so
-the first branch always wins. Compute the comparison in an op.
-
-```python
-import asyncio
-
-from operonx import END, PARENT, START, Operon, graph, op
-from operonx.core.ops import if_
-
-
-@op
-def pair(a: int, b: int) -> dict:
-    return {"a": a, "b": b, "a_wins": a >= b}
-
-
-@op
-def first() -> dict:
-    return {"winner": "a"}
-
-
-@op
-def second() -> dict:
-    return {"winner": "b"}
-
-
-@graph
-def wrong():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    f, s = first(), second()
-    START >> p >> if_(p["a"] >= p["b"], f).else_(s)  # Ref vs Ref: never do this
-    f >> END
-    s >> END
-
-
-@graph
-def right():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    f, s = first(), second()
-    START >> p >> if_(p["a_wins"] == True, f).else_(s)  # noqa: E712 — Ref vs literal
-    f >> END
-    s >> END
-
-
-async def main():
-    inputs = {"a": 1, "b": 100}
-    assert (await Operon(wrong).run(inputs=inputs))["winner"] == "a"  # wrong
-    assert (await Operon(right).run(inputs=inputs))["winner"] == "b"
-
-
-asyncio.run(main())
-```
-
 ## Combine conditions with `&` `|` `~`, never `and` `or` `not`
 
-Python's `and` does not see inside a Ref: `x == 1 and y == 2` becomes just
-`y == 2`.
+Python's `and`, `or`, `not`, `if` and `in` cannot see inside a Ref, so
+they raise a `TypeError` when the graph is built. Use `&`, `|`, `~`.
 
 ```python
 import asyncio
@@ -222,15 +168,6 @@ def no() -> dict:
 
 
 @graph
-def with_and():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    y, n = yes(), no()
-    START >> p >> if_(p["a"] == 1 and p["b"] == 2, y).else_(n)
-    y >> END
-    n >> END
-
-
-@graph
 def with_amp():
     p = pair(a=PARENT["a"], b=PARENT["b"])
     y, n = yes(), no()
@@ -240,63 +177,18 @@ def with_amp():
 
 
 async def main():
-    inputs = {"a": 5, "b": 2}
-    assert (await Operon(with_and).run(inputs=inputs))["r"] == "yes"  # wrong
-    assert (await Operon(with_amp).run(inputs=inputs))["r"] == "no"
+    p = pair(a=1, b=2)
+    try:
+        _ = p["a"] == 1 and p["b"] == 2  # never do this
+        raise AssertionError("expected a TypeError")
+    except TypeError as e:
+        assert "&" in str(e)  # the message names the operators to use
+    assert (await Operon(with_amp).run(inputs={"a": 5, "b": 2}))["r"] == "no"
+    assert (await Operon(with_amp).run(inputs={"a": 1, "b": 2}))["r"] == "yes"
 
 
 asyncio.run(main())
 ```
-
-## Always end a branch with `.else_()`
-
-A branch finished with `.build()` instead of `.else_()` has no default.
-When no case matches, it runs **every** target.
-
-```python
-import asyncio
-
-from operonx import END, PARENT, START, Operon, graph, op
-from operonx.core.ops import if_
-
-RAN = []
-
-
-@op
-def read(n: int) -> dict:
-    return {"n": n}
-
-
-@op
-def high() -> dict:
-    RAN.append("high")
-    return {"r": "high"}
-
-
-@op
-def mid() -> dict:
-    RAN.append("mid")
-    return {"r": "mid"}
-
-
-@graph
-def no_else():
-    r = read(n=PARENT["n"])
-    h, m = high(), mid()
-    START >> r >> if_(r["n"] > 100, h).if_(r["n"] > 50, m).build()
-    h >> END
-    m >> END
-
-
-async def main():
-    await Operon(no_else).run(inputs={"n": 1})
-    assert sorted(RAN) == ["high", "mid"]  # nothing matched, yet both ran
-
-
-asyncio.run(main())
-```
-
-Write `if_(a_cond, a).if_(b_cond, b).else_(c)`: exactly one arm then runs.
 
 ## `None` does not bind to an input
 

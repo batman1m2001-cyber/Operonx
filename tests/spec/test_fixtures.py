@@ -37,13 +37,7 @@ TIMING_KEYS = {"$start_time", "$end_time", "$duration_ms", "start_time", "end_ti
 #: so until it did, these goldens asserted a silent failure. Each entry is
 #: a bug to fix, not an expectation — listed, it shows as an xfail naming
 #: the error rather than as a pass.
-KNOWN_OP_FAILURES = {
-    "core/refs/getattr_dict": (
-        "`src['obj'].name` builds a getattr transform, and getattr on a dict "
-        "raises AttributeError in main.consumer; the fixture says it should "
-        "read the key like getitem, so the golden {} is the failure"
-    ),
-}
+KNOWN_OP_FAILURES: dict = {}
 
 
 def _fixture_id(fx: Path) -> str:

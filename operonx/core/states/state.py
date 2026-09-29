@@ -464,7 +464,7 @@ class MemoryState:
         # its own reducer; identical to the pre-fix behaviour when it
         # doesn't (which is the canonical local→shared case).
         push_ref = self.schema._push_refs[idx]
-        if push_ref and push_ref.idx >= 0:
+        if push_ref is not None and push_ref.idx >= 0:
             stored = self._cells[idx][ctx_key]
             self._write_cell(push_ref.idx, ctx_key, push_ref._fn(stored))
 
@@ -496,7 +496,7 @@ class MemoryState:
         # Cell.__getitem__ walks up the context hierarchy automatically,
         # so source_cell[("main", "[0]")] finds batch values at ("main",).
         pull_ref = self.schema._pull_refs[idx]
-        if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
+        if pull_ref is not None and not pull_ref.is_output and pull_ref.idx >= 0:
             source_cell = self._cells[pull_ref.idx]
             source_val = source_cell[ctx_key]
             if source_val is not None or source_cell.default_value is not None:
