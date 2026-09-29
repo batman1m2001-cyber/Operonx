@@ -833,12 +833,9 @@ class GraphOp(BaseOp):
                     op: [[link.dst, link.soft] for link in links] for op, links in self._adj.items()
                 },
                 "stream_initial_ready": self._stream_initial_ready,
-                "loop_config": {
-                    "until": self._loop_config.until
-                    if isinstance(self._loop_config.until, str)
-                    else None,
-                    "max_iterations": self._loop_config.max_iterations,
-                }
+                # Only synthetic loops carry a loop config, and they refuse
+                # to serialize above, so this is always None today.
+                "loop_config": {"max_iterations": self._loop_config.max_iterations}
                 if self._loop_config
                 else None,
                 "max_stream_concurrent": self.concurrency,

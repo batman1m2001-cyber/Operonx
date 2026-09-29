@@ -399,7 +399,7 @@ def _synthesize_loop(
     hidden._back_edge_sources = {u for (u, _v) in scc_back_edges}  # kept for audit
     from operonx.core.ops.graph.task_scheduler import LoopConfig
 
-    hidden._loop_config = LoopConfig(until=None, max_iterations=1000)
+    hidden._loop_config = LoopConfig(max_iterations=1000)
 
     # --- Move SCC ops into hidden ------------------------------------------------
     # Iterate over scc_seq (list) not scc (set) so hidden._ops insertion is
