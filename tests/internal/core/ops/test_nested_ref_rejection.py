@@ -20,8 +20,9 @@ from __future__ import annotations
 
 import pytest
 
-from operonx.core import PARENT, op
+from operonx.core import PARENT, GraphOp, op
 from operonx.core.ops._params import _find_nested_ref, normalize_params
+from operonx.core.ops.flow.branch_op import if_
 from operonx.core.states.ref import Ref
 
 pytestmark = pytest.mark.unit
@@ -221,3 +222,59 @@ def test_normalize_params_surfaces_the_error():
     s = src(x=1)
     with pytest.raises(TypeError, match=r"nested inside a dict"):
         normalize_params({"v": {"one": s["a"]}}, parent=None)
+
+
+# ── A Ref combined with another Ref ───────────────────────────────────────
+
+
+@op
+def _left() -> dict:
+    return {"n": 1}
+
+
+@op
+def _right() -> dict:
+    return {"n": 2}
+
+
+class TestRefCombinedWithRef:
+    """``sink(v=a["n"] + b["n"])`` reads two cells through one param.
+
+    An op input holds one pull-ref on one cell, so the second Ref was
+    never read: the transform saw None (``1 + None`` at run time, recorded
+    as an op error) or the Ref object itself. A branch condition does read
+    every Ref; an op input refuses the form when the graph is built.
+    """
+
+    @pytest.mark.parametrize(
+        "build",
+        [
+            pytest.param(lambda a, b: a["n"] + b["n"], id="add"),
+            pytest.param(lambda a, b: a["n"] > b["n"], id="compare"),
+            pytest.param(lambda a, b: (a["n"] > 0) & (b["n"] > 0), id="and"),
+            pytest.param(lambda a, b: a["items"][b["n"]], id="getitem"),
+        ],
+    )
+    def test_is_refused_at_build(self, build):
+        with pytest.raises(TypeError, match=r"reads 2 values(.|\n)*compute it in an op"):
+            with GraphOp(name="g"):
+                a, b = _left(), _right()
+                sink(v=build(a, b))
+
+    def test_the_message_names_both_refs(self):
+        with pytest.raises(TypeError) as e:
+            with GraphOp(name="g"):
+                a, b = _left(), _right()
+                sink(v=a["n"] + b["n"])
+        assert "_left.n" in str(e.value) and "_right.n" in str(e.value)
+
+    def test_one_ref_with_literals_still_works(self):
+        with GraphOp(name="g"):
+            a = _left()
+            c = sink(v=(a["n"] + 1) > 0)
+        assert c.inputs["v"].value.var == "n"
+
+    def test_a_branch_still_compares_two_refs(self):
+        with GraphOp(name="g"):
+            a, b = _left(), _right()
+            if_(a["n"] > b["n"], "x").else_("y")
