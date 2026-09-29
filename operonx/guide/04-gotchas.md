@@ -425,6 +425,4 @@ asyncio.run(main())
 - **`.parallel(max=N)` does not limit concurrency**; use the graph's
   `concurrency=N`.
 - **Never mix one hard edge with two or more `~` soft edges into one op.**
-- **`operonx.toml` rejects `on_error = "record"`**; set it on a Python
-  `Job(...)` instead.
 - **HTTP doors reply after the run ends**; stream with a websocket door.
