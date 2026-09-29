@@ -1,6 +1,7 @@
 """Ref type for zero-copy variable references with chainable transforms."""
 
 import operator
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -40,6 +41,21 @@ _REFLECTED_OPS: Dict[str, Callable[[Any, Any], Any]] = {
     "rpow": operator.pow,
     "rmatmul": operator.matmul,
 }
+
+
+def _getattr_or_key(value: Any, name: str) -> Any:
+    """``ref.name`` at run time: the attribute, else the key of a mapping.
+
+    Op outputs are usually dicts, so ``src["obj"].name`` reads the
+    ``"name"`` key rather than raising. A real attribute wins, so
+    ``ref.get("k")`` and ``ref.items()`` stay method calls.
+    """
+    try:
+        return getattr(value, name)
+    except AttributeError:
+        if isinstance(value, Mapping) and name in value:
+            return value[name]
+        raise
 
 
 @dataclass
@@ -266,7 +282,7 @@ class Ref:
                     return lambda x, ctx={}, f=fn, r=a: f(x, ctx)[r._resolve(ctx)]
                 return lambda x, ctx={}, f=fn, k=a: f(x, ctx)[k]
             case "getattr":
-                return lambda x, ctx={}, f=fn, k=a: getattr(f(x, ctx), k)
+                return lambda x, ctx={}, f=fn, k=a: _getattr_or_key(f(x, ctx), k)
             case "call":
                 ca, kw = args
                 if Ref._any_ref(ca, kw):

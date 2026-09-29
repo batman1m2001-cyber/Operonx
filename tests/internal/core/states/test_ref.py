@@ -952,3 +952,28 @@ class TestNoTruthiness:
         cond = ((x == 1) & (y == 2)) | ~(x == 0)
         assert cond.execute(1, {("n", "x"): 1, ("n", "y"): 2}) is True
         assert cond.execute(0, {("n", "x"): 0, ("n", "y"): 3}) is False
+
+
+class TestGetattrOnADict:
+    """``src["obj"].name`` on a dict value reads the ``"name"`` key.
+
+    Op outputs are dicts far more often than objects, and the getattr
+    transform used to raise AttributeError there — recorded as an op
+    error, so the consumer's output was just missing. A real attribute
+    still wins, so ``ref.get("k")`` and ``ref.items()`` stay method calls.
+    """
+
+    def test_a_missing_attribute_reads_the_key(self):
+        assert Ref("n", "obj").name.execute({"name": "Alice"}) == "Alice"
+
+    def test_a_real_attribute_wins(self):
+        assert Ref("n", "obj").get("k").execute({"k": 1}) == 1
+
+    def test_a_missing_key_still_raises_attribute_error(self):
+        with pytest.raises(AttributeError):
+            Ref("n", "obj").name.execute({"other": 1})
+
+    def test_an_object_still_uses_its_attribute(self):
+        from types import SimpleNamespace
+
+        assert Ref("n", "obj").name.execute(SimpleNamespace(name="Bob")) == "Bob"
