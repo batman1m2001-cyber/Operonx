@@ -843,7 +843,6 @@ class TestIntrospection:
     PROBES = [
         "_private",
         "__len__",
-        "__iter__",
         "__copy__",
         "__deepcopy__",
         "__getstate__",
@@ -883,3 +882,26 @@ class TestIntrospection:
             assert isinstance(dup, Ref)
             assert dup.transforms == ref.transforms
             assert dup.execute({"k": 5}) is True
+
+
+class TestNotIterable:
+    """``Ref.__getitem__`` made a Ref iterable by Python's legacy protocol:
+    ``ref[0]``, ``ref[1]``, … each a new Ref, never an ``IndexError``. So
+    ``list(ref)`` — or any tool that iterates what it is handed — never
+    returned."""
+
+    def test_iter_refuses(self):
+        with pytest.raises(TypeError, match="not iterable"):
+            iter(Ref("n", "x"))
+
+    def test_unpacking_refuses(self):
+        with pytest.raises(TypeError, match="not iterable"):
+            first, second = Ref("n", "pair")
+
+    def test_it_is_not_an_iterable(self):
+        from collections.abc import Iterable
+
+        assert not isinstance(Ref("n", "x"), Iterable)
+
+    def test_indexing_is_still_dsl(self):
+        assert Ref("n", "items")[0].execute(["a", "b"]) == "a"

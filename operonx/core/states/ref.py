@@ -435,6 +435,11 @@ class Ref:
     def __getitem__(self, key: Any) -> "Ref":
         return self._with_transform("getitem", key)
 
+    # Without this, `__getitem__` makes a Ref iterable by the legacy
+    # protocol — `ref[0]`, `ref[1]`, … never an IndexError — so `list(ref)`
+    # never returns. None makes `iter()` raise "not iterable" at once.
+    __iter__ = None
+
     def __getattr__(self, name: str) -> "Ref":
         if name.startswith("_"):
             raise AttributeError(f"'{type(self).__name__}' không có attribute '{name}'")
