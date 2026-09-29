@@ -154,6 +154,32 @@ class TestApi:
         assert R.scrub_message(message) is message
 
 
+class TestScrubData:
+    """Tool arguments arrive as a structure, and in a structure the label
+    that identifies a secret is the *key* rather than text beside it."""
+
+    def test_a_value_is_caught_by_its_key(self):
+        out = R.scrub_data({"password": "correcthorse99", "api_key": "abcdef123456"})
+        assert "correcthorse99" not in str(out)
+        assert "abcdef123456" not in str(out)
+        assert set(out) == {"password", "api_key"}, "keys survive"
+
+    def test_nested_and_listed_values_are_reached(self):
+        out = R.scrub_data({"a": [{"b": "sk-abcdefghijklmnop12345"}], "api_key": ["k_12345678"]})
+        assert "sk-abcdefghijklmnop12345" not in str(out)
+        assert "k_12345678" not in str(out), "list items inherit the list's key"
+
+    def test_ordinary_values_are_untouched(self):
+        """Over-redaction: `max_tokens` is not a token, a path is not a key."""
+        data = {"max_tokens": 1024, "path": "src/app/settings.py", "ok": True, "n": None}
+        assert R.scrub_data(data) == data
+
+    def test_does_not_mutate_the_input(self):
+        data = {"headers": {"Authorization": "Bearer sk-abcdefghijklmnop12345"}}
+        R.scrub_data(data)
+        assert data == {"headers": {"Authorization": "Bearer sk-abcdefghijklmnop12345"}}
+
+
 class TestDispatchIntegration:
     @pytest.fixture(autouse=True)
     def _tools(self):

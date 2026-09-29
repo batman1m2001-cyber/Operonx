@@ -1,4 +1,4 @@
-"""Secret redaction for tool output.
+"""Secret redaction for tool output and tool-call arguments.
 
 Tool output goes two places an agent author does not fully control: into
 the model's context, and into whatever the tracer writes to disk or ships
@@ -123,6 +123,33 @@ class Redactor:
         if not isinstance(message, dict) or "content" not in message:
             return message
         return {**message, "content": self.scrub(message.get("content"))}
+
+    def scrub_data(self, value: Any, key: Optional[str] = None) -> Any:
+        """Redact every string inside a JSON-like value; return a new one.
+
+        For tool **arguments**, which arrive as a structure rather than as
+        text. Each string is scrubbed together with the key it sits under,
+        as ``"key: value"``: the labelled patterns — ``Authorization:
+        Bearer …``, ``token: …`` — match a label and a value, and in a dict
+        the label is the key. Scrubbing values alone would let
+        ``{"token": "tok_…"}`` through, since only the key says what it
+        is. Keys themselves, numbers, booleans and ``None`` are kept.
+
+        Never mutates ``value``: the same dict is what the tool runs with.
+        """
+        if isinstance(value, str):
+            if key:
+                label = f"{key}: "
+                scrubbed = self.scrub(label + value)
+                if scrubbed.startswith(label):
+                    return scrubbed[len(label) :]
+            return self.scrub(value)
+        if isinstance(value, dict):
+            return {k: self.scrub_data(v, key=str(k)) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            # Items inherit the list's key: ``{"tokens": [...]}`` labels each.
+            return [self.scrub_data(item, key=key) for item in value]
+        return value
 
     def found(self, text: Any) -> List[str]:
         """Kinds detected in ``text``, for tests and audit logging."""

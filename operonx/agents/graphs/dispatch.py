@@ -130,7 +130,7 @@ def each_call(tool_calls: Optional[list] = None):
 
 
 @op
-def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
+def parse_call(call: Optional[dict] = None, policy: Any = None, redactor: Any = None) -> dict:
     """Validate a tool call against the registry and policy, and shape
     the payloads.
 
@@ -138,6 +138,12 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     refusal all become ``error``, which ``execute`` turns into a tool
     message — the model can correct itself from that, but not from a
     traceback.
+
+    ``redactor`` scrubs the arguments shown in ``approval_payload`` only.
+    The payload is what reaches the human, the interrupt bus, the tracer
+    and the checkpointer; ``args``, which ``execute`` runs the tool with,
+    stay real — a tool handed ``[redacted:bearer]`` as its credential
+    would fail in a way nobody could diagnose.
     """
     call = call or {}
     call_id, name = call_identity(call)
@@ -191,7 +197,7 @@ def parse_call(call: Optional[dict] = None, policy: Any = None) -> dict:
     # construction, so the InterruptOp downstream takes one bare ref.
     approval_payload = {
         "tool": name,
-        "args": args,
+        "args": redactor.scrub_data(args) if redactor is not None else args,
         "call_id": call_id,
         "description": meta.get("description", ""),
     }
@@ -344,10 +350,11 @@ def build_dispatch(
             Defaults to :data:`~operonx.agents.policy.DEFAULT_POLICY` —
             destructive tools ask, everything else runs.
         redactor: Strips credential-shaped strings from tool output
-            before it reaches the model or the tracer. ``None`` disables
-            it — opt-in, because over-redaction produces an agent that
-            cannot read its own project and is harder to diagnose than a
-            leak.
+            before it reaches the model or the tracer, and from the
+            arguments shown in an approval request (the tool itself still
+            runs with the real ones). ``None`` disables it — opt-in,
+            because over-redaction produces an agent that cannot read its
+            own project and is harder to diagnose than a leak.
     """
 
     @graph
@@ -358,7 +365,7 @@ def build_dispatch(
         # overwrote every sibling — denying one destructive call and
         # approving another ran both. Only one arm fires per call, so the
         # other input is simply absent at read time.
-        parsed = parse_call(call=call, policy=policy or DEFAULT_POLICY)
+        parsed = parse_call(call=call, policy=policy or DEFAULT_POLICY, redactor=redactor)
 
         approve = InterruptOp(
             payload=parsed["approval_payload"],  # bare ref — see module docstring

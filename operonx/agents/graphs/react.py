@@ -167,7 +167,8 @@ def build_react_agent(
             :class:`~operonx.agents.policy.ToolPolicy`. Defaults to
             destructive-asks, everything-else-runs.
         redactor: Strips credential-shaped strings from tool output
-            before the model or the tracer sees it. See
+            before the model or the tracer sees it, and from the
+            arguments in an approval request. See
             :class:`~operonx.agents.redact.Redactor`.
         system: System prompt. Sent first and never changed, which is
             what lets a provider cache the prefix.

@@ -147,8 +147,11 @@ answer = agent_result(handle.state, agent)
 ```
 
 The payload carries the real tool name and arguments, so the human sees
-what they are approving. Approvals arrive one at a time even when tool
-calls fan out.
+what they are approving. With `redactor=Redactor()`, credential-shaped
+strings in those arguments are scrubbed from the payload — and so from
+the interrupt bus, the tracer and the checkpointer — while the tool
+itself still runs with the real values. Approvals arrive one at a time
+even when tool calls fan out.
 
 On denial or timeout the tool does not run and the model gets a message
 saying so — those two cases read differently, because "a human declined"
