@@ -394,3 +394,56 @@ async def test_semantic_failure_does_not_trigger_fallback():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# =============================================================================
+# on_failure — a hard failure raised, or reported like a parse failure
+# =============================================================================
+
+
+def _failing_hub(exc):
+    async def generate(messages, **kwargs):
+        raise exc
+
+    llm = Mock()
+    llm.generate = generate
+    hub = Mock()
+    hub.get.return_value = llm
+    return hub
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_a_hard_failure_raises_by_default():
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
+        mock_cls.instance.return_value = _failing_hub(TimeoutError("exceeded 90s"))
+        g = _wf(resource="mock", prompt="Soften: {text}", fields=["reason: str"], parser="json", text="x")
+        out = await Operon(g).run(inputs={})
+    assert out.get("reason") is None and "error" not in out or out.get("error") is None
+    state = out["$state"]
+    assert any(var == "error" and state[op, var] for op, var in state), "the op should have failed"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_on_failure_error_reports_a_hard_failure_as_the_error_output():
+    """For an optional step: the graph carries on, and `error` says why."""
+    with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
+        mock_cls.instance.return_value = _failing_hub(TimeoutError("exceeded 90s"))
+        g = _wf(resource="mock", prompt="Soften: {text}", fields=["reason: str"], parser="json",
+                on_failure="error", text="x")
+        out = await Operon(g).run(inputs={})
+    assert out["reason"] is None
+    assert out["error"] == "TimeoutError: exceeded 90s"
+
+
+@pytest.mark.unit
+def test_on_failure_error_needs_fields():
+    with pytest.raises(TypeError, match="requires fields"):
+        LLMOp(resource="mock", on_failure="error")
+
+
+@pytest.mark.unit
+def test_on_failure_takes_two_values():
+    with pytest.raises(ValueError, match="'raise' or 'error'"):
+        LLMOp(resource="mock", fields=["a: str"], on_failure="ignore")
