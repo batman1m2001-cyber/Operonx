@@ -250,6 +250,9 @@ class LLMOp(BaseOp):
                 — refusals from the model, provider-side content filtering, or
                 exhausted transport retries (the underlying SDK gave up). NOT
                 triggered by parse/validator failures — those use ``max_retries``.
+                With ``stream=True`` only until the first delta is yielded:
+                after that a failure propagates, because a fallback restarts
+                the answer and would contradict the deltas already sent.
             batch_mode: Use OpenAI Batch API (50% cheaper). ``fields`` /
                 ``validators`` / ``max_retries`` apply to the batch answer as
                 to a live one (a semantic retry is another batch submission).
@@ -1004,45 +1007,73 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     async def _stream_core(self, **kwargs):
-        """Format prompt → select LLM → stream → fallback on error."""
+        """Format prompt → select LLM → stream → fallback on error.
+
+        The fallback is taken only while nothing has been yielded. Once a
+        delta is out, the consumer has acted on it — rendered it, or (a
+        voice app) spoken it — and a fallback starts its answer from the
+        beginning, so the joined deltas would read
+        ``primary_partial + fallback_full`` while the final frame read
+        ``fallback_full``. After the first delta a failure propagates
+        instead, which keeps "join the deltas" and "read the final frame"
+        the same answer. Tool-call and reasoning chunks are accumulated,
+        not yielded, so they do not count.
+        """
         llm_params = self._build_llm_params(kwargs)
         selected = self._select_llm()
         resource = self._get_resource_key(selected)
         acc = self._new_stream_acc()
+        emitted = False
 
         try:
             async for chunk in selected.stream(**llm_params):
                 yield_dict = self._process_chunk(chunk, acc)
                 if yield_dict:
+                    emitted = True
                     yield yield_dict
         except Exception as e:
             if not self._fallback_llms:
                 raise
+            if emitted:
+                LOGGER.error(
+                    "Streaming from %s failed after deltas were emitted (%d chars); "
+                    "not falling back — a replay would contradict them: %s",
+                    resource,
+                    len(acc["response"]),
+                    e,
+                )
+                raise
             LOGGER.error(f"Streaming from {resource} failed: {e}")
             async for result in self._fallback_stream(llm_params):
-                if isinstance(result, dict) and "finish_reason" in result:
-                    yield result
-                    return
                 yield result
             return
 
         yield self._stream_final(acc, resource)
 
     async def _fallback_stream(self, llm_params):
-        """Try fallback LLMs for streaming. Yields chunks, final yield has metadata."""
+        """Try fallback LLMs for streaming. Yields chunks, final yield has metadata.
+
+        Same rule as the primary (see :meth:`_stream_core`): a fallback that
+        fails after yielding a delta ends the stream with its error rather
+        than handing over to the next one.
+        """
         for idx, fallback_llm in enumerate(self._fallback_llms):
             fallback_key = self.fallback[idx]
             LOGGER.info(f"Trying streaming fallback {fallback_key}...")
+            emitted = False
             try:
                 acc = self._new_stream_acc()
                 async for chunk in fallback_llm.stream(**llm_params):
                     yield_dict = self._process_chunk(chunk, acc)
                     if yield_dict:
+                        emitted = True
                         yield yield_dict
                 LOGGER.info(f"Streaming fallback to {fallback_key} succeeded")
                 yield self._stream_final(acc, fallback_key)
                 return
             except Exception as fallback_error:
+                if emitted:
+                    raise
                 LOGGER.error(f"Streaming fallback {fallback_key} failed: {fallback_error}")
         raise RuntimeError("All streaming fallback models failed")
 

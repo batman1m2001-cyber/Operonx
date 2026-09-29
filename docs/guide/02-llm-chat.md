@@ -177,7 +177,10 @@ c = LLMOp.of(
 )
 ```
 
-See [Streaming](06-streaming.md) for the consumption side.
+See [Streaming](06-streaming.md) for the consumption side. A `fallback=`
+list covers a stream only until its first delta; after that a failure is
+the op's error, never a replay the consumer has partly seen
+([details](06-streaming.md#fallback-while-streaming)).
 
 ## Where to go next
 
