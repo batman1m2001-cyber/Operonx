@@ -96,26 +96,46 @@ class AgentSession:
 
         Returns:
             The same shape as :func:`~operonx.agents.graphs.react.agent_result`,
-            for this exchange.
+            for this exchange, plus ``error`` (empty on success).
+
+        Raises:
+            asyncio.TimeoutError: the turn exceeded ``timeout``. The run is
+                cancelled and the conversation is left exactly as it was,
+                so retrying the same ``send`` is safe. Any other exception
+                from the run is handled the same way.
         """
+        # The history is not touched until the turn is committed below.
+        # Appending the user turn up front meant every exit had to undo
+        # it, and only the success path did: a timeout or an exception
+        # left it in place, so the retry sent two consecutive user turns
+        # and the provider rejected the shape.
         previous = list(self._messages)
-        self._messages.append({"role": "user", "content": text})
+        sent = previous + [{"role": "user", "content": text}]
 
-        engine = Operon(self.agent)
-        handle = engine.start(
-            inputs={"messages": self.messages},
-            **({"checkpointer": self.checkpointer} if self.checkpointer is not None else {}),
-        )
-        self._handle = handle
-
+        handle = None
         unsubscribe = None
-        if on_approval is not None:
-            from operonx.checkpoint import bind_interrupt_bus
-
-            unsubscribe = bind_interrupt_bus(handle.state, sink=on_approval)
-
         try:
+            engine = Operon(self.agent)
+            handle = engine.start(
+                inputs={"messages": list(sent)},
+                **({"checkpointer": self.checkpointer} if self.checkpointer is not None else {}),
+            )
+            self._handle = handle
+
+            if on_approval is not None:
+                from operonx.checkpoint import bind_interrupt_bus
+
+                unsubscribe = bind_interrupt_bus(handle.state, sink=on_approval)
+
             await asyncio.wait_for(handle.result(), timeout=self.timeout)
+        except BaseException:
+            # `wait_for` cancels only the *waiter*; the run itself carries
+            # on and would keep calling tools for a turn the caller has
+            # just been told failed. Stop it. BaseException, because the
+            # caller's own cancellation is an exit too.
+            if handle is not None:
+                handle.cancel()
+            raise
         finally:
             if unsubscribe is not None:
                 unsubscribe()
@@ -158,10 +178,9 @@ class AgentSession:
             }
 
         if not answered:
-            # Roll back to before this turn so the caller can retry
-            # without the history accumulating consecutive user turns
+            # Leave the history as it was before this turn so the caller
+            # can retry without it accumulating consecutive user turns
             # (which the provider rejects anyway).
-            self._messages = previous
             return {
                 **result,
                 "messages": list(previous),

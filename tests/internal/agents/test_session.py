@@ -340,3 +340,71 @@ class TestBudgetExhaustion:
         await session.send("keep going")
         ran = [m for m in session.messages if m.get("role") == "tool"]
         assert any(m["tool_call_id"] == "t0" and m["status"] == "success" for m in ran)
+
+
+class TestRollbackOnEveryExit:
+    """The user turn was appended before the run and rolled back only on
+    the *success* path's "no reply" branch. A timeout or an exception
+    propagated with the turn still in the history, so a retry appended a
+    second user turn after it — a shape the provider rejects."""
+
+    @staticmethod
+    def _slow_then_fast(finished):
+        import asyncio
+
+        state = {"i": 0}
+
+        @op
+        async def call_model(messages: list = None) -> dict:
+            state["i"] += 1
+            if state["i"] == 1:
+                await asyncio.sleep(1.0)
+                finished.append("slow call completed")
+            return {
+                "assistant_message": [
+                    {"id": f"r{state['i']}", "role": "assistant", "content": f"reply {state['i']}"}
+                ],
+                "tool_calls": [],
+                "done": True,
+            }
+
+        return call_model
+
+    def _session(self, finished):
+        agent = build_react_agent(call_model=self._slow_then_fast(finished), max_turns=3)(
+            messages=None
+        )
+        return AgentSession(agent, timeout=0.2)
+
+    @pytest.mark.asyncio
+    async def test_a_timeout_leaves_the_history_unchanged(self):
+        import asyncio
+
+        session = self._session([])
+        with pytest.raises(asyncio.TimeoutError):
+            await session.send("hello")
+        assert session.messages == []
+
+    @pytest.mark.asyncio
+    async def test_a_retry_after_a_timeout_sends_one_user_turn(self):
+        import asyncio
+
+        session = self._session([])
+        with pytest.raises(asyncio.TimeoutError):
+            await session.send("hello")
+        result = await session.send("hello")
+        assert result["error"] == ""
+        assert [m["role"] for m in session.messages] == ["user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_the_timed_out_run_is_stopped(self):
+        """Rolling the history back while the run carries on would let it
+        keep calling tools for a turn the caller has been told failed."""
+        import asyncio
+
+        finished = []
+        session = self._session(finished)
+        with pytest.raises(asyncio.TimeoutError):
+            await session.send("hello")
+        await asyncio.sleep(1.3)
+        assert finished == []
