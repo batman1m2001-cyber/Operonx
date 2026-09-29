@@ -9,6 +9,7 @@ counters are part of the contract, not diagnostics.
 from __future__ import annotations
 
 import asyncio
+import gc
 
 import pytest
 
@@ -252,6 +253,92 @@ class TestFailure:
         ) as hb:
             await _beat_until(hb, 3)
             assert hb.running
+
+
+class ReporterDown(BaseException):
+    """Not an ``Exception`` — the kind an ``except Exception`` guard lets by.
+    Operonx raises several of these on purpose (interrupts, budgets)."""
+
+
+def _unretrieved(contexts: list) -> list:
+    return [c for c in contexts if "never retrieved" in c.get("message", "")]
+
+
+class TestGuards:
+    """`send`/`on_result` were guarded against any ``BaseException``, the
+    `on_error` reporter only against ``Exception``. What got past it ended
+    the beat task, whose exception nobody read: the next dispatch replaced
+    `_beat_task`, and asyncio reported it only when the task was collected."""
+
+    @pytest.fixture
+    async def loop_reports(self):
+        loop = asyncio.get_running_loop()
+        contexts: list = []
+        previous = loop.get_exception_handler()
+        loop.set_exception_handler(lambda _loop, context: contexts.append(context))
+        yield contexts
+        loop.set_exception_handler(previous)
+
+    @pytest.mark.asyncio
+    async def test_a_base_exception_from_the_error_handler_is_contained(self, loop_reports):
+        def bad_handler(_e):
+            raise ReporterDown("the reporter is down")
+
+        hb = Heartbeat(FakeSession(fail=True), "x", interval=TICK, on_error=bad_handler)
+        await hb.start()
+        await _beat_until(hb, 3)
+        assert hb.running
+        await hb.stop()
+        assert hb.errors >= 3
+        del hb
+        gc.collect()
+        assert _unretrieved(loop_reports) == []
+
+    @pytest.mark.asyncio
+    async def test_a_beat_that_escapes_its_guard_is_still_retrieved(self, loop_reports):
+        """The guards are the first line; the beat task's exception is read
+        regardless, so a future gap in them is reported, not lost."""
+        hb = Heartbeat(FakeSession(), "x", interval=TICK)
+
+        async def escaped() -> None:
+            raise ReporterDown("past the guard")
+
+        hb._beat_once = escaped
+        await hb.start()
+        await _until(lambda h=hb: h.errors >= 2)
+        await hb.stop()
+        assert isinstance(hb.last_error, ReporterDown)
+        del hb, escaped
+        gc.collect()
+        assert _unretrieved(loop_reports) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit])
+    @pytest.mark.parametrize("where", ["send", "on_error"])
+    async def test_process_exits_are_not_swallowed(self, signal, where):
+        """KeyboardInterrupt and SystemExit mean "end the process", and
+        asyncio lets them through from any task for that reason. Counting
+        a Ctrl-C that lands inside a turn as a failed beat kept the
+        schedule going through it. Both guards now let them pass."""
+
+        class Session(FakeSession):
+            async def send(self, text, *, on_approval=None):
+                if where == "send":
+                    raise signal()
+                raise RuntimeError("model unavailable")
+
+        reported: list = []
+
+        def handler(e):
+            reported.append(e)
+            if where == "on_error":
+                raise signal()
+
+        hb = Heartbeat(Session(), "x", on_error=handler)
+        with pytest.raises(signal):
+            await hb._beat_once()
+        if where == "send":
+            assert reported == [], "a process exit is not a beat error to report"
 
 
 class TestLifecycle:

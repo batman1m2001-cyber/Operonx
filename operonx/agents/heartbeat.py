@@ -32,7 +32,16 @@ import asyncio
 import random
 from typing import Any, Awaitable, Callable, Optional, Union
 
+from operonx.core.loggings import LOGGER
+
 __all__ = ["Heartbeat", "OverlapPolicy"]
+
+#: Let through by both guards in a beat. Cancellation is how `stop()` ends
+#: a beat that outran its grace. KeyboardInterrupt and SystemExit mean "end
+#: the process" — asyncio re-raises them out of any task into the event
+#: loop for that reason — and a heartbeat that counted a Ctrl-C landing
+#: inside a turn as a failed beat would keep beating through it.
+_PASS_THROUGH = (asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 #: What to do when a beat comes due while the previous one is still running.
 #:
@@ -67,7 +76,10 @@ class Heartbeat:
         on_result: Called with each turn's result dict. Exceptions from it
             are counted as beat errors — a sink that throws must not be
             able to stop the schedule.
-        on_error: Called with any exception raised by a beat.
+        on_error: Called with any exception raised by a beat. What it
+            raises is ignored, like the sink's. KeyboardInterrupt and
+            SystemExit are not beat errors: they propagate, from a beat or
+            from this handler, and end the process as asyncio intends.
         on_approval: Forwarded to ``session.send`` for gated tools. Without
             one, a heartbeat that trips a destructive tool waits out the
             approval timeout with nobody watching, so this is worth
@@ -262,6 +274,7 @@ class Heartbeat:
             # asked for whenever a turn outlasts the interval.
             self._started += 1
             self._beat_task = asyncio.create_task(self._beat_chain())
+            self._beat_task.add_done_callback(self._reap)
 
             if self._quota_reached():
                 break
@@ -305,7 +318,7 @@ class Heartbeat:
                 maybe = self.on_result(result)
                 if asyncio.iscoroutine(maybe):
                     await maybe
-        except asyncio.CancelledError:
+        except _PASS_THROUGH:
             raise
         except BaseException as e:  # noqa: BLE001 — a scheduler outlives its beats
             self.errors += 1
@@ -315,7 +328,33 @@ class Heartbeat:
                     maybe = self.on_error(e)
                     if asyncio.iscoroutine(maybe):
                         await maybe
-                except Exception:  # noqa: BLE001 — the reporter is not the schedule
+                except _PASS_THROUGH:
+                    raise
+                # The same breadth as the guard above. This one caught only
+                # `Exception`, so a reporter raising any other
+                # `BaseException` ended the beat task, with nobody to read it.
+                except BaseException:  # noqa: BLE001 — the reporter is not the schedule
                     pass
         finally:
             self.beats += 1
+
+    def _reap(self, task: "asyncio.Task[None]") -> None:
+        """Read a finished beat task's exception, so none goes unretrieved.
+
+        Nothing else ever looks at a finished beat task: `_beat_task` is
+        replaced on the next dispatch, and asyncio reported what was left
+        on it only when the task was garbage-collected — "Task exception
+        was never retrieved", far from the cause. The guards in
+        `_beat_once` let only `_PASS_THROUGH` out, and KeyboardInterrupt /
+        SystemExit have reached the event loop by the time this runs; any
+        other exception here means a guard has a gap, so it is recorded as
+        a beat error and logged rather than lost.
+        """
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is None or isinstance(error, (KeyboardInterrupt, SystemExit)):
+            return
+        self.errors += 1
+        self.last_error = error
+        LOGGER.error("heartbeat: a beat raised past its guard: %s: %s", type(error).__name__, error)
