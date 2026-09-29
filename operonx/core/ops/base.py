@@ -568,8 +568,23 @@ class BaseOp(ABC):
 
         if isinstance(other, list):
             if add_edge is not None:
+                # `[a, b] >> if_(predicate_op(...), x)`: route through the
+                # inline predicate, as `__rshift__` does. Ask before adding
+                # any edge — once `a` feeds the predicate it has a
+                # predecessor, and `b` would skip it.
+                entries = {
+                    item.name: item._condition_entries(self)
+                    for item in other
+                    if isinstance(item, BaseOp)
+                }
                 for item in other:
-                    add_edge(item.name, self.name, edge_type)
+                    predicates = entries.get(item.name)
+                    if predicates:
+                        item_type = "condition" if item.type == "branch" else "normal"
+                        for predicate in predicates:
+                            add_edge(item.name, predicate.name, item_type)
+                    else:
+                        add_edge(item.name, self.name, edge_type)
         return self
 
     def __gt__(self, other):

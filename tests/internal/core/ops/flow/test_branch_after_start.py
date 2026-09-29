@@ -111,3 +111,49 @@ class TestPredicateCondition:
         out = await Operon(g).run(inputs={"n": n})
         assert out["w"] == want
         assert out["o"] == "other"
+
+
+@op
+def left(n: int = 0) -> dict:
+    return {"n": n}
+
+
+@op
+def right(n: int = 0) -> dict:
+    return {"m": n}
+
+
+@op
+def sum_big(n: int = 0, m: int = 0) -> bool:
+    return n + m > 5
+
+
+class TestPredicateAfterAList:
+    """``[a, b] >> if_(predicate_op(...), x)`` — the same gap as START.
+
+    ``BaseOp.__rrshift__`` wired each list item straight to the branch,
+    so the predicate had no incoming edge and never ran: every call took
+    the else arm.
+    """
+
+    def _graph(self, x):
+        with GraphOp(name="g") as g:
+            a = left(n=x)
+            b = right(n=0)
+            bg, sm = big(), small()
+            START >> [a, b]
+            [a, b] >> if_(sum_big(n=a["n"], m=b["m"]), bg).else_(sm)
+            bg >> END
+            sm >> END
+        return g
+
+    def test_the_list_feeds_the_predicate(self):
+        g = self._graph(1)
+        edges = {(e.from_node, e.to_node) for e in g._edges.values()}
+        assert {("a", "sum_big"), ("b", "sum_big"), ("sum_big", "route_1")} <= edges
+        assert ("a", "route_1") not in edges
+
+    @pytest.mark.parametrize("x,want", CASES)
+    async def test_it_routes(self, x, want):
+        out = await Operon(self._graph(x)).run(inputs={})
+        assert out["w"] == want
