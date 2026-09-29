@@ -382,7 +382,7 @@ class TestClone:
         ref_clone = ref._clone()
 
         assert ref_clone.source == ref.source
-        assert ref_clone.ops == ref.ops
+        assert ref_clone.transforms == ref.transforms
 
     def test_clone_executes_same(self):
         """Test clone produces same result."""
@@ -905,3 +905,50 @@ class TestNotIterable:
 
     def test_indexing_is_still_dsl(self):
         assert Ref("n", "items")[0].execute(["a", "b"]) == "a"
+
+
+# ============================================================
+# Test 23: No truthiness (E9) — `and` / `or` / `not` cannot see a Ref
+# ============================================================
+
+
+class TestNoTruthiness:
+    """``x == 1 and y == 2`` asks Python for ``bool(x == 1)``, which a Ref
+    cannot answer at build time. It used to say True, so the expression
+    silently became ``y == 2``. Now it refuses and names the operators
+    that do work."""
+
+    def _refs(self):
+        return Ref("n", "x"), Ref("n", "y")
+
+    def test_bool_refuses(self):
+        x, _ = self._refs()
+        with pytest.raises(TypeError, match=r"&.*\|.*~"):
+            bool(x == 1)
+
+    def test_and_refuses(self):
+        x, y = self._refs()
+        with pytest.raises(TypeError, match="&"):
+            _ = x == 1 and y == 2
+
+    def test_or_refuses(self):
+        x, y = self._refs()
+        with pytest.raises(TypeError, match=r"\|"):
+            _ = x == 1 or y == 2
+
+    def test_not_refuses(self):
+        x, _ = self._refs()
+        with pytest.raises(TypeError, match="~"):
+            _ = not x
+
+    def test_in_refuses(self):
+        """``v in ref`` coerces to bool too; it used to be always True."""
+        x, _ = self._refs()
+        with pytest.raises(TypeError):
+            _ = 1 in x
+
+    def test_the_operators_still_combine(self):
+        x, y = self._refs()
+        cond = ((x == 1) & (y == 2)) | ~(x == 0)
+        assert cond.execute(1, {("n", "x"): 1, ("n", "y"): 2}) is True
+        assert cond.execute(0, {("n", "x"): 0, ("n", "y"): 3}) is False

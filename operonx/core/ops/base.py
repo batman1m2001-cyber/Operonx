@@ -684,7 +684,7 @@ class BaseOp(ABC):
                     value = cell[context_id]
                 else:
                     pull_ref = pull_refs[idx]
-                    if pull_ref and not pull_ref.is_output and pull_ref.idx >= 0:
+                    if pull_ref is not None and not pull_ref.is_output and pull_ref.idx >= 0:
                         source_val = cells[pull_ref.idx][context_id]
                         if source_val is not None or cells[pull_ref.idx].default_value is not None:
                             value = pull_ref._fn(source_val)

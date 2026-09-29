@@ -138,8 +138,8 @@ asyncio.run(main())
 
 ## Combine conditions with `&` `|` `~`, never `and` `or` `not`
 
-Python's `and` does not see inside a Ref: `x == 1 and y == 2` becomes just
-`y == 2`.
+Python's `and`, `or`, `not`, `if` and `in` cannot see inside a Ref, so
+they raise a `TypeError` when the graph is built. Use `&`, `|`, `~`.
 
 ```python
 import asyncio
@@ -164,15 +164,6 @@ def no() -> dict:
 
 
 @graph
-def with_and():
-    p = pair(a=PARENT["a"], b=PARENT["b"])
-    y, n = yes(), no()
-    START >> p >> if_(p["a"] == 1 and p["b"] == 2, y).else_(n)
-    y >> END
-    n >> END
-
-
-@graph
 def with_amp():
     p = pair(a=PARENT["a"], b=PARENT["b"])
     y, n = yes(), no()
@@ -182,9 +173,14 @@ def with_amp():
 
 
 async def main():
-    inputs = {"a": 5, "b": 2}
-    assert (await Operon(with_and).run(inputs=inputs))["r"] == "yes"  # wrong
-    assert (await Operon(with_amp).run(inputs=inputs))["r"] == "no"
+    p = pair(a=1, b=2)
+    try:
+        _ = p["a"] == 1 and p["b"] == 2  # never do this
+        raise AssertionError("expected a TypeError")
+    except TypeError as e:
+        assert "&" in str(e)  # the message names the operators to use
+    assert (await Operon(with_amp).run(inputs={"a": 5, "b": 2}))["r"] == "no"
+    assert (await Operon(with_amp).run(inputs={"a": 1, "b": 2}))["r"] == "yes"
 
 
 asyncio.run(main())

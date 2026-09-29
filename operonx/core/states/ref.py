@@ -607,6 +607,22 @@ class Ref:
     def __invert__(self):
         return self._with_transform("not_")
 
+    def __bool__(self):
+        """A Ref has no truth value while the graph is being built.
+
+        ``and``, ``or``, ``not``, ``if`` and ``in`` all ask for one, and an
+        object without ``__bool__`` is always truthy — so
+        ``x == 1 and y == 2`` silently became ``y == 2``, and a bare
+        ``if ref:`` always passed. Refuse, and say what to write instead.
+        Code that means "is there a Ref" writes ``ref is not None``.
+        """
+        raise TypeError(
+            f"{self!r} has no truth value while the graph is being built, so "
+            f"`and`, `or`, `not`, `if` and `in` cannot see inside it. Combine "
+            f"conditions with `&`, `|` and `~` — `(x == 1) & (y == 2)` — and "
+            f"compute anything else in an op."
+        )
+
     # =========================================================================
     # Tiện ích
     # =========================================================================
