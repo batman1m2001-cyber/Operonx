@@ -371,3 +371,23 @@ class TestApprovalInAChild:
         delegate = make_delegate_tool(call_model=answering_model(), allow_tools=["wipe"])
         out = await asyncio.wait_for(delegate.__wrapped__(task="go"), timeout=30)
         assert out["error"] == NO_TOOLS_MESSAGE
+
+
+class TestTruncatedChild:
+    @pytest.mark.asyncio
+    async def test_a_child_cut_at_length_is_flagged(self, _registry):
+        """The parent must not treat half an answer as a finished one."""
+
+        @op
+        def cut_model(messages: list = None) -> dict:
+            return {
+                "assistant_message": [{"id": "c", "role": "assistant", "content": "Half of"}],
+                "tool_calls": [],
+                "done": True,
+                "finish_reason": "length",
+            }
+
+        delegate = make_delegate_tool(call_model=cut_model, allow_tools=["read"])
+        out = await asyncio.wait_for(delegate.__wrapped__(task="go"), timeout=30)
+        assert out["answer"] == "Half of"
+        assert out["truncated"] is True

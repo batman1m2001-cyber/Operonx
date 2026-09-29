@@ -18,7 +18,10 @@ messages answering nothing, and the provider rejects the conversation.
 
 ``finish_reason`` is still reported so a caller can tell a clean stop
 from a truncated one — a response cut at ``length`` is not a finished
-answer, even though the loop treats both as done.
+answer, even though the loop treats both as done. The loop records the
+last turn's, and :func:`~operonx.agents.graphs.react.agent_result`
+returns it as ``finish_reason`` and ``truncated`` (and counts a cut
+answer as ``stopped_early``).
 """
 
 from __future__ import annotations

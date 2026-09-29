@@ -30,6 +30,7 @@ from typing import Any, Callable, Optional
 from operonx.agents.graphs.dispatch import build_dispatch, call_identity, tool_message
 from operonx.agents.ops.compact_ops import apply_compaction, plan_compaction
 from operonx.agents.ops.memory_ops import gather_memory
+from operonx.agents.ops.model_ops import TRUNCATED_REASONS
 from operonx.agents.ops.prompt_ops import apply_cache_control, assemble_api_messages
 from operonx.agents.policy import ToolPolicy
 from operonx.agents.redact import Redactor
@@ -153,7 +154,9 @@ def build_react_agent(
     Args:
         call_model: An op factory taking ``messages: list`` and returning
             ``assistant_message`` (a list of message dicts), ``tool_calls``
-            (a list, empty when finished) and ``done`` (bool). Injected
+            (a list, empty when finished) and ``done`` (bool), and
+            optionally ``finish_reason``/``truncated``, which
+            :func:`agent_result` reports. Injected
             rather than constructed here so the loop is testable without a
             provider, and so callers choose their own ``LLMOp.of(...)``
             configuration.
@@ -276,12 +279,36 @@ def build_react_agent(
             ]
         }
 
+    @op
+    def how_it_ended(
+        exhausted: bool = False, finish_reason: str = "", truncated: bool = False
+    ) -> dict:
+        """Record how this turn ended; the last turn's write is the answer's.
+
+        A response cut at ``length`` has no tool calls, so the loop treats
+        it as done — correctly, since there is nothing to dispatch — but it
+        is not a finished answer, and nothing downstream read the adapter's
+        ``finish_reason``/``truncated``, so it was reported as a clean one.
+        The flag is recomputed from the reason as well, for a hand-written
+        ``call_model`` that reports only the reason. A ``call_model`` that
+        reports neither reads as a clean stop.
+        """
+        reason = finish_reason or ""
+        cut = bool(truncated) or reason in TRUNCATED_REASONS
+        return {
+            "stopped_early": bool(exhausted) or cut,
+            "truncated": cut,
+            "finish_reason": reason,
+        }
+
     @graph
     def react(messages=None):
         PARENT.declare(
             messages=[],
             turns=0,
             stopped_early=False,
+            truncated=False,
+            finish_reason="",
             reducers={"messages": add_messages},
         )
 
@@ -328,6 +355,14 @@ def build_react_agent(
             exhausted=counter["exhausted"],
             messages=assistant["messages"],
         )
+        # `finish_reason`/`truncated` are optional outputs of `call_model`:
+        # one that does not produce them leaves these inputs at their
+        # defaults.
+        ended = how_it_ended(
+            exhausted=counter["exhausted"],
+            finish_reason=model["finish_reason"],
+            truncated=model["truncated"],
+        )
         calls = each_call_of(tool_calls=model["tool_calls"])
         disp = dispatch_one(call=calls["call"].parallel(max=8))
         gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
@@ -336,7 +371,9 @@ def build_react_agent(
         # re-emitted message updates rather than duplicating.
         counter["turns"] >> PARENT["turns"]
         counter["notice"] >> PARENT["messages"]
-        counter["exhausted"] >> PARENT["stopped_early"]
+        ended["stopped_early"] >> PARENT["stopped_early"]
+        ended["truncated"] >> PARENT["truncated"]
+        ended["finish_reason"] >> PARENT["finish_reason"]
         assistant["messages"] >> PARENT["messages"]
         closed["messages"] >> PARENT["messages"]
         gathered["messages"] >> PARENT["messages"]
@@ -345,7 +382,8 @@ def build_react_agent(
         matched >> assembled >> cached >> model >> assistant >> router
         # `closed` runs after `assistant`, so its answers land after the
         # message holding the calls they answer.
-        router >> closed >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
+        router >> closed >> ended
+        ended >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 
     return react
@@ -366,6 +404,8 @@ EMPTY_RESULT: dict[str, Any] = {
     "messages": [],
     "turns": 0,
     "stopped_early": False,
+    "truncated": False,
+    "finish_reason": "",
     "final": None,
 }
 
@@ -390,7 +430,11 @@ def agent_result(source: Any, agent) -> dict:
 
     ``final`` is the last assistant message, or ``None`` when that message
     asked for tools — the loop ended (budget spent) before the model
-    answered. ``stopped_early`` is True whenever the turn budget ran out.
+    answered. ``stopped_early`` is True when the run ended before the
+    model finished: the turn budget ran out, or the last response was cut
+    off. ``truncated`` says which — the last response stopped at
+    ``length``/``max_tokens``/``content_filter`` — and ``finish_reason``
+    is that response's stop reason (``""`` if ``call_model`` reports none).
 
     Returns :data:`EMPTY_RESULT`'s shape when nothing was produced, so
     callers can read ``["messages"]`` unconditionally. An empty answer
@@ -420,6 +464,8 @@ def agent_result(source: Any, agent) -> dict:
         "messages": messages,
         "turns": cell("turns", 0),
         "stopped_early": bool(cell("stopped_early", False)),
+        "truncated": bool(cell("truncated", False)),
+        "finish_reason": cell("finish_reason", "") or "",
         # A turn that asked for tools is not an answer, even when it is the
         # last one: the budget can end the loop on it. Reporting it as
         # `final` handed callers an empty "answer" and told them the run

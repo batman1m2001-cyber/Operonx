@@ -317,3 +317,123 @@ class TestBudgetNeverStrandsACall:
 
         result = await run_calling([(_call(0), True)], max_turns=5)
         assert unmatched_tool_calls(result["messages"])["calls_without_results"] == []
+
+
+def ending_model(finish_reason, **extra):
+    """Answers at once, reporting ``finish_reason`` the way the
+    ``make_llm_caller`` adapter does."""
+
+    @op
+    def call_model(messages: list = None) -> dict:
+        return {
+            "assistant_message": [{"id": "a0", "role": "assistant", "content": "The answer is"}],
+            "tool_calls": [],
+            "done": True,
+            "finish_reason": finish_reason,
+            **extra,
+        }
+
+    return call_model
+
+
+async def run_model(call_model, *, max_turns=5):
+    built = build_react_agent(call_model=call_model, max_turns=max_turns)(messages=None)
+    handle = Operon(built).start(inputs={"messages": USER})
+    await asyncio.wait_for(handle.result(), timeout=60)
+    return agent_result(handle.state, built)
+
+
+class TestATruncatedAnswerIsReported:
+    """``finish_reason`` and ``truncated`` were declared on the adapter and
+    read by nothing: an answer cut at ``finish_reason="length"`` ended the
+    loop as a clean finish, and the caller had no way to tell — though
+    the module docstring promised one."""
+
+    @pytest.mark.asyncio
+    async def test_a_length_cut_is_flagged(self):
+        result = await run_model(ending_model("length", truncated=True))
+        assert result["truncated"] is True
+        assert result["finish_reason"] == "length"
+        assert result["stopped_early"] is True, "a cut answer is not a finished one"
+
+    @pytest.mark.asyncio
+    async def test_the_reason_alone_is_enough(self):
+        """A hand-written call_model may report the reason and not the flag."""
+        result = await run_model(ending_model("max_tokens"))
+        assert result["truncated"] is True
+
+    @pytest.mark.asyncio
+    async def test_a_clean_stop_is_not_flagged(self):
+        result = await run_model(ending_model("stop"))
+        assert result["truncated"] is False
+        assert result["finish_reason"] == "stop"
+        assert result["stopped_early"] is False
+
+    @pytest.mark.asyncio
+    async def test_a_call_model_that_reports_nothing_reads_as_clean(self):
+        result = await run_calling([([], True)])
+        assert result["truncated"] is False
+        assert result["finish_reason"] == ""
+
+    @pytest.mark.asyncio
+    async def test_it_is_the_last_turn_that_counts(self):
+        """A cut mid-run that the model recovered from is not the answer."""
+        state = {"i": 0}
+
+        @op
+        def call_model(messages: list = None) -> dict:
+            i = state["i"]
+            state["i"] += 1
+            calls = _call(0) if i == 0 else []
+            message = {"id": f"a{i}", "role": "assistant", "content": "" if calls else "done"}
+            if calls:
+                message["tool_calls"] = calls
+            return {
+                "assistant_message": [message],
+                "tool_calls": calls,
+                "done": not calls,
+                "finish_reason": "length" if i == 0 else "stop",
+            }
+
+        result = await run_model(call_model)
+        assert result["turns"] == 2
+        assert result["truncated"] is False
+
+    @pytest.mark.asyncio
+    async def test_the_llm_adapter_is_wired_through(self):
+        """End to end through ``make_llm_caller`` and a provider that stops
+        at ``length`` — the path a real deployment takes."""
+        from unittest.mock import Mock, patch
+
+        from openai.types.chat.chat_completion import ChatCompletion
+
+        from operonx.agents.ops.model_ops import make_llm_caller
+
+        async def generate(messages, **kwargs):
+            return ChatCompletion.model_validate(
+                {
+                    "id": "x",
+                    "created": 0,
+                    "model": "m",
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "finish_reason": "length",
+                            "message": {"role": "assistant", "content": "The answer is"},
+                        }
+                    ],
+                }
+            )
+
+        llm = Mock()
+        llm.generate = generate
+        hub = Mock()
+        hub.get.return_value = llm
+        with patch("operonx.providers.ops._utils.ResourceHub") as hub_cls:
+            hub_cls.instance.return_value = hub
+            result = await run_model(make_llm_caller("mock"))
+
+        assert result["final"]["content"] == "The answer is"
+        assert result["truncated"] is True
+        assert result["finish_reason"] == "length"

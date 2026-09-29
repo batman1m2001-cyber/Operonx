@@ -67,8 +67,15 @@ answer = agent_result(result, agent)
 answer["messages"]        # the conversation, flat
 answer["final"]           # last assistant message, or None if it never answered
 answer["turns"]
-answer["stopped_early"]   # True if the turn budget ran out
+answer["stopped_early"]   # True if the run ended before the model finished
+answer["truncated"]       # the last response was cut off (length, max_tokens, ...)
+answer["finish_reason"]   # that response's stop reason, "" if call_model reports none
 ```
+
+`stopped_early` covers both ways a run can end without a finished
+answer: the turn budget ran out, or the last response was cut off —
+which the loop cannot tell from a clean stop by its tool calls alone,
+since a cut answer asks for none.
 
 It needs the built graph because that is where the cells live. If you
 drive the agent with `engine.start()` instead, pass `handle.state` —

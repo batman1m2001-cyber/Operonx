@@ -408,3 +408,21 @@ class TestRollbackOnEveryExit:
             await session.send("hello")
         await asyncio.sleep(1.3)
         assert finished == []
+
+
+class TestTruncatedAnswer:
+    @pytest.mark.asyncio
+    async def test_send_reports_a_cut_answer(self):
+        @op
+        def call_model(messages: list = None) -> dict:
+            return {
+                "assistant_message": [{"id": "c", "role": "assistant", "content": "The ans"}],
+                "tool_calls": [],
+                "done": True,
+                "finish_reason": "length",
+            }
+
+        session = AgentSession(build_react_agent(call_model=call_model)(messages=None))
+        result = await session.send("q")
+        assert result["truncated"] is True
+        assert result["stopped_early"] is True
