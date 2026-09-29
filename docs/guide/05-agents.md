@@ -11,8 +11,8 @@ write is the tools and the model call.
 import asyncio
 import operonx
 from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
+from operonx.agents.ops.model_ops import make_llm_caller
 from operonx.core import Operon
-from operonx.providers import LLMOp
 
 @tool(
     name="get_weather",
@@ -27,15 +27,10 @@ from operonx.providers import LLMOp
 async def get_weather(city: str) -> dict:
     return {"temp_c": 21, "sky": "clear", "city": city}
 
-def call_model(messages):
-    return LLMOp.of(
-        resource="gpt-4o",
-        messages=messages,
-        tools=get_tool_definitions(),
-    )
-
 async def main():
     operonx.bootstrap()
+    # Registered tools are read here, so build the caller after the @tool defs.
+    call_model = make_llm_caller("gpt-4o", tools=get_tool_definitions())
     agent = build_react_agent(call_model=call_model, max_turns=10)(messages=None)
 
     result = await Operon(agent).run(
@@ -54,6 +49,15 @@ node with tracing and bound routing) and an LLM-callable tool. The two
 schemas are separate on purpose: the signature drives graph wiring, the
 JSON Schema drives the model's request payload, and neither can be
 derived from the other.
+
+`make_llm_caller("gpt-4o", ...)` is the model call: an `LLMOp` on the
+`llm:gpt-4o` resource (the key without its `llm:` prefix) plus the
+adapter that turns its `content`/`tool_calls`/`finish_reason` into what
+the loop reads — `assistant_message`, `tool_calls` and `done`. Handing
+the loop a bare `LLMOp.of(...)` does not work: nothing produces those
+outputs, so the run ends with `final` set to `None`. A hand-written
+`call_model` must produce them itself; see `build_react_agent`'s
+docstring for the contract.
 
 ## Read the result through `agent_result`
 
