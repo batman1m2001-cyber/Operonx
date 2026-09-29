@@ -186,3 +186,87 @@ class TestOutputKeyCollisions:
     def test_a_key_named_as_is_still_a_path(self):
         f = ExtractField.from_string("meta.as: str")
         assert (f.output_key, f.chain_path) == ("as", ["meta", "as"])
+
+
+class TestOptionalFieldsAndValidators:
+    """P6 — ``?`` and ``validators=`` did not compose.
+
+    The allow-list treated ``None`` as invalid, so an absent optional field
+    either failed the parse (no ``@default``) or was filled with the
+    default — after which nothing could tell "absent" from "the model
+    answered something unrecognised"."""
+
+    def test_an_absent_optional_field_skips_its_validator(self):
+        out = parse_and_extract(
+            '{"a": "x"}', "json", F("a: str", "b?: str"), validators={"b": ["Y", "N"]}
+        )
+        assert out == {"a": "x", "b": None, "error": None}
+
+    def test_an_absent_optional_field_is_not_filled_by_the_default(self):
+        out = parse_and_extract(
+            '{"a": "x"}', "json", F("a: str", "b?: str"), validators={"b": ["Y", "N", "@N"]}
+        )
+        assert out == {"a": "x", "b": None, "error": None}
+
+    def test_a_present_optional_value_is_validated(self):
+        out = parse_and_extract(
+            '{"a": "x", "b": "Z"}', "json", F("a: str", "b?: str"), validators={"b": ["Y", "N"]}
+        )
+        assert out["error"] is not None and "'b'" in out["error"]
+
+    def test_a_present_optional_value_takes_the_default(self):
+        out = parse_and_extract(
+            '{"a": "x", "b": "Z"}',
+            "json",
+            F("a: str", "b?: str"),
+            validators={"b": ["Y", "N", "@N"]},
+        )
+        assert out == {"a": "x", "b": "N", "error": None}
+
+    def test_an_explicit_null_is_present_and_validated(self):
+        """``null`` is an answer (see the module rules), so it is checked."""
+        out = parse_and_extract(
+            '{"b": null}', "json", F("b?: str"), validators={"b": ["Y", "N", "@N"]}
+        )
+        assert out == {"b": "N", "error": None}
+
+    def test_an_absent_aliased_optional_field_skips_its_validator(self):
+        out = parse_and_extract(
+            '{"a": "x"}', "json", F("a: str", "u.id as uid?: str"), validators={"uid": ["1"]}
+        )
+        assert out == {"a": "x", "uid": None, "error": None}
+
+    def test_a_missing_required_field_still_takes_the_default(self):
+        """Unchanged: for a required field the default is the documented
+        way to keep a shaky model's answer usable."""
+        out = parse_and_extract('{"a": "x"}', "json", F("b: str"), validators={"b": ["Y", "@N"]})
+        assert out == {"b": "N", "error": None}
+
+
+class TestValidatorValuesStartingWithAt:
+    """``v.lstrip("@")`` read every leading ``@`` as the default marker, so
+    an allowed value that really starts with ``@`` could not be written."""
+
+    def test_a_doubled_at_is_a_literal_at(self):
+        out = parse_and_extract(
+            '{"h": "@me"}', "json", F("h: str"), validators={"h": ["@@me", "x"]}
+        )
+        assert out == {"h": "@me", "error": None}
+
+    def test_the_literal_is_not_a_default(self):
+        out = parse_and_extract('{"h": "zzz"}', "json", F("h: str"), validators={"h": ["@@me"]})
+        assert out["error"] is not None
+        assert "'@me'" in out["error"]
+
+    def test_a_default_can_start_with_an_at(self):
+        """Marker ``@`` + escaped ``@@me`` = default ``@me``."""
+        out = parse_and_extract(
+            '{"h": "zzz"}', "json", F("h: str"), validators={"h": ["x", "@@@me"]}
+        )
+        assert out == {"h": "@me", "error": None}
+
+    def test_a_single_at_is_still_the_default_marker(self):
+        out = parse_and_extract(
+            '{"h": "zzz"}', "json", F("h: str"), validators={"h": ["x", "@FALLBACK"]}
+        )
+        assert out == {"h": "FALLBACK", "error": None}

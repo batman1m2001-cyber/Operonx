@@ -143,6 +143,11 @@ Rules worth knowing before you rely on it:
   Without it every call reports missing fields and burns its retries.
 - **A `@`-prefixed validator value is a default.** When the model answers
   outside the allow-list, that value is substituted instead of erroring.
+  Write `@@` for an allowed value that really starts with `@`
+  (`"@@me"` is `@me`).
+- **An absent optional field skips its validator.** It stays `None` — no
+  error, no default — so `None` still means "not in the answer". A value
+  the model did give is checked as usual.
 - **An output is named after the path's last segment — or `as`.**
   `"user.id: str"` and `"order.id: str"` would both be `id`, so that is
   refused when the op is built; name them `"user.id as user_id: str"`,

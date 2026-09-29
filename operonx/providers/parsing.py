@@ -71,7 +71,9 @@ ParserFormat = Literal["json", "xml", "yaml"]
 #: What ``validators=`` accepts.
 #:
 #: * ``{field: [allowed, ...]}`` — per-field allow-list, with an
-#:   ``"@default"`` entry standing in for an unrecognised value.
+#:   ``"@default"`` entry standing in for an unrecognised value (``"@@x"``
+#:   is the literal ``"@x"``). An optional field the payload left out is
+#:   not checked.
 #: * ``Callable[[dict], bool]`` — a predicate over the **whole** parsed
 #:   dict, for a shape no per-field list can express ("``result`` must
 #:   be a dict containing ``violation``"). Returning False fails the
@@ -397,18 +399,40 @@ def convert_type(value: Any, type_hint: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _allowed_entry(value: Any) -> tuple:
+    """Read one allow-list entry as ``(value, is_default)``.
+
+    A leading ``@`` marks the default and ``@@`` is a literal ``@``, so the
+    run of leading ``@`` decides: odd means default, and each pair left is
+    one literal ``@``. ``"@x"`` is default ``x``, ``"@@x"`` is the value
+    ``@x``, ``"@@@x"`` is default ``@x``. ``lstrip("@")`` used to eat the
+    whole run, so no allowed value could start with ``@``.
+    """
+    if not isinstance(value, str) or not value.startswith("@"):
+        return value, False
+    run = len(value) - len(value.lstrip("@"))
+    return "@" * (run // 2) + value[run:], run % 2 == 1
+
+
 def apply_validators(
     result: Dict[str, Any],
     validators: "Validators",
+    absent: Iterable[str] = (),
 ) -> Optional[str]:
     """Apply validators. Returns None on success, an error string on failure.
 
     Two forms, see :data:`Validators`.
 
     **Allow-list** — values prefixed with ``@`` act as defaults: when the
-    value is missing or unrecognised the ``@``-prefixed value is
-    substituted (``@`` stripped). Without a default, an invalid value
-    returns a human-readable error and does NOT mutate ``result``.
+    value is unrecognised the ``@``-prefixed value is substituted (the
+    marker stripped; write ``@@`` for a value that really starts with
+    ``@``). ``None`` is unrecognised unless listed. Without a default, an
+    invalid value returns a human-readable error and does NOT mutate
+    ``result``.
+
+    ``absent`` names optional fields the payload did not contain. Their
+    allow-lists are skipped: absence was declared acceptable, and filling
+    one with the default would make "absent" read as "answered".
 
     **Callable** — receives the whole parsed dict and returns a bool. Use
     it for cross-field or structural checks an allow-list cannot state.
@@ -424,16 +448,17 @@ def apply_validators(
             return f"Validation failed: {name}() raised {type(e).__name__}: {e}"
         return None if ok else f"Validation failed: {name}() rejected the parsed output"
 
+    absent = set(absent)
     for field_name, allowed_values in validators.items():
-        clean_values = [v.lstrip("@") if isinstance(v, str) else v for v in allowed_values]
-        default_value = next(
-            (v.lstrip("@") for v in allowed_values if isinstance(v, str) and v.startswith("@")),
-            None,
-        )
+        if field_name in absent:
+            continue
+        entries = [_allowed_entry(v) for v in allowed_values]
+        clean_values = [v for v, _ in entries]
+        default = next((v for v, is_default in entries if is_default), MISSING)
         value = result.get(field_name)
-        if value is None or value not in clean_values:
-            if default_value is not None:
-                result[field_name] = default_value
+        if value not in clean_values:
+            if default is not MISSING:
+                result[field_name] = default
             else:
                 return f"Validation failed: '{field_name}' value {value!r} not in {clean_values}"
     return None
@@ -481,12 +506,16 @@ def parse_and_extract(
 
     result: Dict[str, Any] = {}
     missing: List[ExtractField] = []
+    # Optional fields the payload left out: None, and not validated.
+    absent: List[str] = []
     # output_key -> the structure found where a single value was declared.
     misshapen: Dict[str, Any] = {}
     for field in fields:
         raw = _resolve_field(parsed_data, field.chain_path, parser, field.type_hint)
         if raw is MISSING:
-            if not field.optional:
+            if field.optional:
+                absent.append(field.output_key)
+            else:
                 missing.append(field)
             raw = None
         elif _wants_scalar(field.type_hint) and _is_subtree(raw):
@@ -501,7 +530,7 @@ def parse_and_extract(
         result[field.output_key] = convert_type(raw, field.type_hint)
 
     if validators:
-        err = apply_validators(result, validators)
+        err = apply_validators(result, validators, absent=absent)
         if err is not None:
             return {"error": err}
         # A validator's ``@default`` counts as an answer, so a field it

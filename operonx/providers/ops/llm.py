@@ -267,9 +267,11 @@ class LLMOp(BaseOp):
             validators: Optional validation applied after extraction.
                 Either a per-field allow-list — ``{"field": [allowed, ...]}``,
                 where an ``"@default"`` entry stands in for an unrecognised
-                value — or a ``Callable[[dict], bool]`` over the whole parsed
-                dict, for structural checks an allow-list cannot state. A
-                callable that raises counts as a rejection, not a crash.
+                value (``"@@x"`` is the literal ``"@x"``; an absent ``?``
+                field is not checked) — or a ``Callable[[dict], bool]`` over
+                the whole parsed dict, for structural checks an allow-list
+                cannot state. A callable that raises counts as a rejection,
+                not a crash.
             max_retries: Max **semantic** retries when the parser or validators
                 report an error. Default 0 (no retry — first parse failure
                 surfaces as ``error`` in the output). Transport failures are
