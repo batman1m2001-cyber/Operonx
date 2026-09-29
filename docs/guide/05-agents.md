@@ -242,7 +242,7 @@ finally:
     await client.close()
 ```
 
-Needs `operonx[mcp]`. Three things it does that are worth knowing:
+Needs `operonx[mcp]`. The things it does that are worth knowing:
 
 - Tools are namespaced `server__tool`, so a third-party server cannot
   shadow a local one.
@@ -251,6 +251,12 @@ Needs `operonx[mcp]`. Three things it does that are worth knowing:
   human. If a live run seems to hang, this is usually why.
 - Registration must happen **before** the graph is built —
   `get_tool_definitions()` reads the registry at build time.
+- Registration is all-or-nothing: if one tool cannot be registered (a
+  name collision, a bad schema), none is. `client.close()` withdraws the
+  client's tools and leaves local ones alone; `unregister_mcp_tools(client)`
+  withdraws them and keeps the connection.
+- Connecting in one task and closing in another — a server's startup and
+  shutdown hooks — is safe.
 
 ## Running on a schedule — `Heartbeat`
 

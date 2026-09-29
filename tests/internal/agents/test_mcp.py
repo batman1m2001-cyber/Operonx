@@ -29,9 +29,11 @@ from operonx.agents.mcp import (  # noqa: E402
     MCPServer,
     connect_mcp,
     register_mcp_tools,
+    unregister_mcp_tools,
 )
 
 SERVER = Path(__file__).parent / "mcp_fixtures" / "echo_server.py"
+CLASH_SERVER = Path(__file__).parent / "mcp_fixtures" / "clash_server.py"
 
 
 def _mcp_version() -> tuple[int, ...]:
@@ -378,6 +380,88 @@ class TestRegistration:
         await register_mcp_tools(client)
         assert TOOL_REGISTRY["echo"] is local_echo
         assert "echo__echo" in TOOL_REGISTRY
+
+
+def _local_tool(name: str):
+    from operonx.agents.tool import tool
+
+    @tool(name=name, description="a local tool", schema={"type": "object", "properties": {}})
+    async def local() -> dict:
+        return {"local": True}
+
+    return local
+
+
+class TestRegistrationIsAllOrNothing:
+    """A registration that failed part-way left the tools it had already
+    registered in place — advertised by `get_tool_definitions()`, and, once
+    `connect_mcp` had closed the client, raising "not connected" on every
+    call the model made."""
+
+    @pytest.mark.asyncio
+    async def test_a_collision_part_way_through_registers_nothing(self, client):
+        # `explode` is the server's third tool: `echo` and `add` come first.
+        squatter = _local_tool("echo__explode")
+        with pytest.raises(MCPError, match="already registered"):
+            await register_mcp_tools(client)
+        assert set(TOOL_REGISTRY) == {"echo__explode"}
+        assert TOOL_REGISTRY["echo__explode"] is squatter
+
+    @pytest.mark.asyncio
+    async def test_a_failed_connect_mcp_advertises_no_dead_proxies(self):
+        _local_tool("echo__explode")
+        with pytest.raises(MCPError):
+            await connect_mcp(_server())
+        advertised = [d["function"]["name"] for d in get_tool_definitions()]
+        assert advertised == ["echo__explode"]
+
+    @pytest.mark.asyncio
+    async def test_two_tools_sanitised_to_one_name_register_nothing(self):
+        clash = MCPServer(name="clash", command=sys.executable, args=[str(CLASH_SERVER)])
+        async with MCPClient(clash) as c:
+            with pytest.raises(MCPError, match="clash__read_file"):
+                await register_mcp_tools(c)
+        assert not TOOL_REGISTRY
+
+
+class TestUnregistering:
+    """`clear_registry()` was the only way out, and it deletes local tools
+    too."""
+
+    @pytest.mark.asyncio
+    async def test_close_removes_the_clients_tools_and_nothing_else(self):
+        local = _local_tool("local_tool")
+        client, names = await connect_mcp(_server())
+        assert "echo__echo" in names
+        await client.close()
+        assert set(TOOL_REGISTRY) == {"local_tool"}
+        assert TOOL_REGISTRY["local_tool"] is local
+
+    @pytest.mark.asyncio
+    async def test_unregistering_keeps_the_connection(self, client):
+        names = await register_mcp_tools(client)
+        assert sorted(unregister_mcp_tools(client)) == sorted(names)
+        assert not TOOL_REGISTRY
+        assert "echo: still here" in await client.call("echo", {"text": "still here"})
+        assert await register_mcp_tools(client) == names  # and it can register again
+
+    @pytest.mark.asyncio
+    async def test_every_registration_of_the_client_is_removed(self, client):
+        await register_mcp_tools(client, allow=["echo"])
+        await register_mcp_tools(client, allow=["echo"], prefix="again")
+        assert sorted(unregister_mcp_tools(client)) == ["again__echo", "echo__echo"]
+        assert not TOOL_REGISTRY
+
+    @pytest.mark.asyncio
+    async def test_a_name_someone_else_now_holds_is_spared(self, client):
+        """The registry can be cleared and a name reused behind the
+        client's back; unregistering removes this client's proxies, not
+        whatever now answers to their names."""
+        await register_mcp_tools(client, allow=["echo"])
+        clear_registry()
+        newcomer = _local_tool("echo__echo")
+        assert unregister_mcp_tools(client) == []
+        assert TOOL_REGISTRY["echo__echo"] is newcomer
 
 
 class TestPermissionDefaults:

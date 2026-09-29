@@ -38,7 +38,14 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 from operonx.core.ops.transform.func_op import op
 
-__all__ = ["TOOL_REGISTRY", "ToolMeta", "tool", "get_tool_definitions", "clear_registry"]
+__all__ = [
+    "TOOL_REGISTRY",
+    "ToolMeta",
+    "tool",
+    "get_tool_definitions",
+    "clear_registry",
+    "unregister_tool",
+]
 
 # name → op factory. Populated at import time by the decorator; dispatch
 # resolves through this rather than closing over the function, so a tool
@@ -187,3 +194,24 @@ def clear_registry() -> None:
     """Empty ``TOOL_REGISTRY``. For tests — the registry is process-wide,
     so a test that registers a tool leaks it into every later test."""
     TOOL_REGISTRY.clear()
+
+
+def unregister_tool(name: str) -> Any:
+    """Remove one tool from ``TOOL_REGISTRY`` and return its factory.
+
+    The per-tool counterpart of :func:`clear_registry`, which deletes
+    every local tool along with the one being withdrawn. A graph built
+    while the tool was registered still offers it to the model — its tool
+    list is read at build time — so rebuild after unregistering.
+
+    Raises:
+        KeyError: naming a tool that is not registered. Ignoring it would
+            hide a typo, and the tool the caller meant to withdraw would
+            still be offered to the model.
+    """
+    try:
+        return TOOL_REGISTRY.pop(name)
+    except KeyError:
+        raise KeyError(
+            f"no tool named {name!r} is registered. Registered: {sorted(TOOL_REGISTRY)}"
+        ) from None

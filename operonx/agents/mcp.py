@@ -39,7 +39,7 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from operonx.agents.tool import TOOL_REGISTRY, tool
+from operonx.agents.tool import TOOL_REGISTRY, tool, unregister_tool
 from operonx.core.loggings import LOGGER
 
 __all__ = [
@@ -47,6 +47,7 @@ __all__ = [
     "MCPClient",
     "MCPError",
     "register_mcp_tools",
+    "unregister_mcp_tools",
     "connect_mcp",
 ]
 
@@ -251,6 +252,10 @@ class MCPClient:
         self._conn: Optional[_Connection] = None
         self._session: Any = None
         self._tools: List[Any] = []
+        #: Operonx name → the proxy factory this client registered under it,
+        #: kept so its proxies can be withdrawn without touching anything
+        #: else in the registry.
+        self._registered: Dict[str, Any] = {}
 
     # ------------------------------------------------------------ lifecycle
 
@@ -337,7 +342,9 @@ class MCPClient:
         return collected
 
     async def close(self) -> None:
-        """Shut the server down. Idempotent, and safe from any task.
+        """Unregister this client's tools and shut the server down.
+
+        Idempotent, and safe from any task. Local tools are not touched.
 
         Raises:
             MCPError: the shutdown itself failed. It used to be swallowed,
@@ -346,6 +353,9 @@ class MCPClient:
                 ``async with`` still logs rather than raises when an error
                 is already on its way out, so the real one is not replaced.
         """
+        # First, and whatever the shutdown does: a proxy left registered
+        # after this point is advertised to the model and fails every call.
+        unregister_mcp_tools(self)
         conn, self._conn = self._conn, None
         self._session = None
         if conn is None:
@@ -540,7 +550,12 @@ async def register_mcp_tools(
                 f"It offers: {sorted(available)}"
             )
 
-    registered: List[str] = []
+    # Everything that can fail is checked before anything is registered.
+    # Registering tool by tool meant a failure part-way — a name collision,
+    # a bad schema — left the earlier tools registered: advertised by
+    # `get_tool_definitions()`, and raising "not connected" on every call
+    # once `connect_mcp` had closed the client.
+    planned: Dict[str, tuple] = {}
     for descriptor in client.tools:
         server_name = _attr(descriptor, "name", default="")
         if not server_name or (allow is not None and server_name not in allow):
@@ -551,6 +566,13 @@ async def register_mcp_tools(
         # reject the *whole request* when one name violates it — so a single
         # `github.create_issue` stopped every tool working, local ones too.
         full_name = f"{namespace}__{_UNSAFE.sub('_', server_name)}"[:64]
+        if full_name in planned:
+            raise MCPError(
+                f"MCP server {client.server.name!r} has two tools that both become "
+                f"{full_name!r} once made safe for a provider: "
+                f"{planned[full_name][0]!r} and {server_name!r}. Pass allow= to "
+                f"pick one."
+            )
         if full_name in TOOL_REGISTRY:
             raise MCPError(
                 f"{full_name!r} is already registered. Two servers sharing a "
@@ -576,10 +598,50 @@ async def register_mcp_tools(
                 f"inputSchema that is not a JSON Schema object: {schema!r}"
             )
 
-        _make_proxy(client, server_name, full_name, description, schema)
-        registered.append(full_name)
+        planned[full_name] = (
+            server_name,
+            description,
+            schema,
+            _signature_from_schema(schema),
+            _tool_flags(descriptor),
+        )
+
+    registered: List[str] = []
+    try:
+        for full_name, (server_name, description, schema, signature, flags) in planned.items():
+            factory = _make_proxy(
+                client, server_name, full_name, description, schema, signature, flags
+            )
+            client._registered[full_name] = factory
+            registered.append(full_name)
+    except BaseException:
+        # Nothing above should fail after the checks; if something does,
+        # the registry goes back to exactly what it was.
+        for full_name in registered:
+            if TOOL_REGISTRY.get(full_name) is client._registered.pop(full_name, None):
+                unregister_tool(full_name)
+        raise
 
     return registered
+
+
+def unregister_mcp_tools(client: MCPClient) -> List[str]:
+    """Withdraw every tool ``client`` registered, returning their names.
+
+    :meth:`MCPClient.close` does this itself; call it directly to stop
+    offering a server's tools while keeping the connection. Local tools,
+    and other clients' tools, are not touched — nor is a name that has
+    since been taken by a different tool (after a ``clear_registry()``,
+    say). Rebuild the agent graph afterwards: it reads the registry at
+    build time.
+    """
+    removed: List[str] = []
+    for full_name, factory in list(client._registered.items()):
+        if TOOL_REGISTRY.get(full_name) is factory:
+            unregister_tool(full_name)
+            removed.append(full_name)
+    client._registered.clear()
+    return removed
 
 
 def _make_proxy(
@@ -588,13 +650,14 @@ def _make_proxy(
     full_name: str,
     description: str,
     schema: Dict[str, Any],
-) -> None:
-    """Register one `@tool` that forwards to the server.
+    signature: inspect.Signature,
+    flags: Dict[str, bool],
+) -> Any:
+    """Register one `@tool` that forwards to the server; return its factory.
 
     A closure per tool, because the registry maps a name to one callable
     and the server-side name has to travel with it.
     """
-    flags = _tool_flags(next(t for t in client.tools if _attr(t, "name") == server_name))
 
     async def proxy(**kwargs: Any) -> dict:
         text = await client.call(server_name, kwargs)
@@ -602,12 +665,12 @@ def _make_proxy(
 
     # What operonx inspects to decide the op's inputs. Without it the op
     # declares one input named `kwargs` and rejects every real argument.
-    proxy.__signature__ = _signature_from_schema(schema)
+    proxy.__signature__ = signature
     proxy.__name__ = full_name
     proxy.__qualname__ = f"mcp:{full_name}"
     proxy.__doc__ = description
 
-    tool(
+    return tool(
         name=full_name,
         description=description,
         schema=schema,
