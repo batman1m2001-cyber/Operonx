@@ -217,7 +217,8 @@ async def main():
 asyncio.run(main())
 ```
 
-- **Put a real op before the branch.** `START >> if_(...)` is a `TypeError`.
+- A branch can come first: `START >> if_(n > 10, b).else_(s)` branches on
+  the graph's inputs.
 - **Finish with `.else_(op)`, or `.build()` for no default.** With
   `.build()`, when nothing matches no arm runs, and neither does an op fed
   only by the arms.
