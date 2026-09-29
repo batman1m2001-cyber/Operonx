@@ -25,7 +25,7 @@ stt_route >> skip_stt >> picker                    # (2)
 
 1. Accepts **op instances** as targets (previously accepted only op names as strings; op-instance names were extracted immediately, losing the reference)
 2. **Auto-wires** `branch >> target` edges for every op-instance target found in cases and default at build time — one line per target vanishes
-3. **Auto-names** the branch: LHS via `auto_name()` (for the `route = if_(...)` form), then, inline, to what the first case tests — `if_kind`, numbered `_2` when taken (1.10.2; was `route_N`)
+3. **Auto-names** the branch: LHS via `auto_name()` (for the `route = if_(...)` form), then falls back to a per-graph `route_1`, `route_2` counter when there's no LHS (inline usage)
 4. Can drop directly into a `>>` chain — no standalone declaration needed
 
 ```python
@@ -52,7 +52,7 @@ Zero `stt_route =`, zero `route >> target`, zero manual `~` — the DAG shape is
 ```python
 START >> source >> if_(source["kind"] == "audio", asr).else_(skip_stt)
 ```
-- Branch auto-named `if_kind` (1.10.2; was `route_1`)
+- Branch auto-named `route_1` (or `route_N` for the Nth inline branch in the graph)
 - Auto-adds edges `branch → asr` (condition) and `branch → skip_stt` (condition)
 
 **LHS-assigned (op-instance targets, auto-wired, custom name):**
@@ -92,9 +92,8 @@ Step 3 is the fix for a real bug: `auto_name()`'s source parser walks back 6 lin
 **1.10.2.** The guard only caught names that were already ops. A keyword
 argument above the branch (`role="agent",` parses as an assignment) is not
 one, so real graphs had branches named `role` and `filter_meta`. Step 2 now
-reads the bytecode only (`auto_name(source_fallback=False)`): no assignment
-means inline, not "guess". Step 4 is `if_<field>` — what the first case
-tests, or the predicate op's name — numbered `_2`, `_3` when taken.
+reads the bytecode only (`auto_name(source_fallback=False)`): no
+assignment means inline, and inline is `route_N`.
 
 ## Backward compatibility
 
@@ -110,8 +109,8 @@ tests, or the predicate op's name — numbered `_2`, `_3` when taken.
 - **Unit tests** — 9 shapes in `test_branch_inline.py`:
   1. Inline op-instance targets auto-wire branch→target
   2. LHS assignment uses the variable name (`route`)
-  3. Inline no-LHS is named after its condition (`if_score`)
-  4. Two inline branches on one field get `if_score`, `if_score_2`
+  3. Inline no-LHS falls back to `route_1`
+  4. Multiple inline branches get sequential `route_1`, `route_2`
   5. String targets: no auto-wiring (backward compat)
   6. Mixed op-instance + string: per-case behavior
   7. Auto-soften still fires on inline branch merges

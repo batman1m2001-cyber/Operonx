@@ -1,6 +1,5 @@
 """BranchOp — conditional routing op for workflow control flow."""
 
-import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from operonx.core.configs.op_config import OpType
@@ -308,8 +307,7 @@ class Branch:
         skip_stt >> picker
 
     Auto-name resolves to the LHS if there is one (``stt_route = if_(...)``);
-    inline, to what the first case tests (``if_kind`` here, ``if_is_short``
-    for a predicate op), numbered ``_2``, ``_3`` when taken.
+    inline, to a per-graph counter, ``route_1``, ``route_2``.
 
     **Named form (for forward refs or a shared branch node)** — pass op
     *names* as strings. No auto-wiring; you wire ``branch >> target``
@@ -394,12 +392,10 @@ class Branch:
         # so it can be wired below.
         predicates: List[BaseOp] = []
         normalised: List[Tuple[Ref, Any]] = []
-        tested: List[str] = []  # what each case tests: a predicate op, or a field
         for cond, target in self._cases:
             ref, predicate = _as_condition_ref(cond)
             if predicate is not None:
                 predicates.append(predicate)
-            tested.append(predicate.name if predicate is not None else ref.var)
             normalised.append((ref, target))
         self._cases = normalised
 
@@ -413,12 +409,11 @@ class Branch:
                 self._default.name if isinstance(self._default, BaseOp) else self._default
             )
 
-        # Name resolution: explicit > the variable it is assigned to > what it
-        # tests. The variable is read from the bytecode only: inline
-        # (``source >> if_(...).else_(...)``) there is none, and guessing from
-        # nearby source lines once named branches after a kwarg above them
-        # (``role="agent",``). Inline, ``if_(bot["is_bot"], ...)`` is
-        # ``if_is_bot`` — the trace says what was decided.
+        # Name resolution: explicit > the variable it is assigned to > a
+        # per-graph counter, ``route_1``. The variable is read from the
+        # bytecode only: inline (``source >> if_(...).else_(...)``) there is
+        # none, and guessing from nearby source lines named branches after a
+        # kwarg above them (``role="agent",``).
         lhs = auto_name(source_fallback=False)
         # A predicate built inline as an argument runs BEFORE the branch, so
         # on `inner = if_(is_small(...), a).else_(b)` it is the predicate that
@@ -437,10 +432,7 @@ class Branch:
             if lhs and lhs not in taken:
                 name = lhs
             else:
-                base = "if_" + re.sub(r"\W+", "_", tested[0] if tested else "branch")
-                name, n = base, 2
-                while name in taken:
-                    name, n = f"{base}_{n}", n + 1
+                name = f"route_{1 + sum(1 for op in taken.values() if op.type == 'branch')}"
 
         all_inputs = {}
         for condition_ref, _ in self._cases:

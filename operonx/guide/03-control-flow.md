@@ -225,9 +225,8 @@ asyncio.run(main())
 - A condition is a Ref compared to a literal (`c["big"] == True`,
   `c["n"] > 10`), combined with `&`, `|`, `~` (never `and`, `or`, `not`),
   or an op that returns a single `bool`.
-- Write a branch inline. It is named after what it tests (`if_big` here),
-  so the trace says what was decided; assign it (`size = if_(...)`) only
-  when something else refers to it.
+- Write a branch inline (it is named `route_1`, `route_2`, … in its
+  graph); assign it (`size = if_(...)`) only when another op refers to it.
 
 ## `~` — fire on whichever arrives first
 
