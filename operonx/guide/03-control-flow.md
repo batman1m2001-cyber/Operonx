@@ -82,6 +82,54 @@ asyncio.run(main())
   still caps all async ops together.
 - A stream has no "end" signal besides `.collect()`.
 
+Items a consumer is not ready for wait on the edge, unbounded by default.
+When the producer can outrun the consumer for long (a socket, a queue),
+bound the edge with `max_pending=N`. At N waiting items the producer is not
+resumed until one leaves, so it stops reading its own input, and pressure
+reaches whatever feeds it.
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, graph, op
+
+seen = {"ahead": 0, "done": 0, "yielded": 0}
+
+
+@op
+async def packets(n: int):
+    for i in range(n):
+        seen["ahead"] = max(seen["ahead"], seen["yielded"] - seen["done"])
+        seen["yielded"] += 1
+        yield {"pkt": i}
+
+
+@op
+async def detect(pkt: int) -> dict:
+    await asyncio.sleep(0.001)
+    seen["done"] += 1
+    return {"out": pkt}
+
+
+@graph
+def bounded(n):
+    p = packets(n=n)
+    d = detect(pkt=p["pkt"].sequential(max_pending=4))  # the producer waits at 4
+    START >> p >> d >> END
+
+
+out = asyncio.run(Operon(bounded, params={"n": None}).run(inputs={"n": 50}))
+assert out["out"] == list(range(50))
+assert seen["ahead"] <= 4  # without max_pending it reaches ~49
+```
+
+- The same bound works on `.parallel(max=N, max_pending=P)`. A bare
+  `.parallel()` or `.collect()` refuses it, because nothing waits there.
+- `on_full="drop_oldest"` drops the stalest waiting item and never holds
+  the producer. `handle.drops` counts what each edge dropped.
+- A producer on a bounded edge always runs as a task, even a plain `def`,
+  and gives its `concurrency` slot back while it waits.
+
 ## Loops
 
 ### While loop

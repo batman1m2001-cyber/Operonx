@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-09-30
+
+### Added
+
+- **A bound on a stream edge:** `ref.sequential(max_pending=N)` and
+  `.parallel(max=M, max_pending=N)`. At N waiting items the producer is not
+  advanced, so the backlog stops growing and the pressure reaches its input.
+  Before, the edge queue had no bound: a callbot load test measured 695
+  items waiting at 12 calls. `on_full="drop_oldest"` drops instead, counted
+  in `handle.drops`. Unbounded stays the default.
+
 ## [1.11.0] - 2026-09-29
 
 Every open finding in `docs/design/OPEN_FINDINGS.md` is fixed, and so are
@@ -2209,7 +2220,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.3...v1.11.0
 [1.10.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.2...v1.10.3
 [1.10.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.1...v1.10.2
