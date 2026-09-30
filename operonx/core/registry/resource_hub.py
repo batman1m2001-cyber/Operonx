@@ -1,5 +1,6 @@
 """ResourceHub - centralized registry with lazy loading and pluggable storage."""
 
+import functools
 import hashlib
 import json
 import warnings
@@ -37,6 +38,17 @@ class CacheEntry:
 #: fetching a bearer token from the named provider. Adding a category here
 #: plus a ``REGISTRY.register`` is all a new auth scheme needs.
 TOKEN_REF_PREFIXES = ("keycloak", "oauth2")
+
+
+@functools.cache
+def _load_builtin_providers() -> bool:
+    """Import operonx.providers' registry plugins (once). False on a
+    core-only install, where the package is absent."""
+    try:
+        import operonx.providers.registry  # noqa: F401 — registers on import
+    except ImportError:
+        return False
+    return True
 
 
 def _split_token_ref(api_key: Any) -> Optional[Tuple[str, str]]:
@@ -213,8 +225,13 @@ class ResourceHub:
             LOGGER.warning("Invalid key format, missing category: %s", key)
             return None
 
-        # Lookup config class by category
-        config_class = REGISTRY.get_class(category)
+        # Lookup config class by category. The built-in categories (llm,
+        # embedding, …) register when operonx.providers is imported; a
+        # script that bootstraps and calls hub.get() first must not get a
+        # raw dict for them.
+        config_class = REGISTRY.get_class(category) or (
+            _load_builtin_providers() and REGISTRY.get_class(category)
+        )
 
         # Fall back to 'type' or '_class' field
         if not config_class:
@@ -384,6 +401,14 @@ class ResourceHub:
         # (api_key: "keycloak:xxx" or "oauth2:xxx")
         resolved_config = self._resolve_token_ref(config)
         create_config = resolved_config or config
+
+        if isinstance(create_config, dict):
+            raise KeyError(
+                f"Resource '{key}': no provider is registered for category "
+                f"'{key.split(':')[0]}'. The built-in ones come with operonx.providers "
+                "(pip install operonx[providers]); a custom category needs "
+                "REGISTRY.register(ConfigClass, factory)."
+            )
 
         # Lazy initialize resource
         try:

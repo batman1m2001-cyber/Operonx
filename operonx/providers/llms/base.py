@@ -1,7 +1,8 @@
 """Base class shared by every LLM backend.
 
 Import-time dependencies are kept to what is actually executed. ``httpx`` is
-real runtime use (``create_http_client`` below), so it stays eager. The
+real runtime use (``create_http_client``, re-exported from
+``providers/_utils/http.py``), so it stays eager. The
 OpenAI types are used **only in annotations**, so they load under
 ``TYPE_CHECKING`` — this module is imported eagerly by
 ``operonx.providers.llms``, and pulling the OpenAI SDK here would defeat the
@@ -34,6 +35,9 @@ from typing import (
 
 import httpx
 
+from operonx.providers._utils.http import (
+    create_http_client,  # noqa: F401 — re-exported for the backends
+)
 from operonx.providers.llms.config import LLMConfig
 
 if TYPE_CHECKING:
@@ -187,21 +191,6 @@ def cache_metrics(completion: ChatCompletion) -> Dict[str, int]:
         "cached_input_tokens": int(cached or 0),
         "cache_write_tokens": int(write or 0),
     }
-
-
-def create_http_client(
-    verify: bool = True,
-    proxy: Optional[str] = None,
-    read_timeout: float = 120.0,
-    max_connections: int = 100,
-) -> httpx.AsyncClient:
-    """Shared HTTP client factory for all LLM providers."""
-    return httpx.AsyncClient(
-        proxy=proxy,
-        verify=verify,
-        timeout=httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0),
-        limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=10),
-    )
 
 
 def configure_event_loop():

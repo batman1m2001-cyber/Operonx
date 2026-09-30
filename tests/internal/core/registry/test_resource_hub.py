@@ -943,3 +943,50 @@ class TestBootstrap:
         assert os.environ.get("FOO") == "bar"
         BOOTSTRAP_ENV_PATHS.clear()
         ResourceHub._instance = None
+
+
+# ============================================================================
+# A built-in category resolves without importing operonx.providers first
+# ============================================================================
+
+
+def test_bootstrap_then_get_resolves_a_builtin_category_in_a_fresh_process(tmp_path):
+    """`bootstrap()` then `hub.get("embedding:…")` is the documented setup.
+    The built-in categories register when operonx.providers is imported,
+    and before 1.11.2 a script that had not imported it got the config as a
+    raw dict and "No factory registered for dict". Needs a fresh
+    interpreter: inside pytest, operonx.providers is always imported."""
+    import subprocess
+    import sys
+    import textwrap
+
+    (tmp_path / "resources.yaml").write_text(
+        textwrap.dedent("""\
+            embedding:bge:
+              api_type: vllm
+              base_url: http://127.0.0.1:1/v1/embeddings
+              model: BAAI/bge-m3
+              dimensions: 1024
+            widget:thing:
+              colour: green
+        """),
+        encoding="utf-8",
+    )
+    script = textwrap.dedent("""\
+        import sys
+        import operonx
+        assert "operonx.providers" not in sys.modules
+        hub = operonx.bootstrap(resources="resources.yaml", env=False)
+        print(type(hub.get("embedding:bge")).__name__)
+        try:
+            hub.get("widget:thing")
+        except KeyError as e:
+            print(e)
+    """)
+    out = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path, capture_output=True, text=True, timeout=120
+    )
+    assert out.returncode == 0, out.stderr[-800:]
+    lines = out.stdout.strip().splitlines()
+    assert lines[0] == "VLLMEmbedding"
+    assert "no provider is registered for category 'widget'" in lines[-1]

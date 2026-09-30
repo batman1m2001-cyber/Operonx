@@ -32,7 +32,15 @@ def create_embedding(config: EmbeddingConfig) -> BaseEmbedder:
         except ImportError as e:
             raise ImportError(_missing_extra_message("TEIEmbedding", "providers", e)) from e
         return TEIEmbedding(config)
-    if config.api_type in (EmbeddingType.VLLM, EmbeddingType.OPENAI, EmbeddingType.AZURE):
+    if config.api_type in (EmbeddingType.OPENAI, EmbeddingType.AZURE):
+        try:
+            from operonx.providers.embeddings.openai import AzureOpenAIEmbedding, OpenAIEmbedding
+        except ImportError as e:
+            raise ImportError(_missing_extra_message("OpenAIEmbedding", "openai", e)) from e
+        if config.api_type == EmbeddingType.AZURE:
+            return AzureOpenAIEmbedding(config)
+        return OpenAIEmbedding(config)
+    if config.api_type == EmbeddingType.VLLM:
         try:
             from operonx.providers.embeddings.vllm import VLLMEmbedding
         except ImportError as e:
@@ -56,7 +64,10 @@ def create_embedding(config: EmbeddingConfig) -> BaseEmbedder:
         except ImportError as e:
             raise ImportError(_missing_extra_message("ONNXEmbedding", "onnx", e)) from e
         return ONNXEmbedding(config)
-    raise ValueError(f"Unsupported Model: {config.api_type}")
+    supported = sorted(t.value for t in EmbeddingType if t is not EmbeddingType.GEMINI)
+    raise ValueError(
+        f"Unsupported embedding api_type {config.api_type.value!r}; supported: {supported}"
+    )
 
 
 def _missing_extra_message(backend: str, extra: str, exc: ImportError) -> str:

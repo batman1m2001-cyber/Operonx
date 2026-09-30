@@ -85,6 +85,18 @@ embedding:openai:
   dimensions: 1536
 ```
 
+An embedding resource's `base_url` depends on its `api_type`:
+
+| `api_type` | `base_url` | e.g. |
+|---|---|---|
+| `openai` | the API root, as for `llm:*` — the client adds `/embeddings` | `https://api.openai.com/v1` |
+| `azure` | the resource endpoint; `model` is the deployment, `api_version` is required | `https://acme.openai.azure.com` |
+| `vllm`, `tei` | the exact endpoint URL | `http://gpu-01:8000/v1/embeddings` |
+| `triton` | a bare `host:port` (TLS is `ssl: true`) | `triton.internal:8001` |
+
+With `dimensions` set, an `openai`/`azure` resource sends it (models that can
+shorten their vectors do) and raises on a reply of any other width.
+
 Then reference by key in your op definitions:
 
 ```python

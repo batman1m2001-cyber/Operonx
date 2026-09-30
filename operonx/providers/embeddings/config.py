@@ -27,10 +27,15 @@ class EmbeddingConfig(YamlModel):
             Default is None.
         api_key (Optional[str]): The API key for authenticating with the embedding service.
             Required for OpenAI, Azure, and Gemini. Default is None.
-        base_url (Optional[str]): The base URL for the API endpoint.
-            Required for Azure and TEI. Default is None.
-        api_version (Optional[str]): The version of the API to use, if applicable.
-            Required for Azure. Default is None.
+        base_url (Optional[str]): Where the service is. Its meaning depends
+            on ``api_type``: for ``openai`` the **API root**
+            (``https://api.openai.com/v1``, as for ``llm:*`` resources — the
+            client adds ``/embeddings``); for ``azure`` the resource endpoint
+            (``https://<name>.openai.azure.com``); for ``vllm`` and ``tei``
+            the exact endpoint URL; for ``triton`` a bare ``host:port``.
+        api_version (Optional[str]): Azure only, and required there
+            (e.g. ``2024-10-21``). With ``azure``, ``model`` is the
+            deployment name.
         model (Optional[str]): The specific model to use for embedding.
             Required for TEI. Default is None.
         embed_batch_size (Optional[int]): The batch size for embedding requests.
@@ -67,6 +72,7 @@ class EmbeddingConfig(YamlModel):
     api_type: EmbeddingType = EmbeddingType.VLLM
     api_key: Optional[str] = None
     base_url: Optional[str] = None
+    api_version: Optional[str] = None
     embed_batch_size: Optional[int] = None
     model: Optional[str] = None
     dimensions: Optional[int] = None
