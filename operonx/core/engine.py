@@ -268,6 +268,19 @@ class ExecutionHandle:
             return {}
         return dict(self.state._op_errors)
 
+    @property
+    def drops(self) -> Dict[str, int]:
+        """Items dropped by full ``on_full="drop_oldest"`` edges so far.
+
+        ``{"<src full name> -> <dst full name>": count}``, empty when
+        nothing was dropped. Readable while the run is going. An edge
+        bounded with ``max_pending`` and the default ``on_full="wait"``
+        never drops; it holds its producer instead.
+        """
+        if self.state is None:
+            return {}
+        return dict(self.state._edge_drops)
+
     def _with_errors(self, out: Dict[str, Any]) -> Dict[str, Any]:
         """Add ``"$errors"`` to a result payload when an op failed.
 

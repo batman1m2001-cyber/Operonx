@@ -58,6 +58,20 @@ def _getattr_or_key(value: Any, name: str) -> Any:
         raise
 
 
+_ON_FULL = ("wait", "drop_oldest")
+
+
+def _stream_bound(max_pending: Optional[int], on_full: str) -> Optional[Tuple[int, str]]:
+    """``(max_pending, on_full)`` for a Ref's edge, or None when unbounded."""
+    if on_full not in _ON_FULL:
+        raise ValueError(f"on_full must be one of {_ON_FULL}, got {on_full!r}")
+    if max_pending is None:
+        return None
+    if isinstance(max_pending, bool) or not isinstance(max_pending, int) or max_pending < 1:
+        raise ValueError(f"max_pending must be a positive int, got {max_pending!r}")
+    return (max_pending, on_full)
+
+
 @dataclass
 class StreamPolicy:
     collect: bool = False
@@ -108,6 +122,7 @@ class Ref:
         "_stream_parallel",
         "_stream_parallel_max",
         "_stream_collect",
+        "_stream_bound",
     )
 
     _RESERVED_ATTRS = frozenset(
@@ -131,10 +146,12 @@ class Ref:
             "get_all_vars",
             "get_all_refs",
             "parallel",
+            "sequential",
             "collect",
             "_stream_parallel",
             "_stream_parallel_max",
             "_stream_collect",
+            "_stream_bound",
         }
     )
 
@@ -163,6 +180,7 @@ class Ref:
         object.__setattr__(self, "_stream_parallel", False)
         object.__setattr__(self, "_stream_parallel_max", None)
         object.__setattr__(self, "_stream_collect", False)
+        object.__setattr__(self, "_stream_bound", None)
         # Nếu có transforms nhưng không có fn, rebuild từ transforms (trường hợp deserialization)
         if _fn is None and _transforms:
             _fn = lambda x, ctx={}: x
@@ -200,13 +218,18 @@ class Ref:
         object.__setattr__(new, "_stream_parallel", self._stream_parallel)
         object.__setattr__(new, "_stream_parallel_max", self._stream_parallel_max)
         object.__setattr__(new, "_stream_collect", self._stream_collect)
+        object.__setattr__(new, "_stream_bound", self._stream_bound)
         return new
 
-    def parallel(self, max: int = None) -> "Ref":
+    def parallel(self, max: int = None, *, max_pending: int = None, on_full: str = "wait") -> "Ref":
         """Mark for parallel consumption. Default sequential → parallel.
 
         Args:
             max: Max concurrent items. None = unlimited.
+            max_pending: Max items waiting for one of the ``max`` slots;
+                see :meth:`sequential`. Needs ``max`` — an unbounded
+                ``.parallel()`` starts every item at once, so none wait.
+            on_full: ``"wait"`` or ``"drop_oldest"``; see :meth:`sequential`.
 
         Returns:
             New Ref with parallel mode set.
@@ -215,10 +238,44 @@ class Ref:
 
             op_b(x=source["x"].parallel())       # unlimited parallel
             op_b(x=source["x"].parallel(max=4))   # max 4 concurrent
+            op_b(x=source["x"].parallel(max=4, max_pending=16))
         """
+        if max_pending is not None and not max:
+            raise ValueError(
+                "max_pending needs .parallel(max=N): an unbounded .parallel() "
+                "starts every item at once, so nothing ever waits on the edge"
+            )
         new = self._clone()
         object.__setattr__(new, "_stream_parallel", True)
         object.__setattr__(new, "_stream_parallel_max", max)
+        object.__setattr__(new, "_stream_bound", _stream_bound(max_pending, on_full))
+        return new
+
+    def sequential(self, *, max_pending: int = None, on_full: str = "wait") -> "Ref":
+        """One item at a time through the consumer (the default), with a bound.
+
+        Without a bound the items the consumer is not ready for wait on the
+        edge, and nothing limits how many: a producer faster than its
+        consumer grows that backlog for as long as it runs.
+
+        Args:
+            max_pending: Max items waiting on this edge. ``None`` (the
+                default) is unbounded, as before.
+            on_full: What happens when ``max_pending`` items wait.
+                ``"wait"`` (default) does not advance the producer until
+                one leaves, so a producer reading a socket or a queue stops
+                reading it. ``"drop_oldest"`` drops the stalest waiting
+                item instead and counts it in ``handle.drops``.
+
+        Example::
+
+            op_b(x=source["x"].sequential(max_pending=64))
+            op_b(x=source["x"].sequential(max_pending=8, on_full="drop_oldest"))
+        """
+        new = self._clone()
+        object.__setattr__(new, "_stream_parallel", False)
+        object.__setattr__(new, "_stream_parallel_max", None)
+        object.__setattr__(new, "_stream_bound", _stream_bound(max_pending, on_full))
         return new
 
     def collect(self) -> "Ref":
@@ -248,6 +305,7 @@ class Ref:
         object.__setattr__(new_ref, "_stream_parallel", self._stream_parallel)
         object.__setattr__(new_ref, "_stream_parallel_max", self._stream_parallel_max)
         object.__setattr__(new_ref, "_stream_collect", self._stream_collect)
+        object.__setattr__(new_ref, "_stream_bound", self._stream_bound)
         return new_ref
 
     @staticmethod

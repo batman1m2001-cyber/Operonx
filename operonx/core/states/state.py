@@ -120,6 +120,9 @@ class MemoryState:
         # {op_full_name: error_text} for every op that raised in this run.
         # Filled by `record_op_error`; read as `handle.errors` / "$errors".
         "_op_errors",
+        # {"src -> dst": n} items dropped by a full `on_full="drop_oldest"`
+        # edge. Written by the scheduler; read as `handle.drops`.
+        "_edge_drops",
     )
 
     def __init__(
@@ -200,6 +203,7 @@ class MemoryState:
 
         # Ops that raised, first failure of each. See `record_op_error`.
         self._op_errors: Dict[str, str] = {}
+        self._edge_drops: Dict[str, int] = {}
 
         # Apply initial inputs
         if inputs:

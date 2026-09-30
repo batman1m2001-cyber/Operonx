@@ -158,6 +158,7 @@ def resolve_value(key: str, value: Any, parent) -> Any:
         object.__setattr__(new_ref, "_stream_parallel", value._stream_parallel)
         object.__setattr__(new_ref, "_stream_parallel_max", value._stream_parallel_max)
         object.__setattr__(new_ref, "_stream_collect", value._stream_collect)
+        object.__setattr__(new_ref, "_stream_bound", value._stream_bound)
         return new_ref
 
     # Handle op reference: some_op → Ref(some_op, key)

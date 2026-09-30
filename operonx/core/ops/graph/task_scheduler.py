@@ -105,21 +105,29 @@ def _stamped(
 
 
 def _edge_policy(graph, src: str, dst: str) -> tuple:
-    """``(collect, limit)`` for the edge ``src -> dst``, read off dst's Ref.
+    """``(collect, limit, bound)`` for the edge ``src -> dst``, read off dst's Ref.
 
     The policy lives on the Ref that dst's input holds to src
     (``src["x"].parallel(max=4)``); the first input referencing src wins.
+    ``bound`` is ``(max_pending, on_full)`` or None (unbounded, the default).
     """
     dst_op = graph._ops.get(dst)
     for param in getattr(dst_op, "inputs", {}).values():
         ref = getattr(param, "value", None)
         if isinstance(ref, Ref) and getattr(ref.raw_source, "name", None) == src:
+            bound = ref._stream_bound
             if ref._stream_collect:
-                return True, None
+                if bound is not None:
+                    raise ValueError(
+                        f"{dst} reads {src} with .collect() and max_pending: collect "
+                        f"holds the whole stream until it ends, so no bound applies. "
+                        f"Drop max_pending, or bound the edge into a per-item op instead."
+                    )
+                return True, None, None
             if ref._stream_parallel:
-                return False, ref._stream_parallel_max or None
-            break
-    return False, 1
+                return False, ref._stream_parallel_max or None, bound
+            return False, 1, bound
+    return False, 1, None
 
 
 class Scheduler:
@@ -139,7 +147,15 @@ class Scheduler:
             └─ EOF   → _on_eof()    flush collect, advance seq queue, check loop
     """
 
-    __slots__ = ("graph", "_route_policy", "_loop_ops", "_loop_watch", "_collect_gens")
+    __slots__ = (
+        "graph",
+        "_route_policy",
+        "_wait_bounds",
+        "_drop_bounds",
+        "_loop_ops",
+        "_loop_watch",
+        "_collect_gens",
+    )
 
     def __init__(self, graph):
         self.graph = graph  # static compiled data — never mutated after build()
@@ -149,9 +165,27 @@ class Scheduler:
         # 1 for sequential (the default), N for ``.parallel(max=N)``, None
         # for an unbounded ``.parallel()``.
         self._route_policy: Dict[Tuple[str, str], Tuple[bool, object]] = {}
+        # Edges with ``max_pending``. Both empty for a graph that sets none,
+        # and every check on the hot path starts with that emptiness, so an
+        # unbounded graph pays one falsy test per item and nothing more.
+        #   _wait_bounds[src]   = ((src, dst), max_pending) for each of src's
+        #                         edges that hold the producer (on_full="wait")
+        #   _drop_bounds[(src, dst)] = max_pending for on_full="drop_oldest"
+        self._wait_bounds: Dict[str, tuple] = {}
+        self._drop_bounds: Dict[Tuple[str, str], int] = {}
         for src, links in graph._adj.items():
             for link in links:
-                self._route_policy[(src, link.dst)] = _edge_policy(graph, src, link.dst)
+                collect, limit, bound = _edge_policy(graph, src, link.dst)
+                self._route_policy[(src, link.dst)] = (collect, limit)
+                if bound is None:
+                    continue
+                cap, on_full = bound
+                if on_full == "wait":
+                    self._wait_bounds[src] = self._wait_bounds.get(src, ()) + (
+                        ((src, link.dst), cap),
+                    )
+                else:
+                    self._drop_bounds[(src, link.dst)] = cap
 
         # Child ops that are synthetic loops -> the successors their exit
         # routing may reach. A loop op's frames are per iteration, so they
@@ -368,6 +402,20 @@ class Scheduler:
         # downstream ops from the same generator don't overwrite each other.
         seq_origins: Dict[Tuple[str, tuple], tuple] = {}
 
+        # Backpressure for edges with ``max_pending`` (on_full="wait"). An
+        # edge's pending items are the ones parked in its `seq_queues` deque
+        # plus the frames its producer has put on the event queue that the
+        # main loop has not routed yet. The second half matters: a producer
+        # pulling from an already-full inbound queue never suspends, so it
+        # can emit a whole backlog before the main loop routes the first
+        # frame, and a check on the deque alone would pass every time.
+        #   bp_unrouted[src] = src's frames on the event queue, not yet routed
+        #   bp_waiters[src]  = futures of src's pumps parked on a full edge
+        wait_bounds = self._wait_bounds
+        drop_bounds = self._drop_bounds
+        bp_unrouted: Dict[str, int] = {}
+        bp_waiters: Dict[str, list] = {}
+
         # collect_bufs[(stream_ctx, src, dst)] = list of (item_ctx, result).
         # Frames on a `.collect()` edge buffer here instead of dispatching,
         # and dst runs once with the lists at stream_ctx + ("__collect__",).
@@ -408,7 +456,12 @@ class Scheduler:
             """Schedule op based on its bound (sync=inline, io/cpu=task)."""
             nonlocal inflight
             op = g._ops[op_name]
-            if getattr(op, "bound", None) == "sync":
+            # A producer on a bounded edge always gets a task, even a plain
+            # `def` one: an inline op is iterated by the main loop itself,
+            # so it has no way to wait for the main loop to drain its edge.
+            if getattr(op, "bound", None) == "sync" and not (
+                wait_bounds and op_name in wait_bounds
+            ):
                 inline_pending.append((op_name, ctx))
             else:
                 inflight += 1
@@ -430,75 +483,150 @@ class Scheduler:
             """
             nonlocal inflight
             op = g._ops[op_name]
+            bp = wait_bounds.get(op_name) if wait_bounds else None
 
-            async with _sem:
+            # Acquired by hand rather than `async with`: a producer parked
+            # on a full edge gives its slot back while it waits (below).
+            # With `concurrency=1` a producer holding it would starve the
+            # very consumer that has to drain the edge. `held` says whether
+            # this pump owns a slot to release when it ends.
+            await _sem.acquire()
+            held = True
+            try:
+                async for item_ctx, result in op.run(state, ctx):
+                    if isinstance(result, Interrupt):
+                        # Validated before stamping. Raising from inside
+                        # this `async for` would throw into a suspended
+                        # generator, whose finally then resets a
+                        # ContextVar token from the wrong context — so
+                        # the misuse is routed to the main loop instead,
+                        # which re-raises it to the caller intact.
+                        try:
+                            result = _stamped(
+                                result,
+                                op_name,
+                                ctx,
+                                item_ctx,
+                                is_root_scheduler=_is_root_scheduler,
+                            )
+                        except InterruptTargetError as e:
+                            fatal.append(e)
+                            break
+                        # Stamp emitter identity so the main loop
+                        # knows which task to skip during the
+                        # self-cancel guard. That guard looks up
+                        # `tasks_by_ctx`, which is keyed by the op's
+                        # dispatch ctx — so `.ctx` stays coarse while
+                        # SELF resolves to `item_ctx`, the ctx of the
+                        # yield that actually emitted the interrupt.
+                        queue.put_nowait(result)
+                    else:
+                        queue.put_nowait(Frame(op_name, item_ctx, result))
+                        _note_event(item_ctx, 1)
+                        if bp is not None:
+                            bp_unrouted[op_name] = bp_unrouted.get(op_name, 0) + 1
+                    inflight += 1
+                    # The await point of backpressure: the generator is
+                    # suspended at its yield, so not resuming it here is
+                    # what keeps it from reading its next input.
+                    if bp is not None and _bp_full(op_name):
+                        _sem.release()
+                        held = False
+                        await _bp_wait(op_name)
+                        await _sem.acquire()
+                        held = True
+                queue.put_nowait(EOF(op_name, ctx))
+                _note_event(ctx, 1)
+                inflight += 1
+            except asyncio.CancelledError:
+                # Cancelled by _sweep_ctx — do not enqueue EOF (the
+                # sweep already accounted for queued frames + cleared
+                # the consumer bookkeeping).
+                raise
+            except BaseException as e:
+                # An op's own exception never gets here: `BaseOp.run`
+                # records it and ends normally. What does is the
+                # framework failing around the op, and that is fatal.
+                #
+                # ObserveBudgetExceeded is a BaseException on purpose —
+                # a circuit breaker is not an op result. But letting it
+                # escape here enqueued nothing, so the main loop stayed
+                # parked in `await queue.get()` with inflight already at
+                # zero: the run hung forever and the exception was never
+                # retrieved. Hand it to the main loop as an event.
+                fatal.append(e)
+                queue.put_nowait(EOF(op_name, ctx))
+                _note_event(ctx, 1)
+                inflight += 1
+            finally:
+                inflight -= 1
+                bucket = tasks_by_ctx.get(ctx)
+                if bucket is not None:
+                    bucket.pop(op_name, None)
+                    if not bucket:
+                        tasks_by_ctx.pop(ctx, None)
+                        # Last op in this context finished. Nothing else
+                        # in the package frees per-context state, so for
+                        # a streaming run this is the only thing between
+                        # a flat run and unbounded growth.
+                        _release_if_done(ctx)
+                if held:
+                    _sem.release()
+
+        def _bp_full(src: str) -> bool:
+            """Has any of src's waiting edges reached its ``max_pending``?"""
+            unrouted = bp_unrouted.get(src, 0)
+            for key, cap in wait_bounds[src]:
+                q = seq_queues.get(key)
+                if unrouted + (len(q) if q else 0) >= cap:
+                    return True
+            return False
+
+        async def _bp_wait(src: str) -> None:
+            """Park the calling pump until every bounded edge of src has room."""
+            loop = asyncio.get_running_loop()
+            while _bp_full(src):
+                fut = loop.create_future()
+                waiters = bp_waiters.setdefault(src, [])
+                waiters.append(fut)
                 try:
-                    async for item_ctx, result in op.run(state, ctx):
-                        if isinstance(result, Interrupt):
-                            # Validated before stamping. Raising from inside
-                            # this `async for` would throw into a suspended
-                            # generator, whose finally then resets a
-                            # ContextVar token from the wrong context — so
-                            # the misuse is routed to the main loop instead,
-                            # which re-raises it to the caller intact.
-                            try:
-                                result = _stamped(
-                                    result,
-                                    op_name,
-                                    ctx,
-                                    item_ctx,
-                                    is_root_scheduler=_is_root_scheduler,
-                                )
-                            except InterruptTargetError as e:
-                                fatal.append(e)
-                                break
-                            # Stamp emitter identity so the main loop
-                            # knows which task to skip during the
-                            # self-cancel guard. That guard looks up
-                            # `tasks_by_ctx`, which is keyed by the op's
-                            # dispatch ctx — so `.ctx` stays coarse while
-                            # SELF resolves to `item_ctx`, the ctx of the
-                            # yield that actually emitted the interrupt.
-                            queue.put_nowait(result)
-                        else:
-                            queue.put_nowait(Frame(op_name, item_ctx, result))
-                            _note_event(item_ctx, 1)
-                        inflight += 1
-                    queue.put_nowait(EOF(op_name, ctx))
-                    _note_event(ctx, 1)
-                    inflight += 1
-                except asyncio.CancelledError:
-                    # Cancelled by _sweep_ctx — do not enqueue EOF (the
-                    # sweep already accounted for queued frames + cleared
-                    # the consumer bookkeeping).
-                    raise
-                except BaseException as e:
-                    # An op's own exception never gets here: `BaseOp.run`
-                    # records it and ends normally. What does is the
-                    # framework failing around the op, and that is fatal.
-                    #
-                    # ObserveBudgetExceeded is a BaseException on purpose —
-                    # a circuit breaker is not an op result. But letting it
-                    # escape here enqueued nothing, so the main loop stayed
-                    # parked in `await queue.get()` with inflight already at
-                    # zero: the run hung forever and the exception was never
-                    # retrieved. Hand it to the main loop as an event.
-                    fatal.append(e)
-                    queue.put_nowait(EOF(op_name, ctx))
-                    _note_event(ctx, 1)
-                    inflight += 1
+                    await fut
                 finally:
-                    inflight -= 1
-                    bucket = tasks_by_ctx.get(ctx)
-                    if bucket is not None:
-                        bucket.pop(op_name, None)
-                        if not bucket:
-                            tasks_by_ctx.pop(ctx, None)
-                            # Last op in this context finished. Nothing else
-                            # in the package frees per-context state, so for
-                            # a streaming run this is the only thing between
-                            # a flat run and unbounded growth.
-                            _release_if_done(ctx)
+                    # Cancelled while parked: leave no dead future behind.
+                    if not fut.done() or fut.cancelled():
+                        live = bp_waiters.get(src)
+                        if live is not None and fut in live:
+                            live.remove(fut)
+
+        def _bp_wake(src: str) -> None:
+            """Resume src's parked pumps if its edges have room again.
+
+            All of them, not one: each re-checks in `_bp_wait`'s loop, and
+            one woken pump that ends without yielding again would otherwise
+            leave the rest parked with nothing left to wake them.
+            """
+            waiters = bp_waiters.get(src)
+            if waiters and not _bp_full(src):
+                del bp_waiters[src]
+                for fut in waiters:
+                    if not fut.done():
+                        fut.set_result(None)
+
+        def _drop_oldest(key: tuple) -> None:
+            """Drop the stalest item waiting on a full ``drop_oldest`` edge."""
+            dropped = seq_queues[key].popleft()
+            src, dst = key
+            name = f"{g._ops[src].full_name} -> {g._ops[dst].full_name}"
+            drops = state._edge_drops
+            n = drops.get(name, 0)
+            if n == 0:
+                LOGGER.warning(
+                    f"edge {name} is full (max_pending={drop_bounds[key]}): dropping "
+                    f"its oldest waiting items; the count is in handle.drops"
+                )
+            drops[name] = n + 1
+            # Its consumer will never run, so nothing else frees the item.
+            _release_if_done(dropped)
 
         def _release_if_done(ctx: tuple) -> None:
             """Free a context's cells once nothing is left to run in it.
@@ -711,7 +839,10 @@ class Scheduler:
                     seq_origins[(dst, ctx)] = key
                     dispatch(dst, ctx)
                 else:
-                    seq_queues.setdefault(key, deque()).append(ctx)
+                    q = seq_queues.setdefault(key, deque())
+                    if drop_bounds and len(q) >= drop_bounds.get(key, len(q) + 1):
+                        _drop_oldest(key)
+                    q.append(ctx)
 
         def _flush_collect(key: tuple) -> None:
             """Hand one collect group to its consumer as lists, in yield order."""
@@ -796,6 +927,8 @@ class Scheduler:
                     next_ctx = q.popleft()
                     seq_origins[(dst, next_ctx)] = key
                     dispatch(dst, next_ctx)
+                    if wait_bounds and src in bp_waiters:
+                        _bp_wake(src)
                 else:
                     seq_running[key] -= 1
 
@@ -916,6 +1049,8 @@ class Scheduler:
                     and not is_emitter
                 ):
                     drop_count += 1
+                    if wait_bounds and isinstance(item, Frame) and item_op in wait_bounds:
+                        bp_unrouted[item_op] -= 1
                 else:
                     # The emitter is spared its own already-queued EOF. A
                     # non-generator op enqueues the Interrupt and its EOF in
@@ -1021,6 +1156,10 @@ class Scheduler:
             for sctx in [c for c in stream_minter if _is_descendant_or_equal(c, ctx_prefix)]:
                 stream_minter.pop(sctx, None)
 
+            # Dropped frames and trimmed queues free room on bounded edges.
+            for src in list(bp_waiters):
+                _bp_wake(src)
+
             # Inline ops are queued here, not spawned as tasks, so cancelling
             # `tasks_by_ctx` never touched them. `@op` on a plain `def`
             # resolves to bound="sync" — the *default* — so an Interrupt in
@@ -1054,6 +1193,11 @@ class Scheduler:
                     raise fatal[0]
                 if isinstance(event, Frame):
                     _on_frame(event)
+                    if wait_bounds and event.op in wait_bounds:
+                        # Routed: it now counts in a seq queue, or it ran.
+                        bp_unrouted[event.op] -= 1
+                        if event.op in bp_waiters:
+                            _bp_wake(event.op)
                 elif isinstance(event, Interrupt):
                     await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
                     _report_interrupt(event, event.ctx)
