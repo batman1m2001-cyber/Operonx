@@ -4,7 +4,6 @@ import asyncio
 import json
 import time
 import uuid
-from functools import lru_cache
 from typing import Any, Dict, List, Union
 
 import aiohttp
@@ -112,14 +111,13 @@ class VLLMEmbedding(BaseEmbedder):
         except asyncio.TimeoutError as e:
             raise ConnectionError("Request timed out") from e
 
-    @lru_cache(maxsize=1)
     def get_output_dim(self) -> int:
-        r"""Get the output dimension of the embeddings.
+        r"""The configured ``dimensions`` (validated positive in ``__init__``).
 
-        Returns:
-            The dimensionality of the embedding vectors for the current model.
+        It returned ``self.output_dim``, an attribute nothing set — every
+        call raised ``AttributeError``.
         """
-        return self.output_dim
+        return self.config.dimensions
 
 
 from typing import Tuple

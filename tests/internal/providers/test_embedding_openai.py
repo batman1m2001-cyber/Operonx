@@ -207,3 +207,17 @@ async def test_every_shipped_openai_embedding_resource_reaches_the_endpoint(bloc
         emb = create_embedding(EmbeddingConfig(**cfg))
     await emb.run("a")
     assert wire["requests"][-1]["url"].endswith("/v1/embeddings")
+
+
+def test_vllm_get_output_dim_is_the_configured_dimensions():
+    """It returned an attribute nothing set, so every call raised."""
+    vllm = EmbeddingConfig(
+        api_type=EmbeddingType.VLLM, base_url="http://h/v1/embeddings", dimensions=1024
+    )
+    assert create_embedding(vllm).get_output_dim() == 1024
+
+
+def test_openai_get_output_dim():
+    assert create_embedding(_openai(dimensions=256)).get_output_dim() == 256
+    with pytest.raises(ValueError, match="dimensions"):
+        create_embedding(_openai()).get_output_dim()

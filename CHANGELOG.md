@@ -31,6 +31,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `api_type: openai` embeddings need only `operonx[openai]` — no longer
   `operonx[providers]` for aiohttp.
 - An unsupported embedding `api_type` names the supported ones.
+- **`bootstrap()` then `hub.get("embedding:…")` works without importing
+  `operonx.providers` first.** The built-in categories register on that
+  import; without it the resource stayed a raw dict and failed with
+  "No factory registered for dict". The hub now loads the built-in plugins
+  when a category is unknown, and a category no provider serves gets an
+  error naming it and the fix.
+- `VLLMEmbedding.get_output_dim()` returns the configured `dimensions`; it
+  read an attribute nothing set, so every call raised `AttributeError`.
 - New mock-only tests (`tests/internal/providers/test_embedding_openai.py`,
   marked `unit` so the default `pytest` runs them) pin the request on the
   wire, and check that every `openai` embedding resource shipped in
