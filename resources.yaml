@@ -172,11 +172,11 @@ embedding:bge-m3:
   model: BAAI/bge-m3
   dimensions: 1024
 
-# OpenAI Embeddings
+# OpenAI Embeddings — base_url is the API root, as for llm:*; the client adds /embeddings
 embedding:openai:
   api_type: openai
   api_key: ${OPENAI_API_KEY}
-  base_url: https://api.openai.com/v1/embeddings
+  base_url: https://api.openai.com/v1
   model: text-embedding-3-small
   dimensions: 1536
 

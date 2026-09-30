@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`api_type: openai` embeddings reach the embeddings endpoint.** They were
+  sent through the vLLM client, which posts to `base_url` as written, so the
+  documented `base_url: https://api.openai.com/v1` (the providers docs, the RAG
+  guide, ex07, ex12, ex16) posted to `/v1` and got a 404 from OpenAI. `openai`
+  and `azure` now use the OpenAI SDK, like the `llm:*` backends: `base_url` is
+  the API root. A `base_url` ending in `/embeddings` — the only form that
+  worked before — still works, with a `DeprecationWarning`. `vllm` is
+  unchanged: its `base_url` is the exact endpoint.
+- **`dimensions` is sent.** It was never in the request, so a 256-wide
+  resource got 1536-wide vectors. It is now sent, and a reply of any other
+  width raises instead of reaching an index built for the configured one.
+  A model that cannot shorten its vectors (`text-embedding-ada-002`) rejects
+  `dimensions`: leave it unset there.
+- **Azure embeddings authenticate.** They sent `Authorization: Bearer <key>`
+  and no `api-version`; they now send `api-key` and `?api-version=`.
+  `api_version` is a field of the embedding config (it was documented but
+  silently dropped) and is required for `azure`; `base_url` is the resource
+  endpoint and `model` the deployment. A deployment URL is refused with the
+  fix in the message.
+- `api_type: openai` embeddings need only `operonx[openai]` — no longer
+  `operonx[providers]` for aiohttp.
+- An unsupported embedding `api_type` names the supported ones.
+- New mock-only tests (`tests/internal/providers/test_embedding_openai.py`,
+  marked `unit` so the default `pytest` runs them) pin the request on the
+  wire, and check that every `openai` embedding resource shipped in
+  `resources.yaml` and `examples/` reaches `/embeddings` as written.
+
 ## [1.11.1] - 2026-09-30
 
 ### Added

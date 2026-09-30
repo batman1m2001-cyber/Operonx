@@ -16,6 +16,8 @@ from operonx.providers.embeddings.factory import create_embedding
 # imported on first access via __getattr__ below.
 _LAZY_BACKENDS = {
     "TEIEmbedding": "operonx.providers.embeddings.tei",
+    "OpenAIEmbedding": "operonx.providers.embeddings.openai",
+    "AzureOpenAIEmbedding": "operonx.providers.embeddings.openai",
     "VLLMEmbedding": "operonx.providers.embeddings.vllm",
     "HFEmbedding": "operonx.providers.embeddings.huggingface",
     "ONNXEmbedding": "operonx.providers.embeddings.onnx",
@@ -44,6 +46,8 @@ __all__ = [
     "EmbeddingType",
     "EmbeddingConfig",
     "create_embedding",
+    "OpenAIEmbedding",
+    "AzureOpenAIEmbedding",
     "VLLMEmbedding",
     "TEIEmbedding",
     "HFEmbedding",
