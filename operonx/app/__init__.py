@@ -18,7 +18,7 @@ The dependency runs one way. Graphs never import this package.
 """
 
 from .application import Application, GraphRef
-from .declare import Listener, Service, asgi, env, http, websocket
+from .declare import Listener, Service, asgi, env, http, schedule, webhook, websocket
 from .evals import Dataset, Eval
 from .manifest import JobSpec, Manifest, ManifestError, ServeSpec
 
@@ -36,5 +36,7 @@ __all__ = [
     "asgi",
     "env",
     "http",
+    "schedule",
+    "webhook",
     "websocket",
 ]

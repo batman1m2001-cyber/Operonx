@@ -34,7 +34,7 @@ Other extras: `anthropic`, `gemini`, `langfuse`, `postgres`, `mongo`,
 from operonx import END, PARENT, SCRATCH, START, EmitOp, InterruptOp, Operon, bootstrap, graph, op
 from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
 from operonx.agents.ops.model_ops import make_llm_caller
-from operonx.app import Application, Eval, Service, asgi, env, http, websocket
+from operonx.app import Application, Eval, Service, asgi, env, http, schedule, webhook, websocket
 from operonx.app.jobs import Job, Runbook
 from operonx.app.serve import RunRequest, egress, ingress
 from operonx.core.ops import if_

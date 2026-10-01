@@ -30,13 +30,13 @@ manifest parser does, so nothing downstream knows which way it came.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from .manifest import SESSION_MODES, STREAM_KINDS, ManifestError, ServeSpec, _default_session
 
-__all__ = ["Listener", "Service", "asgi", "env", "http", "websocket"]
+__all__ = ["Listener", "Service", "asgi", "env", "http", "schedule", "webhook", "websocket"]
 
 
 def env(name: str, default: Any = None) -> Any:
@@ -67,6 +67,9 @@ class Listener:
     #: ``operonx.toml`` at the project root: each worker loads the
     #: application from it.
     workers: int = 1
+    #: What the transport needs besides an address (a schedule's clock).
+    #: Becomes the service's options.
+    options: Dict[str, Any] = field(default_factory=dict, hash=False, compare=False)
 
 
 def _workers(workers: Any) -> int:
@@ -91,6 +94,40 @@ def http(
 
 def asgi(path: str = "/", port: int = 8000, host: str = "0.0.0.0", workers: int = 1) -> Listener:
     return Listener("asgi", path, int(port), host, workers=_workers(workers))
+
+
+def webhook(path: str, port: int = 8000, host: str = "0.0.0.0") -> Listener:
+    """A POST that starts a run and is answered at once.
+
+    The reply is ``202 {"accepted": true, "run_id": ...}`` before the run
+    begins; the run goes on in the background, traced like any service run.
+    For events nobody waits on: a new email, a Slack message, a CRM change.
+    ``max_inflight=N`` on the service answers ``429`` beyond N pending runs.
+    """
+    return Listener("webhook", path, int(port), host, "POST")
+
+
+def schedule(
+    every: Any = None, at: Optional[str] = None, port: int = 8000, host: str = "0.0.0.0"
+) -> Listener:
+    """A clock that starts a run: ``every=`` (``30``, ``"5m"``, ``"1h"``) or
+    daily ``at="08:00"`` (local time).
+
+    It has no route of its own: it runs inside the server on ``port``,
+    beside that port's other services. A tick that lands while the last run
+    is still going is skipped and counted; a failing run does not stop it.
+    The graph's ingress item is ``{"tick": n, "at": "<iso time>"}``.
+    """
+    from .serve.triggers import _parse_at, parse_every
+
+    if (every is None) == (at is None):
+        raise ManifestError("schedule() needs exactly one of every= or at=")
+    if every is not None:
+        parse_every(every)
+    else:
+        _parse_at(at)
+    opts = {"every": every} if every is not None else {"at": at}
+    return Listener("schedule", f"/__schedule__/{every or at}", int(port), host, "*", options=opts)
 
 
 def Service(  # noqa: N802 — reads as a declaration
@@ -171,7 +208,7 @@ def Service(  # noqa: N802 — reads as a declaration
             raise ManifestError(f"{label} variant {v_name!r} must be a mapping of parameters")
         variants_out[str(v_name)] = dict(bind)
 
-    opts: Dict[str, Any] = dict(options)
+    opts: Dict[str, Any] = {**listener.options, **dict(options)}
     if concurrency is not None:
         opts["concurrency"] = int(concurrency)
     # None inherits the application's consumers; [] says "trace nothing"

@@ -695,6 +695,39 @@ class GraphOp(BaseOp):
     # 3. EXECUTE — run the workflow
     # ═══════════════════════════════════════════════════════════════════
 
+    def _seed_declared_inputs(self, state: "MemoryState", context_id: tuple) -> None:
+        """Start a declared cell from the input of the same name.
+
+        An agent declares ``PARENT.declare(messages=[...])`` and also takes
+        ``messages`` as its input: one cell, both roles. Run on its own, the
+        engine writes the inputs into it before the first op. Nested, the
+        input arrives as a pull ref — and a shared cell is never pulled, so
+        the parent's value never entered it: the agent ran without the
+        question it was asked. Writing it here, through the reducer, gives
+        the nested run the same starting cell as the standalone one.
+        """
+        schema = state.schema
+        for var in self._shared_vars:
+            idx = schema.get_index(self.full_name, var)
+            pull = schema.get_pull_ref(idx) if idx >= 0 else None
+            if pull is None or pull.is_output or pull.idx < 0:
+                continue
+            value = pull._fn(state._cells[pull.idx][context_id])
+            if value is not None:
+                state._write_cell(idx, context_id, value)
+
+    def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
+        """Store the graph's outputs — except its declared cells.
+
+        A declared cell already holds the graph's value: every write inside
+        the graph went into it. Storing the graph's output there again hands
+        the cell's reducer its own accumulated value as a fresh delta — an
+        ``add_messages`` cell came out with every message twice.
+        """
+        if self._shared_vars and result:
+            result = {k: v for k, v in result.items() if k not in self._shared_vars}
+        super().store_result(state, result, context_id)
+
     async def run(
         self,
         state: "MemoryState",
@@ -726,6 +759,7 @@ class GraphOp(BaseOp):
 
         try:
             _inputs = self.get_inputs(state, context_id=context_id)
+            self._seed_declared_inputs(state, context_id)
 
             if self._is_building:
                 self.build()
