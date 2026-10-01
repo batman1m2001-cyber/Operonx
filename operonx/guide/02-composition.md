@@ -168,6 +168,14 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
   egress item(s), sent when the run ends.
 - `websocket(path, port=...)` needs `max_inflight=N`: every frame is an
   item, every egress item is sent at once.
+- `webhook(path, port=...)`: for events nobody waits on (a new email, a
+  Slack message). The POST is answered `202 {"accepted": true, "run_id": ...}`
+  at once and the run goes on in the background, traced. `max_inflight=N`
+  answers `429` beyond N pending runs.
+- `schedule(every="5m")` or `schedule(at="08:00", port=...)`: a clock that
+  starts a run per tick, inside the server on that port; the ingress item is
+  `{"tick": n, "at": ...}`. A tick that lands while the last run is still
+  going is skipped and counted; a failing run does not stop the clock.
 - `on_session=fn` turns the request into the graph's inputs
   (`RunRequest(inputs={...})`, or `None` to refuse). Without it the query
   string becomes the inputs.

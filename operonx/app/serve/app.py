@@ -185,7 +185,10 @@ def _default_on_session(spec: ServeSpec):
     def build(session: Any) -> RunRequest:
         meta = dict(getattr(session, "meta", {}) or {})
         query = dict(meta.get("query") or {})
-        return RunRequest(inputs=query, scratch={}, trace_id=query.get("trace_id"))
+        # a webhook mints the run id it answered with (`meta["trace_id"]`)
+        return RunRequest(
+            inputs=query, scratch={}, trace_id=query.get("trace_id") or meta.get("trace_id")
+        )
 
     return build
 
@@ -246,6 +249,13 @@ def build_app(
         elif spec.kind == "websocket":
             transport = WebSocketTransport(spec)
             routes.append(WebSocketRoute(spec.path, _ws_endpoint(spec, transport)))
+        elif spec.kind == "webhook":
+            from .triggers import WebhookTransport
+
+            transport = WebhookTransport(spec)
+            routes.append(
+                Route(spec.path, _webhook_endpoint(spec, transport, JSONResponse), methods=["POST"])
+            )
         else:
             # A project's own transport. It does not get an ASGI route —
             # it accepts its own connections — so the runner drives it and
@@ -319,6 +329,24 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
                 status_code=500,
             )
         return JSONResponse(session.reply)
+
+    return endpoint
+
+
+def _webhook_endpoint(spec: ServeSpec, transport: Any, JSONResponse):
+    async def endpoint(request):
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            payload = (await request.body()).decode("utf-8", "replace")
+        run_id = transport.accept(payload, meta=_meta_from_request(request))
+        if run_id is None:
+            # Stopping, or full: the sender retries. Queueing without bound
+            # behind a slow flow is how a burst becomes an outage.
+            return JSONResponse({"accepted": False, "service": spec.name}, status_code=429)
+        return JSONResponse(
+            {"accepted": True, "service": spec.name, "run_id": run_id}, status_code=202
+        )
 
     return endpoint
 

@@ -77,8 +77,20 @@ def _register_builtins() -> None:
 
         return WebSocketTransport(spec)
 
+    def _webhook(spec):
+        from .triggers import WebhookTransport
+
+        return WebhookTransport(spec)
+
+    def _schedule(spec):
+        from .triggers import ScheduleTransport
+
+        return ScheduleTransport(spec)
+
     register_transport("http", _http)
     register_transport("websocket", _websocket)
+    register_transport("webhook", _webhook)
+    register_transport("schedule", _schedule)
 
 
 _register_builtins()

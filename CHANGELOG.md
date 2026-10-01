@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Triggers: `webhook(...)` and `schedule(...)` listeners.** A run started
+  by an event rather than a caller who waits. `Service("mail",
+  webhook("/mail", port=8200), graph=g)` answers the POST `202
+  {"accepted": true, "run_id": ...}` at once and runs `g` in the background,
+  traced like any service run (`?trace_id=` keeps the sender's id);
+  `max_inflight=N` answers `429` beyond N pending runs. `Service("sweep",
+  schedule(every="5m"), graph=g)` or `schedule(at="08:00")` starts a run per
+  tick; a tick that lands while the last run is going is skipped and counted
+  (`ScheduleTransport.skipped`), and a failing run does not stop the clock.
+  Before, an `http` service answered only when the run ended — a webhook
+  sender gave up long before an agent finished — and there was no clock.
+- **An agent is a node: `agent["final"]`.** The ReAct graph ends on `final`,
+  so the op after an agent inside a larger graph reads its answer directly;
+  before, it was reachable only through `agent_result()` after the run.
+
 ### Fixed
+
+- **A nested graph's declared cell lost its input and doubled its writes.**
+  A graph that declares a cell and also takes it as an input — an agent's
+  `messages` — has one cell in both roles. Nested in another graph, the
+  parent's value never entered it (a shared cell is never pulled), and when
+  the graph finished its output was stored back into the same cell, so the
+  reducer appended the cell's own value again. An agent used as a node ran
+  without the question it was asked, and the next op saw every message
+  twice. Standalone runs were correct, which is why nothing caught it.
 
 - **`api_type: openai` embeddings reach the embeddings endpoint.** They were
   sent through the vLLM client, which posts to `base_url` as written, so the
