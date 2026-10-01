@@ -409,7 +409,9 @@ def build_react_agent(
         # `closed` runs after `assistant`, so its answers land after the
         # message holding the calls they answer.
         router >> closed >> ended
-        ended >> if_(router["finished"] == True, END).else_(calls)  # noqa: E712
+        answer = answer_of(messages=PARENT["messages"])
+        ended >> if_(router["finished"] == True, answer).else_(calls)  # noqa: E712
+        answer >> END
         calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
 
     return react
@@ -431,6 +433,33 @@ def _takes_last_turn(call_model: Callable) -> bool:
         inspect.Parameter.POSITIONAL_OR_KEYWORD,
         inspect.Parameter.KEYWORD_ONLY,
     )
+
+
+def final_of(messages: Any) -> Optional[dict]:
+    """The agent's answer in a conversation: its last assistant message.
+
+    A turn that asked for tools is not an answer, even when it is the last
+    one: the budget can end the loop on it. Reporting it as the answer
+    handed callers an empty "answer" and told them the run succeeded.
+    """
+    if not isinstance(messages, list):
+        return None
+    last = next(
+        (m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"),
+        None,
+    )
+    return None if last is not None and last.get("tool_calls") else last
+
+
+@op
+def answer_of(messages: Optional[list] = None) -> dict:
+    """The agent graph's output: the answer, for whoever comes next.
+
+    Without it an agent used as a node had nothing for the next op to read
+    but its cells — the answer was reachable only through ``agent_result``
+    after the whole run had finished.
+    """
+    return {"final": final_of(messages)}
 
 
 @op
@@ -500,19 +529,11 @@ def agent_result(source: Any, agent) -> dict:
     messages = cell("messages", [])
     if not isinstance(messages, list):
         messages = []
-    last = next(
-        (m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"),
-        None,
-    )
     return {
         "messages": messages,
         "turns": cell("turns", 0),
         "stopped_early": bool(cell("stopped_early", False)),
         "truncated": bool(cell("truncated", False)),
         "finish_reason": cell("finish_reason", "") or "",
-        # A turn that asked for tools is not an answer, even when it is the
-        # last one: the budget can end the loop on it. Reporting it as
-        # `final` handed callers an empty "answer" and told them the run
-        # succeeded.
-        "final": None if last is not None and last.get("tool_calls") else last,
+        "final": final_of(messages),
     }

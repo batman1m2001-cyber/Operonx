@@ -271,6 +271,10 @@ asyncio.run(main())
   `out["messages"]` (it holds one list per turn). `stopped_early` is True
   when the budget ran out or the last response was cut off (`truncated`,
   with `finish_reason`); `final` is `None` if the model never answered.
+- **An agent is a node.** Inside a graph, the op after it reads
+  `agent["final"]` (the answer) and `agent["messages"]` (the whole
+  conversation): `research = build_react_agent(...)(messages=ask["messages"])`,
+  then `brief(answer=research["final"])`, wired `ask >> research >> brief`.
 - On the budget's last turn `make_llm_caller` sends `tool_choice="none"`,
   so the model must answer in text. A hand-written `call_model` gets the
   same signal by declaring `last_turn: bool = False`.
