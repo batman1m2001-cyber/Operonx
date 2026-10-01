@@ -402,7 +402,7 @@ class MCPClient:
         return list(self._tools)
 
     async def call(self, name: str, arguments: Dict[str, Any]) -> str:
-        """Invoke one tool and return its text.
+        """Invoke one tool and return its text — what a model reads.
 
         Raises:
             MCPError: the connection is closed, the call timed out, or the
@@ -411,6 +411,45 @@ class MCPClient:
                 exception into a tool message the model can act on, while
                 returning error text as a result would read as an answer.
         """
+        return (await self._invoke(name, arguments))[1]
+
+    async def call_value(self, name: str, arguments: Dict[str, Any]) -> Any:
+        """Invoke one tool and return its value — what code reads.
+
+        The text of a result is for a model: a list arrives as one text
+        block per item, so a one-item list reads as a bare object and an
+        empty one as nothing. The server's ``structuredContent`` is the
+        value itself; a tool returning a list or a scalar has it wrapped as
+        ``{"result": ...}`` (its output schema says so), which is unwrapped
+        here. Without structured content the text is parsed as JSON, and
+        returned as it is when it is not JSON.
+
+        Raises:
+            MCPError: as :meth:`call`.
+        """
+        import json as _json
+
+        result, text = await self._invoke(name, arguments)
+        structured = _attr(result, "structured_content", "structuredContent")
+        if structured is not None:
+            if self._wraps_result(name) and isinstance(structured, dict) and set(structured) == {"result"}:
+                return structured["result"]
+            return structured
+        try:
+            return _json.loads(text) if text else None
+        except ValueError:
+            return text
+
+    def _wraps_result(self, name: str) -> bool:
+        """Whether the tool's output schema is the ``{"result": ...}`` wrapper."""
+        tool = next((t for t in self._tools if _attr(t, "name") == name), None)
+        schema = _attr(tool, "output_schema", "outputSchema") if tool is not None else None
+        if not isinstance(schema, dict):
+            return False
+        return set(schema.get("properties") or {}) == {"result"} and schema.get("required") == ["result"]
+
+    async def _invoke(self, name: str, arguments: Dict[str, Any]) -> tuple:
+        """One tool call, checked: ``(raw result, its text)``."""
         if self._session is None:
             raise MCPError(
                 f"MCP server {self.server.name!r} is not connected — "
@@ -441,7 +480,7 @@ class MCPClient:
             # In-band error. Ignoring the flag would format a failure as an
             # answer, which is the one thing a tool result must never do.
             raise MCPError(f"{self.server.name}__{name} reported an error: {text}")
-        return text
+        return result, text
 
 
 #: JSON Schema type names → the Python annotations operonx wires against.

@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ScheduleTransport.skipped`), and a failing run does not stop the clock.
   Before, an `http` service answered only when the run ended — a webhook
   sender gave up long before an agent finished — and there was no clock.
+- **`MCPClient.call_value(name, args)`: a tool's value, for code.** `call()`
+  returns text, which suits a model; code building on it could not tell a
+  one-item list from a record (a list arrives as one text block per item) or
+  an empty list from nothing. `call_value` returns the server's structured
+  value, unwrapping the `{"result": ...}` a list or scalar comes in, and falls
+  back to the text parsed as JSON.
 - **An agent is a node: `agent["final"]`.** The ReAct graph ends on `final`,
   so the op after an agent inside a larger graph reads its answer directly;
   before, it was reachable only through `agent_result()` after the run.
