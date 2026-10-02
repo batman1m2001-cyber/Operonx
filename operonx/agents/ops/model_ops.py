@@ -26,6 +26,7 @@ answer as ``stopped_early``).
 
 from __future__ import annotations
 
+from operonx.core.utils.auto_name import register_skip
 from typing import Any, Callable, List, Optional
 from uuid import uuid4
 
@@ -178,6 +179,9 @@ def make_llm_caller(
                 START >> llm >> adapted >> END
 
         return model_call(messages=messages, last_turn=last_turn)
+
+    # named after the caller's variable (`model = call_model(...)`), not a hash
+    register_skip(call_model)
 
     def with_tools(names: List[str]) -> Callable:
         """This caller, showing the model only ``names``, in that order.
