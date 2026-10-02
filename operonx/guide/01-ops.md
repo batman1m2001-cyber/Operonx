@@ -275,6 +275,9 @@ asyncio.run(main())
   `agent["final"]` (the answer) and `agent["messages"]` (the whole
   conversation): `research = build_react_agent(...)(messages=ask["messages"])`,
   then `brief(answer=research["final"])`, wired `ask >> research >> brief`.
+  The node is named after its variable (`research`) and shows `final`; one
+  turn inside it is three zones — `context` (compaction, memory, skills,
+  the prompt), `model`, `tools` (one tool message per call) — then back.
 - On the budget's last turn `make_llm_caller` sends `tool_choice="none"`,
   so the model must answer in text. A hand-written `call_model` gets the
   same signal by declaring `last_turn: bool = False`.
