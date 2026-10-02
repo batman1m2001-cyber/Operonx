@@ -27,6 +27,7 @@ ignore it.
 
 from __future__ import annotations
 
+import functools
 import inspect
 from typing import Any, Callable, Optional
 
@@ -46,6 +47,7 @@ from operonx.core.ops.base import END, PARENT, START
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph._decorators import graph
 from operonx.core.ops.transform.func_op import op
+from operonx.core.utils.auto_name import register_skip
 from operonx.reducers import add_messages
 
 __all__ = ["build_react_agent", "agent_result", "BUDGET_EXHAUSTED", "NOT_RUN"]
@@ -323,6 +325,51 @@ def build_react_agent(
             "finish_reason": reason,
         }
 
+    # ── zones ────────────────────────────────────────────────────────
+    # The turn is three stages, each a subgraph, so a viewer shows the
+    # loop's shape — context → model → tools → back — and a stage's steps
+    # one level deeper, instead of fifteen nodes in a row.
+
+    @graph
+    def build_context(messages=None, query=None):
+        """What the model sees this turn: compaction, memory, skills, the
+        assembled prompt and its cache marks. Compaction shapes the *prompt*,
+        not the stored conversation: the history stays whole, so nothing is
+        lost and `agent_result` still returns everything that happened."""
+        planned = plan_compaction(
+            messages=messages,
+            budget=token_budget,
+            keep_recent=keep_recent,
+            reserved_tokens=tool_tokens,
+        )
+        compacted = apply_compaction(
+            pinned=planned["pinned"],
+            summarize=planned["summarize"],
+            keep=planned["keep"],
+        )
+        recalled = gather_memory(providers=memory_providers, query=query)
+        matched = inject_skills(query=query, skills=skills)
+        assembled = assemble_api_messages(
+            system=system,
+            messages=compacted["messages"],
+            memory_context=recalled["context"],
+            notices=matched["notices"],
+        )
+        cached = apply_cache_control(
+            messages=assembled["messages"],
+            breakpoints=cache_breakpoints,
+        )
+        START >> planned >> compacted >> recalled >> matched >> assembled >> cached >> END
+
+    @graph
+    def run_tools(tool_calls=None):
+        """Every tool the model asked for, at once: one tool message per call.
+        The loop gathers them (a subgraph is a one-EOF source for `.collect()`;
+        a collect inside the subgraph would hand its result up twice)."""
+        calls = each_call_of(tool_calls=tool_calls)
+        disp = dispatch_one(call=calls["call"].parallel(max=8))
+        START >> calls >> disp >> END
+
     @graph
     def react(messages=None):
         PARENT.declare(
@@ -337,39 +384,13 @@ def build_react_agent(
         counter = count_turn(turns=PARENT["turns"])
         asked = last_user_text(messages=PARENT["messages"])
 
-        # ── context stage ────────────────────────────────────────────
-        # Compaction shapes the *prompt*, not the stored conversation.
-        # The history stays whole so nothing is lost irrecoverably and
-        # `agent_result` still returns everything that happened; the cost
-        # is re-planning each turn, which is pure computation over a list.
-        planned = plan_compaction(
-            messages=PARENT["messages"],
-            budget=token_budget,
-            keep_recent=keep_recent,
-            reserved_tokens=tool_tokens,
-        )
-        compacted = apply_compaction(
-            pinned=planned["pinned"],
-            summarize=planned["summarize"],
-            keep=planned["keep"],
-        )
-        recalled = gather_memory(providers=memory_providers, query=asked["text"])
-        matched = inject_skills(query=asked["text"], skills=skills)
-        assembled = assemble_api_messages(
-            system=system,
-            messages=compacted["messages"],
-            memory_context=recalled["context"],
-            notices=matched["notices"],
-        )
-        cached = apply_cache_control(
-            messages=assembled["messages"],
-            breakpoints=cache_breakpoints,
-        )
+        context = build_context(messages=PARENT["messages"], query=asked["text"])
+        context.show_keys = ("messages",)  # what the model will see, not the last step's flag
 
         if takes_last_turn:
-            model = call_model(messages=cached["messages"], last_turn=counter["exhausted"])
+            model = call_model(messages=context["messages"], last_turn=counter["exhausted"])
         else:
-            model = call_model(messages=cached["messages"])
+            model = call_model(messages=context["messages"])
         router = decide(
             done=model["done"],
             exhausted=counter["exhausted"],
@@ -389,9 +410,8 @@ def build_react_agent(
             finish_reason=model["finish_reason"],
             truncated=model["truncated"],
         )
-        calls = each_call_of(tool_calls=model["tool_calls"])
-        disp = dispatch_one(call=calls["call"].parallel(max=8))
-        gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
+        tools = run_tools(tool_calls=model["tool_calls"])
+        gathered = gather_tool_messages(tool_messages=tools["tool_message"].collect())
 
         # Accumulate into the shared cell. The reducer merges by id, so a
         # re-emitted message updates rather than duplicating.
@@ -404,17 +424,28 @@ def build_react_agent(
         closed["messages"] >> PARENT["messages"]
         gathered["messages"] >> PARENT["messages"]
 
-        START >> counter >> asked >> planned >> compacted >> recalled >> matched
-        matched >> assembled >> cached >> model >> assistant >> router
+        START >> counter >> asked >> context >> model >> assistant >> router
         # `closed` runs after `assistant`, so its answers land after the
         # message holding the calls they answer.
         router >> closed >> ended
         answer = answer_of(messages=PARENT["messages"])
-        ended >> if_(router["finished"] == True, answer).else_(calls)  # noqa: E712
+        ended >> if_(router["finished"] == True, answer).else_(tools)  # noqa: E712
         answer >> END
-        calls >> disp >> gathered >> counter  # back-edge — rewritten into a loop
+        tools >> gathered >> counter  # back-edge — rewritten into a loop
 
-    return react
+    def agent(**kwargs: Any):
+        """The agent node. Its answer, `final`, is what a viewer shows for it."""
+        node = react(**kwargs)
+        if "show_keys" not in kwargs:  # a caller's own choice wins
+            node.show_keys = ("final",)
+        return node
+
+    # Still a `@graph` to anything that inspects it: its signature
+    # (`messages`), its name, and the `_operonx_graph` marker the serve layer
+    # and Studio's extraction read to tell a graph from a factory.
+    functools.update_wrapper(agent, react)
+    register_skip(agent)  # the node is named after the caller's variable, not `node`
+    return agent
 
 
 def _takes_last_turn(call_model: Callable) -> bool:

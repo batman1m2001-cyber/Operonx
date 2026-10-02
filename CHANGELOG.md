@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-10-02
+
+### Changed
+
+- **The ReAct turn is drawn as zones.** `build_react_agent` builds each turn
+  as three stages: `context` (a `build_context` subgraph: compaction,
+  memory, skills, the assembled prompt, cache marks), `model` (the
+  `call_model` step, named `model` instead of a hash such as `784228a4`),
+  and `tools` (a `run_tools` subgraph: one dispatch per call, up to 8 at
+  once, one tool message each), then back. A viewer or a trace shows the
+  loop's shape — context → model → tools — with each stage's steps one
+  level down, instead of fifteen nodes in a row. Trace op names move with
+  it: `…__loop_0__.planned` is now `…__loop_0__.context.planned`,
+  `…__loop_0__.disp.run` is `…__loop_0__.tools.disp.run`. The messages,
+  `turns`, `stopped_early`, `truncated`, `finish_reason` and `final` an
+  agent returns are unchanged.
+- **An agent node is named after its variable and shows `final`.**
+  `research = build_react_agent(...)(messages=...)` is the node `research`,
+  and a viewer shows its answer rather than its last `stopped_early` flag.
+  `show_keys=` passed at the call still wins. `build_react_agent` still
+  returns a `@graph` factory to anything that inspects it (its `messages`
+  parameter, its `react` name, the marker the serve layer and Studio read).
+
+### Known issues
+
+- **A turn whose every tool call fails at the op level ends the agent with
+  no answer.** A nested graph whose streamed items all failed yields
+  nothing, so the loop's `.collect()` over `tools` never fires and the next
+  turn does not start; the error is in `$errors`. This is not a tool that
+  raises — that is answered with an error tool message, as before — but an
+  op inside dispatch failing, such as an approval sink that raises. Before
+  1.12.1 the next turn ran, on a history with that call unanswered (which a
+  real provider rejects). Pinned by an `xfail` in
+  `tests/internal/agents/test_agent_zones.py`.
+- The loop gathers the tool messages in the parent, not with a `.collect()`
+  inside `run_tools`: in the agent's loop that collect handed its result up
+  twice. A minimal nested graph (generator → parallel op → collect, inside
+  a subgraph) does not reproduce it, so the trigger is not yet pinned down.
+
 ## [1.12.0] - 2026-10-01
 
 ### Added

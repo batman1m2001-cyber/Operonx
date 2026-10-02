@@ -30,6 +30,7 @@ from typing import Any, Callable, List, Optional
 from uuid import uuid4
 
 from operonx.core.ops.transform.func_op import op
+from operonx.core.utils.auto_name import register_skip
 
 __all__ = ["adapt_llm_output", "make_llm_caller", "turn_tool_choice"]
 
@@ -178,6 +179,9 @@ def make_llm_caller(
                 START >> llm >> adapted >> END
 
         return model_call(messages=messages, last_turn=last_turn)
+
+    # named after the caller's variable (`model = call_model(...)`), not a hash
+    register_skip(call_model)
 
     def with_tools(names: List[str]) -> Callable:
         """This caller, showing the model only ``names``, in that order.
