@@ -27,6 +27,7 @@ ignore it.
 
 from __future__ import annotations
 
+import functools
 import inspect
 from typing import Any, Callable, Optional
 
@@ -38,7 +39,6 @@ from operonx.agents.ops.compact_ops import (
 )
 from operonx.agents.ops.memory_ops import gather_memory
 from operonx.agents.ops.model_ops import TRUNCATED_REASONS
-from operonx.core.utils.auto_name import register_skip
 from operonx.agents.ops.prompt_ops import apply_cache_control, assemble_api_messages
 from operonx.agents.policy import ToolPolicy
 from operonx.agents.redact import Redactor
@@ -47,6 +47,7 @@ from operonx.core.ops.base import END, PARENT, START
 from operonx.core.ops.flow.branch_op import if_
 from operonx.core.ops.graph._decorators import graph
 from operonx.core.ops.transform.func_op import op
+from operonx.core.utils.auto_name import register_skip
 from operonx.reducers import add_messages
 
 __all__ = ["build_react_agent", "agent_result", "BUDGET_EXHAUSTED", "NOT_RUN"]
@@ -432,17 +433,22 @@ def build_react_agent(
         answer >> END
         tools >> gathered >> counter  # back-edge — rewritten into a loop
 
-    def agent(*args: Any, **kwargs: Any):
+    def agent(**kwargs: Any):
         """The agent node. Its answer, `final`, is what a viewer shows for it."""
-        node = react(*args, **kwargs)
-        node.show_keys = ("final",)
+        node = react(**kwargs)
+        if "show_keys" not in kwargs:  # a caller's own choice wins
+            node.show_keys = ("final",)
         return node
 
+    # Still a `@graph` to anything that inspects it: its signature
+    # (`messages`), its name, and the `_operonx_graph` marker the serve layer
+    # and Studio's extraction read to tell a graph from a factory.
+    functools.update_wrapper(agent, react)
     register_skip(agent)  # the node is named after the caller's variable, not `node`
     return agent
 
 
-def _takes_last_turn(call_model: Callable) -> bool:  # noqa: D401
+def _takes_last_turn(call_model: Callable) -> bool:
     """Whether ``call_model`` declares a ``last_turn`` parameter.
 
     Named explicitly, not caught by ``**kwargs``: a factory that forwards

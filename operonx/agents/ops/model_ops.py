@@ -26,11 +26,11 @@ answer as ``stopped_early``).
 
 from __future__ import annotations
 
-from operonx.core.utils.auto_name import register_skip
 from typing import Any, Callable, List, Optional
 from uuid import uuid4
 
 from operonx.core.ops.transform.func_op import op
+from operonx.core.utils.auto_name import register_skip
 
 __all__ = ["adapt_llm_output", "make_llm_caller", "turn_tool_choice"]
 
