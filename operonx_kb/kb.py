@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 from operonx import Operon
 
 from operonx_kb.errors import CatalogError, KBError
+from operonx_kb.graphs.answer import answer_graph
 from operonx_kb.graphs.ingest import build_ingest_graph
 from operonx_kb.graphs.maintenance import (
     build_delete_graph,
@@ -318,6 +319,64 @@ class KnowledgeBase:
             error=QueryError, required=("hits",),
         )  # fmt: skip
         return {"hits": out["hits"], "stats": out.get("stats", {})}
+
+    def answer_graph(
+        self,
+        collection_id: str,
+        llm: str,
+        *,
+        mode: Optional[str] = None,
+        reranker: Optional[str] = None,
+        rerank_depth: int = 30,
+        budget_tokens: int = 1500,
+        neighbours: int = 1,
+    ):
+        """The answer graph: this collection's search, the context, ``llm`` and citation checks."""
+        return answer_graph(
+            self.search_graph(collection_id, mode, reranker, rerank_depth),
+            llm,
+            budget_tokens=budget_tokens,
+            neighbours=neighbours,
+            catalog=self.catalog_key,
+            blobs=self.blobs_key,
+        )
+
+    async def ask(
+        self,
+        collection_id: str,
+        question: str,
+        llm: str,
+        *,
+        filter: Optional[Any] = None,
+        k: int = 8,
+        mode: Optional[str] = None,
+        reranker: Optional[str] = None,
+        rerank_depth: int = 30,
+        budget_tokens: int = 1500,
+        neighbours: int = 1,
+    ) -> Dict[str, Any]:
+        """Answer a question from the collection with verified citations (track5 §10).
+
+        Returns:
+            ``{"text", "citations", "dropped", "unsupported_sentences", "sources",
+            "stats", "usage"}``. Every citation's quote was found in its source and
+            carries its canonical span, pages and boxes; the rest are in ``dropped``.
+
+        Raises:
+            QueryError: An op failed, or the model's reply did not parse.
+        """
+        mode = mode or DEFAULT_MODE
+        flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
+        spec = self.collection(collection_id).spec
+        config = f"{llm}|{mode}|{reranker}|{rerank_depth}|{budget_tokens}|{neighbours}|{spec.model_dump_json()}"
+        return await self._run_graph(
+            "answer", collection_id,
+            lambda: self.answer_graph(collection_id, llm, mode=mode, reranker=reranker,
+                                      rerank_depth=rerank_depth, budget_tokens=budget_tokens,
+                                      neighbours=neighbours),
+            config, {"query": question, "collection": collection_id, "filter": flt, "k": k},
+            "answer", error=QueryError,
+        )  # fmt: skip
 
     # maintenance ----------------------------------------------------------------------------
 
