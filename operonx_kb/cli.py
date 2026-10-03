@@ -8,6 +8,9 @@
     operonx-kb delete handbook raw/policy.pdf --purge
     operonx-kb gc handbook --blobs
     operonx-kb verify handbook            # exit 1 when a problem is found
+    operonx-kb query handbook "how many days of leave" --mode hybrid --tag hr
+    operonx-kb query handbook "how many days of leave" --answer assistant
+    operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
 
 Resources come from ``resources.yaml`` (``--resources`` to point elsewhere).
 The dense index is an operonx ``vector_store:``; an in-memory FAISS index
@@ -26,8 +29,14 @@ from typing import List, Optional, Sequence
 
 import operonx
 
-from operonx_kb.kb import IngestError, KnowledgeBase
-from operonx_kb.model.collection import ChunkerSpec, CollectionSpec, DenseIndexSpec
+from operonx_kb.kb import MODES, IngestError, KnowledgeBase, QueryError
+from operonx_kb.model.collection import (
+    AnalyzerSpec,
+    ChunkerSpec,
+    CollectionSpec,
+    DenseIndexSpec,
+    LexicalIndexSpec,
+)
 
 __all__ = ["main"]
 
@@ -62,6 +71,12 @@ def _cmd_create(kb: KnowledgeBase, args) -> int:
             embedder=args.embedder, store=args.store, collection=args.store_collection
         )
         if args.embedder
+        else None,
+        lexical=LexicalIndexSpec(
+            index=args.lexical,
+            analyzer=AnalyzerSpec(kind=args.analyzer, fold_diacritics=args.fold),
+        )
+        if args.lexical
         else None,
         language=args.language,
     )
@@ -137,6 +152,64 @@ def _cmd_verify(kb: KnowledgeBase, args) -> int:
     return 0 if report.ok else 1
 
 
+def _filter(args) -> Optional[dict]:
+    flt = json.loads(args.filter) if args.filter else {}
+    if args.tag:
+        flt["tags_any"] = args.tag
+    if args.acl:
+        flt["acl_any"] = args.acl
+    return flt or None
+
+
+def _snippet(text: str, width: int = 100) -> str:
+    one = " ".join(text.split())
+    return one if len(one) <= width else one[: width - 1] + "…"
+
+
+def _cmd_query(kb: KnowledgeBase, args) -> int:
+    try:
+        if args.answer:
+            out = asyncio.run(kb.ask(args.collection, args.text, args.answer, filter=_filter(args),
+                                     k=args.k, mode=args.mode, reranker=args.rerank))  # fmt: skip
+        else:
+            out = asyncio.run(kb.search(args.collection, args.text, filter=_filter(args), k=args.k,
+                                        mode=args.mode, reranker=args.rerank))  # fmt: skip
+    except QueryError as exc:
+        print(f"operonx-kb: {exc}", file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(out, ensure_ascii=False, indent=1))
+        return 0
+    if args.answer:
+        print(out["text"])
+        for c in out["citations"]:
+            pages = f" p.{','.join(map(str, c['pages']))}" if c["pages"] else ""
+            print(
+                f'  [{c["source"]}] {c["key"]}{pages} span={c["span"]}: "{_snippet(c["quote"], 80)}"'
+            )
+        for d in out["dropped"]:
+            print(f"  dropped: {d['reason']}")
+        return 0
+    for h in out["hits"]:
+        where = " › ".join(h["heading_path"][-2:])
+        print(f"{h['rank']:3d}  {h['score']:.4f}  {h['key']}  {where}\n     {_snippet(h['text'])}")
+    return 0
+
+
+def _cmd_eval(kb: KnowledgeBase, args) -> int:
+    from operonx_kb.eval import evaluate_answers, evaluate_search
+
+    if args.answers:
+        report = asyncio.run(evaluate_answers(kb, args.collection, args.dataset, args.answers,
+                                              mode=args.mode, reranker=args.rerank))  # fmt: skip
+    else:
+        report = asyncio.run(evaluate_search(kb, args.collection, args.dataset, mode=args.mode,
+                                             reranker=args.rerank))  # fmt: skip
+    report.pop("per_case", None)
+    print(json.dumps(report, ensure_ascii=False, indent=1, default=str))
+    return 1 if report["errors"] else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="operonx-kb", description="operonx-kb: documents in, provenance kept."
@@ -159,6 +232,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--chunker", choices=["structural", "recursive"], default="structural")
     p.add_argument("--max-tokens", type=int, default=400)
+    p.add_argument(
+        "--lexical", help="kb_lexical resource key of a lexical index, e.g. kb_lexical:main"
+    )
+    p.add_argument("--analyzer", choices=["simple", "vi"], default="simple")
+    p.add_argument("--fold", action="store_true", help="fold diacritics in the lexical index")
     p.add_argument("--language")
     p.set_defaults(fn=_cmd_create)
 
@@ -197,6 +275,27 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("verify", help="check spans, blobs and the index; exit 1 on a problem")
     p.add_argument("collection")
     p.set_defaults(fn=_cmd_verify)
+
+    p = sub.add_parser("query", help="search a collection, or answer with --answer LLM")
+    p.add_argument("collection")
+    p.add_argument("text")
+    p.add_argument("--mode", choices=list(MODES), help="retrieval mode (default: dense)")
+    p.add_argument("--k", type=int, default=5)
+    p.add_argument("--tag", action="append", help="only documents with this tag (repeatable)")
+    p.add_argument("--acl", action="append", help="the caller's principal (repeatable)")
+    p.add_argument("--filter", help='a KBFilter as JSON, e.g. \'{"fields": {"dept": "hr"}}\'')
+    p.add_argument("--rerank", help="reranking resource name")
+    p.add_argument("--answer", metavar="LLM", help="answer with this llm resource, with citations")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=_cmd_query)
+
+    p = sub.add_parser("eval", help="evaluate search (or answers) of a collection on a dataset")
+    p.add_argument("collection")
+    p.add_argument("dataset", help="JSONL of cases with quote-anchored labels")
+    p.add_argument("--mode", choices=list(MODES))
+    p.add_argument("--rerank", help="reranking resource name")
+    p.add_argument("--answers", metavar="LLM", help="evaluate answers of this llm resource")
+    p.set_defaults(fn=_cmd_eval)
     return parser
 
 
