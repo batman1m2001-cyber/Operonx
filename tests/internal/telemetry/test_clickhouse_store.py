@@ -86,12 +86,18 @@ class FakeClient:
             self.databases.add(sql.split()[-1])
         self.commands.append(sql)
 
-    def query(self, sql, parameters=None):
+    def query(self, sql, parameters=None, column_formats=None):
         if sql.startswith("EXISTS DATABASE"):
             return _Result([[int(sql.split()[-1] in self.databases)]])
         if "max(version)" in sql:
             return _Result([[max(self.versions, default=0)]])
+        if sql.startswith("SELECT data FROM") and ".media " in sql:
+            assert column_formats == {"data": "bytes"}  # a String column read as bytes
+            return _Result([[r[3]] for r in self.media_rows() if r[0] == parameters["s"]][:1])
         return _Result([])
+
+    def media_rows(self):
+        return [r for t, _, rows, _ in self.inserts if t.endswith(".media") for r in rows]
 
     def insert(self, table, rows, column_names=None, settings=None):
         if table.endswith("schema_version"):
@@ -244,10 +250,10 @@ def test_schema_is_created_once_and_versioned(tmp_path):
     store.put_trace(_trace("t-2"))
     creates = [c for c in client.commands if c.startswith("CREATE TABLE")]
     assert [c.split()[5] for c in creates] == [
-        "ox.schema_version", "ox.runs", "ox.nodes", "ox.op_rollups",
+        "ox.schema_version", "ox.runs", "ox.nodes", "ox.op_rollups", "ox.media",
     ]  # fmt: skip
     assert client.commands[0] == "CREATE DATABASE IF NOT EXISTS ox"
-    assert client.versions == [1]
+    assert client.versions == [1, 2]
     # a second process finding version 1 creates nothing new
     again = _store(tmp_path, client=client)
     again.put_trace(_trace("t-3"))
@@ -261,7 +267,7 @@ def test_a_user_granted_only_tables_writes_and_reads(tmp_path):
     store.put_trace(_trace())
     assert not [c for c in client.commands if c.startswith("CREATE DATABASE")]
     assert [t for t, *_ in client.inserts] == ["ox.nodes", "ox.op_rollups", "ox.runs"]
-    assert store.schema_version() == 1
+    assert store.schema_version() == 2
 
 
 def test_batches_go_out_as_one_insert_per_table(tmp_path):
@@ -390,6 +396,214 @@ def test_trace_clickhouse_and_run_store_resolve_from_yaml(tmp_path, monkeypatch)
         assert s.media.root == tmp_path / "blobs"
         assert (s.writer.batch_size, s.writer.flush_interval, s.writer.max_queue) == (500, 0.5, 50)
         assert s._ch is None  # nothing connected yet
+
+
+# -- offline: media in ClickHouse ------------------------------------------------------------
+
+
+def _ch(tmp_path, client=None, **kw):
+    """A store keeping its blobs in ClickHouse; *tmp_path*/media must stay empty."""
+    return _store(tmp_path, client=client, media="clickhouse", **kw)
+
+
+def _with_audio(trace_id, *clips, wall=1790467200.0):
+    """A run whose ops each output one clip."""
+    nodes = [
+        OpExecution(
+            op_id=f"g.say#{i}",
+            op_name="say",
+            op_full_name="g.say",
+            ctx=(str(i),),
+            start_time=10.0 + i,
+            end_time=10.5 + i,
+            inputs={"i": i},
+            outputs={"audio": Media(clip, "audio/wav")},
+            op_type="code",
+        )
+        for i, clip in enumerate(clips)
+    ]
+    return _trace(trace_id, wall=wall, nodes=nodes, origin="service")
+
+
+def _tables(client):
+    return [t.split(".")[1] for t, *_ in client.inserts]
+
+
+def test_a_v1_database_upgrades_to_v2_by_creating_only_the_media_table(tmp_path):
+    client = FakeClient(databases={"ox"}, grants_db=False)
+    client.versions = [1]  # runs, nodes and op_rollups already there
+    store = _ch(tmp_path, client=client)
+    store.put_trace(_trace())
+    creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
+    assert creates == ["ox.schema_version", "ox.media"]
+    assert client.versions == [1, 2] and store.schema_version() == 2
+    ddl = next(c for c in client.commands if "ox.media" in c)
+    assert "ReplacingMergeTree(expires_at)" in ddl and "ORDER BY sha" in ddl
+    assert "TTL expires_at" in ddl and "PARTITION" not in ddl
+
+
+def test_clickhouse_media_goes_in_the_batch_before_the_nodes(tmp_path):
+    client = FakeClient()
+    store = _ch(tmp_path, client=client, flush_interval=0.5)
+    a, b = wav(0.2), wav(0.3)
+    for i in range(4):
+        store.consume(_with_audio(f"m-{i}", a, b if i % 2 else wav(0.1 + i)))
+    assert store.flush(timeout=5)
+    assert _tables(client) == ["media", "nodes", "op_rollups", "runs"]  # one batch, one each
+    table, columns, rows, settings = client.inserts[0]
+    assert columns == ["sha", "mime", "size", "data", "expires_at"]
+    assert settings == {"async_insert": 1, "wait_for_async_insert": 1}
+    assert sorted(len(r[3]) for r in rows) == sorted({len(a), len(b), len(wav(0.1)), len(wav(2.1))})
+    assert {r[1] for r in rows} == {"audio/wav"}
+    assert not (tmp_path / "media").exists()  # nothing on disk
+    node = dict(zip(NODE_COLUMNS, client.inserts[1][2][0]))
+    ref = json.loads(node["outputs"])["audio"]
+    assert ref["store"] == "clickhouse" and ref["duration_s"] == pytest.approx(0.2, abs=1e-3)
+    assert store.media.get(ref["$media"]) == a
+
+
+def test_a_clip_this_process_wrote_is_not_written_again(tmp_path):
+    client = FakeClient()
+    store = _ch(tmp_path, client=client)
+    clip = wav(0.4)
+    store.put_trace(_with_audio("d-1", clip, clip))  # twice in one run: one row
+    store.put_trace(_with_audio("d-2", clip))  # a later run: no row at all
+    assert len(client.media_rows()) == 1
+    assert _tables(client) == [
+        "media",
+        "nodes",
+        "op_rollups",
+        "runs",
+        "nodes",
+        "op_rollups",
+        "runs",
+    ]
+    assert store.media.stats == {"written": 1, "bytes": len(clip), "skipped": 1}
+
+
+def test_a_later_run_extends_a_shared_clips_expiry(tmp_path):
+    client = FakeClient()
+    store = _ch(tmp_path, client=client, ttl_days=30)
+    clip, t0 = wav(0.4), 1790467200.0
+    store.put_trace(_with_audio("e-1", clip, wall=t0))
+    store.put_trace(_with_audio("e-2", clip, wall=t0 + 0.5 * DAY))  # within the slack: skipped
+    store.put_trace(_with_audio("e-3", clip, wall=t0 + 3 * DAY))  # past it: written again
+    expiries = [r[4] for r in client.media_rows()]
+    assert expiries == [int(t0 + 31 * DAY), int(t0 + 34 * DAY)]
+    # every run's blob outlives the run
+    for tid, start in (("e-1", t0), ("e-2", t0 + 0.5 * DAY), ("e-3", t0 + 3 * DAY)):
+        assert max(expiries) >= expires_at(start, "service", 30), tid
+
+
+def test_the_seen_shas_are_bounded(tmp_path):
+    client = FakeClient()
+    store = _ch(tmp_path, client=client)
+    store.media.seen_max = 2
+    clips = [wav(0.1 * (i + 1)) for i in range(3)]
+    for i, clip in enumerate(clips):
+        store.put_trace(_with_audio(f"s-{i}", clip))
+    store.put_trace(_with_audio("s-again", clips[0]))  # evicted: written again
+    store.put_trace(_with_audio("s-kept", clips[2]))  # still seen: skipped
+    assert len(store.media._seen) == 2 and len(client.media_rows()) == 4
+
+
+def test_a_failed_media_insert_is_retried_and_its_blobs_not_marked_written(tmp_path):
+    class FlakyClient(FakeClient):
+        failures = 1
+
+        def insert(self, table, rows, column_names=None, settings=None):
+            if table.endswith(".media") and self.failures:
+                self.failures -= 1
+                raise ConnectionError("clickhouse blinked")
+            super().insert(table, rows, column_names, settings)
+
+    client = FlakyClient()
+    store = _ch(tmp_path, client=client)
+    store.writer.retry_backoff = (0.001, 0.001)
+    clip = wav(0.3)
+    store.consume(_with_audio("r-1", clip))
+    assert store.flush(timeout=5)
+    assert store.writer.stats["failed_batches"] == 0 and store.writer.stats["written"] == 1
+    assert len(client.media_rows()) == 1 and _tables(client)[0] == "media"
+    assert store.media.get(client.media_rows()[0][0]) == clip
+
+
+def test_blob_bytes_held_by_a_batch_are_bounded(tmp_path):
+    client = FakeClient()
+    clips = [wav(0.5 + i / 100) for i in range(6)]  # one distinct clip per run
+    bound = 2 * len(clips[0])
+    store = _ch(tmp_path, client=client, media_batch_bytes=bound)
+    store._write_batch([_with_audio(f"b-{i}", clip) for i, clip in enumerate(clips)])  # one batch
+    media = [rows for t, _, rows, _ in client.inserts if t.endswith(".media")]
+    assert sum(len(r) for r in media) == 6 and len(media) == 3  # out every second run
+    # never more than the bound plus the one run that crossed it
+    assert all(sum(len(x[3]) for x in rows) < bound + len(clips[-1]) for rows in media)
+    assert _tables(client).index("nodes") > max(
+        i for i, t in enumerate(_tables(client)) if t == "media"
+    )  # still all before the nodes
+
+
+def test_clickhouse_media_get_exists_and_refuses_bad_shas(tmp_path):
+    client = FakeClient()
+    store = _ch(tmp_path, client=client)
+    sha = store.media.put(b"\x89PNG\r\n\x1a\n" + b"0" * 2000)  # outside a batch: written now
+    assert client.media_rows()[0][:3] == [sha, "image/png", 2008]
+    assert store.media.get(sha).startswith(b"\x89PNG")
+    assert store.media.get("0" * 64) is None
+    assert store.media.get("../etc/passwd") is None and store.media.exists("nope") is False
+    assert store.get_run("t-1") is None
+
+
+def test_media_is_local_by_default_and_checked(tmp_path):
+    from operonx.telemetry.media import LocalMediaStore
+
+    assert isinstance(_store(tmp_path).media, LocalMediaStore)
+    with pytest.raises(ValueError, match="media"):
+        _store(tmp_path, media="s3")
+
+
+def test_media_clickhouse_resolves_from_yaml(tmp_path):
+    import operonx.telemetry  # noqa: F401 — registers the categories
+    from operonx.telemetry.runs.clickhouse import ClickHouseMediaStore
+
+    cfg = tmp_path / "resources.yaml"
+    cfg.write_text(
+        "trace_clickhouse:\n  default:\n    host: ch.internal\n    media: clickhouse\n"
+        "run_store:\n  default:\n    backend: clickhouse\n    host: ch.internal\n"
+        "    media: clickhouse\n"
+    )
+    ResourceHub.set_instance(ResourceHub.from_yaml(str(cfg)))
+    for key in ("trace_clickhouse:default", "run_store:default"):
+        s = ResourceHub.instance().get(key)
+        assert isinstance(s.media, ClickHouseMediaStore), key
+        assert s.media.name == "clickhouse" and s._ch is None
+
+
+def test_project_stores_reads_clickhouse_media_from_clickhouse(tmp_path):
+    from operonx.telemetry.runs import project_stores
+    from operonx.telemetry.runs.clickhouse import ClickHouseMediaStore
+
+    writer_client = FakeClient()
+    writer = _ch(tmp_path, client=writer_client)
+    clip = wav(0.7)
+    writer.put_trace(_with_audio("p-1", clip))
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    (root / "operonx.toml").write_text(
+        '[project]\nname = "p"\n\n[tracing]\nsinks = ["trace_clickhouse:default"]\n'
+    )
+    (root / "resources.yaml").write_text(
+        "trace_clickhouse:\n  default:\n    host: ch.internal\n    media: clickhouse\n"
+    )
+    (src,) = project_stores(root, env={})
+    assert src.spec["media"] == "clickhouse" and "media_dir" not in src.spec
+    store = src.open()  # what the studio does
+    store._ch = store._given_client = writer_client  # the same server, from another host
+    assert isinstance(store.media, ClickHouseMediaStore)
+    ref = json.loads(dict(zip(NODE_COLUMNS, writer_client.inserts[1][2][0]))["outputs"])["audio"]
+    assert store.media.get(ref["$media"]) == clip
+    store.close()
 
 
 # -- live --------------------------------------------------------------------------------------
@@ -572,7 +786,7 @@ def test_storing_a_run_twice_keeps_one_copy(live):
     live.put_trace(_trace("twice"))
     assert live.count(RunFilter(trace_ids=["twice"])) == 1
     assert len(live.get_run("twice").nodes) == 2
-    assert live.schema_version() == 1
+    assert live.schema_version() == 2
 
 
 def test_values_json_cannot_hold_never_sink_a_run(tmp_path):
@@ -583,3 +797,74 @@ def test_values_json_cannot_hold_never_sink_a_run(tmp_path):
     assert json.loads(_to_json(cyclic)) == {"$unserializable": "dict"}
     assert json.loads(_to_json({(1, 2): "tuple key"})) == {"$unserializable": "dict"}
     assert json.loads(_to_json({"big": 2**70})) == {"big": 2**70}  # the stdlib takes over
+
+
+# -- live: media in ClickHouse ------------------------------------------------------------------
+
+
+def test_live_media_lands_once_in_the_media_table_and_reads_back(request, tmp_path):
+    store = open_store(request, tmp_path, media="clickhouse")
+    engine = Operon(voice, params={"text": None}, trace=[store])
+
+    async def go(tid):
+        await engine.start(inputs={"text": "xin chào"}, trace_id=tid).collect()
+
+    asyncio.run(go("cm-1"))
+    asyncio.run(go("cm-2"))
+    rec = store.get_run("cm-1")
+    ref = {r["op_name"]: r for r in rec.nodes}["s"]["outputs"]["audio"]
+    assert ref["store"] == "clickhouse" and ref["duration_s"] == pytest.approx(1.5, abs=1e-3)
+    assert store.media.get(ref["$media"]) == wav(1.5)  # byte-exact, not utf-8 text
+    assert store.media.exists(ref["$media"]) and rec.media_root is None
+    db = store.database
+    (n,) = store._query(f"SELECT count() FROM {db}.media")[0]
+    assert n == 1  # two runs, two refs each, one row
+    assert not (tmp_path / "media").exists()
+
+
+def test_live_a_v1_database_upgrades_to_v2(request, tmp_path):
+    from operonx.telemetry.runs import clickhouse as chmod
+
+    store = open_store(request, tmp_path, media="clickhouse")
+    real = chmod.MIGRATIONS
+    chmod.MIGRATIONS = real[:1]
+    try:
+        v1 = _trace("v1")
+        v1.nodes = v1.nodes[1:]  # no media: version 1 had nowhere for it
+        store.put_trace(v1)  # a database at version 1, with a run in it
+        assert store.schema_version() == 1
+    finally:
+        chmod.MIGRATIONS = real
+    store._ready = False  # the next process to open it
+    store.put_trace(_with_audio("v2", wav(0.2)))
+    assert store.schema_version() == 2
+    assert {s.trace_id for s in store.list_runs().items} == {"v1", "v2"}
+    ref = store.get_run("v2").nodes[0]["outputs"]["audio"]
+    assert store.media.get(ref["$media"]) == wav(0.2)
+
+
+def test_live_a_reput_extends_expiry_and_expired_blobs_go(request, tmp_path):
+    store = open_store(request, tmp_path, media="clickhouse", ttl_days=None)
+    db, clip, old = store.database, wav(0.3), wav(0.6)
+    store.put_trace(_with_audio("x-old", old, wall=time.time() - 45 * DAY))  # long expired
+    store.put_trace(_with_audio("x-1", clip, wall=time.time() - 25 * DAY))  # 5 days left
+    store.put_trace(_with_audio("x-2", clip, wall=time.time() - 1 * DAY))  # extends to ~29
+    store._command(f"OPTIMIZE TABLE {db}.media FINAL")
+    rows = store._query(f"SELECT sha, expires_at FROM {db}.media FINAL")
+    assert len(rows) == 1  # the expired clip is gone, the shared one kept once
+    left = rows[0][1].timestamp() - time.time()
+    assert 29 * DAY < left < 31 * DAY
+    sha = rows[0][0]
+    assert store.media.get(sha) == clip
+
+
+def test_live_prune_media_in_clickhouse_removes_only_orphans(request, tmp_path):
+    store = open_store(request, tmp_path, media="clickhouse")
+    store.put_trace(_with_audio("pa", wav(0.2)))
+    store.put_trace(_with_audio("pb", wav(0.4)))
+    assert len(list(store.media.keys())) == 2
+    assert store.prune_media(older_than_s=3600) == 0
+    store.delete_runs(RunFilter(trace_ids=["pb"]))
+    assert store.prune_media(older_than_s=0) == 1
+    (kept,) = [sha for sha, _ in store.media.keys()]
+    assert store.get_run("pa").nodes[0]["outputs"]["audio"]["$media"] == kept
