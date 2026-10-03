@@ -100,13 +100,14 @@ def test_same_text_new_bytes_is_a_new_version_with_no_index_writes(kb, tmp_path)
     path = tmp_path / "notes.md"
     path.write_bytes(_guide(5).encode())
     run(kb.add("docs", str(path)))
-    calls, upserts = kb.embedder.calls, kb.recorder.runs("upsert")
+    calls = kb.embedder.calls
+    before = run(ids_in(kb.store))
     path.write_bytes(_guide(5).replace("\n", "\r\n").encode())
     result = run(kb.add("docs", str(path)))
     assert result["action"] == "update" and result["stats"]["chunking"]["new"] == 0
-    assert (
-        kb.embedder.calls == calls and kb.recorder.runs("upsert") == upserts
-    )  # the else_ arm went straight to commit
+    assert kb.embedder.calls == calls  # nothing embedded
+    assert result["stats"]["commit"]["indexed"] == 0  # the upsert got an empty batch: no-op
+    assert run(ids_in(kb.store)) == before
     assert kb.recorder.runs("commit") == 2
     assert kb.verify("docs").ok
 

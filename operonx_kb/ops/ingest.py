@@ -219,12 +219,12 @@ def commit_version(
     occurrences: list,
     catalog: str,
     blobs: str,
-    written: int = 0,
+    written: int,
 ) -> dict:
     """Store the canonical text, re-check the invariant, and flip the active version.
 
-    It runs after the vector upsert, or straight after staging when there was
-    nothing new to write; ``written`` is the upsert's count (0 then).
+    It runs after the vector upsert; ``written`` is the upsert's count (0 when
+    the version brought no new chunk: an empty batch is a no-op upstream).
     """
     vt = tree_from_dict(tree)
     chunk_models = [Chunk.model_validate(c) for c in chunks]

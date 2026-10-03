@@ -4,8 +4,7 @@
 
     plan_ingest ─► if skip ─► skipped ──────────────────────────────────────────────────┐
                    else  ─► parse_document ─► build_tree ─► chunk_version ─► EmbedChunksOp │
-                            ─► stage_index_writes ─► if any ─► VectorUpsertOp ─┐         │
-                                                     else ──────────────────────┴► commit_version
+                            ─► stage_index_writes ─► VectorUpsertOp ─► commit_version     │
                             ─► removed_vector_ids ─► VectorDeleteOp ─► forget_index_writes ─► report
 
 :func:`build_ingest_graph` returns the per-document graph (``item``,
@@ -107,8 +106,7 @@ def build_ingest_graph(
             skip=skip["result"],
         )
         START >> plan >> if_(plan["action"] == "skip", skip).else_(parsed)
-        parsed >> tree >> chunks >> embed >> stage >> if_(stage["staged"] > 0, upsert).else_(commit)
-        upsert >> commit
+        parsed >> tree >> chunks >> embed >> stage >> upsert >> commit
         commit >> gone >> delete >> forget
         forget >> result
         skip >> result
