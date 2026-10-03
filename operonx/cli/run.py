@@ -13,7 +13,9 @@ works from a package whose ``__main__.py`` calls it.
 
 The command is what a cron entry calls; a job's ``schedule`` declares
 when, it does not run anything. Exit status is 0 only when every item
-finished cleanly, so a cron mail or a CI step sees a failed batch.
+finished cleanly, so a cron mail or a CI step sees a failed batch. An
+eval exits with its gate's code: 0 pass, 1 failed or regressed, 2
+inconclusive under ``Gate(strict=True)``, 3 an infrastructure error.
 """
 
 from __future__ import annotations
@@ -175,6 +177,13 @@ def _run(job: Any, args: argparse.Namespace) -> int:
         print(f"  … and {len(bad) - args.failures} more, in {run.path / 'items.jsonl'}")
     if run.meta.get("error"):
         print(f"  {run.meta['error']}")
+    gate = (run.meta.get("eval") or {}).get("gate")
+    if gate:  # an eval: its gate chose the exit status (0 pass, 1 failed, 2, 3)
+        for line in gate.get("reasons") or ():
+            print(f"  gate: {line}")
+        for line in gate.get("warnings") or ():
+            print(f"  warning: {line}")
+        return int(gate["exit_code"])
     return 0 if run.status == "ok" else 1
 
 

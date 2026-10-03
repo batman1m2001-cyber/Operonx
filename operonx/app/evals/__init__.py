@@ -30,15 +30,30 @@ in [0, 1] (passes at 0.5), or ``{"passed", "score", "reason"}``. Helpers:
 :func:`llm_judge`. ``output`` is what the case produced: the one item the
 graph sent (or its result, for a graph with no doors), a list when it sent
 several, ``None`` when it sent nothing.
+
+**A run is an experiment.** ``run.meta["eval"]`` also holds its
+``fingerprint`` (git commit, graph, resolved config, dataset and evaluator
+hashes — :mod:`.fingerprint`), per-metric means with confidence intervals
+(``metrics``, :mod:`.stats`), and the gate's verdict and exit code.
+``repeats=N`` runs every case N times and reports which cases are flaky
+and pass^k. A :class:`Gate` compares against a baseline run, holds a
+must-pass tier and an error budget, and decides pass / regressed /
+inconclusive / failed / error::
+
+    ev = Eval("replies", graph="bot:reply_flow", dataset="dataset:replies",
+              evaluators=[exact("intent")], repeats=3,
+              gate=Gate(threshold=0.9, baseline="latest", tolerance=0.03))
 """
 
 from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
 from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
+from .gate import Gate
 from .job import Eval
 
 __all__ = [
     "Dataset",
     "Eval",
+    "Gate",
     "contains",
     "dataset_path",
     "exact",
