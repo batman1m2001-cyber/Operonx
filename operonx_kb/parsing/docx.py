@@ -215,7 +215,9 @@ class _Walker:
             outline = int(_wattr(ol, "val") or 9) if ol is not None else None
             num = _num_pr(ppr)
         chain = self.chain(style_id)
-        names = [(sid.lower(), st.name.lower()) for sid, st in chain] or ([(style_id.lower(), "")] if style_id else [])
+        names = [(sid.lower(), st.name.lower()) for sid, st in chain] or (
+            [(style_id.lower(), "")] if style_id else []
+        )
         if any(sid == "title" or name == "title" for sid, name in names):
             return "title", None, None
         if any(name == "caption" or sid == "caption" for sid, name in names):
@@ -223,7 +225,14 @@ class _Walker:
         if any(name in _CODE_STYLES or sid in _CODE_STYLES for sid, name in names):
             return "code", None, None
         if any("heading" in sid or "heading" in name for sid, name in names):
-            level = next((st.outline + 1 for _, st in chain if st.outline is not None and 0 <= st.outline < 9), None)
+            level = next(
+                (
+                    st.outline + 1
+                    for _, st in chain
+                    if st.outline is not None and 0 <= st.outline < 9
+                ),
+                None,
+            )
             if level is None:
                 for sid, name in names:
                     m = _HEADING_NUM.search(name) or _HEADING_NUM.search(sid)
@@ -253,7 +262,9 @@ class _Walker:
                 attrs["marker"] = marker
             depth = num[1]
         if text.strip():
-            self.blocks.append(RawBlock(kind=kind, text=text, level=level, depth=depth, attrs=attrs))
+            self.blocks.append(
+                RawBlock(kind=kind, text=text, level=level, depth=depth, attrs=attrs)
+            )
         for drawing in p.iter(q("w:drawing")):
             if next(drawing.iter(q("pic:pic")), None) is None:
                 continue  # a shape or text box, not a picture
@@ -288,8 +299,12 @@ class _Walker:
                     span = int(_wattr(gs, "val") or 1) if gs is not None else 1
                     vm = tcpr.find(q("w:vMerge"))
                     continuation = vm is not None and _wattr(vm, "val") != "restart"
-                text = "" if continuation else " ".join(
-                    t for t in (_paragraph_text(p) for p in tc.iter(q("w:p"))) if t.strip()
+                text = (
+                    ""
+                    if continuation
+                    else " ".join(
+                        t for t in (_paragraph_text(p) for p in tc.iter(q("w:p"))) if t.strip()
+                    )
                 )
                 row.append(text)
                 row.extend([""] * (span - 1))
@@ -363,4 +378,6 @@ class DocxParser(Parser):
             title = core.find("{http://purl.org/dc/elements/1.1/}title")
             if title is not None and (title.text or "").strip():
                 metadata["title"] = title.text.strip()
-        return ParsedDoc(blocks=furniture + walker.blocks + footnotes, metadata=metadata, parser=self.name)
+        return ParsedDoc(
+            blocks=furniture + walker.blocks + footnotes, metadata=metadata, parser=self.name
+        )

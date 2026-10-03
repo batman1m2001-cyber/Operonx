@@ -19,7 +19,14 @@ from __future__ import annotations
 import re
 from typing import List, Optional, Tuple
 
-__all__ = ["join_lines", "fix_ligatures", "split_list_marker", "is_caption", "continues", "join_continued"]
+__all__ = [
+    "join_lines",
+    "fix_ligatures",
+    "split_list_marker",
+    "is_caption",
+    "continues",
+    "join_continued",
+]
 
 _LIGATURE_MAP = {
     "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
@@ -48,7 +55,13 @@ def join_lines(lines: List[str]) -> str:
             prev_words = _WORD.findall(prev)
             line_words = _WORD.findall(line)
             attached = len(prev) > 1 and prev[-2].isalnum()
-            if attached and prev_words and line_words and prev_words[-1].isalnum() and line_words[0].isalnum():
+            if (
+                attached
+                and prev_words
+                and line_words
+                and prev_words[-1].isalnum()
+                and line_words[0].isalnum()
+            ):
                 out[ix - 1] = prev[:-1]
             elif not attached:
                 out[ix - 1] = prev + " "

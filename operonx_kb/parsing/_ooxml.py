@@ -55,7 +55,9 @@ class Package:
         DocumentParseError: Not a zip, or over the limits.
     """
 
-    def __init__(self, data: bytes, kind: str, max_member: int = 64 << 20, max_total: int = 512 << 20):
+    def __init__(
+        self, data: bytes, kind: str, max_member: int = 64 << 20, max_total: int = 512 << 20
+    ):
         self.kind = kind
         try:
             self.zip = zipfile.ZipFile(io.BytesIO(data))
@@ -85,7 +87,9 @@ class Package:
         try:
             return SafeET.fromstring(self.zip.read(name))
         except Exception as exc:  # defusedxml raises several types
-            raise DocumentParseError(f"{self.kind} member {name!r} is not valid XML", {"error": str(exc)}) from exc
+            raise DocumentParseError(
+                f"{self.kind} member {name!r} is not valid XML", {"error": str(exc)}
+            ) from exc
 
     def rels(self, part: str) -> Dict[str, str]:
         """Relationship id → target part path for ``part`` (resolved, package-absolute)."""
@@ -98,7 +102,11 @@ class Package:
             if rel.get("TargetMode") == "External":
                 continue
             target = rel.get("Target") or ""
-            path = target.lstrip("/") if target.startswith("/") else posixpath.normpath(posixpath.join(folder, target))
+            path = (
+                target.lstrip("/")
+                if target.startswith("/")
+                else posixpath.normpath(posixpath.join(folder, target))
+            )
             out[rel.get("Id") or ""] = path
         return out
 

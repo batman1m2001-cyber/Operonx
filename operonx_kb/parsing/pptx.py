@@ -52,7 +52,12 @@ def _xfrm(el: Element) -> Optional[Box]:
     off, ext = xfrm.find(q("a:off")), xfrm.find(q("a:ext"))
     if off is None or ext is None:
         return None
-    return (float(off.get("x", 0)), float(off.get("y", 0)), float(ext.get("cx", 0)), float(ext.get("cy", 0)))
+    return (
+        float(off.get("x", 0)),
+        float(off.get("y", 0)),
+        float(ext.get("cx", 0)),
+        float(ext.get("cy", 0)),
+    )
 
 
 def _placeholder(el: Element) -> Tuple[bool, Optional[str], Optional[str]]:
@@ -128,7 +133,9 @@ def _auto_num(kind: str, n: int) -> str:
 
 
 class _Slide:
-    def __init__(self, pkg: Package, layouts: _Layouts, part: str, page_no: int, size: Tuple[float, float]):
+    def __init__(
+        self, pkg: Package, layouts: _Layouts, part: str, page_no: int, size: Tuple[float, float]
+    ):
         self.pkg = pkg
         self.layouts = layouts
         self.part = part
@@ -142,7 +149,12 @@ class _Slide:
         w, h = self.size
         x, y, cx, cy = box
         clamp = lambda v: max(0.0, min(1.0, v))  # noqa: E731
-        return [Region(page_no=self.page_no, bbox=(clamp(x / w), clamp(y / h), clamp((x + cx) / w), clamp((y + cy) / h)))]
+        return [
+            Region(
+                page_no=self.page_no,
+                bbox=(clamp(x / w), clamp(y / h), clamp((x + cx) / w), clamp((y + cy) / h)),
+            )
+        ]
 
     def shapes(self, tree: Element, transform=None) -> List[Tuple[Optional[Box], int, Element]]:
         """Leaf shapes with absolute boxes, in document order."""
@@ -162,7 +174,10 @@ class _Slide:
                             float(choff.get("x", 0)), float(choff.get("y", 0)),
                         )  # fmt: skip
                         if transform is not None:
-                            inner = (*self._apply(transform, (inner[0], inner[1], 0, 0))[:2], *inner[2:])
+                            inner = (
+                                *self._apply(transform, (inner[0], inner[1], 0, 0))[:2],
+                                *inner[2:],
+                            )
                 out.extend(self.shapes(child, inner))
             elif child.tag in (q("p:sp"), q("p:graphicFrame"), q("p:pic")):
                 box = _xfrm(child)
@@ -202,7 +217,11 @@ class _Slide:
             if el.tag == q("p:pic"):
                 pr = el.find(f"{q('p:nvPicPr')}/{q('p:cNvPr')}")
                 alt = (pr.get("descr") or "") if pr is not None else ""
-                self.blocks.append(RawBlock(kind="figure", text=alt, regions=regions, attrs={"slide": self.page_no}))
+                self.blocks.append(
+                    RawBlock(
+                        kind="figure", text=alt, regions=regions, attrs={"slide": self.page_no}
+                    )
+                )
             elif el.tag == q("p:graphicFrame"):
                 tbl = el.find(f".//{q('a:tbl')}")
                 if tbl is not None:
@@ -223,7 +242,15 @@ class _Slide:
         if is_ph and typ in _TITLE_PH:
             text = " ".join(_paragraph_text(p) for p in body.findall(q("a:p")))
             if text.strip():
-                self.blocks.append(RawBlock(kind="heading", level=1, text=text, regions=regions, attrs={"slide": self.page_no}))
+                self.blocks.append(
+                    RawBlock(
+                        kind="heading",
+                        level=1,
+                        text=text,
+                        regions=regions,
+                        attrs={"slide": self.page_no},
+                    )
+                )
             return
         bulleted_default = is_ph and typ in _BODY_PH
         counters: Dict[int, int] = {}
@@ -241,10 +268,16 @@ class _Slide:
                     bullet = "num"
                 elif ppr.find(q("a:buChar")) is not None or ppr.find(q("a:buBlip")) is not None:
                     bullet = "char"
-            is_list = bullet in ("num", "char") or (bullet is None and (bulleted_default or lvl > 0))
+            is_list = bullet in ("num", "char") or (
+                bullet is None and (bulleted_default or lvl > 0)
+            )
             if not is_list:
                 counters.clear()
-                self.blocks.append(RawBlock(kind="paragraph", text=text, regions=regions, attrs={"slide": self.page_no}))
+                self.blocks.append(
+                    RawBlock(
+                        kind="paragraph", text=text, regions=regions, attrs={"slide": self.page_no}
+                    )
+                )
                 continue
             for deeper in [k for k in counters if k > lvl]:
                 del counters[deeper]
@@ -254,7 +287,9 @@ class _Slide:
                 start = int(auto.get("startAt", 1))
                 counters[lvl] = counters.get(lvl, start - 1) + 1
                 attrs["marker"] = _auto_num(auto.get("type", "arabicPeriod"), counters[lvl])
-            self.blocks.append(RawBlock(kind="list_item", text=text, depth=lvl, regions=regions, attrs=attrs))
+            self.blocks.append(
+                RawBlock(kind="list_item", text=text, depth=lvl, regions=regions, attrs=attrs)
+            )
 
     def table(self, tbl: Element, regions: List[Region]) -> None:
         rows: List[List[str]] = []
@@ -265,12 +300,18 @@ class _Slide:
                 body = tc.find(q("a:txBody"))
                 text = ""
                 if body is not None and not merged:
-                    text = " ".join(t for t in (_paragraph_text(p) for p in body.findall(q("a:p"))) if t.strip())
+                    text = " ".join(
+                        t for t in (_paragraph_text(p) for p in body.findall(q("a:p"))) if t.strip()
+                    )
                 row.append(text)
             rows.append(row)
         if rows:
             self.blocks.append(
-                RawBlock(kind="table", regions=regions, attrs={"rows": rows, "header_rows": 1, "slide": self.page_no})
+                RawBlock(
+                    kind="table",
+                    regions=regions,
+                    attrs={"rows": rows, "header_rows": 1, "slide": self.page_no},
+                )
             )
 
 
@@ -305,7 +346,9 @@ class PptxParser(Parser):
             slide = _Slide(pkg, layouts, part, n, size)
             slide.emit()
             blocks.extend(slide.blocks)
-            pages.append(PageInfo(page_no=n, width=size[0] / _EMU_PER_PT, height=size[1] / _EMU_PER_PT))
+            pages.append(
+                PageInfo(page_no=n, width=size[0] / _EMU_PER_PT, height=size[1] / _EMU_PER_PT)
+            )
         metadata = {}
         first_heading = next((b.text for b in blocks if b.kind == "heading"), None)
         if first_heading:

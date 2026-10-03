@@ -127,7 +127,10 @@ class XlsxParser(Parser):
     name = "xlsx"
     version = "1"
     mimes = frozenset(
-        {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel.sheet.macroEnabled.12"}
+        {
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel.sheet.macroEnabled.12",
+        }
     )
     extensions = frozenset({".xlsx", ".xlsm"})
 
@@ -151,7 +154,9 @@ class XlsxParser(Parser):
             values, merges = _sheet_cells(root, strings)
             if not values:
                 continue
-            blocks.append(RawBlock(kind="heading", level=1, text=sheet_name, attrs={"sheet": sheet_name}))
+            blocks.append(
+                RawBlock(kind="heading", level=1, text=sheet_name, attrs={"sheet": sheet_name})
+            )
             shadows = {
                 (r, c)
                 for (r0, c0), (r1, c1) in merges
@@ -179,5 +184,7 @@ class XlsxParser(Parser):
                 ):
                     blocks.append(RawBlock(kind="paragraph", text=rows[0][0], attrs=anchor))
                     rows = rows[1:]
-                blocks.append(RawBlock(kind="table", attrs={"rows": rows, "header_rows": 1, **anchor}))
+                blocks.append(
+                    RawBlock(kind="table", attrs={"rows": rows, "header_rows": 1, **anchor})
+                )
         return ParsedDoc(blocks=blocks, parser=self.name)

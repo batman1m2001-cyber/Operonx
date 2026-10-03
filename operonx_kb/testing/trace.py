@@ -26,7 +26,9 @@ class RecordingConsumer(Consumer):
         return None
 
     def runs(self, op_name: str) -> int:
-        return sum(1 for t in self.traces for n in t.nodes if n.op_name == op_name and not n.is_yield)
+        return sum(
+            1 for t in self.traces for n in t.nodes if n.op_name == op_name and not n.is_yield
+        )
 
     def clear(self) -> None:
         self.traces.clear()

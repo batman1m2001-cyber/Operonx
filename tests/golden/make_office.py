@@ -48,7 +48,9 @@ def _zip(path: Path, members: Dict[str, str]) -> bytes:
 
 
 def _rels(*rels) -> str:
-    body = "".join(f'<Relationship Id="{i}" Type="{t}" Target="{target}"/>' for i, t, target in rels)
+    body = "".join(
+        f'<Relationship Id="{i}" Type="{t}" Target="{target}"/>' for i, t, target in rels
+    )
     return f'{XML}<Relationships xmlns="{PR}">{body}</Relationships>'
 
 
@@ -102,12 +104,16 @@ def docx(path: Path = None) -> bytes:
     table = (
         "<w:tbl>"
         "<w:tr><w:tc><w:p><w:r><w:t>Leave type</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Days</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Paid</w:t></w:r></w:p></w:tc></w:tr>"
-        "<w:tr><w:tc><w:p><w:r><w:t>Annual</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>12</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge w:val=\"restart\"/></w:tcPr><w:p><w:r><w:t>Yes</w:t></w:r></w:p></w:tc></w:tr>"
+        '<w:tr><w:tc><w:p><w:r><w:t>Annual</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>12</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge w:val="restart"/></w:tcPr><w:p><w:r><w:t>Yes</w:t></w:r></w:p></w:tc></w:tr>'
         "<w:tr><w:tc><w:p><w:r><w:t>Sick</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>30</w:t></w:r></w:p></w:tc><w:tc><w:tcPr><w:vMerge/></w:tcPr><w:p/></w:tc></w:tr>"
-        "<w:tr><w:tc><w:tcPr><w:gridSpan w:val=\"2\"/></w:tcPr><w:p><w:r><w:t>Unpaid leave by agreement</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>No</w:t></w:r></w:p></w:tc></w:tr>"
+        '<w:tr><w:tc><w:tcPr><w:gridSpan w:val="2"/></w:tcPr><w:p><w:r><w:t>Unpaid leave by agreement</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>No</w:t></w:r></w:p></w:tc></w:tr>'
         "</w:tbl>"
     )
-    single = "<w:tbl><w:tr><w:tc>" + _p("A boxed note: policies are reviewed every January.") + "</w:tc></w:tr></w:tbl>"
+    single = (
+        "<w:tbl><w:tr><w:tc>"
+        + _p("A boxed note: policies are reviewed every January.")
+        + "</w:tc></w:tr></w:tbl>"
+    )
     body = "".join(
         [
             _p("Employee Handbook", "Title"),
@@ -120,14 +126,20 @@ def docx(path: Path = None) -> bytes:
             _p("Leave entitlements", "Caption"),
             table,
             _p("1.1 Sick leave", "PolicyHeading"),
-            _p("Sick leave needs a doctor's note after two days.", extra='<w:del><w:r><w:delText>one day</w:delText></w:r></w:del>'),
+            _p(
+                "Sick leave needs a doctor's note after two days.",
+                extra="<w:del><w:r><w:delText>one day</w:delText></w:r></w:del>",
+            ),
             _p("Steps to request leave:"),
             _p("Open the portal.", num=("2", 0)),
             _p("Choose the dates.", num=("2", 0)),
             _p("Half days are allowed.", num=("2", 1)),
             _p("Submit.", num=("2", 0)),
             _p("2 Phúc lợi", "Heading1"),
-            _p("Nhân viên được hỗ trợ ăn trưa và gửi xe.", extra='<w:r><w:br/><w:t>Mức hỗ trợ cập nhật hằng năm.</w:t></w:r>'),
+            _p(
+                "Nhân viên được hỗ trợ ăn trưa và gửi xe.",
+                extra="<w:r><w:br/><w:t>Mức hỗ trợ cập nhật hằng năm.</w:t></w:r>",
+            ),
             _p("2.1 Thiết bị", "Tieude3"),
             _p("Each employee gets a laptop.", extra=image),
             single,
@@ -163,7 +175,11 @@ def docx(path: Path = None) -> bytes:
             ),
             "_rels/.rels": _rels(
                 ("rId1", base + "officeDocument", "word/document.xml"),
-                ("rId2", "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties", "docProps/core.xml"),
+                (
+                    "rId2",
+                    "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+                    "docProps/core.xml",
+                ),
             ),
             "word/_rels/document.xml.rels": _rels(
                 ("rId1", base + "styles", "styles.xml"),
@@ -219,7 +235,12 @@ def pptx(path: Path = None) -> bytes:
     slide1 = (
         f"{XML}<p:sld {ns}><p:cSld><p:spTree>"
         + _sp(_ap("Welcome to ACME"), "ctrTitle", (685800, 2130425, 7772400, 1470025))
-        + _sp(_ap("Onboarding for new staff, 2026"), "subTitle", (1371600, 3886200, 6400800, 1752600), idx="1")
+        + _sp(
+            _ap("Onboarding for new staff, 2026"),
+            "subTitle",
+            (1371600, 3886200, 6400800, 1752600),
+            idx="1",
+        )
         + "</p:spTree></p:cSld></p:sld>"
     )
     table = (
@@ -261,7 +282,7 @@ def pptx(path: Path = None) -> bytes:
         + "</p:grpSp></p:spTree></p:cSld></p:sld>"
     )
     pres = (
-        f"{XML}<p:presentation {ns}><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId9\"/></p:sldMasterIdLst>"
+        f'{XML}<p:presentation {ns}><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId9"/></p:sldMasterIdLst>'
         '<p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/><p:sldId id="258" r:id="rId3"/></p:sldIdLst>'
         '<p:sldSz cx="9144000" cy="6858000"/></p:presentation>'
     )
@@ -296,7 +317,9 @@ def pptx(path: Path = None) -> bytes:
             "ppt/slides/_rels/slide2.xml.rels": slide_rels,
             "ppt/slides/_rels/slide3.xml.rels": slide_rels,
             "ppt/slideLayouts/slideLayout1.xml": layout,
-            "ppt/slideLayouts/_rels/slideLayout1.xml.rels": _rels(("rId1", base + "slideMaster", "../slideMasters/slideMaster1.xml")),
+            "ppt/slideLayouts/_rels/slideLayout1.xml.rels": _rels(
+                ("rId1", base + "slideMaster", "../slideMasters/slideMaster1.xml")
+            ),
             "ppt/slideMasters/slideMaster1.xml": master,
         },
     )
@@ -306,7 +329,20 @@ def pptx(path: Path = None) -> bytes:
 
 
 def xlsx(path: Path = None) -> bytes:
-    strings = ["Budget 2026", "Item", "Q1", "Q2", "Laptops", "Licences", "Notes", "Approved by finance", "Hidden", "Chi phí", "Số tiền", "Ăn trưa"]
+    strings = [
+        "Budget 2026",
+        "Item",
+        "Q1",
+        "Q2",
+        "Laptops",
+        "Licences",
+        "Notes",
+        "Approved by finance",
+        "Hidden",
+        "Chi phí",
+        "Số tiền",
+        "Ăn trưa",
+    ]
     sst = (
         f'{XML}<sst xmlns="{S}" count="{len(strings)}" uniqueCount="{len(strings)}">'
         + "".join(f"<si><t>{s}</t></si>" for s in strings)

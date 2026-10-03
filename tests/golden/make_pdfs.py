@@ -61,7 +61,9 @@ def _wrap(text: str, font: str, size: float, width: float) -> List[str]:
 class _Writer:
     """Draws flowing text into columns, a page at a time."""
 
-    def __init__(self, canvas, columns: List[Tuple[float, float]], top: float, bottom: float, on_page=None):
+    def __init__(
+        self, canvas, columns: List[Tuple[float, float]], top: float, bottom: float, on_page=None
+    ):
         self.c = canvas
         self.columns = columns
         self.col = 0
@@ -83,7 +85,15 @@ class _Writer:
             self.col = 0
         self.y = self.top
 
-    def lines(self, lines: List[str], font: str, size: float, leading: float, x_offset: float = 0.0, after: float = 6.0):
+    def lines(
+        self,
+        lines: List[str],
+        font: str,
+        size: float,
+        leading: float,
+        x_offset: float = 0.0,
+        after: float = 6.0,
+    ):
         for line in lines:
             if self.y - leading < self.bottom:
                 self._next_column()
@@ -92,9 +102,18 @@ class _Writer:
             self.c.drawString(self.columns[self.col][0] + x_offset, self.y, line)
         self.y -= after
 
-    def para(self, text: str, font: str = "DejaVu", size: float = 10, after: float = 6.0, indent: float = 0.0):
+    def para(
+        self,
+        text: str,
+        font: str = "DejaVu",
+        size: float = 10,
+        after: float = 6.0,
+        indent: float = 0.0,
+    ):
         x0, x1 = self.columns[self.col]
-        self.lines(_wrap(text, font, size, x1 - x0 - indent), font, size, size * 1.25, indent, after)
+        self.lines(
+            _wrap(text, font, size, x1 - x0 - indent), font, size, size * 1.25, indent, after
+        )
 
     def heading(self, text: str, size: float = 12):
         if self.y - 3 * size < self.bottom:
@@ -183,7 +202,9 @@ def two_column_report(path: Path = None) -> bytes:
     w.heading("3 Results")
     w.para(LOREM)
     c.setFont("DejaVu", 7)
-    c.drawString(w.columns[w.col][0], 48, "1 Measured on the internal handbook corpus, October 2026.")
+    c.drawString(
+        w.columns[w.col][0], 48, "1 Measured on the internal handbook corpus, October 2026."
+    )
     c.showPage()
     c.save()
     return _write(path, buf)
@@ -235,11 +256,18 @@ def table_report(path: Path = None) -> bytes:
     c.drawString(56, y, "Allowances")
     y -= 18
     c.setFont("DejaVu", 10)
-    c.drawString(56, y, "Monthly allowances are paid with the salary and adjusted every year accord-")
+    c.drawString(
+        56, y, "Monthly allowances are paid with the salary and adjusted every year accord-"
+    )
     y -= 12.5
     c.drawString(56, y, "ingly to the consumer price index.")
     y -= 22
-    rows = [("Item", "Amount", "Frequency"), ("Lunch", "730,000", "monthly"), ("Parking", "150,000", "monthly"), ("Phone", "200,000", "monthly")]
+    rows = [
+        ("Item", "Amount", "Frequency"),
+        ("Lunch", "730,000", "monthly"),
+        ("Parking", "150,000", "monthly"),
+        ("Phone", "200,000", "monthly"),
+    ]
     for item, amount, freq in rows:
         c.drawString(56, y, item)
         c.drawString(200, y, amount)
@@ -273,7 +301,9 @@ def chinh_sach_vi(path: Path = None) -> bytes:
     w.heading("3. Nghỉ ốm")
     c.setFont("DejaVu", 10)
     y = w.y - 12.5
-    c.drawString(56, y, "Nghỉ ốm từ 2 ngày trở lên cần có giấy xác nhận của cơ sở y tế. Trường hợp đặc biệt,")
+    c.drawString(
+        56, y, "Nghỉ ốm từ 2 ngày trở lên cần có giấy xác nhận của cơ sở y tế. Trường hợp đặc biệt,"
+    )
     c.drawString(56, y - 12.5, "giám đốc nhân sự quyết định.")
     c.showPage()
     c.save()

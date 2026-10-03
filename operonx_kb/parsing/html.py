@@ -34,7 +34,21 @@ __all__ = ["HtmlParser", "html_to_blocks", "promote_lone_h1"]
 
 _SKIP = frozenset({"script", "style", "noscript", "template", "svg", "object", "iframe"})
 _VOID = frozenset(
-    {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "source",
+        "track",
+        "wbr",
+    }
 )
 _BLOCK = frozenset(
     {
@@ -133,7 +147,13 @@ class _Builder(_StdHTMLParser):
         kind, extra = self._context()
         attrs = dict(extra.get("attrs", {}))
         self.blocks.append(
-            RawBlock(kind=kind, text=text, level=extra.get("level"), depth=extra.get("depth", 0), attrs=attrs)
+            RawBlock(
+                kind=kind,
+                text=text,
+                level=extra.get("level"),
+                depth=extra.get("depth", 0),
+                attrs=attrs,
+            )
         )
         if kind == "list_item":
             # Text after a nested list inside the same <li> continues as a paragraph.
@@ -161,7 +181,16 @@ class _Builder(_StdHTMLParser):
             self._table_start(tag, attrs)
             self.stack.append(tag)
             return
-        if self.tables and tag not in ("table", "tr", "td", "th", "caption", "thead", "tbody", "tfoot"):
+        if self.tables and tag not in (
+            "table",
+            "tr",
+            "td",
+            "th",
+            "caption",
+            "thead",
+            "tbody",
+            "tfoot",
+        ):
             if tag == "img" and attrs.get("alt"):
                 self.buffer.append(attrs["alt"])
             if tag not in _VOID:
@@ -197,7 +226,9 @@ class _Builder(_StdHTMLParser):
             self.pre_depth += 1
             match = _LANG.search(attrs.get("class") or "")
             self.pre_lang = match.group(1) if match else None
-            self.pending_kind.append(("code", {"attrs": {"lang": self.pre_lang} if self.pre_lang else {}}))
+            self.pending_kind.append(
+                ("code", {"attrs": {"lang": self.pre_lang} if self.pre_lang else {}})
+            )
         elif tag == "code" and self.pre_depth and not self.pre_lang:
             match = _LANG.search(attrs.get("class") or "")
             if match:
@@ -208,7 +239,13 @@ class _Builder(_StdHTMLParser):
             self.pending_kind.append(("caption", {}))
         elif tag == "img":
             self.flush()
-            self.blocks.append(RawBlock(kind="figure", text=attrs.get("alt") or "", attrs={"src": attrs.get("src") or ""}))
+            self.blocks.append(
+                RawBlock(
+                    kind="figure",
+                    text=attrs.get("alt") or "",
+                    attrs={"src": attrs.get("src") or ""},
+                )
+            )
         elif tag == "table":
             self.tables.append(_Table())
         elif tag == "blockquote":
@@ -238,9 +275,26 @@ class _Builder(_StdHTMLParser):
         if tag in _BLOCK:
             self.flush()
         self._pop(tag)
-        if tag in ("nav", "header", "footer") and self.furniture_depth and not self._in("main", "article"):
+        if (
+            tag in ("nav", "header", "footer")
+            and self.furniture_depth
+            and not self._in("main", "article")
+        ):
             self.furniture_depth -= 1
-        elif tag in ("h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "dt", "dd", "figcaption", "blockquote"):
+        elif tag in (
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "p",
+            "li",
+            "dt",
+            "dd",
+            "figcaption",
+            "blockquote",
+        ):
             if self.pending_kind:
                 self.pending_kind.pop()
         elif tag in ("ul", "ol", "dl"):
@@ -297,7 +351,9 @@ class _Builder(_StdHTMLParser):
                 if outer.cell is not None:
                     outer.cell.append(" ".join(" ".join(r) for r in grid))
                 return
-            self.blocks.append(RawBlock(kind="table", attrs={"rows": grid, "header_rows": header_rows}))
+            self.blocks.append(
+                RawBlock(kind="table", attrs={"rows": grid, "header_rows": header_rows})
+            )
 
 
 def promote_lone_h1(blocks: List[RawBlock]) -> List[RawBlock]:

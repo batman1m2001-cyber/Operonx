@@ -43,7 +43,13 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx_kb.model.ids import fingerprint
-from operonx_kb.pdf.assemble import continues, is_caption, join_continued, join_lines, split_list_marker
+from operonx_kb.pdf.assemble import (
+    continues,
+    is_caption,
+    join_continued,
+    join_lines,
+    split_list_marker,
+)
 from operonx_kb.pdf.backend import BBox, PdfPage, Rule, Word
 
 __all__ = ["Segment", "LayoutBlock", "LayoutModel", "HeuristicLayout"]
@@ -273,7 +279,12 @@ class HeuristicLayout(LayoutModel):
         for i, a in enumerate(rules):
             for j in range(i + 1, len(rules)):
                 b = rules[j]
-                if a.x0 - tol <= b.x1 and b.x0 - tol <= a.x1 and a.y0 - tol <= b.y1 and b.y0 - tol <= a.y1:
+                if (
+                    a.x0 - tol <= b.x1
+                    and b.x0 - tol <= a.x1
+                    and a.y0 - tol <= b.y1
+                    and b.y0 - tol <= a.y1
+                ):
                     parent[find(i)] = find(j)
         groups: Dict[int, List[Rule]] = defaultdict(list)
         for i, r in enumerate(rules):
@@ -288,7 +299,12 @@ class HeuristicLayout(LayoutModel):
             ys = _cluster([r.y0 for r in hs], tol)
             if len(xs) < 2 or len(ys) < 2:
                 continue
-            bbox = (min(r.x0 for r in group), min(r.y0 for r in group), max(r.x1 for r in group), max(r.y1 for r in group))
+            bbox = (
+                min(r.x0 for r in group),
+                min(r.y0 for r in group),
+                max(r.x1 for r in group),
+                max(r.y1 for r in group),
+            )
             grids.append((bbox, xs, ys))
         return grids
 
@@ -332,7 +348,13 @@ class HeuristicLayout(LayoutModel):
                 size = statistics.median(s.size for s in prev)
                 if gap > 1.5 * size or len(line) < 2:
                     break
-                matched = [next((k for k, (c0, c1) in enumerate(cols) if _overlap(s.x0, s.x1, c0, c1) > 0), None) for s in line]
+                matched = [
+                    next(
+                        (k for k, (c0, c1) in enumerate(cols) if _overlap(s.x0, s.x1, c0, c1) > 0),
+                        None,
+                    )
+                    for s in line
+                ]
                 if None in matched or len(set(matched)) != len(matched):
                     break
                 for s, k in zip(line, matched):
@@ -347,7 +369,9 @@ class HeuristicLayout(LayoutModel):
                 for ln in run:
                     row = [""] * len(cols)
                     for s in by_line[ln]:
-                        k = next(k for k, (c0, c1) in enumerate(cols) if _overlap(s.x0, s.x1, c0, c1) > 0)
+                        k = next(
+                            k for k, (c0, c1) in enumerate(cols) if _overlap(s.x0, s.x1, c0, c1) > 0
+                        )
                         row[k] = (row[k] + " " + s.text).strip()
                     rows.append(row)
                 tables.append((members, rows))
@@ -399,8 +423,11 @@ class HeuristicLayout(LayoutModel):
         return max(s.y1 for s in segs) - min(s.y0 for s in segs)
 
     @staticmethod
-    def order(items: List[Tuple[BBox, Any]], gutters: List[Tuple[float, float]]) -> List[Tuple[Any, Tuple[int, int]]]:
+    def order(
+        items: List[Tuple[BBox, Any]], gutters: List[Tuple[float, float]]
+    ) -> List[Tuple[Any, Tuple[int, int]]]:
         """Column-major order; each item gets its (zone, column)."""
+
         def crosses(b: BBox) -> bool:
             return _crosses(b[0], b[2], gutters)
 
@@ -416,7 +443,9 @@ class HeuristicLayout(LayoutModel):
         for zone, bound in enumerate(bounds):
             inside = [i for i in flowing if prev <= (i[0][1] + i[0][3]) / 2 < bound]
             for col in range(len(gutters) + 1):
-                members = sorted((i for i in inside if column(i[0]) == col), key=lambda i: (i[0][1], i[0][0]))
+                members = sorted(
+                    (i for i in inside if column(i[0]) == col), key=lambda i: (i[0][1], i[0][0])
+                )
                 out.extend((i[1], (zone, col)) for i in members)
             if zone < len(spanning):
                 out.append((spanning[zone][1], (zone, -1)))
@@ -428,8 +457,20 @@ class HeuristicLayout(LayoutModel):
     def layout(self, pages: Sequence[PdfPage]) -> List[LayoutBlock]:
         segs = {}
         for page in pages:
-            big = [b for b in page.images if (b[2] - b[0]) * (b[3] - b[1]) > 0.5 * page.width * page.height]
-            words = [w for w in page.words if not any(b[0] <= (w.x0 + w.x1) / 2 <= b[2] and b[1] <= (w.y0 + w.y1) / 2 <= b[3] for b in page.images if b not in big)]
+            big = [
+                b
+                for b in page.images
+                if (b[2] - b[0]) * (b[3] - b[1]) > 0.5 * page.width * page.height
+            ]
+            words = [
+                w
+                for w in page.words
+                if not any(
+                    b[0] <= (w.x0 + w.x1) / 2 <= b[2] and b[1] <= (w.y0 + w.y1) / 2 <= b[3]
+                    for b in page.images
+                    if b not in big
+                )
+            ]
             segs[page.page_no] = self.segments(page, words)
         self.mark_furniture(pages, segs)
         sizes: Counter = Counter()
@@ -450,27 +491,73 @@ class HeuristicLayout(LayoutModel):
         flow = [s for s in segs if not s.furniture]
         out: List[LayoutBlock] = []
         for s in furniture:
-            out.append(LayoutBlock(kind=s.furniture, page_no=page.page_no, lines=[s.text], regions=[(page.page_no, s.bbox)], size=s.size))
+            out.append(
+                LayoutBlock(
+                    kind=s.furniture,
+                    page_no=page.page_no,
+                    lines=[s.text],
+                    regions=[(page.page_no, s.bbox)],
+                    size=s.size,
+                )
+            )
 
         items: List[Tuple[BBox, Any]] = []
         for bbox, xs, ys in self.ruled_tables(page):
-            inside = [s for s in flow if bbox[0] - 1 <= (s.x0 + s.x1) / 2 <= bbox[2] + 1 and bbox[1] - 1 <= (s.y0 + s.y1) / 2 <= bbox[3] + 1]
+            inside = [
+                s
+                for s in flow
+                if bbox[0] - 1 <= (s.x0 + s.x1) / 2 <= bbox[2] + 1
+                and bbox[1] - 1 <= (s.y0 + s.y1) / 2 <= bbox[3] + 1
+            ]
             if not inside:
                 continue
             flow = [s for s in flow if s not in inside]
             rows = self.fill_grid([w for s in inside for w in s.words], xs, ys)
-            items.append((bbox, LayoutBlock(kind="table", page_no=page.page_no, rows=rows, regions=[(page.page_no, bbox)])))
+            items.append(
+                (
+                    bbox,
+                    LayoutBlock(
+                        kind="table",
+                        page_no=page.page_no,
+                        rows=rows,
+                        regions=[(page.page_no, bbox)],
+                    ),
+                )
+            )
         for b in page.images:
             if (b[2] - b[0]) * (b[3] - b[1]) <= 0.5 * page.width * page.height:
-                items.append((b, LayoutBlock(kind="figure", page_no=page.page_no, regions=[(page.page_no, b)])))
+                items.append(
+                    (
+                        b,
+                        LayoutBlock(
+                            kind="figure", page_no=page.page_no, regions=[(page.page_no, b)]
+                        ),
+                    )
+                )
 
         gutters = self.gutters(flow, body)
         # Borderless tables, inside one column or across the page.
         for column_segs in self._by_column(flow, gutters):
             for members, rows in self.aligned_tables(column_segs):
                 flow = [s for s in flow if s not in members]
-                bbox = (min(s.x0 for s in members), min(s.y0 for s in members), max(s.x1 for s in members), max(s.y1 for s in members))
-                items.append((bbox, LayoutBlock(kind="table", page_no=page.page_no, rows=rows, regions=[(page.page_no, bbox)], attrs={"ruled": False})))
+                bbox = (
+                    min(s.x0 for s in members),
+                    min(s.y0 for s in members),
+                    max(s.x1 for s in members),
+                    max(s.y1 for s in members),
+                )
+                items.append(
+                    (
+                        bbox,
+                        LayoutBlock(
+                            kind="table",
+                            page_no=page.page_no,
+                            rows=rows,
+                            regions=[(page.page_no, bbox)],
+                            attrs={"ruled": False},
+                        ),
+                    )
+                )
         items.extend((s.bbox, s) for s in flow)
 
         current: Optional[LayoutBlock] = None
@@ -483,7 +570,12 @@ class HeuristicLayout(LayoutModel):
                 current, last = None, None
                 continue
             s = item
-            if current is not None and last is not None and current.column == column and self._continues_block(last, s, current):
+            if (
+                current is not None
+                and last is not None
+                and current.column == column
+                and self._continues_block(last, s, current)
+            ):
                 if s.line == last.line:
                     current.lines[-1] += " " + s.text
                 else:
@@ -491,7 +583,14 @@ class HeuristicLayout(LayoutModel):
                 self._grow(current, s)
                 members[id(current)].append(s)
             else:
-                current = LayoutBlock(kind="paragraph", page_no=page.page_no, lines=[s.text], regions=[(page.page_no, s.bbox)], x0=s.x0, column=column)
+                current = LayoutBlock(
+                    kind="paragraph",
+                    page_no=page.page_no,
+                    lines=[s.text],
+                    regions=[(page.page_no, s.bbox)],
+                    x0=s.x0,
+                    column=column,
+                )
                 members[id(current)] = [s]
                 out.append(current)
             last = s
@@ -504,7 +603,9 @@ class HeuristicLayout(LayoutModel):
                 block.mono = sum(len(w.text) for w in words if w.mono) / chars
         return out
 
-    def _by_column(self, flow: List[Segment], gutters: List[Tuple[float, float]]) -> List[List[Segment]]:
+    def _by_column(
+        self, flow: List[Segment], gutters: List[Tuple[float, float]]
+    ) -> List[List[Segment]]:
         groups: Dict[int, List[Segment]] = defaultdict(list)
         for s in flow:
             if _crosses(s.x0, s.x1, gutters):
@@ -556,8 +657,15 @@ class HeuristicLayout(LayoutModel):
                 b.kind = "caption"
                 continue
             larger = b.size >= self.heading_ratio * body
-            bold_short = b.bold >= 0.9 and b.size >= 0.95 * body and words <= 15 and not text.rstrip().endswith((".", ":", ";", ","))
-            if (larger and len(b.lines) <= 3 and len(text) <= 200) or (bold_short and len(b.lines) <= 2):
+            bold_short = (
+                b.bold >= 0.9
+                and b.size >= 0.95 * body
+                and words <= 15
+                and not text.rstrip().endswith((".", ":", ";", ","))
+            )
+            if (larger and len(b.lines) <= 3 and len(text) <= 200) or (
+                bold_short and len(b.lines) <= 2
+            ):
                 b.kind = "heading"
                 headings.append(b)
                 continue
@@ -623,7 +731,11 @@ class HeuristicLayout(LayoutModel):
         skip = {"page_header", "page_footer", "table", "figure", "caption", "footnote"}
         pending: Optional[LayoutBlock] = None  # a paragraph that may continue
         for b in blocks:
-            if b.kind == "paragraph" and pending is not None and (b.page_no != pending.page_no or b.column != pending.column):
+            if (
+                b.kind == "paragraph"
+                and pending is not None
+                and (b.page_no != pending.page_no or b.column != pending.column)
+            ):
                 if continues(pending.text, b.text):
                     pending.lines = [join_continued(pending.text, b.text)]
                     pending.regions.extend(b.regions)

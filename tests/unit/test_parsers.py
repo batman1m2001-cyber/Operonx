@@ -67,11 +67,17 @@ def test_markdown_blocks():
 
 def test_markdown_several_h1_are_headings_not_titles():
     doc = MarkdownParser().parse(b"# A\n\ntext\n\n# B\n")
-    assert [(b.kind, b.level) for b in doc.blocks] == [("heading", 1), ("paragraph", None), ("heading", 1)]
+    assert [(b.kind, b.level) for b in doc.blocks] == [
+        ("heading", 1),
+        ("paragraph", None),
+        ("heading", 1),
+    ]
 
 
 def test_markdown_front_matter_title_and_html_block():
-    doc = MarkdownParser().parse(b"---\ntitle: 'Doc'\n---\n<table><tr><th>A</th></tr><tr><td>1</td></tr></table>\n")
+    doc = MarkdownParser().parse(
+        b"---\ntitle: 'Doc'\n---\n<table><tr><th>A</th></tr><tr><td>1</td></tr></table>\n"
+    )
     assert doc.metadata == {"title": "Doc"}
     assert doc.blocks[0].kind == "table" and doc.blocks[0].attrs["rows"] == [["A"], ["1"]]
 
@@ -89,7 +95,11 @@ def test_html_skips_hidden_and_scripts_and_marks_chrome_as_furniture():
         "<script>no()</script><p aria-hidden='true'>no</p></main><footer>foot</footer>"
     )
     assert meta == {"title": "T"}
-    assert [(b.kind, b.text) for b in blocks] == [("page_header", "menu"), ("paragraph", "one"), ("page_footer", "foot")]
+    assert [(b.kind, b.text) for b in blocks] == [
+        ("page_header", "menu"),
+        ("paragraph", "one"),
+        ("page_footer", "foot"),
+    ]
 
 
 def test_html_table_spans_and_header_rows():
@@ -97,7 +107,10 @@ def test_html_table_spans_and_header_rows():
         "<table><tr><th>a</th><th>b</th></tr><tr><td rowspan=2>x</td><td>1</td></tr><tr><td>2</td></tr>"
         "<tr><td colspan=2>wide</td></tr></table>"
     )
-    assert blocks[0].attrs == {"rows": [["a", "b"], ["x", "1"], ["", "2"], ["wide", ""]], "header_rows": 1}
+    assert blocks[0].attrs == {
+        "rows": [["a", "b"], ["x", "1"], ["", "2"], ["wide", ""]],
+        "header_rows": 1,
+    }
 
 
 def test_html_lists_nest_and_count_from_start():
@@ -132,10 +145,15 @@ def test_docx_headings_lists_tables_furniture():
     table = next(b for b in doc.blocks if b.kind == "table")
     assert table.attrs["rows"][2] == ["Sick", "30", ""]  # vMerge continuation
     assert table.attrs["rows"][3] == ["Unpaid leave by agreement", "", "No"]  # gridSpan
-    assert by_text["A boxed note: policies are reviewed every January."].kind == "paragraph"  # 1x1 table unwrapped
+    assert (
+        by_text["A boxed note: policies are reviewed every January."].kind == "paragraph"
+    )  # 1x1 table unwrapped
     assert by_text["curl -X POST https://hr.example/api/leave"].kind == "code"
     assert by_text["Organisation chart of the HR team"].kind == "figure"
-    assert {b.kind for b in doc.blocks if b.text in ("ACME Internal", "Confidential - page")} == {"page_header", "page_footer"}
+    assert {b.kind for b in doc.blocks if b.text in ("ACME Internal", "Confidential - page")} == {
+        "page_header",
+        "page_footer",
+    }
     assert doc.blocks[-1].kind == "footnote"
 
 
@@ -143,14 +161,20 @@ def test_pptx_reading_order_titles_lists_regions():
     doc = PptxParser().parse((DOCS / "onboarding.pptx").read_bytes())
     assert [p.page_no for p in doc.pages] == [1, 2, 3]
     slide2 = [b for b in doc.blocks if b.attrs.get("slide") == 2]
-    assert slide2[0].kind == "heading" and slide2[0].text == "First week"  # geometry beats XML order
+    assert (
+        slide2[0].kind == "heading" and slide2[0].text == "First week"
+    )  # geometry beats XML order
     items = [(b.text, b.depth, b.attrs.get("marker")) for b in slide2 if b.kind == "list_item"]
     assert items == [("Collect your badge", 0, None), ("Floor 3 reception", 1, None),
                      ("Set up two-factor login", 0, None), ("Read the handbook", 0, "3.")]  # fmt: skip
     assert any(b.kind == "paragraph" and b.text == "Ask questions anytime" for b in slide2)
     assert next(b for b in doc.blocks if b.kind == "page_footer").text == "2"
     slide3 = [b.text for b in doc.blocks if b.attrs.get("slide") == 3]
-    assert slide3 == ["Liên hệ", "Email: hr@acme.example", "Phòng nhân sự: tầng 3"]  # group, left to right
+    assert slide3 == [
+        "Liên hệ",
+        "Email: hr@acme.example",
+        "Phòng nhân sự: tầng 3",
+    ]  # group, left to right
     title = doc.blocks[0]
     assert title.regions[0].page_no == 1 and all(0 <= v <= 1 for v in title.regions[0].bbox)
 
@@ -161,7 +185,11 @@ def test_xlsx_regions_labels_hidden_sheets():
     assert ("heading", "Secret", None) not in texts  # hidden sheet
     assert ("paragraph", "Budget 2026", "A1:C4") in texts  # section label above the table
     tables = [b.attrs for b in doc.blocks if b.kind == "table"]
-    assert tables[0]["rows"] == [["Item", "Q1", "Q2"], ["Laptops", "12000", "8000"], ["Licences", "", "1500.5"]]
+    assert tables[0]["rows"] == [
+        ["Item", "Q1", "Q2"],
+        ["Laptops", "12000", "8000"],
+        ["Licences", "", "1500.5"],
+    ]
     assert tables[0]["range"] == "A1:C4" and tables[2]["sheet"] == "Phụ cấp"
     assert tables[2]["rows"][2] == ["Gửi xe", "150000"]  # inline string
 

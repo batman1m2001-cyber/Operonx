@@ -85,7 +85,9 @@ class ParserRouter:
     def fingerprint(self) -> str:
         return combine_fingerprints(**{p.name: p.fingerprint() for p in self.parsers})
 
-    def for_file(self, data: bytes, *, name: Optional[str] = None, mime: Optional[str] = None) -> Parser:
+    def for_file(
+        self, data: bytes, *, name: Optional[str] = None, mime: Optional[str] = None
+    ) -> Parser:
         """The parser for this file.
 
         Raises:

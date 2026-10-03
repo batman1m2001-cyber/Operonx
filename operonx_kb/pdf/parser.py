@@ -60,14 +60,33 @@ class PdfParser(Parser):
             for page_no, (x0, y0, x1, y1) in b.regions:
                 w, h = dims[page_no]
                 clamp = lambda v: max(0.0, min(1.0, v))  # noqa: E731
-                regions.append(Region(page_no=page_no, bbox=(clamp(x0 / w), clamp(y0 / h), clamp(x1 / w), clamp(y1 / h))))
+                regions.append(
+                    Region(
+                        page_no=page_no,
+                        bbox=(clamp(x0 / w), clamp(y0 / h), clamp(x1 / w), clamp(y1 / h)),
+                    )
+                )
             attrs = {k: v for k, v in b.attrs.items() if not k.startswith("_")}
             if b.kind == "table":
                 attrs.update({"rows": b.rows or [], "header_rows": 1})
-            out.append(RawBlock(kind=b.kind, text="" if b.kind == "table" else b.text, level=b.level, depth=b.depth, regions=regions, attrs=attrs))
+            out.append(
+                RawBlock(
+                    kind=b.kind,
+                    text="" if b.kind == "table" else b.text,
+                    level=b.level,
+                    depth=b.depth,
+                    regions=regions,
+                    attrs=attrs,
+                )
+            )
         return ParsedDoc(
             blocks=out,
-            pages=[PageInfo(page_no=p.page_no, width=p.width, height=p.height, text_layer=bool(p.words)) for p in pages],
+            pages=[
+                PageInfo(
+                    page_no=p.page_no, width=p.width, height=p.height, text_layer=bool(p.words)
+                )
+                for p in pages
+            ],
             parser=self.name,
             stats={
                 "pages": len(pages),

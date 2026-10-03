@@ -106,7 +106,9 @@ def _parse_lines(lines: List[str]) -> List[RawBlock]:  # noqa: C901 — one stat
             text = " ".join(line.strip() for line in para)
             image = _IMAGE_LINE.match(" ".join(para))
             if image and len(para) == 1:
-                blocks.append(RawBlock(kind="figure", text=image.group(1), attrs={"src": image.group(2)}))
+                blocks.append(
+                    RawBlock(kind="figure", text=image.group(1), attrs={"src": image.group(2)})
+                )
             else:
                 blocks.append(RawBlock(kind="paragraph", text=strip_inline(text)))
             para.clear()
@@ -133,7 +135,9 @@ def _parse_lines(lines: List[str]) -> List[RawBlock]:  # noqa: C901 — one stat
                 body.append(lines[i])
                 i += 1
             i += 1  # closing fence (or end of document)
-            blocks.append(RawBlock(kind="code", text="\n".join(body), attrs={"lang": lang} if lang else {}))
+            blocks.append(
+                RawBlock(kind="code", text="\n".join(body), attrs={"lang": lang} if lang else {})
+            )
             continue
 
         # A paragraph line followed by a setext underline is a heading.
@@ -155,7 +159,11 @@ def _parse_lines(lines: List[str]) -> List[RawBlock]:  # noqa: C901 — one stat
         if atx:
             flush_para()
             items.clear()
-            blocks.append(RawBlock(kind="heading", level=len(atx.group(1)), text=strip_inline(atx.group(2) or "")))
+            blocks.append(
+                RawBlock(
+                    kind="heading", level=len(atx.group(1)), text=strip_inline(atx.group(2) or "")
+                )
+            )
             i += 1
             continue
 
@@ -177,7 +185,9 @@ def _parse_lines(lines: List[str]) -> List[RawBlock]:  # noqa: C901 — one stat
             i += 2
             while i < n and lines[i].strip() and "|" in lines[i]:
                 row = _split_row(lines[i])
-                rows.append((row + [""] * len(header))[: len(header)])  # GFM: pad/truncate to header
+                rows.append(
+                    (row + [""] * len(header))[: len(header)]
+                )  # GFM: pad/truncate to header
                 i += 1
             blocks.append(RawBlock(kind="table", attrs={"rows": rows, "header_rows": 1}))
             continue
@@ -215,7 +225,14 @@ def _parse_lines(lines: List[str]) -> List[RawBlock]:  # noqa: C901 — one stat
                     and not _FENCE.match(lines[i]) and not _HR.match(lines[i]):  # fmt: skip
                 text_lines.append(lines[i].strip())
                 i += 1
-            blocks.append(RawBlock(kind="list_item", text=strip_inline(" ".join(text_lines)), depth=depth, attrs=attrs))
+            blocks.append(
+                RawBlock(
+                    kind="list_item",
+                    text=strip_inline(" ".join(text_lines)),
+                    depth=depth,
+                    attrs=attrs,
+                )
+            )
             continue
 
         if not para and items and len(line) - len(line.lstrip()) >= items[-1][0]:

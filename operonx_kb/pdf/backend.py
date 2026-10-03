@@ -15,9 +15,9 @@ from __future__ import annotations
 
 import io
 import re
-from importlib.metadata import PackageNotFoundError, version
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Optional, Tuple
 
 from operonx_kb.errors import DocumentParseError, MissingExtraError
@@ -153,13 +153,18 @@ class DoclingParseBackend(PdfBackend):
         doc = None
         try:
             doc = DoclingPdfParser(loglevel="fatal").load(
-                path_or_stream=io.BytesIO(data), lazy=True, password=password, content_config=content
+                path_or_stream=io.BytesIO(data),
+                lazy=True,
+                password=password,
+                content_config=content,
             )
             out = [self._page(no, page) for no, page in doc.iterate_pages()]
         except DocumentParseError:
             raise
         except Exception as exc:  # docling-parse raises RuntimeError for corrupt/encrypted files
-            raise DocumentParseError("docling-parse could not read the PDF", {"error": str(exc)}) from exc
+            raise DocumentParseError(
+                "docling-parse could not read the PDF", {"error": str(exc)}
+            ) from exc
         finally:
             if doc is not None:
                 doc.unload()
@@ -182,12 +187,18 @@ class DoclingParseBackend(PdfBackend):
                 continue
             x0, y0, x1, y1 = flip(cell.rect)
             bold, italic, mono = font_style(cell.font_name or "")
-            words.append(Word(text, x0, y0, x1, y1, cell.font_name or "", y1 - y0, bold, italic, mono))
+            words.append(
+                Word(text, x0, y0, x1, y1, cell.font_name or "", y1 - y0, bold, italic, mono)
+            )
         rules: List[Rule] = []
         for shape in page.shapes:
             pts = [(float(p.x), height - float(p.y)) for p in shape.points]
             for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-                if (abs(ay - by) < 1.0 or abs(ax - bx) < 1.0) and max(abs(ax - bx), abs(ay - by)) >= 4.0:
+                if (abs(ay - by) < 1.0 or abs(ax - bx) < 1.0) and max(
+                    abs(ax - bx), abs(ay - by)
+                ) >= 4.0:
                     rules.append(Rule(min(ax, bx), min(ay, by), max(ax, bx), max(ay, by)))
         images = [flip(b.rect) for b in page.bitmap_resources]
-        return PdfPage(page_no=page_no, width=width, height=height, words=words, rules=rules, images=images)
+        return PdfPage(
+            page_no=page_no, width=width, height=height, words=words, rules=rules, images=images
+        )

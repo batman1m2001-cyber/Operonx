@@ -1,7 +1,6 @@
 """K0 gate: the span invariant on every golden block fixture, plus tree snapshots."""
 
 import json
-
 from pathlib import Path
 
 import pytest

@@ -20,7 +20,11 @@ HAS_PDF = importlib.util.find_spec("docling_parse") is not None
 
 def _params():
     for p in FILES:
-        marks = [pytest.mark.pdf, pytest.mark.skipif(not HAS_PDF, reason="needs the 'pdf' extra")] if p.suffix == ".pdf" else []
+        marks = (
+            [pytest.mark.pdf, pytest.mark.skipif(not HAS_PDF, reason="needs the 'pdf' extra")]
+            if p.suffix == ".pdf"
+            else []
+        )
         yield pytest.param(p, id=p.name, marks=marks)
 
 
@@ -31,9 +35,13 @@ def test_golden_document(path: Path, update_golden):
     tree = build_version(parsed, "ver_golden")
     assert check_elements(tree.canonical, tree.elements) == len(tree.elements)
     for chunker in (StructuralChunker(max_tokens=120), RecursiveChunker(max_tokens=120)):
-        chunks, occurrences = materialize(tree, chunker.draft(tree), document_id="doc_g", version_id="ver_golden", chunker=chunker)
+        chunks, occurrences = materialize(
+            tree, chunker.draft(tree), document_id="doc_g", version_id="ver_golden", chunker=chunker
+        )
         assert chunks, f"{chunker.name} produced no chunks"
-        assert check_chunks(tree.canonical, occurrences, {c.id: c.content_sha for c in chunks}) == len(chunks)
+        assert check_chunks(
+            tree.canonical, occurrences, {c.id: c.content_sha for c in chunks}
+        ) == len(chunks)
     compare_or_update(tree_snapshot(tree), GOLDEN / "expected" / f"{path.name}.json", update_golden)
 
 
@@ -55,8 +63,13 @@ def test_office_generators_are_reproducible():
         assert make(None) == (DOCS / name).read_bytes(), f"{name} differs from its generator"
 
 
-@pytest.mark.skipif(not Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf").exists(), reason="needs DejaVu fonts")
-@pytest.mark.skipif(importlib.util.find_spec("reportlab") is None, reason="needs reportlab (dev group)")
+@pytest.mark.skipif(
+    not Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf").exists(),
+    reason="needs DejaVu fonts",
+)
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None, reason="needs reportlab (dev group)"
+)
 def test_pdf_generators_are_reproducible():
     GENERATORS = _generators("make_pdfs")
 
