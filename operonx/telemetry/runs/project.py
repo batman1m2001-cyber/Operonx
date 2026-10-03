@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
-__all__ = ["StoreSource", "project_stores", "read_dotenv"]
+__all__ = ["StoreSource", "project_files", "project_stores", "read_dotenv"]
 
 _ENV = re.compile(r"\$\{([^}:]+)(?::([^}]*))?\}")
 _KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
@@ -323,6 +323,27 @@ class _Resolver:
         return spec
 
 
+def project_files(
+    root: Any, env: Optional[Mapping[str, str]] = None
+) -> Tuple[Optional[Dict[str, Any]], "_Resolver"]:
+    """The project's ``operonx.toml`` (``${VAR}`` resolved; ``None`` when
+    there is none) and a resolver over its ``resources.yaml`` — what
+    :func:`project_stores` and the score store's
+    :func:`~operonx.telemetry.scores.project_score_store` read."""
+    # absolute: a relative spec would resolve against whichever process opens it
+    root = Path(root).expanduser().absolute()
+    merged: Dict[str, str] = {
+        **read_dotenv(root / ".env"),
+        **dict(os.environ if env is None else env),
+    }
+    path = root / "operonx.toml"
+    raw = _interpolate(_toml(path), merged, []) if path.is_file() else None
+    resources = (raw or {}).get("resources")
+    overlay = resources.get("overlay") if isinstance(resources, dict) else None
+    res_name = str(overlay or "resources.yaml")
+    return raw, _Resolver(root, _resources(root / res_name), res_name, merged)
+
+
 def project_stores(root: Any, env: Optional[Mapping[str, str]] = None) -> List[StoreSource]:
     """One :class:`StoreSource` per trace sink the project's ``operonx.toml``
     names in ``[tracing]`` — the project-wide list, every
@@ -334,28 +355,12 @@ def project_stores(root: Any, env: Optional[Mapping[str, str]] = None) -> List[S
     process's); the project's ``.env`` fills in what it lacks. An empty
     list when there is no manifest or no ``[tracing]`` table. A malformed
     ``[tracing]`` raises :class:`~operonx.app.manifest.ManifestError`."""
-    # absolute: a relative spec would resolve against whichever process opens it
-    root = Path(root).expanduser().absolute()
-    path = root / "operonx.toml"
-    if not path.is_file():
+    raw, resolver = project_files(root, env)
+    if raw is None or raw.get("tracing") is None:
         return []
-    merged: Dict[str, str] = {
-        **read_dotenv(root / ".env"),
-        **dict(os.environ if env is None else env),
-    }
-    raw = _interpolate(_toml(path), merged, [])
-    if raw.get("tracing") is None:
-        return []
-    used = _sinks_in_use(raw, str(path))
+    used = _sinks_in_use(raw, str(resolver.root / "operonx.toml"))
     if not used:
         return []
-    overlay = (
-        (raw.get("resources") or {}).get("overlay")
-        if isinstance(raw.get("resources"), dict)
-        else None
-    )
-    res_path = root / str(overlay or "resources.yaml")
-    resolver = _Resolver(root, _resources(res_path), str(overlay or "resources.yaml"), merged)
     levels: Dict[str, List[str]] = {}
     for sink, level in used:
         have = levels.setdefault(sink, [])
