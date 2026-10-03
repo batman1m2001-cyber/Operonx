@@ -298,9 +298,10 @@ class GraphOp(BaseOp):
         """
         # Phase 3: rewrite user-authored back-edges into hidden loop nodes
         # BEFORE building children (so the hidden loop children get built too).
-        from operonx.core.ops.graph.cycle_rewrite import rewrite_cycles_to_loops
+        from operonx.core.ops.graph.cycle_rewrite import check_loop_caps, rewrite_cycles_to_loops
 
         rewrite_cycles_to_loops(self)
+        check_loop_caps(self)
 
         for child in self._ops.values():
             if hasattr(child, "build"):
@@ -735,8 +736,6 @@ class GraphOp(BaseOp):
         while stack:
             child = stack.pop()
             stack.extend(getattr(child, "_ops", {}).values())
-            if getattr(child, "_synthetic", False):
-                continue
             idx = schema.get_index(child.full_name, "error")
             if idx < 0:
                 continue

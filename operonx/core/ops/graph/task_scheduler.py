@@ -22,7 +22,10 @@ class LoopConfig:
     """Iteration cap of a synthetic loop (the cycle-rewrite's hidden loop op).
 
     A loop's stop condition is not configured here: the scheduler stops it
-    after an iteration in which no back-edge fired.
+    after an iteration in which no back-edge fired. The cap comes from
+    ``if_(..., max_iterations=N)`` on the branch that loops back
+    (`cycle_rewrite.loop_cap`); a loop reaching it records
+    ``LoopLimitExceeded`` in ``$errors`` and routes nothing.
     """
 
     max_iterations: int = 1000
@@ -1050,7 +1053,8 @@ class Scheduler:
             signal = state._loop_signals.pop((op.full_name, ctx), None)
             fired, taken = signal if signal is not None else (False, frozenset())
 
-            if fired and n < op._loop_config.max_iterations - 1:
+            cap = op._loop_config.max_iterations
+            if fired and n < cap - 1:
                 dispatch(name, base + (f"{iter_prefix}{n + 1}",))
                 return
 
@@ -1058,6 +1062,24 @@ class Scheduler:
                 return
             if n:
                 _promote_final_values(op, ctx, base)
+            if fired:
+                # Still looping at the cap: the loop failed, and it says
+                # so. It used to stop here silently, with the last
+                # iteration's values looking like an answer. Like a
+                # failing op, it routes nothing.
+                body = ", ".join(repr(child) for child in op._ops)
+                error = (
+                    f"LoopLimitExceeded: the loop through {body} ran {cap} iterations "
+                    f"without exiting and was stopped; the ops after it did not run. "
+                    f"Its exit condition never held: check it, or change the cap with "
+                    f"if_(..., max_iterations=N) on the branch that loops back."
+                )
+                state.record_op_error(op.full_name, error)
+                err_idx = state.schema.get_index(op.full_name, "error")
+                if err_idx >= 0:
+                    # Where an enclosing subgraph looks for its ops' failures.
+                    state._write_cell(err_idx, base, error)
+                return
             # Successors run at the loop's own context — where the ops that
             # joined it before the loop ran, and where a branch finishing
             # after the loop will arrive — not at the last iteration's.
