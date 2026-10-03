@@ -432,7 +432,11 @@ class MCPClient:
         result, text = await self._invoke(name, arguments)
         structured = _attr(result, "structured_content", "structuredContent")
         if structured is not None:
-            if self._wraps_result(name) and isinstance(structured, dict) and set(structured) == {"result"}:
+            if (
+                self._wraps_result(name)
+                and isinstance(structured, dict)
+                and set(structured) == {"result"}
+            ):
                 return structured["result"]
             return structured
         try:
@@ -446,7 +450,9 @@ class MCPClient:
         schema = _attr(tool, "output_schema", "outputSchema") if tool is not None else None
         if not isinstance(schema, dict):
             return False
-        return set(schema.get("properties") or {}) == {"result"} and schema.get("required") == ["result"]
+        return set(schema.get("properties") or {}) == {"result"} and schema.get("required") == [
+            "result"
+        ]
 
     async def _invoke(self, name: str, arguments: Dict[str, Any]) -> tuple:
         """One tool call, checked: ``(raw result, its text)``."""

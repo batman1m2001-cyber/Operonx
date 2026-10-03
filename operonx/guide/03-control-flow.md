@@ -76,7 +76,9 @@ asyncio.run(main())
 - `.collect()` waits for the whole stream wherever it sits. Behind a
   per-item op (`join(words=s["loud"].collect())` after
   `s = shout(word=w["word"])`) the consumer still runs once, with every
-  item in yield order; an item that failed on the way is left out.
+  item in yield order; an item that failed on the way is left out. If
+  every item failed, it still runs once, with `[]`. A generator that
+  yields nothing has no stream, so its collect does not run.
 - `.parallel(max=N)` runs at most N items through that consumer at once
   (`w["word"].parallel(max=4)`). The graph's `concurrency=N` (default 64)
   still caps all async ops together.

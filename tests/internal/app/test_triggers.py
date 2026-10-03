@@ -93,8 +93,9 @@ def test_webhook_keeps_a_run_id_the_sender_chose():
 
 
 def test_webhook_refuses_beyond_max_inflight():
-    app = Application("t", services=[
-        Service("mail", webhook("/mail", port=8813), graph=on_event, max_inflight=1)])
+    app = Application(
+        "t", services=[Service("mail", webhook("/mail", port=8813), graph=on_event, max_inflight=1)]
+    )
     asgi_app = app.asgi()
     with TestClient(asgi_app) as client:
         transport = asgi_app.state.operonx_runners[0].transport
@@ -109,14 +110,18 @@ def test_webhook_refuses_beyond_max_inflight():
 
 
 def test_schedule_ticks_and_survives_a_failing_run():
-    app = Application("t", services=[Service("sweep", schedule(every=0.05, port=8814), graph=on_tick)])
+    app = Application(
+        "t", services=[Service("sweep", schedule(every=0.05, port=8814), graph=on_tick)]
+    )
     with TestClient(app.asgi()):
         assert wait_for(lambda: len(SEEN) >= 3)  # tick 1 raised; ticks 2 and 3 still came
     assert [s["tick"] for s in SEEN[:3]] == [1, 2, 3]
 
 
 def test_schedule_skips_a_tick_while_the_last_run_is_going():
-    app = Application("t", services=[Service("sweep", schedule(every=0.05, port=8815), graph=on_event)])
+    app = Application(
+        "t", services=[Service("sweep", schedule(every=0.05, port=8815), graph=on_event)]
+    )
     asgi_app = app.asgi()
     with TestClient(asgi_app):
         assert wait_for(lambda: len(SEEN) >= 2)
@@ -125,8 +130,9 @@ def test_schedule_skips_a_tick_while_the_last_run_is_going():
     assert [s["tick"] for s in SEEN] == list(range(1, len(SEEN) + 1))  # never two at once
 
 
-@pytest.mark.parametrize("kwargs", [{}, {"every": 1, "at": "08:00"}, {"every": "soon"},
-                                    {"every": 0}, {"at": "25:00"}])
+@pytest.mark.parametrize(
+    "kwargs", [{}, {"every": 1, "at": "08:00"}, {"every": "soon"}, {"every": 0}, {"at": "25:00"}]
+)
 def test_schedule_refuses_a_clock_it_cannot_read(kwargs):
     with pytest.raises((ManifestError, ValueError)):
         schedule(**kwargs)

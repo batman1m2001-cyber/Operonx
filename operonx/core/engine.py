@@ -834,10 +834,10 @@ class Operon:
             mode-specific chunks (see above).
 
         Raises:
-            Whatever ``run()`` raises — a fatal error such as
-            ``ObserveBudgetExceeded`` — in every mode, after the chunks
-            that landed before it. An op that raises is not fatal: the
-            stream ends normally, as ``run()`` returns normally.
+            BaseException: whatever ``run()`` raises — a fatal error such as
+                ``ObserveBudgetExceeded`` — in every mode, after the chunks
+                that landed before it. An op that raises is not fatal: the
+                stream ends normally, as ``run()`` returns normally.
         """
         import asyncio
 

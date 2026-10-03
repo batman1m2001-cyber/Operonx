@@ -61,7 +61,9 @@ class WebhookTransport(AsgiTransport):
             self.refused += 1
             return None
         meta = dict(meta or {})
-        run_id = (meta.get("query") or {}).get("trace_id") or meta.get("trace_id") or uuid.uuid4().hex
+        run_id = (
+            (meta.get("query") or {}).get("trace_id") or meta.get("trace_id") or uuid.uuid4().hex
+        )
         meta["trace_id"] = run_id
         session = HttpSession(payload, meta=meta)
         self._pending.add(session)
@@ -129,8 +131,10 @@ class ScheduleTransport:
                 pass
             if self._current is not None and not self._current.finished.is_set():
                 self.skipped += 1
-                LOGGER.warning(f"[serve:{name}] tick skipped: the last run is still going "
-                               f"({self.skipped} skipped so far)")
+                LOGGER.warning(
+                    f"[serve:{name}] tick skipped: the last run is still going "
+                    f"({self.skipped} skipped so far)"
+                )
                 continue
             self.ticks += 1
             tick = {"tick": self.ticks, "at": datetime.now().isoformat(timespec="seconds")}

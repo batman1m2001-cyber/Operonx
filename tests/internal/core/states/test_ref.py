@@ -857,7 +857,9 @@ class TestIntrospection:
 
     @pytest.mark.parametrize("name", PROBES)
     def test_a_private_name_is_absent(self, name):
-        assert hasattr(Ref("n", "x"), name) is False
+        # every object has some of these from Python itself (`__getstate__`
+        # since 3.11); what matters is that Ref adds none of them
+        assert hasattr(Ref("n", "x"), name) is hasattr(object(), name)
 
     def test_probing_builds_no_ref(self, monkeypatch):
         built = []

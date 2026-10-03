@@ -23,7 +23,9 @@ SERVER = Path(__file__).parent / "mcp_fixtures" / "values_server.py"
 
 @pytest.fixture
 async def client():
-    c = await MCPClient(MCPServer(name="values", command=sys.executable, args=[str(SERVER)])).connect()
+    c = await MCPClient(
+        MCPServer(name="values", command=sys.executable, args=[str(SERVER)])
+    ).connect()
     yield c
     await c.close()
 
