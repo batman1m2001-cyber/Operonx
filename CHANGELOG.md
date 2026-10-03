@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A ClickHouse run store and trace consumer** (`pip install
+  "operonx[clickhouse]"`). `trace=["trace_langfuse:edupia",
+  "trace_clickhouse:default"]` records each run into ClickHouse beside
+  Langfuse, and `run_store: {backend: clickhouse}` opens the same database
+  for the studio. It passes the shared `RunStore` contract tests.
+  - **A run never waits on the database.** `consume` only queues the
+    finished trace (about 50 µs for a 4000-execution run). A background
+    thread builds the rows and inserts them in batches with `async_insert`.
+    While ClickHouse is slow or down, runs past `queue_size` are dropped and
+    counted in `store.writer.stats`, with one warning per outage. Measured on
+    a 2000-yield streaming run: no difference with gaps between runs; back to
+    back, the writer's CPU (about 46 µs per execution) shares the GIL with
+    the next run (`scripts/bench_clickhouse_consumer.py`).
+  - **Tables**: `runs`, `nodes` and `op_rollups`, as `ReplacingMergeTree`
+    (a retried batch never duplicates a run), partitioned by month and
+    ordered for the contract's queries. Every row has a TTL from
+    `expires_at`: operonx's per-origin retention, or `ttl_days`. The schema
+    is created on first use and versioned in `schema_version`.
+  - **Media**: `Media` values, and `bytes` or arrays from `media_threshold`
+    up, are stored once in `media_dir`, named by their SHA-256. The row
+    keeps `{"$media": sha, "mime", "size", "duration_s", "store"}`.
+    `prune_media()` removes blobs nothing references.
+- **`operonx.telemetry.media`**: `detect_media()` names a blob's type from
+  its magic bytes: WAV (rate, channels and duration from the header), MP3,
+  OGG/Opus, FLAC, WebM, PNG, JPEG, GIF, WebP, PDF and `.npy`. Raw PCM takes
+  the rate a `Media` declares in its mime parameters
+  (`audio/L16;rate=16000`). It also adds the `MediaStore` interface,
+  `LocalMediaStore`, `offload_to_store()` and `json_default()` (an orjson
+  hook that sanitises and offloads in one pass), all usable by any store.
+- **`operonx.telemetry.writer.BackgroundWriter`**: a bounded queue and a
+  batching thread. `submit` never blocks or raises; items past the bound
+  are dropped and counted; failed batches are retried, then dropped.
+
+### Changed
+
+- `tests/internal/cli/test_extras.py` also checks quoted install hints
+  (`pip install "operonx[postgres]"`), which it used to skip.
+
 ## [1.12.2] - 2026-10-03
 
 ### Fixed

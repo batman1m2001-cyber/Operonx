@@ -30,6 +30,11 @@ run_store:
     backend: mongo
     uri: ${RUNS_MONGO_URI}
     database: operonx
+  events:
+    backend: clickhouse       # many runs, many writers; never blocks a run
+    host: ${CLICKHOUSE_HOST}
+    password: ${CLICKHOUSE_PASSWORD}
+    media_dir: /data/operonx-media
   remote:
     backend: langfuse         # read-only, over runs a Langfuse consumer shipped
     host: ${LANGFUSE_HOST}
@@ -44,10 +49,90 @@ run_store:
 | `postgres` | `operonx[postgres]` | `prefix` names its tables; `media_dir` takes large payloads. |
 | `mongo` | `operonx[mongo]` | Native queries and pipelines; `media_dir` as above. |
 | `langfuse` | `operonx[langfuse]` | Reads only: nothing is written through it. |
+| `clickhouse` | `operonx[clickhouse]` | Writes from a background queue, never on the run's path; TTL retention; blobs content-addressed in `media_dir`. See [below](#clickhouse). |
 
 Backends import lazily: declaring a store pulls in no driver its backend
 does not use. A tool that must not import your project (the studio)
 opens one from the YAML fields with `open_run_store({...})`.
+
+## ClickHouse
+
+For many runs from many processes: a call centre's month of calls, every
+worker of every service writing into one database the studio reads.
+Declare it as a trace consumer, beside Langfuse or anything else:
+
+```yaml
+trace_clickhouse:
+  default: &clickhouse
+    host: ${CLICKHOUSE_HOST:localhost}
+    port: 8123                 # 8443 with secure: true
+    user: ${CLICKHOUSE_USER:default}
+    password: ${CLICKHOUSE_PASSWORD:}
+    database: operonx          # created on first use
+    secure: false
+    ttl_days:                  # unset: the retention per origin below; 0: forever
+    media_dir: /data/operonx-media
+    media_threshold: 1024      # bytes; a Media value is stored at any size
+    batch_size: 10000          # executions per insert
+    flush_interval: 1.0        # seconds a batch waits to fill
+    queue_size: 1000           # runs waiting; past it, dropped and counted
+
+run_store:
+  default:                     # what the studio reads: the same database
+    <<: *clickhouse
+    backend: clickhouse
+```
+
+```python
+engine = Operon(graph, trace=["trace_langfuse:edupia", "trace_clickhouse:default"])
+```
+
+**A run never waits on ClickHouse.** The consumer's `consume` puts the
+finished trace on a bounded queue and returns, in about 50 µs. A
+background thread builds the rows, stores the blobs and inserts in
+batches (`async_insert`). While ClickHouse is slow or down, runs past
+`queue_size` are dropped, not queued without end. A failing batch is
+retried three times, then dropped. Each outage logs one warning, and its
+recovery logs one more line. The counts are in `store.writer.stats`.
+`store.flush()` waits for the queue, which a short script wants before it
+exits; an exit hook also gives it 5 s. Reads in the same process wait for
+its own queue first, so a run it just recorded is listed.
+
+The writer's work is real CPU: about 46 µs per execution, sharing the
+GIL with whatever runs next. With gaps between runs (calls), a run's time
+does not change. Runs back to back with no idle time slow each other.
+
+**Tables.** `runs` (one row per run, the summary columns), `nodes` (one
+row per execution, inputs and outputs as JSON text), `op_rollups` (one
+row per op per run) and `schema_version`. They are `ReplacingMergeTree`,
+so a retried batch never duplicates a run, partitioned by month and
+ordered for the queries above: runs by `(origin, name, started_at,
+trace_id)`, nodes by `(trace_id, seq)`. Every method of the contract is
+one or two SQL statements; `op_stats` and `groups` aggregate in
+ClickHouse.
+
+**Retention.** Rows expire on their own through `TTL expires_at`. Each row's
+expiry is set when it is written: the origin's default below, or
+`ttl_days` for every origin. `apply_retention` (the studio's sweep) works
+too, by lightweight `DELETE`.
+
+**Media.** Every `Media` value, and any `bytes` or array of
+`media_threshold` bytes or more, is stored once in `media_dir`, named by its
+SHA-256. The row keeps a reference:
+
+```json
+{"$media": "9f2c…", "mime": "audio/wav", "size": 48044,
+ "duration_s": 1.5, "sample_rate": 16000, "channels": 1, "store": "local"}
+```
+
+The type comes from the bytes: WAV (with rate, channels and duration from
+its header), MP3, OGG/Opus, FLAC, WebM, PNG, JPEG, GIF, WebP, PDF, `.npy`;
+else `application/octet-stream`. Raw PCM has no header, so declare it:
+`Media(pcm, "audio/L16;rate=16000;channels=1")` gets its duration from
+its size. `store.media.get(sha)` reads a blob back. Deleting a run keeps
+its blobs, which other runs may share; `store.prune_media()` removes the
+ones nothing references. `operonx.telemetry.media` (`detect_media`,
+`LocalMediaStore`) is usable by any other store.
 
 ## Asking for runs
 

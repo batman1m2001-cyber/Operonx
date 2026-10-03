@@ -76,7 +76,9 @@ runs still waiting in the queue.
   on a bounded queue (`queue_size` runs, default 1000). It never blocks,
   never raises, and never does I/O.
 * A daemon thread drains it. It turns traces into rows (sanitising and
-  offloading media happen here, off the hot path) and inserts nodes, then
+  offloading media happen here, off the hot path, in one orjson pass whose
+  `default=` hook does both: the two Python walks cost 60 µs per execution,
+  the hook 19 µs) and inserts nodes, then
   rollups, then runs: a listed run always has its nodes. It inserts when
   `batch_size` node rows (default 10 000) are ready or `flush_interval`
   (default 1 s) has passed. Inserts use `async_insert=1,
@@ -184,9 +186,10 @@ migration is retried on the next write and never raises into a run.
 Nothing studio-specific is needed. The studio opens stores with
 `open_run_store(spec)` and calls only contract methods (`list_runs`,
 `get_run`, `groups`, `op_stats`, `count`, `delete_runs`, `refresh`). It
-renders `$media` markers. Its `${VAR}` expansion covers `password:`. One
-limit: it anchors relative paths only for `files` and `sqlite`, so
-`media_dir` should be absolute.
+renders `$media` markers. Its `${VAR}` expansion covers `password:`. Two
+limits: it anchors relative paths only for `files` and `sqlite`, so
+`media_dir` should be absolute; and it reads `run_store:` only in the
+nested form (`run_store:` → `default:`), not as `run_store:default:`.
 
 ## Tests
 
@@ -201,4 +204,21 @@ limit: it anchors relative paths only for `files` and `sqlite`, so
   duration; Langfuse (fake client) and ClickHouse on one engine; TTL and
   `prune_media`.
 * Measure: the time a 2000-op streaming run takes with the consumer and
-  without it.
+  without it (`scripts/bench_clickhouse_consumer.py`).
+
+## Measured
+
+These numbers are for a 2000-yield streaming run (4000 executions) on a
+shared, noisy host.
+
+* `consume()` takes a median of 44 to 55 µs.
+* With the writer idle at run start (gaps between runs), the variants'
+  p25 is 217 to 218 ms with no consumer, a no-op consumer and ClickHouse:
+  no measurable difference.
+* Back to back with no idle time, the median is 175 ms with no consumer
+  and 320 to 440 ms with ClickHouse. The writer's CPU, about 46 µs per
+  execution (row build plus clickhouse-connect's encoding), shares the GIL
+  with the next run. A synchronous `put_trace` costs about 600 ms.
+* While the writer drains five such runs, a 20 ms asyncio ticker's lag
+  stays at a p50 of 0.33 ms, with a p99 of 6.5 ms and a max of 8.7 ms (the
+  GIL switch interval).
