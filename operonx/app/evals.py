@@ -493,7 +493,7 @@ class Eval(Job):
             record_dir=record_dir if record_dir.is_absolute() else root / record_dir,
             concurrency=spec.concurrency,
             item_timeout=spec.item_timeout,
-            trace=list(spec.trace) or None,
+            trace=list(spec.trace) if spec.trace is not None else None,
             inputs=dict(spec.inputs),
             item_input=spec.item_input,
             schedule=spec.schedule,

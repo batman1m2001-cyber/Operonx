@@ -42,6 +42,7 @@ from .declare import (
 )
 from .manifest import Manifest, ManifestError, ServeSpec
 from .origin import stamp_process
+from .tracing import check_sinks
 
 __all__ = ["Application", "GraphRef"]
 
@@ -218,6 +219,7 @@ class Application:
 
     async def run(self, name: str, *, resume: bool = False) -> Any:
         """Run a job or runbook once and return its record."""
+        check_sinks(self.name, jobs=[self.job(name)])  # before the first item, not in it
         return await self.job(name).run(resume=resume)
 
     def run_sync(self, name: str, *, resume: bool = False) -> Any:
@@ -230,9 +232,9 @@ class Application:
         Names of things only; a TOML application is described without
         importing the project."""
         if self.manifest.jobs:
-            jobs = [describe_jobspec(j) for j in self.manifest.jobs]
+            jobs = [describe_jobspec(j, self.manifest) for j in self.manifest.jobs]
         else:
-            jobs = [describe_job(j) for j in (self._jobs or {}).values()]
+            jobs = [describe_job(j, self.manifest) for j in (self._jobs or {}).values()]
         return {
             "name": self.name,
             "root": str(self.root),

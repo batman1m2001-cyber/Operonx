@@ -166,6 +166,14 @@ class ServeSpec:
     #: Hooks run before the listener accepts, in each of its workers — and
     #: only its: ``module:attr`` strings, or the callables themselves.
     on_startup: Tuple[Any, ...] = ()
+    #: The trace consumers the service itself declared (``trace=`` /
+    #: ``trace =``), ``None`` when it named none. ``options["trace"]`` is
+    #: what it will use once ``[tracing]`` and the application's default
+    #: are applied; this is kept so applying them again is not mistaken
+    #: for the service's own choice.
+    trace_own: Optional[Tuple[Any, ...]] = field(default=None, compare=False)
+    #: Where ``options["trace"]`` came from (see `operonx.app.tracing`).
+    trace_from: str = field(default="default", compare=False)
 
     @property
     def is_stream(self) -> bool:
@@ -222,7 +230,8 @@ class JobSpec:
     session: str = "per_item"
     concurrency: int = 4
     on_error: str = "skip"
-    trace: Tuple[str, ...] = ()
+    #: ``None`` when the block has no ``trace`` key; ``()`` is "trace nothing".
+    trace: Optional[Tuple[str, ...]] = None
     inputs: Dict[str, Any] = field(default_factory=dict)
     item_input: Optional[str] = None
     item_timeout: Optional[float] = None
@@ -252,6 +261,8 @@ class Manifest:
     #: Where relative paths resolve when there is no file (an application
     #: declared in Python): the directory the declaration was made in.
     base: Optional[Path] = None
+    #: ``[tracing]``: which trace sinks are on (`operonx.app.tracing`).
+    tracing: Any = None
 
     @property
     def name(self) -> str:
@@ -366,11 +377,24 @@ class Manifest:
             _serve_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("serve")))
         )
         _reject_duplicates(serves, where)
+        from .tracing import check_names, parse_tracing, settle_serves
+
+        tracing = parse_tracing(raw.get("tracing"), where)
         # `[project] trace = [...]`: the consumers every service and job
-        # uses unless it declares its own
+        # uses unless it declares its own — the application's default,
+        # spelled in the file.
         if "trace" in project:
             project["trace"] = [str(t) for t in _as_list(project.get("trace"))]
-        serves = with_default_trace(serves, project.get("trace"))
+            if tracing is not None and tracing.sinks is not None:
+                # Two project-wide lists in one file, at two precedence
+                # levels (an `Application(trace=...)` beats the first and
+                # loses to the second): whichever one a reader edits, the
+                # other may be the one that applies.
+                raise ManifestError(
+                    f"{where}: [project] trace and [tracing] sinks both set the project's "
+                    "sinks — keep [tracing] sinks and remove [project] trace"
+                )
+        serves = settle_serves(serves, project.get("trace"), tracing)
 
         jobs = tuple(_job_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("job"))))
         seen_jobs: Dict[str, int] = {}
@@ -380,6 +404,12 @@ class Manifest:
                     f"{where}: [[job]] #{seen_jobs[j.name]} and #{i} are both named {j.name!r}"
                 )
             seen_jobs[j.name] = i
+        if app_entry is None:
+            # With `app =` the services and jobs are the object's, checked
+            # when it is loaded (`load_declared`). A runbook's members are
+            # known only once it is imported: checked when jobs are built.
+            complete = not any(j.runbook for j in jobs)
+            check_names(tracing, where, serves, [j.name for j in jobs] if complete else None)
 
         return cls(
             project=project,
@@ -391,6 +421,7 @@ class Manifest:
             on_startup=on_startup,
             jobs=jobs,
             src=src,
+            tracing=tracing,
         )
 
 
@@ -398,17 +429,11 @@ def with_default_trace(serves: Tuple["ServeSpec", ...], trace: Any) -> Tuple["Se
     """Services that declare no ``trace`` take the application's.
 
     A service that says ``trace=[]`` keeps its silence: ``None`` inherits,
-    an empty list is a decision."""
-    if trace is None:
-        return tuple(serves)
-    from dataclasses import replace
+    an empty list is a decision. ``[tracing]`` aside — see
+    `operonx.app.tracing.settle_serves`, which this is with no table."""
+    from .tracing import settle_serves
 
-    out = []
-    for spec in serves:
-        if spec.kind != "asgi" and "trace" not in spec.options:
-            spec = replace(spec, options={**spec.options, "trace": list(trace)})
-        out.append(spec)
-    return tuple(out)
+    return settle_serves(serves, trace, None)
 
 
 # -- parsing helpers -----------------------------------------------------
@@ -576,6 +601,10 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
+    trace_own = None
+    if "trace" in block:
+        trace_own = tuple(_as_list(block["trace"]))
+        options["trace"] = list(trace_own)
 
     return ServeSpec(
         name=name,
@@ -595,6 +624,8 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         app=(str(app) if app else None),
         description=str(block.get("description") or ""),
         options=options,
+        trace_own=trace_own,
+        trace_from="service" if trace_own is not None else "default",
     )
 
 
@@ -738,7 +769,7 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         session=session,
         concurrency=concurrency,
         on_error=on_error,
-        trace=tuple(str(t) for t in _as_list(block.get("trace"))),
+        trace=(tuple(str(t) for t in _as_list(block["trace"])) if "trace" in block else None),
         inputs=dict(inputs),
         item_input=_opt("item_input"),
         item_timeout=(float(item_timeout) if item_timeout is not None else None),

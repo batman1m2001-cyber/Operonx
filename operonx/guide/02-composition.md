@@ -245,3 +245,49 @@ with TestClient(APP.asgi()) as client:
     reply = client.post("/score", json={"id": "c9", "text": "call me back later please"}).json()
     assert reply == {"id": "c9", "words": 5, "verdict": "engaged"}
 ```
+
+### Which sinks are on: `[tracing]`
+
+`operonx.toml` is the operator's switch for tracing. `[tracing] sinks` sends
+every run to all of them; `[tracing.services.<name>]` and
+`[tracing.jobs.<name>]` override one service or job. `"local"` is the
+built-in local consumer (`.operonx/runs`); any other entry is a resource
+key from `resources.yaml`. `sinks = []` turns tracing off at that level.
+
+```toml file=operonx.toml
+[project]
+name = "scorer"
+app  = "app:APP"
+
+[resources]
+overlay = "resources.yaml"
+
+[tracing]
+sinks = ["local", "trace_local:default"]   # beats Application(trace=...)
+
+[tracing.jobs.score_calls]
+sinks = []                                  # this job is not traced
+```
+
+```python
+from operonx.app import Application
+
+APP = Application.find(".")
+d = APP.describe()  # what `operonx-serve --list` / `operonx-run --list` print
+score = next(s for s in d["services"] if s["name"] == "score")
+assert (score["sinks"], score["sinks_from"]) == (["local", "trace_local:default"], "[tracing]")
+job = next(j for j in d["jobs"] if j["name"] == "score_calls")
+assert (job["sinks"], job["sinks_from"]) == ([], "[tracing.jobs.score_calls]")
+```
+
+```bash run
+operonx-serve --list        # each service with "sinks: ...  (<where they came from>)"
+operonx-run --list          # each job, the same
+```
+
+Most specific wins: `[tracing.<services|jobs>.<name>]`, then the service's or
+job's own `trace=`, then `[tracing] sinks`, then `Application(trace=...)`,
+then the default (a job records locally; a service is not traced). Every
+sink of one run gets the same trace id, including a caller's `?trace_id=`.
+A typo in `[tracing]` fails at load; a sink missing from `resources.yaml`
+fails when the service or job starts.

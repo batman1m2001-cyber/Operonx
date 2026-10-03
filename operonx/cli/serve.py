@@ -14,6 +14,12 @@ from pathlib import Path
 from operonx.app import Application, ManifestError
 
 
+def _sinks(d: dict) -> str:
+    """Where a service's or job's runs are traced, and which level of the
+    precedence chose it — what the operator checks before a deploy."""
+    return f"sinks: {', '.join(d['sinks']) or 'none'}  ({d['sinks_from']})"
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="operonx-serve",
@@ -51,6 +57,8 @@ def main(argv=None) -> int:
                 print(
                     f"    {s.name:14s} {s.kind:10s} {s.path:16s} -> {target}  [{s.session}{bound}]"
                 )
+                if s.kind != "asgi":
+                    print(f"      {_sinks(d)}")
                 if d["on_startup"]:
                     print(f"      on_startup={','.join(d['on_startup'])}")
                 if d["on_session"] or d["on_close"]:
