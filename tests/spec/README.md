@@ -1,24 +1,21 @@
-# Shared JSON fixtures
+# Spec fixtures
 
-These fixtures are duplicated in
-[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs)
-under the same `tests/spec/` path. Both projects run the same
-`graph.json` / `inputs.json` / `expected.json` through their own
-runtime and assert byte-equal output (modulo `$start_time` /
-`$end_time` / `$duration_ms`).
-
-## Sync policy
-
-When adding or changing a fixture, apply the same change in both
-repos in the same PR. The duplication is deliberate — it keeps each
-project self-contained (no git submodule, no cross-repo build hop),
-at the cost of one extra paste on cross-runtime work.
+Golden-output tests: each folder builds a graph, runs it with fixed
+inputs and compares the result with a stored answer, so a change in what
+the engine computes shows up as a diff of a JSON file.
 
 Files per fixture folder:
 
-- `graph.json` — the serialized graph (both runtimes read this).
+- `builder.py` — `build_graph() -> GraphOp`, using the shared ops in
+  `_ops.py`. Its presence is what makes a folder a fixture.
 - `inputs.json` — kwargs passed to `engine.run(inputs=...)`.
-- `expected.json` — golden output.
+- `expected.json` — golden output (timing keys stripped).
 - `scratch.json` — optional, seeds `engine.run(scratch=...)`.
-- `builder.py` — Python-side builder that regenerates `graph.json`
-  via `scripts/regen_fixture.py`. Present in this repo only.
+
+`scripts/regen_fixture.py <fixture dir>` rewrites `expected.json` from
+the builder. Review the diff before committing it: a golden that changed
+is a behaviour change.
+
+(These fixtures were once shared with the operonx-rs runtime, which read
+a serialised `graph.json` from each folder. That runtime is dropped, and
+the `graph.json` files went with it.)

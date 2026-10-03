@@ -115,7 +115,7 @@ class EmbeddingOp(BaseOp):
         return cls(resource=resource, inputs=input_mappings or None, **init_kwargs)
 
     def serialize(self) -> dict:
-        """Serialize EmbeddingOp for Rust backend, including backend config."""
+        """Serialize EmbeddingOp, including the resolved backend config."""
         self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource

@@ -249,7 +249,7 @@ class BaseOp(ABC):
         2. EDGE OPERATORS  >>, >>~, >, <, [], ~ — wiring ops in a graph
         3. EXECUTE         run(), get_inputs/outputs, store_result, _exec_core
         4. OBSERVABILITY   _log(), _store_metrics()
-        5. SERIALIZATION   serialize(), metadata — for Rust backend & tracing
+        5. SERIALIZATION   serialize(), metadata — config dict & tracing
 
     Example::
 
@@ -1440,11 +1440,11 @@ class BaseOp(ABC):
                 )
 
     # =========================================================================
-    # 5. SERIALIZATION — for Rust backend and tracing
+    # 5. SERIALIZATION — config dict and tracing
     # =========================================================================
 
     def serialize(self) -> dict:
-        """Serialize this op to a config dict for the Rust backend."""
+        """This op as a config dict (see ``GraphOp.serialize``)."""
         is_async = inspect.iscoroutinefunction(self.core)
         is_gen = inspect.isgeneratorfunction(self.core) or inspect.isasyncgenfunction(self.core)
         base = {

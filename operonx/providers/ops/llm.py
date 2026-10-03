@@ -1563,7 +1563,7 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     def serialize(self) -> dict:
-        """Serialize LLMOp for Rust backend, including backend configs."""
+        """Serialize LLMOp, including the resolved backend configs."""
         self._ensure_initialized()
         base = super().serialize()
 

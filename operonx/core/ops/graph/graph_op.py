@@ -66,7 +66,7 @@ class GraphOp(BaseOp):
                          → yields (ctx, outputs) per batch or per stream frame
                          → loop iteration handled inside scheduler EOF handler
 
-        4. EXPORT        serialize()  config dict for Rust backend
+        4. EXPORT        serialize()  the graph as a config dict
                          validate()   graph structure validation
                          show()       debug display
     """
@@ -879,11 +879,13 @@ class GraphOp(BaseOp):
     # ═══════════════════════════════════════════════════════════════════
 
     def serialize(self) -> dict:
-        """Serialize full graph to config dict for the Rust backend.
+        """The whole graph as a config dict: ops, edges, entries and exits.
 
-        Note: the key ``"initial_ready_count"`` is kept as-is for Rust backend
-        compatibility even though the internal Python attribute was renamed to
-        ``_initial_ready`` during the scheduler rewrite.
+        A graph's canonical description; an eval's fingerprint hashes it.
+        It was written for the dropped Rust runtime, and some keys are
+        still that runtime's (``initial_ready_count``, ``compiled_adj``,
+        ``stream_initial_ready``): kept so the output, and every hash
+        taken of it, stays the same.
         """
         # Phase 3: synthetic hidden loops can't serialize as classic
         # loop_config because their termination is scheduler-side (back-edge

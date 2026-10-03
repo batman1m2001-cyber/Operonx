@@ -210,7 +210,7 @@ class BranchOp(BaseOp):
         return state[self.full_name, "target", context_id]
 
     def serialize(self) -> dict:
-        """Serialize branch op with conditions for Rust backend."""
+        """Serialize branch op with its conditions."""
         base = super().serialize()
         base.update(
             {

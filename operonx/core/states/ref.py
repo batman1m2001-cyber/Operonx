@@ -769,7 +769,7 @@ class Ref:
     # =========================================================================
 
     def serialize(self) -> dict:
-        """Serialize Ref to dict for Rust backend."""
+        """This Ref as a dict (see ``GraphOp.serialize``)."""
         return {
             "source": self.source,
             "var": self.var,

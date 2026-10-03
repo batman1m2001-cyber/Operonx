@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate a shared spec fixture's `graph.json` + `expected.json`.
+"""Regenerate a spec fixture's `expected.json`.
 
 Usage:
     uv run python scripts/regen_fixture.py tests/spec/core/ops/parser_json_extract
@@ -9,7 +9,6 @@ The fixture dir must already contain:
     inputs.json — engine.run() inputs
 
 Writes:
-    graph.json    — scrubbed serialised graph + schema_version
     expected.json — engine.run() output, $state stripped, timing keys stripped
 """
 
@@ -24,34 +23,6 @@ from pathlib import Path
 
 TIMING_KEYS = {"$start_time", "$end_time", "$duration_ms"}
 
-# Python-only values serialize() emits that a JSON fixture cannot hold,
-# and secrets that must not be written to disk. Moved here from the
-# deleted `operonx pack`; graph.json and this scrub go with
-# GraphOp.serialize() once the Rust serialize path is removed.
-DROP_KEYS = {"python_callable", "resource_config", "resource_configs", "fallback_configs"}
-SENSITIVE_KEYS = {
-    "api_key",
-    "secret_key",
-    "access_token",
-    "refresh_token",
-    "private_key",
-    "private_key_id",
-}
-
-
-def _scrub(node):
-    """Drop Python-only and cached resource fields; redact stray secrets."""
-    if isinstance(node, dict):
-        out = {}
-        for k, v in node.items():
-            if k in DROP_KEYS:
-                continue
-            out[k] = "<REDACTED>" if k in SENSITIVE_KEYS and isinstance(v, str) and v else _scrub(v)
-        return out
-    if isinstance(node, list):
-        return [_scrub(v) for v in node]
-    return node
-
 
 def _strip(o):
     if isinstance(o, dict):
@@ -65,7 +36,6 @@ def regen(fixture_dir: Path) -> None:
     builder_path = fixture_dir / "builder.py"
     inputs_path = fixture_dir / "inputs.json"
     scratch_path = fixture_dir / "scratch.json"
-    graph_path = fixture_dir / "graph.json"
     expected_path = fixture_dir / "expected.json"
 
     spec = importlib.util.spec_from_file_location(f"_b_{fixture_dir.name}", builder_path)
@@ -73,10 +43,6 @@ def regen(fixture_dir: Path) -> None:
     spec.loader.exec_module(module)
     graph = module.build_graph()
     graph.build()
-
-    cleaned = _scrub(graph.serialize())
-    cleaned["schema_version"] = "1.0"
-    graph_path.write_text(json.dumps(cleaned, indent=2, default=str))
 
     inputs = json.loads(inputs_path.read_text()) if inputs_path.exists() else {}
     scratch = json.loads(scratch_path.read_text()) if scratch_path.exists() else None
