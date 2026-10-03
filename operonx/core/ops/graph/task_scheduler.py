@@ -915,14 +915,12 @@ class Scheduler:
                 buf.sort(key=lambda entry: _item_index(entry[0][n]))
                 if not any(k[0] == stream_ctx for k in collect_bufs):
                     stream_minter.pop(stream_ctx, None)
-            merged = {}
-            for _, r in buf:
-                for k, v in r.items():
-                    merged.setdefault(k, []).append(v)
-            if not buf:
-                # No item reached the collect: what it reads is an empty
-                # list, not a missing value (which would bind the default).
-                merged = {var: [] for var in _collected_vars(g, src, dst)}
+            # Only what dst reads through `.collect()`. No item reaching the
+            # collect gives an empty list, not a missing value (which would
+            # bind the default).
+            merged = {
+                var: [r[var] for _, r in buf if var in r] for var in _collected_vars(g, src, dst)
+            }
             collect_ctx = stream_ctx + ("__collect__",)
             # Listed once and seeded here, as `_advance` does for a new item.
             # Left unseeded, the consumer's frame at this context looked like
@@ -934,7 +932,18 @@ class Scheduler:
             if collect_ctx not in ready:
                 ready[collect_ctx] = dict(g._initial_ready)
                 item_ctxs.append(collect_ctx)
-            g._ops[src].store_result(state, merged, collect_ctx)
+            # Written straight into src's cells, where dst's pull finds
+            # them — not through `store_result`, which also pushes. The
+            # lists are dst's input, not a new output of src: storing every
+            # output of src through its pushes handed a `PARENT` reducer
+            # cell each item a second time, as one list.
+            src_name = g._ops[src].full_name
+            for var, values in merged.items():
+                idx = state.schema.get_index(src_name, var)
+                if idx < 0:
+                    raise KeyError(f"({src_name}, {var}) not found in schema")
+                state._write_cell(idx, collect_ctx, values)
+            state.advance_step()
             dispatch(dst, collect_ctx)
 
         def _busy_below(stream_ctx: tuple) -> bool:
