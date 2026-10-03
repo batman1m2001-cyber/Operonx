@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An eval run is an experiment** (`docs/EVALS_PLAN.md`, phase E1).
+  `run.json["eval"]` gains a `fingerprint` (git commit and dirty flag at
+  the eval's root, `graph_hash`, `config_hash` over the resolved resources
+  with secrets dropped, `dataset_version`, evaluator versions and
+  `evaluators_hash`, `operonx_version`), `metrics` (each check and `pass`
+  as a mean with a Wilson, CLT or clustered 95% interval) and a `gate`
+  block with the verdict and exit code. Item verdicts carry `case`,
+  `repeat` and `case_hash`.
+- `Eval(repeats=N)`: N items per case (`<id>#<r>`), cases classed
+  stable-pass / stable-fail / flaky, and pass^k. `Eval(cluster="field")`
+  groups cases for the clustered SE.
+- `operonx.app.evals.Gate`: per-metric thresholds, a baseline (`"latest"`
+  or a run id) compared paired — exact McNemar and Newcombe's interval for
+  0/1 checks, a seeded paired bootstrap otherwise, Holm across gated
+  metrics, Benjamini–Hochberg for the rest — with a tolerance, a must-pass
+  tag, an error budget and `strict`. Verdicts `pass`, `inconclusive`,
+  `failed`, `regressed`, `error`; exit codes 0 / 0 (2 strict) / 1 / 1 / 3,
+  which `operonx run <eval>` now returns. `[[job]]` evals read `repeats`,
+  `cluster` and a `[job.gate]` table.
+- `operonx.app.evals.stats`: Wilson, CLT and clustered SE, pass^k, exact
+  McNemar, Newcombe's paired interval, a paired (cluster) bootstrap, Holm
+  and Benjamini–Hochberg — pure Python, seeded.
+- The agent guide's `06-evals.md`, run by `tests/guide/`.
+- `scripts/bench_eval_overhead.py`: what an eval costs over a plain job,
+  per case and per run.
+
+### Changed
+
+- `operonx.app.evals` is a package (`dataset`, `evaluators`, `job`,
+  `fingerprint`, `stats`, `gate`); every 1.14.0 import still works.
+- `ItemResult.as_dict()` is shallow: the deep copy of an eval's verdict was
+  most of what writing an item cost.
+- Without a `gate`, an eval passes, fails and exits exactly as in 1.9.0.
+
 ## [1.14.0] - 2026-10-04
 
 ### Added

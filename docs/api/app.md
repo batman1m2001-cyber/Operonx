@@ -62,6 +62,13 @@ between it and `trace=` in Python. See [Tracing](../guide/07-tracing.md#switchin
 ::: operonx.app.evals.fuzzy
 ::: operonx.app.evals.json_match
 ::: operonx.app.evals.llm_judge
+::: operonx.app.evals.Gate
+::: operonx.app.evals.fingerprint
+    options:
+      members: [fingerprint, case_hash, dataset_version, evaluator_version]
+::: operonx.app.evals.stats
+    options:
+      members: [wilson, estimate, clustered_se, pass_hat_k, mcnemar, newcombe_paired, paired_bootstrap, compare_paired, holm, benjamini_hochberg]
 
 ## The playground bridge
 

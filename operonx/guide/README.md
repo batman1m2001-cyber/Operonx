@@ -18,6 +18,7 @@ websocket, and an **Application** bundles a product's jobs and services.
 3. [Control flow](03-control-flow.md): streaming, loops, if/else, `~`.
 4. [Gotchas](04-gotchas.md): the failures that raise nothing.
 5. [Project layout](05-project-layout.md): how to lay out a product.
+6. [Evals](06-evals.md): cases, repeats, a gate with a baseline, exit codes.
 
 ## Install
 
