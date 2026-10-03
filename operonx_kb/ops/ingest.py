@@ -192,17 +192,22 @@ def chunk_version(tree: dict, plan: dict, catalog: str) -> dict:
 
 @op(bound="cpu", exclude={"trace": ["vectors", "todo", "ids"]}, show_keys="staged")
 def stage_index_writes(
-    plan: dict, todo: list, vectors: dict, store: str, collection: str, catalog: str
+    todo: list, vectors: dict, store: str, vcollection: str, collection: str, catalog: str
 ) -> dict:
     """Record the new chunks' vector keys in the catalog ledger, then hand them to the upsert.
 
     The ledger row comes first, so the ledger always covers the index: a crash
     after this op and before the upsert leaves a row whose vector is missing,
     which GC deletes harmlessly (deleting an absent id is not an error).
+    Used by ingest (the new chunks) and by rebuild (every active chunk).
+
+    Args:
+        vcollection: The collection inside the vector store (``""`` for its default).
+        collection: The KB collection id.
     """
-    entries = [(c["id"], make_vector_id(c["id"]), plan["document_id"]) for c in todo]
+    entries = [(c["id"], make_vector_id(c["id"]), c["document_id"]) for c in todo]
     catalog_of(catalog).record_index_entries(
-        full_key(store, "vector_store"), collection, plan["collection_id"], entries
+        full_key(store, "vector_store"), vcollection, collection, entries
     )
     return {
         "ids": [vid for _, vid, _ in entries],

@@ -64,11 +64,11 @@ def build_ingest_graph(
             chunks=chunks["todo"],
         )
         stage = stage_index_writes(
-            plan=plan["plan"],
             todo=chunks["todo"],
             vectors=embed["vectors"],
             store=dense.store,
-            collection=collection_name,
+            vcollection=collection_name,
+            collection=collection,
             catalog=catalog,
         )
         upsert = VectorUpsertOp.of(

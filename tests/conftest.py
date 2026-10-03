@@ -32,6 +32,10 @@ vector_store:kb:
   api_type: faiss
   metric: cosine
   dim: 32
+vector_store:kb2:
+  api_type: faiss
+  metric: cosine
+  dim: 32
 fake_embedding:hash:
   dim: 32
 """

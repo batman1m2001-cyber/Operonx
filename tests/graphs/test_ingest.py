@@ -206,3 +206,65 @@ def test_ingest_flow_runs_as_a_job_over_a_directory(kb, tmp_path):
     assert record.status == "ok", record
     assert sorted(r["action"] for r in got) == ["new", "new"]
     assert len(kb.documents("docs")) == 2 and kb.verify("docs").ok
+
+
+async def _top10(store, embedder, queries):
+    """Per query: the top-10 scores, and the ids ranked strictly above the 10th score.
+
+    Identical chunk texts (the corpus repeats a paragraph) score the same, and an
+    index may order equal scores either way; only the unambiguous part is compared.
+    """
+    out = []
+    for q in queries:
+        ids, scores, _ = await store.search(embedder.vector(q), top_k=10)
+        scores = [round(s, 5) for s in scores]
+        out.append((scores, {i for i, s in zip(ids, scores) if s > scores[-1]}))
+    return out
+
+
+def _queries(kb, n=50):
+    chunks = kb.catalog.get_chunks(sorted(kb.catalog.active_chunk_ids(collection_id="docs")))
+    texts = [" ".join(c.text.split()[:8]) for c in chunks.values()]
+    return [texts[i % len(texts)] + f" {i}" for i in range(n)]
+
+
+def test_rebuild_into_a_new_generation_matches_ids_and_top10(kb, hub):
+    """K1c gate: a rebuild from the catalog alone reproduces the id set and the
+    top-10 results of 50 queries, parses nothing and embeds nothing (cache)."""
+    for p in CORPUS:
+        run(kb.add("docs", str(p)))
+    queries = _queries(kb)
+    before_ids = run(ids_in(kb.store))
+    before_top = run(_top10(kb.store, kb.embedder, queries))
+    parses, calls = kb.recorder.runs("parsed"), kb.embedder.calls
+    report = run(kb.rebuild("docs", store="vector_store:kb2", drop_previous=True))
+    new = hub.get("vector_store:kb2")
+    assert report["switched"] and report["upserted"] == len(before_ids) == report["chunks"]
+    assert kb.recorder.runs("parsed") == parses and kb.embedder.calls == calls
+    assert run(ids_in(new)) == before_ids
+    assert run(_top10(new, kb.embedder, queries)) == before_top
+    assert report["previous_deleted"] == len(before_ids) and run(ids_in(kb.store)) == set()
+    assert kb.collection("docs").spec.dense.store == "vector_store:kb2"
+    assert kb.verify("docs").ok
+    # The rebuilt index serves ingest, delete and GC as before.
+    run(kb.delete("docs", str(DOCS / "meeting_notes.txt"), purge=True))
+    assert kb.verify("docs").ok and len(run(ids_in(new))) < len(before_ids)
+
+
+def test_rebuild_after_losing_the_index_restores_it_in_place(kb, hub, tmp_path):
+    from operonx.core.registry import ResourceHub
+
+    for p in CORPUS[:4]:
+        run(kb.add("docs", str(p)))
+    expected = run(ids_in(kb.store))
+    # A new process: the in-memory FAISS index is gone, the catalog is not.
+    fresh = ResourceHub.from_yaml(hub.source_path)
+    ResourceHub.set_instance(fresh)
+    from operonx_kb import KnowledgeBase
+
+    kb2 = KnowledgeBase()
+    assert run(ids_in(fresh.get("vector_store:kb"))) == set()
+    report = run(kb2.rebuild("docs"))
+    assert report["upserted"] == len(expected) and fresh.get("fake_embedding:hash").calls == 0
+    assert run(ids_in(fresh.get("vector_store:kb"))) == expected
+    assert kb2.verify("docs").ok

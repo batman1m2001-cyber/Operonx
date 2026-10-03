@@ -25,6 +25,8 @@ __all__ = [
     "find_stale_entries",
     "collect_blobs",
     "gc_report",
+    "plan_rebuild",
+    "finish_rebuild",
 ]
 
 
@@ -80,13 +82,17 @@ def finish_delete(
 
 
 @op(bound="cpu", show_keys="count")
-def find_stale_entries(collection: str, store: str, vcollection: str, catalog: str) -> dict:
-    """Ledger entries of the collection that no active version holds any more."""
+def find_stale_entries(
+    collection: str, store: str, vcollection: str, catalog: str, everything: bool = False
+) -> dict:
+    """Ledger entries of the collection that no active version holds any more
+    (with ``everything``, all of them: dropping a whole index generation)."""
     cat = catalog_of(catalog)
     entries = cat.index_entries(
         full_key(store, "vector_store"), vcollection, collection_id=collection
     )
-    stale = sorted(set(entries) - cat.active_chunk_ids(collection_id=collection))
+    live = set() if everything else cat.active_chunk_ids(collection_id=collection)
+    stale = sorted(set(entries) - live)
     return {"chunk_ids": stale, "vector_ids": [entries[c] for c in stale], "count": len(stale)}
 
 
@@ -117,3 +123,46 @@ def gc_report(
             "blobs_deleted": blobs_deleted,
         }
     }
+
+
+@op(bound="cpu", exclude={"trace": ["chunks"]}, show_keys="count")
+def plan_rebuild(collection: str, catalog: str) -> dict:
+    """Every chunk an active version of the collection holds, from the catalog alone."""
+    cat = catalog_of(catalog)
+    ids = sorted(cat.active_chunk_ids(collection_id=collection))
+    chunks = cat.get_chunks(ids)
+    return {"chunks": [chunks[i].model_dump(mode="json") for i in ids], "count": len(ids)}
+
+
+@op(bound="cpu", show_keys="report")
+def finish_rebuild(
+    collection: str,
+    store: str,
+    vcollection: str,
+    switch: bool,
+    catalog: str,
+    chunks: int = 0,
+    upserted: int = 0,
+) -> dict:
+    """With ``switch``, point the collection's dense index at the rebuilt one (the alias flip)."""
+    cat = catalog_of(catalog)
+    coll = cat.get_collection(collection)
+    if coll is None:
+        raise CatalogError(f"no collection {collection!r}")
+    previous = coll.spec.dense
+    if switch:
+        dense = previous.model_copy(update={"store": store, "collection": vcollection or None})
+        cat.put_collection(
+            coll.model_copy(update={"spec": coll.spec.model_copy(update={"dense": dense})})
+        )
+    report = {
+        "chunks": chunks,
+        "upserted": upserted,
+        "store": full_key(store, "vector_store"),
+        "collection": vcollection,
+        "switched": switch,
+        "previous": {"store": previous.store, "collection": previous.collection}
+        if previous
+        else None,
+    }
+    return {"report": report}
