@@ -184,3 +184,24 @@ decorator and `Verdict` class, judges as traced graphs and the judge cache's use
   `{"python_callable": fn}` and is hashed by name and source.
 - The rescore module is `rescoring.py`: `operonx.app.evals.rescore` is the function, and a
   module of the same name would have been shadowed by it.
+
+**E3 built, 2026-10-04** (`feat/evals-e2`).
+
+- Contract suite (`tests/internal/telemetry/test_score_store.py`) over `files`, `sqlite`
+  and a throwaway local ClickHouse 26.9 container (`OPERONX_TEST_CLICKHOUSE`, never the team
+  server): all pass, as do the run-store contract and the ClickHouse run-store tests on the
+  same container after the connection moved into `ClickHouseConnection`.
+- Migration: a v2 database gets exactly `experiments`, `experiment_items`, `scores`,
+  `judge_cache` and no `CREATE DATABASE` (fake client); live, a v2 database holding a run
+  upgrades to v3, keeps the run, and an experiment written through one client reads back
+  through a second (host A → host B).
+- Outage: a store that fails every write — the record holds every verdict, the gate
+  decides as without a store, the run waits `scores_timeout` (1 s in the test) and logs
+  the loss with the record's path; `publish` fills the store afterwards with the rows the
+  live path would have written (`test_eval_scores.py`).
+- Overhead with no `scores=` (interleaved E2 `81608af` vs E3, `bench_eval_overhead.py`):
+  eval over job +159 / +152 µs/case before, +139 / +152 after — the per-item cost read
+  (`_run_cost`) is not measurable.
+- Found on the way: `clickhouse-connect` returns `''` for a `String` column written as
+  `''`, so a trace score's empty `case_id` read back as `''`; score ids that a target does
+  not need are `Nullable` in the table and written as `NULL`.

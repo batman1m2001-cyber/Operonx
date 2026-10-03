@@ -96,6 +96,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `output_clipped` when the record holds only a preview.
 - A case's async evaluators run at the same time (50 cases × 3 async
   judges: 2.06 s → 0.74 s).
+- **`operonx.telemetry.scores`: the ScoreStore** (phase E3). Experiments,
+  experiment items and one `Score` row type for every judgement (code,
+  judge, human, online, pairwise; targets item / trace / op / session /
+  pair) with ids derived from what is judged. Backends `files` (JSONL + an
+  SQLite index, the default), `sqlite` and `clickhouse`; `score_store:` is a
+  resource. Contract: experiments upsert/list/get, items, scores,
+  `score_series`, a judge cache.
+- `Eval(scores=…, scores_timeout=10)` writes the experiment, items and
+  scores through a background writer; a store outage loses no verdict (the
+  job record has them). `publish(run, store)` sends a recorded run.
+  `[[job]]` evals read `scores = "score_store:<name>"`.
+- A verdict carries the case run's own `cost_usd`, `tokens_in` and
+  `tokens_out` when it made LLM calls.
 - The agent guide's `07-evals.md`, run by `tests/guide/`.
 - `scripts/bench_eval_overhead.py`: what an eval costs over a plain job,
   per case and per run.
@@ -286,6 +299,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   most of what writing an item cost.
 - Without a `gate`, an eval passes, fails and exits exactly as in 1.9.0.
 - `llm_judge` evaluators carry `eval_kind = "judge"`.
+- ClickHouse schema version 3 (`experiments`, `experiment_items`, `scores`,
+  `judge_cache`) is added to the run store's migration chain: opening a run
+  store on a 1.14 database creates the four tables (no `CREATE DATABASE`
+  for a table-only user). The connection and migration are shared
+  (`ClickHouseConnection`, `migrate`).
 
 ### Removed
 

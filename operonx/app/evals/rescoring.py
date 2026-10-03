@@ -86,11 +86,14 @@ async def rescore(
     *,
     store: Any = None,
     dataset: Any = None,
+    scores: Any = None,
 ) -> Rescored:
     """Judge *run* (a :class:`JobRun`, or its directory) again with
     *evaluators*. ``store`` is the run store its traces went to — needed
     when an evaluator reads ``trace``; ``dataset`` overrides the dataset
-    path the run recorded."""
+    path the run recorded; ``scores`` (a ScoreStore) receives the new
+    scores, one per check per judged run, ids by trace and evaluator
+    version — beside the experiment's own, never over them."""
     found = _load(run)
     prepared = [prepare(ev) for ev in evaluators]
     judges = [p.name for p in prepared if is_judge(p.ev)]
@@ -123,7 +126,42 @@ async def rescore(
         verdicts[item.key] = verdict
         trials.append(trial_of(item.key, verdict, item.ms))
     nums, _, _ = numbers(trials, int(ev_meta.get("repeats") or 1))
+    if scores is not None:
+        rows = _scores(found, verdicts, prepared)
+        await asyncio.to_thread(scores.put_scores, rows)
     return Rescored(found.run_id, found.job, verdicts, nums)
+
+
+def _scores(run: JobRun, verdicts: Mapping[str, Dict[str, Any]], prepared: Sequence[Any]) -> List[Any]:
+    """The rescore's checks as scores on the runs they judged."""
+    from .fingerprint import evaluator_version
+    from .publish import check_score
+
+    versions = {p.name: evaluator_version(p.ev) for p in prepared}
+    rows = []
+    for item in run.items:
+        verdict = verdicts.get(item.key)
+        if not verdict or not item.trace_id:
+            continue
+        for name, check in (verdict.get("checks") or {}).items():
+            if name not in versions:
+                continue  # a check the recorded verdict kept, not one this rescore ran
+            rows.append(
+                check_score(
+                    name,
+                    check,
+                    source="code",
+                    evaluator_version=versions[name],
+                    target="op" if check.get("op") else "trace",
+                    trace_id=item.trace_id,
+                    experiment_id=run.run_id,
+                    case_id=str(verdict.get("case", item.key)),
+                    repeat=int(verdict.get("repeat") or 0),
+                    origin="eval",
+                    name=run.job,
+                )
+            )
+    return rows
 
 
 async def _again(

@@ -71,6 +71,7 @@ between it and `trace=` in Python. See [Tracing](../guide/07-tracing.md#switchin
       members: [ops, tool_calls, op_output, budget]
 ::: operonx.app.evals.rescore
 ::: operonx.app.evals.Rescored
+::: operonx.app.evals.publish
 ::: operonx.app.evals.fingerprint
     options:
       members: [fingerprint, case_hash, dataset_version, evaluator_version]

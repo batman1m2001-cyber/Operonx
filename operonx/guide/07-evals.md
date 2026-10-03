@@ -232,6 +232,51 @@ assert again.summary["passed"] == 2
 - An evaluator that does not take `trace` costs nothing extra; async
   evaluators of one case run at the same time.
 
+## Keep experiments in a score store
+
+With `scores=`, an eval writes its experiment, each item and every
+check's score to a `ScoreStore` as it runs: `files` (JSONL plus an index,
+under the runs root) by default, or the team's ClickHouse — the database
+the runs are in. Studio and CI read experiments there instead of from one
+machine's `evals/` folder.
+
+```python
+from operonx.app.evals import Eval, exact, publish
+from operonx.telemetry.scores import ExperimentFilter, ScoreFilter, open_score_store
+
+from labels import flow
+
+store = open_score_store({"backend": "files"})  # or "score_store:team" from resources.yaml
+ev = Eval(
+    "labels_stored",
+    graph=flow,
+    item_input="text",
+    dataset="dataset:labels",
+    evaluators=[exact("label")],
+    scores=store,
+)
+run = ev.run_sync()
+
+got = store.get_experiment(run.run_id)
+print(got.experiment.status, got.experiment.metrics["pass"]["mean"], len(got.items))
+for s in store.scores(ScoreFilter(experiment_id=run.run_id)):
+    print(s.case_id, s.score_name, s.passed, s.evaluator_version)
+assert [e.experiment_id for e in store.list_experiments(ExperimentFilter(eval="labels_stored")).items] == [run.run_id]
+
+# a store that was down, or a run from before the store: publish its record
+assert publish(run, store) == {"experiments": 1, "items": 3, "scores": 3}  # again: the same rows
+assert len(store.scores(ScoreFilter(experiment_id=run.run_id))) == 3
+```
+
+- The job record is written first, always. A store that is slow or down
+  costs the run at most `scores_timeout` (10 s) at its end; what it did
+  not take is logged, and `publish(run, store)` sends it later.
+- A score's id comes from what it judges (experiment, case, repeat,
+  check), so writing the same verdict twice is one row.
+- In `resources.yaml`: `score_store: {team: {backend: clickhouse, host: …,
+  database: …}}`; in `operonx.toml`: `scores = "score_store:team"` on the
+  `[[job]]`.
+
 ## Declared in `operonx.toml`
 
 ```python file=checks.py

@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
+from operonx.core.workflow_trace import run_metadata
+from operonx.telemetry.scores import Experiment, ScoreStore, open_score_store
+
 from ..jobs import Job
 from ..jobs.record import (
     ITEM_EMPTY,
@@ -42,6 +45,7 @@ from .gate import (
     outcomes,
     trials_of_items,
 )
+from .publish import ScoreWriter, experiment_of, item_of, scores_of, warn_lost
 from .stats import Estimate, estimate, pass_hat_k
 from .traceview import TraceView
 
@@ -126,6 +130,15 @@ class Eval(Job):
             passes or fails exactly as ``threshold`` says.
         root: The project root, where the fingerprint asks git for the
             commit (the manifest's directory; else the working directory).
+        scores: Where the experiment, its items and every check's score
+            are written as the run goes: a
+            :class:`~operonx.telemetry.scores.ScoreStore`, a
+            ``"score_store:<name>"`` key, or a spec (``{"backend":
+            "files"}``). Unset, nothing is written but the job record.
+        scores_timeout: How long the run waits, at its end, for the store
+            to take what is queued. What it did not take is counted and
+            logged; the job record still holds every verdict, and
+            :func:`~operonx.app.evals.publish` sends it later.
     """
 
     origin = "eval"
@@ -143,6 +156,8 @@ class Eval(Job):
         gate: Optional[Gate] = None,
         root: Union[str, Path, None] = None,
         record_dir: Union[str, Path] = "evals",
+        scores: Any = None,
+        scores_timeout: float = 10.0,
         **kwargs: Any,
     ):
         self.dataset = dataset if isinstance(dataset, Dataset) else Dataset(dataset_path(dataset))
@@ -174,6 +189,11 @@ class Eval(Job):
                     f"this eval; metrics are {sorted(known)} ('pass' = every check passed)"
                 )
         self.root = Path(root) if root is not None else None
+        self.scores = _check_scores(name, scores)
+        self.scores_timeout = float(scores_timeout)
+        self._judges = [_name(ev) for ev in self.evaluators if getattr(ev, "eval_kind", None) == "judge"]
+        self._writer: Optional[ScoreWriter] = None
+        self._experiment: Optional[Experiment] = None
         self._capture = _Capture()
         self._rows: Dict[str, Dict[str, Any]] = {}
         self._verdicts: List[Dict[str, Any]] = []
@@ -192,6 +212,37 @@ class Eval(Job):
             record_dir=record_dir,
             **kwargs,
         )
+
+    # -- the experiment in a score store ---------------------------------------
+
+    def begin(self, run_id: str, started: str) -> None:
+        """The runner opened the record: with ``scores=``, the experiment's
+        ``running`` row goes to the store before any case."""
+        self._writer, self._experiment = None, None
+        if self.scores is None:
+            return
+        store = _open_scores(self.scores)
+        opened = JobRun(self.name, run_id, Path(self.record_dir) / self.name / run_id,
+                        RUN_RUNNING, started, None, {}, meta=self.describe())  # fmt: skip
+        self._experiment = experiment_of(opened)
+        self._writer = ScoreWriter(store, self.name)
+        self._writer.submit([self._experiment])
+
+    async def run(self, *, resume: bool = False) -> JobRun:
+        """Run the eval once; with ``scores=``, then wait (up to
+        ``scores_timeout``) for the store to take the experiment."""
+        run: Optional[JobRun] = None
+        try:
+            run = await super().run(resume=resume)
+            if self._writer is not None:
+                self._writer.submit([experiment_of(run)])
+        finally:
+            writer, self._writer = self._writer, None
+            if writer is not None:  # even when the run raised: no writer thread outlives it
+                _, lost = await asyncio.to_thread(writer.finish, self.scores_timeout)
+                if lost and run is not None:
+                    warn_lost(self.name, lost, run)
+        return run
 
     # -- the cases -----------------------------------------------------------
 
@@ -296,8 +347,13 @@ class Eval(Job):
         verdict.update(case=case, repeat=repeat, case_hash=digest)
         if cluster is not None:
             verdict["cluster"] = cluster
+        verdict.update(_run_cost(getattr(result, "trace", None)))
         result.verdict = verdict
         self._verdicts.append(trial_of(result.key, verdict, result.ms))
+        if self._writer is not None:
+            meta = {"eval": {"fingerprint": self._fingerprint}, "judges": self._judges}
+            item = item_of(self._experiment.experiment_id, result)
+            self._writer.submit([item, *scores_of(meta, self._experiment, result)])
 
     # -- the run's numbers ---------------------------------------------------
 
@@ -369,11 +425,13 @@ class Eval(Job):
         *,
         store: Any = None,
         dataset: Any = None,
+        scores: Any = None,
     ) -> Any:
         """Judge this eval's recorded run *run_id* again without running the
         graph (:func:`~operonx.app.evals.rescore`). Without
         *evaluators*, the eval's own — its judges left out, and named in
-        ``skipped``. *store* is the run store its traces went to."""
+        ``skipped``. *store* is the run store its traces went to; *scores*
+        a score store the new scores go to."""
         from .rescoring import is_judge, rescore
 
         path = Path(self.record_dir) / self.name / run_id
@@ -385,7 +443,11 @@ class Eval(Job):
             skipped = [_name(ev) for ev in chosen if is_judge(ev)]
             chosen = [ev for ev in chosen if not is_judge(ev)]
         out = await rescore(
-            path, chosen, store=store, dataset=self.dataset if dataset is None else dataset
+            path,
+            chosen,
+            store=store,
+            dataset=self.dataset if dataset is None else dataset,
+            scores=None if scores is None else _open_scores(_check_scores(self.name, scores)),
         )
         out.skipped = skipped
         return out
@@ -417,6 +479,7 @@ class Eval(Job):
             repeats=opts.get("repeats", 1),
             cluster=opts.get("cluster"),
             gate=Gate.from_options(gate) if gate is not None else None,
+            scores=opts.get("scores"),
             root=root,
             record_dir=record_dir if record_dir.is_absolute() else root / record_dir,
             concurrency=spec.concurrency,
@@ -448,6 +511,11 @@ class Eval(Job):
             out["cluster"] = self.cluster
         if self.gate is not None:
             out["gate"] = self.gate.describe()
+        if self._judges:
+            out["judges"] = list(self._judges)
+        project = run_metadata().get("project")
+        if project:
+            out["project"] = str(project)
         return out
 
 
@@ -557,6 +625,54 @@ def numbers(
     if repeats > 1:
         out["reliability"] = _reliability(cases, repeats)
     return out, cases, metrics
+
+
+def _check_scores(name: str, value: Any) -> Any:
+    """``scores=`` as given, checked now; opened when the run starts."""
+    if value is None or isinstance(value, (ScoreStore, Mapping)):
+        return value
+    if isinstance(value, str):
+        if not value.startswith("score_store:"):
+            raise ValueError(
+                f"eval {name!r}: scores={value!r} is not a score store key; "
+                "name one as 'score_store:<name>' (resources.yaml), or pass a spec mapping"
+            )
+        return value
+    raise TypeError(
+        f"eval {name!r}: scores is a ScoreStore, a 'score_store:<name>' key or a spec "
+        f"mapping, not a {type(value).__name__}"
+    )
+
+
+def _open_scores(value: Any) -> ScoreStore:
+    if isinstance(value, ScoreStore):
+        return value
+    if isinstance(value, Mapping):
+        return open_score_store(dict(value))
+    from operonx.core.registry import ResourceHub
+
+    return ResourceHub.instance().get(value)
+
+
+def _run_cost(trace: Any) -> Dict[str, Any]:
+    """The case run's own LLM cost and tokens, as the run store counts them
+    (an execution reporting ``cost_usd`` is an LLM call; the cost is
+    ``None`` when none was priced). Nothing for a run with no LLM call."""
+    calls, cost, tokens_in, tokens_out = 0, None, 0, 0
+    for node in getattr(trace, "nodes", None) or ():
+        out = node.outputs
+        if not isinstance(out, dict) or "cost_usd" not in out:
+            continue
+        calls += 1
+        if isinstance(out["cost_usd"], (int, float)):
+            cost = (cost or 0.0) + float(out["cost_usd"])
+        usage = out.get("usage")
+        if isinstance(usage, dict):
+            tokens_in += int(usage.get("prompt_tokens") or 0)
+            tokens_out += int(usage.get("completion_tokens") or 0)
+    if not calls:
+        return {}
+    return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out}
 
 
 def _clip(value: Any, limit: int = 4000) -> Any:

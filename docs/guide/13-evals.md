@@ -132,6 +132,55 @@ fails when the pass rate is under it. `run.meta["eval"]` — and the run's
 the judge cost. Each case's item record carries its verdict, with the
 `case`, its `repeat` and its `case_hash` (input + expected).
 
+## Experiments in a score store
+
+```python
+ev = Eval("replies", graph=..., dataset="dataset:replies", evaluators=[...],
+          scores="score_store:team")        # or a ScoreStore, or {"backend": "files"}
+```
+
+With `scores=`, an eval writes to a `ScoreStore`
+(`operonx.telemetry.scores`) as it runs: the **experiment** (a `running`
+row at the start, the finished one at the end — status, fingerprint
+columns, metrics, gate), one **item** per case × repeat (trace id,
+status, time, the case run's own cost and tokens, passed, output) and one
+**score** per check per item. A score is the one row type for every
+judgement — code checks, judges, humans, online rules, pairwise — with a
+`target` (`item`, `trace`, `op`, `session`, `pair`) and a `score_id`
+derived from what it judges, so the same verdict written twice is one row
+and a human's edit replaces their earlier value.
+
+| Backend | Where |
+|---|---|
+| `files` (default) | JSONL under `<runs root>/scores` (`experiments.jsonl`, `items/<experiment>.jsonl`, `scores/YYYY-MM.jsonl`), an SQLite index beside them |
+| `sqlite` | one file |
+| `clickhouse` | the runs' database: schema version 3 of the same migration chain, so no new server, database or grant |
+
+```yaml
+# resources.yaml
+score_store:
+  team:
+    backend: clickhouse
+    host: ${CLICKHOUSE_HOST}
+    user: ${CLICKHOUSE_USER}
+    password: ${CLICKHOUSE_PASSWORD}
+    database: operonx
+```
+
+The writes go through a background writer. The job record is written
+first and always holds every verdict; a store that is slow or down costs
+the run at most `scores_timeout` (10 s) at its end, and what it did not
+take is logged. `publish(run, store)` sends a recorded run — again, or
+for the first time — through the same converters, so it writes exactly
+what the live run would have. `rescore(..., scores=store)` writes its
+scores beside the experiment's own (keyed by trace and evaluator
+version, never over them).
+
+Reading: `store.list_experiments(ExperimentFilter(eval="replies"))`,
+`store.get_experiment(run_id)` (with its items), `store.scores(ScoreFilter(...))`,
+`store.score_series(where, bucket_s)`. Eval and human scores are kept
+forever; online scores (with a `rule`) for `online_ttl_days` (365).
+
 ## A run is an experiment
 
 Each run also records:

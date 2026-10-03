@@ -319,6 +319,9 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
     )
 
     _begin(sink, resume)
+    begin = getattr(job, "begin", None)  # an Eval files its experiment here
+    if begin is not None:
+        begin(record.run_id, record.started)
     sem = asyncio.Semaphore(job.concurrency)
     stopped = asyncio.Event()
     tasks: set = set()
