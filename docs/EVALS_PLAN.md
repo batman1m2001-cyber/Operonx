@@ -1,6 +1,6 @@
 # Evals — experiments with an identity, repeats, error bars and a gate
 
-Status: **E0 (this plan) committed 2026-10-04; E1 in progress on `feat/evals-e1`.**
+Status: **E0 committed 2026-10-04; E1 built on `feat/evals-e1`; E2–E3 on `feat/evals-e2`.**
 Source: `docs/roadmap/ROADMAP.md` §3 and the full design in `docs/roadmap/track4_eval.md`
 (cited below as T4 §n). This file is the working plan: it keeps what T4 decided, resolves
 what T4 left to the implementer, and says what each phase ships and how it is tested.
@@ -63,7 +63,7 @@ rate becomes the *recommended* `repeats`/`tolerance` in the E4 `calibrate` docs.
 | D21 | Manifest | `[[job]]` evals also read `repeats`, `cluster` and a `[job.gate]` table with the `Gate` fields | declared evals get the same surface |
 
 Out of E1 (later phases, not stubs): ScoreStore, the `operonx eval` CLI and `--strict`
-flag, reports, TraceView, judges as graphs, Studio. `Gate(strict=True)` is the library
+flag, reports, TraceView, judges as graphs, Studio (E2–E3 decisions: §5). `Gate(strict=True)` is the library
 form of `--strict`.
 
 ## 4. E1 tests
@@ -95,7 +95,61 @@ different algorithm), never only against what the code printed.
 - `tests/internal/app/test_evals.py`: unchanged, green.
 - `operonx/guide/07-evals.md`: an eval with repeats and a gate, run in `tests/guide/`.
 
-## 5. Log
+## 5. Decisions (E2, E3)
+
+Branch `feat/evals-e2`, stacked on `feat/evals-e1`. Same rules as E1: what T4 decided is
+kept; what it left open is decided here before the code.
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| D22 | Getting the trace to evaluators | `ItemResult.trace`: a transient field (never in `as_dict()`, never on disk) that `runner._attempt` sets to the settled live trace of every item that ran — failed ones included; a timed-out item has none. The runner clears it after the job's `judge` hook, so a run holds at most `concurrency` traces | T4 §7.2 plumbing; nothing new is kept once the case is judged |
+| D23 | Who pays for the trace | `Eval` reads each evaluator's signature once, at construction. A `trace` view is built per case only when some evaluator names `trace` or takes `**kwargs`, and the view builds its rows on first read. An eval whose evaluators do not ask pays nothing (measured, §7) | T4 P2 gate: "evaluators that don't request `trace` add ~0 ms" |
+| D24 | `TraceView` rows | The row every run store keeps (`rows_of_trace`). `from_trace` builds them with a plain `Consumer` and the JSON round trip the files and sqlite stores apply (`default=str`), so a live view equals a stored one value for value; `from_rows(rows, meta)`, `from_record(RunRecord)`, `from_store(store, trace_id)` read stored ones. Executions are ordered by start time, ties in stored order. Totals (`duration_ms`, `cost_usd`, `unpriced`, `tokens_in/out`, `llm_calls`, `errors`) are `summarize()` over the same rows, so a view's numbers are the run store's numbers. A value above a store's media threshold is a reference in the stored view and bytes in the live one: by design, and the golden test uses a graph without media | T4 §7.2: "offline and online evaluators read exactly the same shape" |
+| D25 | Helpers | `ops(name, *, type, under, status)`, `first`, `last`, `path(*, types, collapse)`, `llm_calls()`, `tool_calls()`, `errors()`. `path()` leaves out routing and containers (`branch`, `graph` executions) unless `types` names them; `under` matches any enclosing subgraph name (the root's name is the engine variable's, so it is never matched). An LLM call is an execution whose outputs carry `cost_usd` — the rule `summarize` counts `llm_calls` by (a streaming LLM's token frames do not carry it). `tool_calls()` reads every LLM call's `tool_calls` in order, flat (`name`/`args`) or OpenAI (`function.name`/`function.arguments`, JSON text) shape, and attaches the tool message a dispatch op returned for the same call id. `turns()` (conversations) stays with E8 | T4 §7.2 minus `turns` |
+| D26 | Trajectory modes | `trajectory.ops(reference, mode)` over `trace.path()`, `trajectory.tool_calls(reference, mode, args)` over `trace.tool_calls()`. AgentEvals' four modes: `strict` same calls in the same order; `unordered` same calls, any order; `subset` every actual call matches a distinct reference call (nothing beyond the reference); `superset` every reference call matches a distinct actual call (at least the reference). Matching is a maximum bipartite matching, so a loose reference entry cannot be used up by the wrong call. `args`: `exact` equal dicts, `subset` every argument the reference gives is in the call with an equal value (extra arguments allowed), `ignore` names only. Score: the share of reference calls matched (`subset`: of actual calls). The reference is the argument, else the case's `trajectory.ops` / `trajectory.tool_calls`; neither is an error on the case, never a silent pass | T4 §7.3 |
+| D27 | `op_output`, `budget` | `trajectory.op_output(op, check, at="last")` runs any evaluator with `output` = that op's outputs (`at="first"` for the first execution) and puts the op's `op_id` on the verdict (`op`, the blame); an op that never ran fails. `budget(ms, cost_usd, tokens, llm_calls)`: limits inclusive, over the view's totals (`ms` is the graph run's duration); a cost limit over a run with unpriced calls fails, since the cost is unknown | T4 §7.3; "unpriced is unknown, not free" is the run store's rule |
+| D28 | Concurrency per case | Sync evaluators run inline (no task); the awaitables of async ones are gathered. Check order on the verdict is evaluator order; a check's `ms` is its own start to finish | T4 §7.1 G7, without a task per check for microsecond checks |
+| D29 | `rescore` | `rescore(run, evaluators, *, store=None, dataset=None, scores=None)` re-judges a recorded eval run without running its graph; `Eval.rescore(run_id, evaluators=None, …)` uses the eval's own evaluators and dataset. Per item: the case row from the dataset when its `case_hash` still matches the record (else the item errors: the case changed), the recorded output (an item whose output was clipped in the record — now marked `output_clipped` — errors), `outputs` from `sent`, and `trace` from `store.get_run(trace_id)` only when an evaluator asks. Items that did not run cleanly keep their recorded verdict. A judge (`llm_judge`, marked `eval_kind = "judge"`) is refused: rescoring re-runs deterministic evaluators. The result (`Rescored`: per-item verdicts and the summary numbers) writes no job record; with `scores=` its scores go to the ScoreStore with rescore ids (D31) | T4 P2; "Inspect `score`", LangSmith backtesting |
+| D30 | ScoreStore contract | `operonx/telemetry/scores/`: `put_experiment` (upsert), `put_items`, `list_experiments(where, limit, cursor)`, `get_experiment` (with items), `put_scores` (idempotent by `score_id`), `scores(where, limit)`, `score_series(where, bucket_s)`, `cache_get`/`cache_put` (the judge cache E5 uses), `close`. Synchronous, like `RunStore`. Data: `Experiment`, `ExperimentItem`, `Score`, `ExperimentRecord`, `ExperimentFilter`, `ScoreFilter`, `ExperimentPage`, `Bucket` | T4 §6.1, all of it, so E5 and E7 need no second contract |
+| D31 | Score ids | `Score` fills `score_id` from its own fields: `pair` target → sha(experiment, pair experiment, case, score name); `human` source → sha(target ids, score name, author); `item` target → sha(experiment, case, repeat, score name); `trace`/`op`/`session` targets (online, rescore) → sha(trace, op, session, score name, evaluator version). Each target checks the ids it needs and says which is missing. An offline score's `created_at` is its experiment's start, so the same verdict published twice is the same row | T4 §6.3 |
+| D32 | Files + SQLite (default backend) | `files`: JSONL is the truth — `experiments.jsonl`, `items/<experiment>.jsonl`, `scores/YYYY-MM.jsonl` (by `created_at`) under `<runs root>/scores` — and `.index.sqlite` beside them is the index every read uses. Each line carries `written_at`; the index keeps, per id, the row written last, whatever order lines are read in. `refresh()` reads what other processes appended since the offset it recorded per file. The judge cache lives in the index only (losing it costs money, not truth). `sqlite`: the same index alone, one file. Own index file, not the run store's: each is rebuilt from its own files | T4 §6.2, with the experiment in the store as well as in the job record, so one contract answers every backend |
+| D33 | ClickHouse v3 | T4 §6.3's four tables appended to the run store's `MIGRATIONS` as version 3: one chain, one `schema_version`, one database. `ClickHouseScoreStore` connects and migrates through the same code as the run store, so whichever opens first brings the database to v3, and a user granted only tables in an existing database never runs `CREATE DATABASE`. Experiments and items read `FINAL`; scores are deduplicated on read by `score_id`, latest `written_at` (`LIMIT 1 BY`), because their ORDER BY holds `created_at` and a re-written score (a human edit) can sit in another partition, which no merge collapses. Online scores (those with a `rule`) expire after `online_ttl_days` (365); eval and human scores never do | T4 §6.3, plus the read-side dedupe its ORDER BY needs |
+| D34 | Eval → ScoreStore | `Eval(scores=…)`: a ScoreStore, a `"score_store:<name>"` key, or a spec mapping; `[[job]]` evals read `scores`. Unset (the default) writes nothing — 1.14.0's behaviour and cost. Writes go through a `BackgroundWriter`: the experiment row when the run starts (`running`), each item and its check scores as the case is judged, the final experiment from the finished record. The run then waits for the writes up to `scores_timeout` (10 s); what could not be written is counted and logged. The job record is written first and always, so an outage loses no verdict, and `publish(run, store)` sends a recorded experiment again (or for the first time) through the same converters — the live path and `publish` produce the same rows | T4 §6.3 "the local job record stays the fallback truth" |
+| D35 | Item cost | A verdict carries the case run's own `cost_usd` (`None` when nothing was priced, absent with no LLM call) and `tokens_in`/`tokens_out`, read from the trace nodes; the experiment's `cost_usd` and `p95_ms` come from the items | T4 §5.1 `ExperimentItem` / `Experiment` columns |
+
+Out of E2–E3 (later phases, not stubs): `turns()`, `no_errors`/`max_steps`, the `@evaluator`
+decorator and `Verdict` class, judges as traced graphs and the judge cache's use (E5),
+`open_score_store(project)` resolution from `[tracing]` and `[evals]` (E4), Studio reads (E6),
+`score_series` consumers and online rules (E7).
+
+## 6. E2–E3 tests
+
+- `tests/internal/app/evals/test_traceview.py`: **golden** — one graph with a subgraph, a
+  branch and a real `LLMOp` against a local stand-in model (tool calls, usage, prices);
+  `from_trace(live) == from_rows(store.get_run(id).nodes, meta)` for the files and sqlite
+  stores; helpers and totals against hand counts and against the store's `RunSummary`.
+- `test_trajectory.py`: table tests of the four modes on ops and tool calls (each mode's
+  pass and fail rows, duplicates, the matching case greedy gets wrong), args exact /
+  subset / ignore, missing reference, `op_output` blame, `budget` limits and unknown cost.
+- `test_judging.py`: an evaluator asking for `trace` gets one, one that does not costs
+  nothing (no view built), `**kwargs` gets a lazy one; the record never holds the trace;
+  async evaluators run concurrently (wall time), check order kept.
+- `test_rescore.py`: identical verdicts from the record (`ms` aside); no graph run (a
+  counter, and no new trace in the store); a changed case and a clipped output error;
+  a judge is refused; trace evaluators read the stored run.
+- `tests/internal/telemetry/test_score_store.py`: the contract over `files`, `sqlite` and
+  (live) `clickhouse`; idempotent ids (a re-put collapses, a human edit replaces);
+  files refresh picks up another writer's lines; the v3 migration offline (fake client:
+  a v2 database gets only the four tables, no `CREATE DATABASE`) and live (a v2 database
+  with a run in it upgrades, the run stays).
+- `tests/internal/app/evals/test_eval_scores.py`: an eval writes its experiment, items and
+  scores; the rows equal `publish(record)`; a store that raises on every write loses no
+  verdict (record intact, gate unchanged, drops counted) and `publish` afterwards fills it.
+- Guide: `07-evals.md` gains trajectory, budget, rescore and a score store.
+- Measured: evaluator overhead with and without `trace` (`scripts/bench_eval_overhead.py`);
+  50 cases × 3 async fake judges, sequential vs gathered.
+
+## 7. Log
 
 **E1 built, 2026-10-04** (`feat/evals-e1`).
 
