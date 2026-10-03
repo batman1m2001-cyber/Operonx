@@ -137,12 +137,14 @@ class JobRun:
         return [i for i in self.items if i.status == ITEM_TIMEOUT]
 
     @classmethod
-    def load(cls, path: str | Path) -> "JobRun":
+    def load(cls, path: str | Path, items: bool = True) -> "JobRun":
+        """A run from its directory. ``items=False`` reads ``run.json``
+        alone: no items, and the counts as ``run.json`` wrote them."""
         path = Path(path)
         meta = json.loads((path / "run.json").read_text(encoding="utf-8"))
-        items: List[ItemResult] = []
+        read_items, items = items, []
         items_file = path / "items.jsonl"
-        if items_file.exists():
+        if read_items and items_file.exists():
             with items_file.open("r", encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
@@ -151,10 +153,15 @@ class JobRun:
         # The four item statuses are recounted from items.jsonl, which is
         # the truth; anything else run.json counted (a stream run's `fed`
         # and `sent`) is kept as written.
-        counts = {s: 0 for s in _COUNTED}
-        counts.update({k: v for k, v in (meta.get("counts") or {}).items() if k not in _COUNTED})
-        for item in items:
-            counts[item.status] = counts.get(item.status, 0) + 1
+        if read_items:
+            counts = {s: 0 for s in _COUNTED}
+            counts.update(
+                {k: v for k, v in (meta.get("counts") or {}).items() if k not in _COUNTED}
+            )
+            for item in items:
+                counts[item.status] = counts.get(item.status, 0) + 1
+        else:
+            counts = dict(meta.get("counts") or {})
         return cls(
             job=meta["job"],
             run_id=meta["run_id"],
