@@ -177,7 +177,9 @@ class Score:
             (self.data_type, DATA_TYPES, "data_type"),
         ):
             if value not in allowed:
-                raise ValueError(f"score {self.score_name!r}: {what} is {value!r}; one of {', '.join(allowed)}")
+                raise ValueError(
+                    f"score {self.score_name!r}: {what} is {value!r}; one of {', '.join(allowed)}"
+                )
         if not self.score_name:
             raise ValueError("a score needs a score_name (the evaluator's name)")
         missing = [k for k in _NEEDS[self.target] if getattr(self, k) in (None, "")]

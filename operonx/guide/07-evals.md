@@ -213,7 +213,9 @@ assert run.meta["eval"]["passed"] == 2, run.meta["eval"]["checks"]
 print(order["checks"]["op_output(classify:exact(kind))"]["op"])  # the op judged: its op_id
 
 # a new check over the same runs: nothing runs again
-again = asyncio.run(ev.rescore(run.run_id, [trajectory.ops(["classify"], mode="superset")], store=runs))
+again = asyncio.run(
+    ev.rescore(run.run_id, [trajectory.ops(["classify"], mode="superset")], store=runs)
+)
 assert again.summary["passed"] == 2
 ```
 
@@ -261,7 +263,8 @@ got = store.get_experiment(run.run_id)
 print(got.experiment.status, got.experiment.metrics["pass"]["mean"], len(got.items))
 for s in store.scores(ScoreFilter(experiment_id=run.run_id)):
     print(s.case_id, s.score_name, s.passed, s.evaluator_version)
-assert [e.experiment_id for e in store.list_experiments(ExperimentFilter(eval="labels_stored")).items] == [run.run_id]
+listed = store.list_experiments(ExperimentFilter(eval="labels_stored"))
+assert [e.experiment_id for e in listed.items] == [run.run_id]
 
 # a store that was down, or a run from before the store: publish its record
 assert publish(run, store) == {"experiments": 1, "items": 3, "scores": 3}  # again: the same rows

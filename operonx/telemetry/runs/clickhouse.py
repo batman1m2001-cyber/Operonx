@@ -377,6 +377,7 @@ def migrate(ch: Any, database: str) -> int:
         current = version
     return current
 
+
 # ── rows ────────────────────────────────────────────────────────────────
 
 RUN_COLUMNS: Tuple[str, ...] = tuple(c for c in SUMMARY_COLUMNS if c != "location") + (

@@ -151,7 +151,9 @@ class ScoreIndex:
     # -- read ------------------------------------------------------------------
 
     @staticmethod
-    def _where(f: Any, equal: Sequence[str], time_col: str, extra: Sequence[str] = ()) -> Tuple[str, List[Any]]:
+    def _where(
+        f: Any, equal: Sequence[str], time_col: str, extra: Sequence[str] = ()
+    ) -> Tuple[str, List[Any]]:
         clauses: List[str] = list(extra)
         params: List[Any] = []
         if f is not None:
@@ -248,9 +250,7 @@ class ScoreIndex:
 
     def cache_get(self, key: str) -> Optional[Dict[str, Any]]:
         with self._tx() as cur:
-            cur.execute(
-                f"SELECT verdict FROM judge_cache WHERE key = ? AND {self._live()}", (key,)
-            )
+            cur.execute(f"SELECT verdict FROM judge_cache WHERE key = ? AND {self._live()}", (key,))
             row = cur.fetchone()
         return json.loads(row[0]) if row else None
 

@@ -940,7 +940,9 @@ def test_live_a_v2_database_with_runs_upgrades_to_v3_and_another_host_reads_it(r
         chmod.MIGRATIONS = real
 
     host_a = ClickHouseScoreStore(database=runs.database, **clickhouse_spec())
-    exp = Experiment("e1", "labels", project="demo", started_at=time.time(), metrics={"pass": {"mean": 1.0}})
+    exp = Experiment(
+        "e1", "labels", project="demo", started_at=time.time(), metrics={"pass": {"mean": 1.0}}
+    )
     host_a.put_experiment(exp)
     host_a.put_items([ExperimentItem("e1", "a", output={"label": "x"})])
     host_a.put_scores([Score("exact", experiment_id="e1", case_id="a", passed=True)])

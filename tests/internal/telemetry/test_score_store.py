@@ -155,7 +155,11 @@ def _settle(store):
 
 def test_an_experiment_reads_back_whole_with_its_items(store):
     exp = _exp(1)
-    items = [_item("exp-1", "a"), _item("exp-1", "b", passed=False, error="boom"), _item("exp-1", "a", 1)]
+    items = [
+        _item("exp-1", "a"),
+        _item("exp-1", "b", passed=False, error="boom"),
+        _item("exp-1", "a", 1),
+    ]
     store.put_experiment(exp)
     store.put_items(items)
     got = store.get_experiment("exp-1")
@@ -179,18 +183,31 @@ def test_list_experiments_filters_orders_and_pages(store):
     page = store.list_experiments()
     assert [e.experiment_id for e in page.items] == [f"exp-{i}" for i in (5, 4, 3, 2, 1)]
     assert page.total == 5 and page.next_cursor is None
-    assert [e.experiment_id for e in store.list_experiments(ExperimentFilter(eval="replies")).items] == [
+    assert [
+        e.experiment_id for e in store.list_experiments(ExperimentFilter(eval="replies")).items
+    ] == [
         "exp-5",
         "exp-3",
         "exp-1",
     ]
-    assert [e.experiment_id for e in store.list_experiments(ExperimentFilter(status="failed")).items] == ["exp-3"]
-    since = _exp(3).started_at
-    assert [e.experiment_id for e in store.list_experiments(ExperimentFilter(since=since, until=_exp(5).started_at)).items] == ["exp-4", "exp-3"]
     assert [
-        e.experiment_id for e in store.list_experiments(ExperimentFilter(experiment_ids=["exp-2", "exp-9"])).items
+        e.experiment_id for e in store.list_experiments(ExperimentFilter(status="failed")).items
+    ] == ["exp-3"]
+    since = _exp(3).started_at
+    assert [
+        e.experiment_id
+        for e in store.list_experiments(
+            ExperimentFilter(since=since, until=_exp(5).started_at)
+        ).items
+    ] == ["exp-4", "exp-3"]
+    assert [
+        e.experiment_id
+        for e in store.list_experiments(ExperimentFilter(experiment_ids=["exp-2", "exp-9"])).items
     ] == ["exp-2"]
-    assert store.list_experiments(ExperimentFilter(code_version="sha4")).items[0].experiment_id == "exp-4"
+    assert (
+        store.list_experiments(ExperimentFilter(code_version="sha4")).items[0].experiment_id
+        == "exp-4"
+    )
     first = store.list_experiments(limit=2)
     second = store.list_experiments(limit=2, cursor=first.next_cursor)
     third = store.list_experiments(limit=2, cursor=second.next_cursor)
@@ -226,7 +243,14 @@ def test_scores_filter_and_order(store):
     store.put_scores(
         [
             _score("exp-1", "a", created_at=NOW - 300),
-            _score("exp-1", "b", name="judge:polite", source="judge", created_at=NOW - 200, cost_usd=0.002),
+            _score(
+                "exp-1",
+                "b",
+                name="judge:polite",
+                source="judge",
+                created_at=NOW - 200,
+                cost_usd=0.002,
+            ),
             _score("exp-2", "a", created_at=NOW - 100),
             Score(
                 score_name="judge:polite",
@@ -255,7 +279,12 @@ def test_scores_filter_and_order(store):
     assert ids(trace_id="exp-2/a/0") == [("exp-2", "a", "exp-2/a/0")]
     assert ids(since=NOW - 250, until=NOW - 100) == [("exp-1", "b", "exp-1/b/0")]
     online = store.scores(ScoreFilter(trace_id="call-9"))[0]
-    assert (online.passed, online.value, online.reason, online.snapshot) == (False, 0.0, "curt", {"output": "no."})
+    assert (online.passed, online.value, online.reason, online.snapshot) == (
+        False,
+        0.0,
+        "curt",
+        {"output": "no."},
+    )
     assert len(store.scores(limit=2)) == 2
 
 
@@ -286,15 +315,39 @@ def test_a_human_edit_replaces_the_earlier_value_even_a_month_later(store):
     store.put_scores([edit])
     (got,) = store.scores(ScoreFilter(trace_id="call-1"))
     assert got.label == "good"
-    other = Score(score_name="review", target="trace", source="human", author="minh", trace_id="call-1", label="bad", data_type="categorical")
+    other = Score(
+        score_name="review",
+        target="trace",
+        source="human",
+        author="minh",
+        trace_id="call-1",
+        label="bad",
+        data_type="categorical",
+    )
     store.put_scores([other])
     assert sorted(s.author for s in store.scores(ScoreFilter(trace_id="call-1"))) == ["lan", "minh"]
 
 
 def test_an_online_score_past_its_retention_is_gone_and_others_are_kept(store):
     old = NOW - 400 * DAY
-    online = Score(score_name="judge:polite", target="trace", source="judge", trace_id="t-old", rule="r", passed=True, created_at=old)
-    human = Score(score_name="review", target="trace", source="human", author="lan", trace_id="t-old", passed=True, created_at=old)
+    online = Score(
+        score_name="judge:polite",
+        target="trace",
+        source="judge",
+        trace_id="t-old",
+        rule="r",
+        passed=True,
+        created_at=old,
+    )
+    human = Score(
+        score_name="review",
+        target="trace",
+        source="human",
+        author="lan",
+        trace_id="t-old",
+        passed=True,
+        created_at=old,
+    )
     offline = _score("exp-old", "a", created_at=old)
     store.put_scores([online, human, offline])
     kept = store.scores()
@@ -309,11 +362,30 @@ def test_score_series_buckets_by_time_and_name(store):
             _score("e", "a", created_at=t0 + 10),
             _score("e", "b", created_at=t0 + 20, passed=False),
             _score("e", "c", created_at=t0 + hour + 5),
-            _score("e", "a", name="fuzzy", data_type="numeric", value=0.5, passed=True, created_at=t0 + 30),
-            _score("e", "b", name="fuzzy", data_type="numeric", value=0.25, passed=None, created_at=t0 + 40),
+            _score(
+                "e",
+                "a",
+                name="fuzzy",
+                data_type="numeric",
+                value=0.5,
+                passed=True,
+                created_at=t0 + 30,
+            ),
+            _score(
+                "e",
+                "b",
+                name="fuzzy",
+                data_type="numeric",
+                value=0.25,
+                passed=None,
+                created_at=t0 + 40,
+            ),
         ]
     )
-    got = [(b.start, b.score_name, b.n, b.mean, b.passed) for b in store.score_series(ScoreFilter(experiment_id="e"), hour)]
+    got = [
+        (b.start, b.score_name, b.n, b.mean, b.passed)
+        for b in store.score_series(ScoreFilter(experiment_id="e"), hour)
+    ]
     assert got == [
         (t0, "exact(label)", 2, 0.5, 0.5),
         (t0, "fuzzy", 2, 0.375, 1.0),
@@ -337,17 +409,33 @@ def test_the_judge_cache(store):
 
 def test_score_ids_follow_what_was_judged():
     a = _score("exp-1", "a")
-    assert a.score_id == _score("exp-1", "a", passed=False, created_at=NOW - 9).score_id  # not the value
+    assert (
+        a.score_id == _score("exp-1", "a", passed=False, created_at=NOW - 9).score_id
+    )  # not the value
     assert a.score_id != _score("exp-1", "a", repeat=1).score_id
     assert a.score_id != _score("exp-2", "a").score_id
-    assert a.score_id == _score("exp-1", "a", evaluator_version="v2").score_id  # an item's check is one row
+    assert (
+        a.score_id == _score("exp-1", "a", evaluator_version="v2").score_id
+    )  # an item's check is one row
 
     online = dict(score_name="judge:polite", target="trace", source="judge", trace_id="t1")
-    assert Score(**online, evaluator_version="v1").score_id != Score(**online, evaluator_version="v2").score_id
+    assert (
+        Score(**online, evaluator_version="v1").score_id
+        != Score(**online, evaluator_version="v2").score_id
+    )
     op = Score(score_name="x", target="op", trace_id="t1", op_id="g.a#main")
-    assert op.score_id != Score(score_name="x", target="op", trace_id="t1", op_id="g.b#main").score_id
+    assert (
+        op.score_id != Score(score_name="x", target="op", trace_id="t1", op_id="g.b#main").score_id
+    )
 
-    pair = dict(score_name="pref", target="pair", source="judge", experiment_id="A", pair_experiment_id="B", case_id="c")
+    pair = dict(
+        score_name="pref",
+        target="pair",
+        source="judge",
+        experiment_id="A",
+        pair_experiment_id="B",
+        case_id="c",
+    )
     assert Score(**pair, label="A").score_id == Score(**pair, label="B").score_id
     assert Score(**pair).score_id != Score(**{**pair, "pair_experiment_id": "C"}).score_id
 
@@ -429,7 +517,10 @@ def test_a_score_store_is_a_resource(tmp_path, monkeypatch):
     from operonx.core.registry import ResourceHub
 
     path = tmp_path / "resources.yaml"
-    path.write_text(f"score_store:\n  team:\n    backend: sqlite\n    path: {tmp_path / 't.sqlite'}\n", encoding="utf-8")
+    path.write_text(
+        f"score_store:\n  team:\n    backend: sqlite\n    path: {tmp_path / 't.sqlite'}\n",
+        encoding="utf-8",
+    )
     ResourceHub.set_instance(ResourceHub.from_yaml(path))
     try:
         assert isinstance(ResourceHub.instance().get("score_store:team"), SqliteScoreStore)

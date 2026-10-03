@@ -191,7 +191,10 @@ class Eval(Job):
         self.root = Path(root) if root is not None else None
         self.scores = _check_scores(name, scores)
         self.scores_timeout = float(scores_timeout)
-        self._judges = [_name(ev) for ev in self.evaluators if getattr(ev, "eval_kind", None) == "judge"]
+        self._judges = [
+            _name(ev) for ev in self.evaluators if getattr(ev, "eval_kind", None) == "judge"
+        ]
+        self._store: Optional[ScoreStore] = None
         self._writer: Optional[ScoreWriter] = None
         self._experiment: Optional[Experiment] = None
         self._capture = _Capture()
@@ -219,18 +222,28 @@ class Eval(Job):
         """The runner opened the record: with ``scores=``, the experiment's
         ``running`` row goes to the store before any case."""
         self._writer, self._experiment = None, None
-        if self.scores is None:
+        if self._store is None:
             return
-        store = _open_scores(self.scores)
-        opened = JobRun(self.name, run_id, Path(self.record_dir) / self.name / run_id,
-                        RUN_RUNNING, started, None, {}, meta=self.describe())  # fmt: skip
+        opened = JobRun(
+            job=self.name,
+            run_id=run_id,
+            path=Path(self.record_dir) / self.name / run_id,
+            status=RUN_RUNNING,
+            started=started,
+            ended=None,
+            counts={},
+            meta=self.describe(),
+        )
         self._experiment = experiment_of(opened)
-        self._writer = ScoreWriter(store, self.name)
+        self._writer = ScoreWriter(self._store, self.name)
         self._writer.submit([self._experiment])
 
     async def run(self, *, resume: bool = False) -> JobRun:
         """Run the eval once; with ``scores=``, then wait (up to
         ``scores_timeout``) for the store to take the experiment."""
+        # opened before the record: a store that cannot be named fails the
+        # run before it starts, not with a record stuck at "running"
+        self._store = _open_scores(self.scores) if self.scores is not None else None
         run: Optional[JobRun] = None
         try:
             run = await super().run(resume=resume)
@@ -577,7 +590,9 @@ def _reliability(cases: Mapping[str, CaseOutcome], repeats: int) -> Dict[str, An
     hat = {}
     for k in range(1, repeats + 1):
         vals = [
-            pass_hat_k(sum(o.passed), len(o.passed), k) for o in cases.values() if len(o.passed) >= k
+            pass_hat_k(sum(o.passed), len(o.passed), k)
+            for o in cases.values()
+            if len(o.passed) >= k
         ]
         if vals:
             hat[str(k)] = round(sum(vals) / len(vals), 6)

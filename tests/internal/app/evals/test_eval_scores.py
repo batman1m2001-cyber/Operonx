@@ -27,7 +27,12 @@ from tests.internal.app.evals._flows import flow
 
 ANSWER = "tool_message.content"
 CASES = [
-    {"id": "order", "input": "lookup order 42", "expected": {"tool_message": {"content": "shipped"}}, "tags": ["refund"]},
+    {
+        "id": "order",
+        "input": "lookup order 42",
+        "expected": {"tool_message": {"content": "shipped"}},
+        "tags": ["refund"],
+    },
     {"id": "chat", "input": "hello", "expected": {"tool_message": {"content": "shipped"}}},
 ]
 COST = USAGE["prompt_tokens"] * PRICE_IN + USAGE["completion_tokens"] * PRICE_OUT
@@ -42,7 +47,11 @@ def _eval(tmp_path: Path, scores=None, **kw) -> Eval:
         graph=flow,
         item_input="text",
         dataset=path,
-        evaluators=[exact(ANSWER), trajectory.ops(["classify"], mode="superset"), budget(llm_calls=1)],
+        evaluators=[
+            exact(ANSWER),
+            trajectory.ops(["classify"], mode="superset"),
+            budget(llm_calls=1),
+        ],
         record_dir=tmp_path / "evals",
         scores=scores,
         **kw,
@@ -68,7 +77,9 @@ def logged():
 
 def _plain(rows):
     """Rows as comparable dicts (a score's created_at is the experiment's start)."""
-    return sorted((r.to_dict() for r in rows), key=lambda d: json.dumps(d, sort_keys=True, default=str))
+    return sorted(
+        (r.to_dict() for r in rows), key=lambda d: json.dumps(d, sort_keys=True, default=str)
+    )
 
 
 async def test_an_eval_writes_its_experiment_items_and_scores(tmp_path, llm):
@@ -80,13 +91,24 @@ async def test_an_eval_writes_its_experiment_items_and_scores(tmp_path, llm):
     assert (exp.eval, exp.status, exp.repeats, exp.cases) == ("stored", "failed", 2, 2)
     assert exp.gate == run.meta["eval"]["gate"] and exp.metrics == run.meta["eval"]["metrics"]
     fp = run.meta["eval"]["fingerprint"]
-    assert (exp.dataset, exp.dataset_version, exp.graph_hash) == ("cases", fp["dataset_version"], fp["graph_hash"])
+    assert (exp.dataset, exp.dataset_version, exp.graph_hash) == (
+        "cases",
+        fp["dataset_version"],
+        fp["graph_hash"],
+    )
     assert exp.ended_at >= exp.started_at > 0
     assert exp.cost_usd == pytest.approx(4 * COST)  # four case runs, one priced LLM call each
 
-    assert sorted((i.case_id, i.repeat) for i in rec.items) == [("chat", 0), ("chat", 1), ("order", 0), ("order", 1)]
+    assert sorted((i.case_id, i.repeat) for i in rec.items) == [
+        ("chat", 0),
+        ("chat", 1),
+        ("order", 0),
+        ("order", 1),
+    ]
     order = next(i for i in rec.items if i.case_id == "order")
-    assert order.passed is True and order.tags == ["refund"] and order.cost_usd == pytest.approx(COST)
+    assert (
+        order.passed is True and order.tags == ["refund"] and order.cost_usd == pytest.approx(COST)
+    )
     assert (order.tokens_in, order.tokens_out) == (12, 4)
     assert order.trace_id == next(i.trace_id for i in run.items if i.key == "order#0")
 
@@ -94,8 +116,17 @@ async def test_an_eval_writes_its_experiment_items_and_scores(tmp_path, llm):
     assert len(scores) == 4 * 3
     by = {(s.case_id, s.repeat, s.score_name): s for s in scores}
     s = by[("chat", 0, f"exact({ANSWER})")]
-    assert (s.passed, s.value, s.source, s.target, s.origin, s.name) == (False, 0.0, "code", "item", "eval", "stored")
-    assert s.evaluator_version == fp["evaluators"][f"exact({ANSWER})"] and s.reason.startswith("got None")
+    assert (s.passed, s.value, s.source, s.target, s.origin, s.name) == (
+        False,
+        0.0,
+        "code",
+        "item",
+        "eval",
+        "stored",
+    )
+    assert s.evaluator_version == fp["evaluators"][f"exact({ANSWER})"] and s.reason.startswith(
+        "got None"
+    )
     assert by[("order", 1, "trajectory.ops(superset)")].data_type == "numeric"  # it gives a score
     assert {s.created_at for s in scores} == {exp.started_at}
 
@@ -140,7 +171,9 @@ async def test_a_store_outage_loses_no_verdict(tmp_path, llm, logged):
     reference = await _eval(tmp_path, gate=Gate(threshold=0.4)).run()
     assert [i.key for i in sorted(run.items, key=lambda i: i.key)] == ["chat", "order"]
     assert all(i.verdict and "checks" in i.verdict for i in run.items)
-    assert run.meta["eval"]["gate"]["verdict"] == reference.meta["eval"]["gate"]["verdict"] == "pass"
+    assert (
+        run.meta["eval"]["gate"]["verdict"] == reference.meta["eval"]["gate"]["verdict"] == "pass"
+    )
     said = " ".join(logged)
     assert "score store" in said and "publish" in said and str(run.path) in said
 
@@ -151,7 +184,9 @@ async def test_a_store_outage_loses_no_verdict(tmp_path, llm, logged):
     assert len(up.scores(ScoreFilter(experiment_id=run.run_id))) == 6
 
 
-async def test_without_scores_nothing_is_written_and_the_cost_is_on_the_verdict(tmp_path, llm, monkeypatch):
+async def test_without_scores_nothing_is_written_and_the_cost_is_on_the_verdict(
+    tmp_path, llm, monkeypatch
+):
     monkeypatch.setenv("OPERONX_RUNS_DIR", str(tmp_path / "runs"))
     run = await _eval(tmp_path).run()
     assert not (tmp_path / "runs" / "scores").exists()
@@ -183,7 +218,9 @@ async def test_a_rescore_writes_its_scores_with_rescore_ids(tmp_path, llm):
     new = store.scores(ScoreFilter(experiment_id=run.run_id, score_name="budget"))
     assert len(new) == 2 + 2  # the run's own budget(llm_calls=1) items, and the rescore's traces
     rescored = [s for s in new if s.target == "trace"]
-    assert {s.passed for s in rescored} == {False} and {s.trace_id for s in rescored} == {i.trace_id for i in run.items}
+    assert {s.passed for s in rescored} == {False} and {s.trace_id for s in rescored} == {
+        i.trace_id for i in run.items
+    }
     assert all(s.evaluator_version for s in rescored)
 
 
@@ -268,3 +305,18 @@ def test_a_declared_scores_must_be_a_score_store_key(tmp_path):
     _project(tmp_path, 'scores     = "team.sqlite"')
     with pytest.raises(ManifestError, match="score_store:<name>"):
         Application.find(tmp_path)
+
+
+async def test_a_store_that_cannot_be_opened_fails_before_the_record(tmp_path, llm):
+    from operonx.core.registry import ResourceHub
+
+    path = tmp_path / "resources.yaml"  # the stand-in model's, plus another store
+    path.write_text(
+        path.read_text(encoding="utf-8") + "score_store:\n  other:\n    backend: sqlite\n",
+        encoding="utf-8",
+    )
+    ResourceHub.set_instance(ResourceHub.from_yaml(path))
+    ev = _eval(tmp_path, scores="score_store:missing")
+    with pytest.raises(Exception, match="score_store:missing"):
+        await ev.run()
+    assert not (tmp_path / "evals" / "stored").exists()  # no record left "running"

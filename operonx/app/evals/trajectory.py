@@ -109,7 +109,11 @@ def _compare(
         ok = len(actual) == len(reference) and all(map(match, actual, reference))
         matched = sum(1 for a, r in zip(actual, reference) if match(a, r))
         score = matched / len(reference) if reference else float(ok)
-        reason = None if ok else f"expected {[show(r) for r in reference]}, got {[show(a) for a in actual]}"
+        reason = (
+            None
+            if ok
+            else f"expected {[show(r) for r in reference]}, got {[show(a) for a in actual]}"
+        )
         return {"passed": ok, "score": round(score, 4), "reason": reason}
     pairs = _matching(actual, reference, match)
     missing = [show(r) for i, r in enumerate(reference) if i not in pairs]
@@ -128,7 +132,11 @@ def _compare(
         reasons.append(f"missing {missing}")
     if extra and mode != "superset":
         reasons.append(f"unexpected {extra}")
-    return {"passed": ok, "score": round(score, 4), "reason": "; ".join(reasons) if not ok else None}
+    return {
+        "passed": ok,
+        "score": round(score, 4),
+        "reason": "; ".join(reasons) if not ok else None,
+    }
 
 
 # ── the evaluators ───────────────────────────────────────────────────────
@@ -197,8 +205,7 @@ def tool_calls(
     def trajectory_tool_calls(trace: Any = None, row: Any = None) -> Dict[str, Any]:
         calls = _need_trace(trace, "trajectory.tool_calls").tool_calls()
         ref = [
-            _ref_call(e)
-            for e in _reference(reference, row, "tool_calls", "trajectory.tool_calls")
+            _ref_call(e) for e in _reference(reference, row, "tool_calls", "trajectory.tool_calls")
         ]
         return _compare(calls, ref, mode, same, show)
 
@@ -214,7 +221,10 @@ def op_output(op: str, check: Any, *, at: str = "last", name: Optional[str] = No
     inner = prepare(check)
 
     def op_output_check(
-        trace: Any = None, input: Any = None, expected: Any = None, row: Any = None  # noqa: A002
+        trace: Any = None,
+        input: Any = None,
+        expected: Any = None,
+        row: Any = None,  # noqa: A002
     ) -> Any:
         view = _need_trace(trace, "op_output")
         found = view.first(op) if at == "first" else view.last(op)

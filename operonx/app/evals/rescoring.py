@@ -132,7 +132,9 @@ async def rescore(
     return Rescored(found.run_id, found.job, verdicts, nums)
 
 
-def _scores(run: JobRun, verdicts: Mapping[str, Dict[str, Any]], prepared: Sequence[Any]) -> List[Any]:
+def _scores(
+    run: JobRun, verdicts: Mapping[str, Dict[str, Any]], prepared: Sequence[Any]
+) -> List[Any]:
     """The rescore's checks as scores on the runs they judged."""
     from .fingerprint import evaluator_version
     from .publish import check_score
@@ -175,7 +177,11 @@ async def _again(
     case = str(old.get("case", item.key))
     row = rows.get(case)
     if row is None:
-        return {"passed": False, "checks": {}, "error": f"case {case!r} is no longer in the dataset"}
+        return {
+            "passed": False,
+            "checks": {},
+            "error": f"case {case!r} is no longer in the dataset",
+        }
     if old.get("case_hash") and case_hash(row) != old["case_hash"]:
         return {
             "passed": False,

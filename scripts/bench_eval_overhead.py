@@ -84,6 +84,7 @@ async def main() -> None:
 
     def one_step(trace=None):
         return trace.path() == ["c"]
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         common = dict(graph=flow, item_input="text", concurrency=CONCURRENCY, trace=[])

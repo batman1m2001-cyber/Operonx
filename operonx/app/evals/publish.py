@@ -185,7 +185,11 @@ class ScoreWriter:
     def __init__(self, store: ScoreStore, name: str):
         self.store = store
         self.writer = BackgroundWriter(
-            self._write, name=f"scores:{name}", max_queue=100_000, batch_size=500, flush_interval=0.2
+            self._write,
+            name=f"scores:{name}",
+            max_queue=100_000,
+            batch_size=500,
+            flush_interval=0.2,
         )
 
     def submit(self, rows: Iterable[Any]) -> None:

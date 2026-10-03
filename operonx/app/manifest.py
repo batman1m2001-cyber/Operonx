@@ -783,7 +783,9 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         if not isinstance(options.get("gate", {}), dict):
             raise ManifestError(f"{where}: {label} `gate` must be a table ([job.gate])")
         scores = options.get("scores")
-        if scores is not None and not (isinstance(scores, str) and scores.startswith("score_store:")):
+        if scores is not None and not (
+            isinstance(scores, str) and scores.startswith("score_store:")
+        ):
             raise ManifestError(
                 f"{where}: {label} has scores={scores!r}; expected a 'score_store:<name>' key"
             )

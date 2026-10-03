@@ -98,4 +98,3 @@ class ScoreStore(ABC):
 
     def close(self) -> None:
         """Release connections. Idempotent."""
-

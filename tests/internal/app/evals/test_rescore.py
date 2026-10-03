@@ -72,7 +72,9 @@ def ran(tmp_path, llm):
 
 def _without_ms(verdict):
     out = dict(verdict)
-    out["checks"] = {k: {kk: vv for kk, vv in c.items() if kk != "ms"} for k, c in verdict["checks"].items()}
+    out["checks"] = {
+        k: {kk: vv for kk, vv in c.items() if kk != "ms"} for k, c in verdict["checks"].items()
+    }
     return out
 
 
@@ -161,7 +163,9 @@ async def test_an_output_the_record_clipped_cannot_be_rescored(tmp_path):
         "clipped",
         graph=verbose,
         item_input="text",
-        dataset=_write(tmp_path / "c.jsonl", [{"id": "big", "input": "ab"}, {"id": "small", "input": ""}]),
+        dataset=_write(
+            tmp_path / "c.jsonl", [{"id": "big", "input": "ab"}, {"id": "small", "input": ""}]
+        ),
         evaluators=[contains("ab")],
         record_dir=tmp_path / "evals",
         trace=[],

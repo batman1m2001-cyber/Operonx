@@ -181,7 +181,9 @@ async def test_op_output_judges_one_op_and_blames_it():
     ]
     view = TraceView.from_rows(rows, {"trace_id": "t"})
     expected = {"label": "other"}
-    last = await _judge(trajectory.op_output("classify", exact("label")), trace=view, expected=expected)
+    last = await _judge(
+        trajectory.op_output("classify", exact("label")), trace=view, expected=expected
+    )
     assert last["passed"] is True and last["op"] == "g.classify#main.1"
     first = await _judge(
         trajectory.op_output("classify", exact("label"), at="first"), trace=view, expected=expected
@@ -190,7 +192,10 @@ async def test_op_output_judges_one_op_and_blames_it():
     assert "got 'refund'" in first["reason"]
     missing = await _judge(trajectory.op_output("nope", exact()), trace=view, expected=expected)
     assert missing["passed"] is False and "did not run" in missing["reason"]
-    assert trajectory.op_output("classify", exact("label")).eval_name == "op_output(classify:exact(label))"
+    assert (
+        trajectory.op_output("classify", exact("label")).eval_name
+        == "op_output(classify:exact(label))"
+    )
 
 
 async def test_op_output_runs_an_async_check():
@@ -266,7 +271,9 @@ async def test_an_eval_checks_the_trajectory_of_each_case(tmp_path, llm):
                 ["classify", "lookup_order"], mode="superset", types=["code"], name="code ops"
             ),
             trajectory.tool_calls(mode="strict", args="exact"),
-            trajectory.op_output("classify", lambda output=None: output["kind"] in ("order", "chat")),
+            trajectory.op_output(
+                "classify", lambda output=None: output["kind"] in ("order", "chat")
+            ),
             budget(llm_calls=1, cost_usd=0.001, tokens=16),
         ],
         record_dir=tmp_path / "evals",

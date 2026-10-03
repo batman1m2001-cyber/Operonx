@@ -71,7 +71,9 @@ class OpRow:
     @property
     def cost_usd(self) -> Optional[float]:
         cost = self.outputs.get("cost_usd") if isinstance(self.outputs, Mapping) else None
-        return float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None
+        return (
+            float(cost) if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None
+        )
 
     @property
     def tokens_in(self) -> int:
@@ -275,7 +277,9 @@ class TraceView:
 
     @staticmethod
     def _named(row: OpRow, name: str) -> bool:
-        return row.op_name == name or row.op_full_name == name or row.op_full_name.endswith("." + name)
+        return (
+            row.op_name == name or row.op_full_name == name or row.op_full_name.endswith("." + name)
+        )
 
     def ops(
         self,

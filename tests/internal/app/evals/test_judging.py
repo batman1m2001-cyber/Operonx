@@ -22,7 +22,11 @@ from operonx.app.jobs.record import ItemResult
 from tests.internal.app.evals._flows import flow
 
 CASES = [
-    {"id": "order", "input": "lookup order 42", "expected": {"tool_message": {"content": "shipped"}}},
+    {
+        "id": "order",
+        "input": "lookup order 42",
+        "expected": {"tool_message": {"content": "shipped"}},
+    },
     {"id": "chat", "input": "hello", "expected": {"tool_message": {"content": None}}},
 ]
 ANSWER = "tool_message.content"
@@ -133,5 +137,9 @@ async def test_a_failing_evaluator_fails_only_its_check(tmp_path, llm):
 
     run = await _eval(tmp_path, [broken, exact(ANSWER)], rows=CASES[:1]).run()
     checks = run.items[0].verdict["checks"]
-    assert checks["broken"] == {"passed": False, "error": "RuntimeError: no", "ms": pytest.approx(checks["broken"]["ms"])}
+    assert checks["broken"] == {
+        "passed": False,
+        "error": "RuntimeError: no",
+        "ms": pytest.approx(checks["broken"]["ms"]),
+    }
     assert checks[f"exact({ANSWER})"]["passed"] is True

@@ -53,7 +53,10 @@ class _Handler(BaseHTTPRequestHandler):
         last = next(
             (m for m in reversed(body.get("messages") or []) if m.get("role") == "user"), {}
         )
-        message = {"role": "assistant", "content": None if calls else f"Echo: {last.get('content', '')}"}
+        message = {
+            "role": "assistant",
+            "content": None if calls else f"Echo: {last.get('content', '')}",
+        }
         if calls:
             message["tool_calls"] = calls
         reply = {

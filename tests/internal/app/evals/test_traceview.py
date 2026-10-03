@@ -64,7 +64,11 @@ async def test_a_live_trace_and_its_stored_run_are_the_same_view(tmp_path, llm, 
     assert live.metadata == json.loads(json.dumps(trace.metadata, default=str))
     # and value for value: a row's inputs and outputs are what the store holds
     for got, row in zip(stored.rows, record.nodes):
-        assert (got.inputs, got.outputs, got.ctx) == (row["inputs"], row["outputs"], tuple(row["ctx"]))
+        assert (got.inputs, got.outputs, got.ctx) == (
+            row["inputs"],
+            row["outputs"],
+            tuple(row["ctx"]),
+        )
 
     # the view's numbers are the store's numbers
     s = record.summary
@@ -84,7 +88,9 @@ async def test_a_view_from_a_live_trace_builds_its_rows_on_first_read(tmp_path, 
     trace = await _run(None)
     built = []
     real = traceview.rows_of_trace
-    monkeypatch.setattr(traceview, "rows_of_trace", lambda *a, **k: built.append(1) or real(*a, **k))
+    monkeypatch.setattr(
+        traceview, "rows_of_trace", lambda *a, **k: built.append(1) or real(*a, **k)
+    )
     view = TraceView.from_trace(trace)
     assert view.trace_id == trace.trace_id and built == []
     assert len(view.rows) == 5 and built == [1]
@@ -175,7 +181,13 @@ def test_rows_are_ordered_by_start_and_errors_are_found():
 
 def test_streaming_token_frames_are_not_llm_calls_and_flat_tool_calls_read():
     frames = [
-        _row("talk", 1.0 + i / 100, op_type="llm", outputs={"content": w, "final": False}, ctx=("main", f"[{i}]"))
+        _row(
+            "talk",
+            1.0 + i / 100,
+            op_type="llm",
+            outputs={"content": w, "final": False},
+            ctx=("main", f"[{i}]"),
+        )
         for i, w in enumerate(["a", "b"])
     ]
     final = _row(

@@ -50,13 +50,13 @@ inconclusive / failed / error::
               gate=Gate(threshold=0.9, baseline="latest", tolerance=0.03))
 """
 
+from . import trajectory
 from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
 from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
 from .gate import Gate
 from .job import Eval
 from .publish import publish
 from .rescoring import Rescored, rescore
-from . import trajectory
 from .traceview import OpRow, ToolCall, TraceView
 from .trajectory import budget
 
