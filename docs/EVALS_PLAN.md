@@ -256,3 +256,34 @@ what it left open is decided here before the code.
 - Found on the way: `clickhouse-connect` returns `''` for a `String` column written as
   `''`, so a trace score's empty `case_id` read back as `''`; score ids that a target does
   not need are `Nullable` in the table and written as `NULL`.
+
+**E4 built, 2026-10-04** (`feat/evals-e4`).
+
+- Exit-code matrix through `operonx eval run` (`tests/internal/cli/test_eval_cli.py`): 0
+  pass, 1 failed, 1 regressed, 2 inconclusive under `--strict` (0 without), 3 every case
+  raising, 2 for an unknown eval / a tolerance without a baseline / an unknown report format
+  / an unopenable store / no experiment at the merge-base (nothing runs, no record opens).
+  `--baseline git:main` end to end in a real git repo: refused before main stored an
+  experiment, `regressed` after, the comparison naming `git:main @ <sha>`.
+- JUnit: every report in the tests validates against Jenkins xunit `junit-10.xsd`
+  (`xmlschema`, a dev dependency). A record and its rows in the files store give byte-identical
+  Markdown and JUnit.
+- `calibrate`, checked through the gate (`test_calibrate.py`): 300 cases, 30 flaky at
+  p = 0.6, three runs → suggested tolerance 4.4 pts; 300 fresh A/A pairs (another seed)
+  judged by `compare_runs` pass 96.3% of the time at it and 43.7% at half of it. A
+  deterministic eval's tolerance is exactly `−newcombe_paired(…, 0, 0, …)[0]` (40 always-
+  passing cases: 8.8 pts; the guide's 3 cases: 56.2 pts). Cost per table row at 300 cases and
+  200 simulations: ~0.6 s for one repeat (McNemar), 7–11 s for 2–5 repeats (the bootstrap,
+  B = 2000).
+- `power`: p_d = 0.10, δ = 0.05 → 311.6 → 312 cases (T4's number, and by hand); exact
+  McNemar at n = 312 detects the drop in 77% of 3000 simulated runs — the normal
+  approximation is a little optimistic, as expected of an exact test.
+- Overhead (`scripts/bench_eval_overhead.py`, CPU time, interleaved E3 `1cbd46e` vs E4 on a
+  shared machine): eval over job **+145 / +147 / +91 µs/case** before, **+137 / +155 / +112**
+  after — no measurable change (the verdict refactor into `recorded_verdict`, `p95_ms` and
+  `cost_usd` in the summary).
+- Found on the way: the calibrate formula first written in D44 counted only the flakes and
+  promised tolerances the gate never passes (see D44); the run summary had no `p95_ms` or
+  `cost_usd`, so a report read from a record and from the store differed until
+  `numbers()` computed them; an unknown `--cases` id surfaced as a source error and exit 3
+  (infrastructure) until the CLI checks the selection before the run.

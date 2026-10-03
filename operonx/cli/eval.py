@@ -61,15 +61,18 @@ class _Project:
     stores — each opened the first time it is needed."""
 
     def __init__(self, manifest: Optional[str]):
+        from operonx.app.manifest import MANIFEST_FILENAME
+
+        self.app: Optional[Application] = None
         if manifest:
-            self.app: Optional[Application] = Application.load(manifest)
-        else:
-            try:
-                self.app = Application.find(Path.cwd())
-            except ManifestError as exc:
-                if "no operonx.toml" not in str(exc):
-                    raise
-                self.app = None
+            self.app = Application.load(manifest)
+        else:  # no manifest is a project too: evals named as module:attr
+            here = Path.cwd().resolve()
+            found = next(
+                (d for d in (here, *here.parents) if (d / MANIFEST_FILENAME).is_file()), None
+            )
+            if found is not None:
+                self.app = Application.find(found)
         self.root = self.app.root if self.app is not None else Path.cwd()
         self._scores: Any = None
 
@@ -159,13 +162,13 @@ class _Project:
         """Where the evals' runs are traced: the project's first readable
         trace store, else the local files under the runs root."""
         from operonx.telemetry.runs import open_run_store, project_stores
+        from operonx.telemetry.runs.project import project_files
 
         for src in project_stores(self.root):
             if src.readable:
                 return src.open()
-        runs = os.environ.get("OPERONX_RUNS_DIR")
-        root = Path(runs) if runs else self.root / ".operonx" / "runs"
-        return open_run_store({"backend": "files", "root": str(root)})
+        _, resolver = project_files(self.root)
+        return open_run_store({"backend": "files", "root": str(resolver.runs_root)})
 
     def experiment(self, ref: str, *, use_store: bool = True) -> Any:
         """An experiment by id or record path: records first, then the store."""
@@ -430,22 +433,23 @@ def _cmd_calibrate(project: _Project, args: argparse.Namespace) -> int:
         exps = [
             project.experiment(ref, use_store=not args.no_store) for ref in _csv(args.experiments)
         ]
-        if target is None and project.app is not None:
+        declared = {e["name"] for e in project.evals()}
+        if target is None and exps and exps[0].eval in declared:
             target = _gate_tolerance(project.eval(exps[0].eval))
     else:
         from operonx.app.evals.experiments import load_experiment
 
         if args.runs < 2:
             raise _Usage("--runs: at least 2 runs of the same code")
+        ev = project.eval(args.eval)
+        if target is None:
+            target = _gate_tolerance(ev)
+        if ev.gate is not None and ev.gate.baseline is not None:
+            ev.gate = dataclasses.replace(ev.gate, baseline=None)  # A/A: nothing to compare with
+        if ev.scores is None and not args.no_store:
+            ev.scores = project.scores()
         exps = []
         for i in range(args.runs):
-            ev = project.eval(args.eval)  # a fresh Eval each run
-            if target is None:
-                target = _gate_tolerance(ev)
-            if ev.gate is not None and ev.gate.baseline is not None:
-                ev.gate = dataclasses.replace(ev.gate, baseline=None)  # A/A: no baseline
-            if ev.scores is None and not args.no_store:
-                ev.scores = project.scores()
             run = ev.run_sync()
             print(f"run {i + 1}/{args.runs}: {run.summary()}")
             exps.append(load_experiment(run))
