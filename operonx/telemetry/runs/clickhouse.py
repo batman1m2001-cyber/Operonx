@@ -17,17 +17,24 @@ Tables (in ``database``, created on first use, versioned in
 * ``nodes``: one row per execution, the row every store keeps, ordered by
   ``(trace_id, seq)``;
 * ``op_rollups``: one row per op per run, ordered by ``(origin, name,
-  run_started, trace_id, op)``.
+  run_started, trace_id, op)``;
+* ``media`` (schema version 2): one row per blob, ordered by ``sha``,
+  used only with ``media="clickhouse"``.
 
 All are ``ReplacingMergeTree`` (a retried batch collapses to one row),
-partitioned by month, and expire on their own through ``TTL expires_at``.
-``ttl_days`` unset means operonx's per-origin retention, a number means
-that many days for every origin, and ``0`` means keep forever.
+partitioned by month (``media`` is not: one blob, one place), and expire
+on their own through ``TTL expires_at``. ``ttl_days`` unset means
+operonx's per-origin retention, a number means that many days for every
+origin, and ``0`` means keep forever.
 
 Blobs (every :class:`~operonx.core.media.Media`, and any ``bytes`` or
-array at ``media_threshold`` bytes or more) go to ``media_dir``,
-content-addressed. The row keeps ``{"$media": sha256, "mime", "size",
-"duration_s", "store"}``; :attr:`ClickHouseRunStore.media` reads them back.
+array at ``media_threshold`` bytes or more) are content-addressed. The row
+keeps ``{"$media": sha256, "mime", "size", "duration_s", "store"}``;
+:attr:`ClickHouseRunStore.media` reads them back. Where they live is
+``media``: ``"local"`` (the default) is a directory, ``media_dir``;
+``"clickhouse"`` is the ``media`` table beside the runs, so a reader on
+another host (the studio) plays the audio too — see
+:class:`ClickHouseMediaStore`.
 
 Uses ``clickhouse-connect`` over HTTP (the ``clickhouse`` extra),
 imported when a client is first needed. Constructing the store does no
@@ -36,17 +43,27 @@ I/O, so a service starts even while its ClickHouse is down.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import threading
 import time
+from collections import OrderedDict
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from operonx.core.loggings import LOGGER
 from operonx.telemetry.consumers.local import resolve_root
-from operonx.telemetry.media import LocalMediaStore, MediaStore, json_default
+from operonx.telemetry.media import (
+    _HEX64,
+    LocalMediaStore,
+    MediaInfo,
+    MediaStore,
+    detect_media,
+    json_default,
+)
 from operonx.telemetry.writer import BackgroundWriter
 
 from .base import RunStore, _check_by
@@ -66,6 +83,7 @@ from .sql import SUMMARY_COLUMNS
 __all__ = [
     "FOREVER",
     "MIGRATIONS",
+    "ClickHouseMediaStore",
     "ClickHouseRunStore",
     "expires_at",
     "node_rows",
@@ -190,11 +208,32 @@ ORDER BY (origin, name, run_started, trace_id, op)
 TTL expires_at
 """
 
+# One row per blob. Not partitioned: ReplacingMergeTree collapses rows only
+# within a partition, and the same sha written by two runs a month apart
+# must stay one blob. The version is expires_at, so a later run's put
+# extends the expiry instead of losing to the older row. Small granules:
+# a read is a point lookup by sha, and the default 10 MB granule would
+# decompress ~100 clips to return one.
+_DDL_MEDIA = """
+CREATE TABLE IF NOT EXISTS {db}.media (
+  sha String,
+  mime LowCardinality(String),
+  size UInt64,
+  data String CODEC(ZSTD(3)),
+  expires_at DateTime,
+  created DateTime64(3) DEFAULT now64(3)
+) ENGINE = ReplacingMergeTree(expires_at)
+ORDER BY sha
+TTL expires_at
+SETTINGS index_granularity = 256, index_granularity_bytes = 1048576
+"""
+
 #: ``(version, note, statements)``, applied in order on first use. A new
 #: version appends here and must be idempotent (``ADD COLUMN IF NOT
 #: EXISTS``): two processes may migrate at once.
 MIGRATIONS: List[Tuple[int, str, List[str]]] = [
     (1, "runs, nodes and op_rollups", [_DDL_RUNS, _DDL_NODES, _DDL_ROLLUPS]),
+    (2, "media", [_DDL_MEDIA]),
 ]
 
 # ── rows ────────────────────────────────────────────────────────────────
@@ -220,6 +259,7 @@ ROLLUP_COLUMNS: Tuple[str, ...] = (
     "total_ms", "max_ms", "errors", "cost_usd", "unpriced", "tokens_in",
     "tokens_out", "samples", "exact", "expires_at",
 )  # fmt: skip
+MEDIA_COLUMNS: Tuple[str, ...] = ("sha", "mime", "size", "data", "expires_at")
 _ROLLUP_READ = (
     "trace_id", "op", "op_type", "count", "total_ms", "max_ms", "errors",
     "cost_usd", "unpriced", "tokens_in", "tokens_out", "samples", "exact",
@@ -393,6 +433,199 @@ def node_of(row: Sequence[Any]) -> Dict[str, Any]:
     return d
 
 
+# ── media in ClickHouse ─────────────────────────────────────────────────
+
+#: A blob is written with this much expiry beyond the run that wrote it,
+#: so a later run sharing it is skipped (no re-insert) for up to a day and
+#: the blob still outlives every run that references it.
+_MEDIA_SLACK = 86400
+
+
+class _MediaBatch:
+    """Blobs waiting for the next ``media`` insert, by sha."""
+
+    __slots__ = ("rows", "bytes", "expires")
+
+    def __init__(self, expires: int):
+        self.rows: Dict[str, List[Any]] = {}
+        self.bytes = 0
+        self.expires = expires
+
+
+class ClickHouseMediaStore(MediaStore):
+    """Blobs in the ``media`` table of a :class:`ClickHouseRunStore`'s
+    database, through its client — what ``media="clickhouse"`` gives.
+
+    Writes ride the run store's batches: while the writer thread builds a
+    batch, :meth:`put` only collects the blob, and the batch inserts the
+    blobs once (one ``media`` insert, before ``nodes``, so a listed
+    execution's blob is there). A batch whose blobs pass ``batch_bytes``
+    inserts what it has collected after the run that crossed it and
+    carries on, so the blob bytes held at once stay under ``batch_bytes``
+    plus one run's, however media-heavy the batch. A ``put`` outside a
+    batch inserts at once.
+
+    A sha this process already wrote (a bounded LRU of ``seen`` shas) is
+    not written again: the callbot repeats the same TTS clips call after
+    call. Each row's ``expires_at`` is the run's expiry plus a day; a
+    later run whose expiry passes what was written re-puts the blob, and
+    ``ReplacingMergeTree(expires_at)`` keeps the longest-lived row.
+
+    :meth:`get` reads ``data`` by ``sha`` with ``LIMIT 1``: every row of
+    one sha holds the same bytes (they are what it hashes), so neither
+    ``FINAL`` nor ``argMax`` is needed to read the right ones.
+    """
+
+    name = "clickhouse"
+
+    def __init__(self, owner: "ClickHouseRunStore", seen: int = 4096, batch_bytes: int = 32 << 20):
+        self._owner = owner
+        self.seen_max = max(0, int(seen))
+        self.batch_bytes = max(1, int(batch_bytes))
+        self._seen: "OrderedDict[str, int]" = OrderedDict()  # sha → expiry written
+        self._lock = threading.Lock()
+        self._local = threading.local()
+        self.stats: Dict[str, int] = {"written": 0, "bytes": 0, "skipped": 0}
+
+    @property
+    def _table(self) -> str:
+        return f"{self._owner.database}.media"
+
+    # -- batching ------------------------------------------------------------
+
+    @contextmanager
+    def batch(self) -> Iterator[_MediaBatch]:
+        """Collect this thread's puts until :meth:`flush` inserts them.
+        Nothing collected outlives the block: a failed batch is rebuilt,
+        and its blobs collected again, on retry."""
+        prev = getattr(self._local, "batch", None)
+        b = _MediaBatch(self._default_expiry())
+        self._local.batch = b
+        try:
+            yield b
+        finally:
+            self._local.batch = prev
+
+    def expire_with(self, expires: int) -> None:
+        """Blobs this thread puts next belong to a run expiring at *expires*."""
+        b = getattr(self._local, "batch", None)
+        if b is not None:
+            b.expires = int(expires)
+
+    def flush(self, full_only: bool = False) -> None:
+        """Insert what this thread's batch has collected; with *full_only*,
+        only once it holds ``batch_bytes`` or more."""
+        b = getattr(self._local, "batch", None)
+        if b is not None and b.rows and (not full_only or b.bytes >= self.batch_bytes):
+            self._write(b)
+
+    def _default_expiry(self) -> int:
+        return expires_at(time.time(), "", self._owner.ttl_days)
+
+    def _write(self, b: _MediaBatch) -> None:
+        rows = list(b.rows.values())
+        self._owner._insert("media", rows, MEDIA_COLUMNS)
+        with self._lock:
+            for row in rows:
+                sha, written = row[0], row[4]
+                if self._seen.get(sha, -1) < written:
+                    self._seen[sha] = written
+                self._seen.move_to_end(sha)
+            while len(self._seen) > self.seen_max:
+                self._seen.popitem(last=False)
+            self.stats["written"] += len(rows)
+            self.stats["bytes"] += b.bytes
+        b.rows.clear()
+        b.bytes = 0
+
+    # -- the MediaStore contract ------------------------------------------------
+
+    def put(self, data: bytes, info: Optional[MediaInfo] = None) -> str:
+        data = bytes(data)
+        sha = hashlib.sha256(data).hexdigest()
+        b = getattr(self._local, "batch", None)
+        wanted = b.expires if b is not None else self._default_expiry()
+        with self._lock:
+            have = self._seen.get(sha)
+            if have is not None:
+                self._seen.move_to_end(sha)
+                if have >= wanted:
+                    self.stats["skipped"] += 1
+                    return sha
+        expiry = FOREVER if wanted >= FOREVER else min(FOREVER, wanted + _MEDIA_SLACK)
+        if b is None:
+            one = _MediaBatch(expiry)
+            self._add(one, sha, data, info, expiry)
+            self._write(one)
+            return sha
+        if sha in b.rows:
+            b.rows[sha][4] = max(b.rows[sha][4], expiry)
+            return sha
+        # never insert from here: put runs inside orjson's default= hook,
+        # which would swallow a failed insert. The batch flushes between runs.
+        self._add(b, sha, data, info, expiry)
+        return sha
+
+    @staticmethod
+    def _add(b: _MediaBatch, sha: str, data: bytes, info: Optional[MediaInfo], expiry: int) -> None:
+        mime = (info or detect_media(data)).mime
+        b.rows[sha] = [sha, mime, len(data), data, expiry]
+        b.bytes += len(data)
+
+    def get(self, sha: str) -> Optional[bytes]:
+        if not isinstance(sha, str) or not _HEX64.match(sha):
+            return None
+        rows = (
+            self._owner._client()
+            .query(
+                f"SELECT data FROM {self._table} WHERE sha = {{s:String}} LIMIT 1",
+                parameters={"s": sha},
+                column_formats={"data": "bytes"},
+            )
+            .result_rows
+        )
+        return bytes(rows[0][0]) if rows else None
+
+    def exists(self, sha: str) -> bool:
+        if not isinstance(sha, str) or not _HEX64.match(sha):
+            return False
+        rows = self._owner._query(
+            f"SELECT 1 FROM {self._table} WHERE sha = {{s:String}} LIMIT 1", {"s": sha}
+        )
+        return bool(rows)
+
+    def delete(self, sha: str) -> bool:
+        return self.delete_many([sha]) > 0
+
+    def delete_many(self, shas: Sequence[str]) -> int:
+        """Lightweight ``DELETE`` of *shas*, one statement per 5000."""
+        shas = [s for s in shas if isinstance(s, str) and _HEX64.match(s)]
+        gone = 0
+        for i in range(0, len(shas), 5000):
+            chunk = shas[i : i + 5000]
+            found = self._owner._query(
+                f"SELECT count(DISTINCT sha) FROM {self._table} WHERE sha IN {{s:Array(String)}}",
+                {"s": chunk},
+            )
+            n = int(found[0][0]) if found else 0
+            if n:
+                self._owner._command(
+                    f"DELETE FROM {self._table} WHERE sha IN {{s:Array(String)}}", {"s": chunk}
+                )
+            gone += n
+        with self._lock:
+            for s in shas:
+                self._seen.pop(s, None)
+        return gone
+
+    def keys(self) -> Iterator[Tuple[str, float]]:
+        rows = self._owner._query(
+            f"SELECT sha, toFloat64(max(created)) FROM {self._table} GROUP BY sha ORDER BY sha"
+        )
+        for sha, written in rows:
+            yield sha, float(written)
+
+
 # ── the store ───────────────────────────────────────────────────────────
 
 
@@ -403,6 +636,12 @@ class ClickHouseRunStore(RunStore):
     ``command`` and ``insert`` the way ``clickhouse_connect``'s has):
     tests hand in a fake. ``read_timeout`` is how long a read waits for
     this process's queued runs to land first.
+
+    ``media`` is where blobs go: ``"local"`` (the default) a directory,
+    ``media_dir``; ``"clickhouse"`` the ``media`` table, written in the
+    same batches as the runs (``media_dir`` is then unused, and
+    ``media_batch_bytes`` caps the blob bytes one insert carries); or a
+    :class:`~operonx.telemetry.media.MediaStore` of your own.
     """
 
     def __init__(
@@ -421,8 +660,9 @@ class ClickHouseRunStore(RunStore):
         queue_size: int = 1000,
         timeout: float = 10.0,
         read_timeout: float = 5.0,
-        media: Optional[MediaStore] = None,
+        media: Any = "local",
         client: Any = None,
+        media_batch_bytes: int = 32 << 20,
     ):
         if not _IDENT.match(database or ""):
             raise ValueError(f"database {database!r} is not a plain identifier")
@@ -439,10 +679,14 @@ class ClickHouseRunStore(RunStore):
         self.media_threshold = int(media_threshold)
         self.timeout = float(timeout)
         self.read_timeout = float(read_timeout)
-        if media is None:
+        if media is None or media in ("", "local"):
             root = resolve_root(media_dir) if media_dir else resolve_root("") / "media"
             media = LocalMediaStore(root)
-        self.media = media
+        elif media == "clickhouse":
+            media = ClickHouseMediaStore(self, batch_bytes=media_batch_bytes)
+        elif not isinstance(media, MediaStore):
+            raise ValueError(f"media is {media!r}; one of 'local', 'clickhouse', or a MediaStore")
+        self.media: MediaStore = media
         self._given_client = client
         self._ch = client
         self._ch_pid = os.getpid()
@@ -565,6 +809,8 @@ class ClickHouseRunStore(RunStore):
         meta = meta_of_trace(trace)
         summary, rollups = summarize(str(trace.trace_id), rows, meta, location=None)
         exp = expires_at(summary.started_at, summary.origin, self.ttl_days)
+        if isinstance(self.media, ClickHouseMediaStore):
+            self.media.expire_with(exp)
         return (
             summary,
             run_row(summary, meta, exp),
@@ -575,14 +821,24 @@ class ClickHouseRunStore(RunStore):
     def put_trace(self, trace: Any) -> RunSummary:
         """Store one run now, synchronously (scripts, backfills). The
         engine's path is :meth:`consume`."""
-        summary, run, nodes, rollups = self.build(trace)
-        self._insert_all([run], nodes, rollups)
+        with self._media_batch():
+            summary, run, nodes, rollups = self.build(trace)
+            self._insert_all([run], nodes, rollups)
         return summary
+
+    def _media_batch(self) -> Any:
+        """Blobs put while building go out with the batch's rows."""
+        if isinstance(self.media, ClickHouseMediaStore):
+            return self.media.batch()
+        return nullcontext()
 
     def _insert_all(
         self, runs: List[List[Any]], nodes: List[List[Any]], rollups: List[List[Any]]
     ) -> None:
-        # nodes first: a run that is listed always has its executions
+        # blobs, then nodes: a run that is listed always has its executions,
+        # and an execution its blobs
+        if isinstance(self.media, ClickHouseMediaStore):
+            self.media.flush()
         self._insert("nodes", nodes, NODE_COLUMNS)
         self._insert("op_rollups", rollups, ROLLUP_COLUMNS)
         self._insert("runs", runs, RUN_COLUMNS)
@@ -594,23 +850,26 @@ class ClickHouseRunStore(RunStore):
         runs: List[List[Any]] = []
         nodes: List[List[Any]] = []
         rollups: List[List[Any]] = []
-        for trace in traces:
-            try:
-                _, run, n, r = self.build(trace)
-            except Exception as exc:  # noqa: BLE001 — one odd run never sinks the batch
-                self._built_errors += 1
-                if self._built_errors == 1:
-                    LOGGER.warning(
-                        "clickhouse: could not turn trace %s into rows (%s: %s); skipped",
-                        getattr(trace, "trace_id", "?"),
-                        type(exc).__name__,
-                        exc,
-                    )
-                continue
-            runs.append(run)
-            nodes.extend(n)
-            rollups.extend(r)
-        self._insert_all(runs, nodes, rollups)
+        with self._media_batch():
+            for trace in traces:
+                try:
+                    _, run, n, r = self.build(trace)
+                except Exception as exc:  # noqa: BLE001 — one odd run never sinks the batch
+                    self._built_errors += 1
+                    if self._built_errors == 1:
+                        LOGGER.warning(
+                            "clickhouse: could not turn trace %s into rows (%s: %s); skipped",
+                            getattr(trace, "trace_id", "?"),
+                            type(exc).__name__,
+                            exc,
+                        )
+                    continue
+                runs.append(run)
+                nodes.extend(n)
+                rollups.extend(r)
+                if isinstance(self.media, ClickHouseMediaStore):
+                    self.media.flush(full_only=True)  # bounded: blobs out between runs
+            self._insert_all(runs, nodes, rollups)
 
     def flush(self, timeout: Optional[float] = None) -> bool:
         """Wait for queued runs to be written (or dropped)."""
@@ -821,7 +1080,9 @@ class ClickHouseRunStore(RunStore):
     def prune_media(self, older_than_s: float = 86400.0) -> int:
         """Delete blobs no stored execution references any more, written
         more than *older_than_s* ago (younger ones may belong to runs still
-        on their way in). Returns how many were deleted."""
+        on their way in). Returns how many were deleted. With
+        ``media="clickhouse"`` blobs also expire on their own, with the
+        last run that wrote them."""
         self._settle()
         rows = self._query(
             "SELECT DISTINCT arrayJoin(extractAll(concat(inputs, ' ', outputs), {pat:String})) "
@@ -830,11 +1091,12 @@ class ClickHouseRunStore(RunStore):
         )
         keep = {r[0] for r in rows}
         cutoff = time.time() - float(older_than_s)
-        gone = 0
-        for sha, written in list(self.media.keys()):
-            if sha not in keep and written < cutoff and self.media.delete(sha):
-                gone += 1
-        return gone
+        orphans = [
+            sha for sha, written in self.media.keys() if sha not in keep and written < cutoff
+        ]
+        if isinstance(self.media, ClickHouseMediaStore):
+            return self.media.delete_many(orphans)
+        return sum(1 for sha in orphans if self.media.delete(sha))
 
     def close(self) -> None:
         self.writer.close()

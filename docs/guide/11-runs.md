@@ -49,7 +49,7 @@ run_store:
 | `postgres` | `operonx[postgres]` | `prefix` names its tables; `media_dir` takes large payloads. |
 | `mongo` | `operonx[mongo]` | Native queries and pipelines; `media_dir` as above. |
 | `langfuse` | `operonx[langfuse]` | Reads only: nothing is written through it. |
-| `clickhouse` | `operonx[clickhouse]` | Writes from a background queue, never on the run's path; TTL retention; blobs content-addressed in `media_dir`. See [below](#clickhouse). |
+| `clickhouse` | `operonx[clickhouse]` | Writes from a background queue, never on the run's path; TTL retention; blobs content-addressed in `media_dir`, or in the database with `media: clickhouse`. See [below](#clickhouse). |
 
 Backends import lazily: declaring a store pulls in no driver its backend
 does not use. A tool that must not import your project (the studio)
@@ -71,6 +71,7 @@ trace_clickhouse:
     database: operonx          # created on first use
     secure: false
     ttl_days:                  # unset: the retention per origin below; 0: forever
+    media: local               # local: blobs in media_dir; clickhouse: in the database
     media_dir: /data/operonx-media
     media_threshold: 1024      # bytes; a Media value is stored at any size
     batch_size: 10000          # executions per insert
@@ -104,8 +105,13 @@ does not change. Runs back to back with no idle time slow each other.
 
 **Tables.** `runs` (one row per run, the summary columns), `nodes` (one
 row per execution, inputs and outputs as JSON text), `op_rollups` (one
-row per op per run) and `schema_version`. They are `ReplacingMergeTree`,
-so a retried batch never duplicates a run, partitioned by month and
+row per op per run), `media` (one row per blob, used with
+`media: clickhouse`) and `schema_version`. A database an older operonx
+created is upgraded on first use: version 2 adds `media` and touches
+nothing else. When the database exists, the user needs no `CREATE
+DATABASE` grant. The tables are `ReplacingMergeTree`, so a retried
+batch never duplicates a run; all but `media` are partitioned by month,
+and they are
 ordered for the queries above: runs by `(origin, name, started_at,
 trace_id)`, nodes by `(trace_id, seq)`. Every method of the contract is
 one or two SQL statements; `op_stats` and `groups` aggregate in
@@ -117,8 +123,22 @@ expiry is set when it is written: the origin's default below, or
 too, by lightweight `DELETE`.
 
 **Media.** Every `Media` value, and any `bytes` or array of
-`media_threshold` bytes or more, is stored once in `media_dir`, named by its
-SHA-256. The row keeps a reference:
+`media_threshold` bytes or more, is stored once, named by its SHA-256.
+The `media` field says where:
+
+- `local` (the default, as before): files in `media_dir`. Only a reader
+  that sees that directory can play them.
+- `clickhouse`: rows in the `media` table, beside the runs, so the studio
+  on another host plays the audio too. `media_dir` is not used. The blobs
+  go in the same background batches as the runs (one `media` insert per
+  batch, before `nodes`), never on the run's path. A clip this process
+  already wrote is not written again (an LRU of 4096 hashes), so the same
+  TTS phrase in every call is stored once. A blob expires with the last
+  run that wrote it, plus a day. The blob bytes one batch holds are capped
+  at 32 MB (`media_batch_bytes=` on the store) plus one run's: past it,
+  the batch inserts its blobs between runs.
+
+The row keeps a reference:
 
 ```json
 {"$media": "9f2c…", "mime": "audio/wav", "size": 48044,
@@ -129,9 +149,11 @@ The type comes from the bytes: WAV (with rate, channels and duration from
 its header), MP3, OGG/Opus, FLAC, WebM, PNG, JPEG, GIF, WebP, PDF, `.npy`;
 else `application/octet-stream`. Raw PCM has no header, so declare it:
 `Media(pcm, "audio/L16;rate=16000;channels=1")` gets its duration from
-its size. `store.media.get(sha)` reads a blob back. Deleting a run keeps
-its blobs, which other runs may share; `store.prune_media()` removes the
-ones nothing references. `operonx.telemetry.media` (`detect_media`,
+its size. `store.media.get(sha)` reads a blob back, from either place;
+`"store"` in the reference says which (`local` or `clickhouse`).
+Switching `media` does not move blobs already written. Deleting a run
+keeps its blobs, which other runs may share; `store.prune_media()` removes
+the ones nothing references. `operonx.telemetry.media` (`detect_media`,
 `LocalMediaStore`) is usable by any other store.
 
 ## Reading a project's own sinks
