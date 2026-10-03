@@ -243,9 +243,9 @@ def bind_interrupt_bus(
 ) -> Callable[[], None]:
     """Subscribe ``sink`` to ``InterruptOp`` events on ``state``.
 
-    Sink receives fully-formed :class:`InterruptEvent` instances. Caller
-    is responsible for arranging the resume value via
-    ``state.resume_interrupt(interrupt_id, value)``.
+    Sink receives fully-formed :class:`InterruptEvent` instances, each
+    answerable with ``event.resume(value)`` (the same as
+    ``state.resume_interrupt(event.interrupt_id, value)``).
 
     When ``op_registry`` is supplied, per-op filters are honoured against
     the ``channel`` argument (default ``"trace"``). An InterruptOp declared
@@ -267,6 +267,7 @@ def bind_interrupt_bus(
                 ctx=ctx,
                 payload=payload,
                 interrupt_id=interrupt_id,
+                _resume=state.resume_interrupt,
             )
         )
 

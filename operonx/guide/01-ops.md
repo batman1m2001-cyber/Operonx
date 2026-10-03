@@ -293,8 +293,10 @@ asyncio.run(main())
 - **`if_` / `.else_()`** — branching; see [control flow](03-control-flow.md#ifelse).
 - **`EmitOp(payload=ref, channel="progress")`** sends a side event to
   `engine.stream(inputs, mode="custom")` without changing the data flow.
-- **`InterruptOp(payload=ref, timeout=0)`** pauses for a human answer;
-  resume with `handle.state.resume_interrupt(interrupt_id, value)`.
+- **`InterruptOp(payload=ref, timeout=0)`** pauses for a human answer.
+  `engine.stream(inputs, mode="interrupts")` yields an `InterruptEvent`
+  when it pauses (`mode="updates"` yields it among the updates); answer
+  with `event.resume(value)`, and the op outputs `response=value`.
 
 ```python
 import asyncio
@@ -319,6 +321,40 @@ async def main():
     engine = Operon(progress, params={"n": None})
     seen = [e.payload async for e in engine.stream({"n": 4}, mode="custom", channels=["progress"])]
     assert seen == ["doubled 4"]
+
+
+asyncio.run(main())
+```
+
+```python
+import asyncio
+
+from operonx import END, START, InterruptOp, Operon, graph, op
+
+
+@op
+def plan(x: int) -> dict:
+    return {"plan": f"delete {x} rows"}
+
+
+@op
+def execute(plan: str, approved: str = None) -> dict:
+    return {"done": plan if approved == "yes" else "skipped"}
+
+
+@graph
+def guarded(x):
+    p = plan(x=x)
+    ask = InterruptOp(payload=p["plan"])
+    ex = execute(plan=p["plan"], approved=ask["response"])
+    START >> p >> ask >> ex >> END
+
+
+async def main():
+    engine = Operon(guarded, params={"x": None})
+    async for event in engine.stream({"x": 3}, mode="interrupts"):
+        assert event.payload == "delete 3 rows"
+        assert event.resume("yes")  # False if the op was no longer waiting
 
 
 asyncio.run(main())
