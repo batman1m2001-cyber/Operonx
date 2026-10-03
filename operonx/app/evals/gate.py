@@ -35,11 +35,14 @@ from .stats import Estimate, benjamini_hochberg, compare_paired, holm, seed_of
 
 __all__ = [
     "CaseOutcome",
+    "comparability",
+    "compare_runs",
     "EXIT_CODES",
     "Gate",
     "PASS_METRIC",
     "VERDICTS",
     "decide",
+    "exit_code",
     "outcomes",
 ]
 
@@ -228,8 +231,10 @@ class Gate:
     def thresholds(self) -> Dict[str, float]:
         return dict(self._thresholds)
 
-    def tolerance_for(self, metric: str) -> float:
-        return self._tolerances[metric]
+    def tolerance_for(self, metric: str) -> Optional[float]:
+        """How large a drop of *metric* matters; ``None`` when the gate does
+        not say (a comparison then reports it without a verdict)."""
+        return self._tolerances.get(metric)
 
     def named_metrics(self) -> List[str]:
         """Every metric name the gate mentions, to check against the eval's."""
@@ -346,6 +351,8 @@ def compare_runs(
     for t in tests:
         if t["gated"]:
             tol = gate.tolerance_for(t["metric"])
+            if tol is None:
+                continue  # compared, not judged: nobody said what drop matters
             if t["diff"] < -tol and t["p_holm"] < gate.alpha:
                 t["verdict"] = REGRESSED
             elif t["ci_lo"] >= -tol:
@@ -364,6 +371,26 @@ def compare_runs(
         "not_compared": skipped,
         "flips": _flips(base, cur, ids),
     }
+
+
+def comparability(
+    base_id: str,
+    base_fp: Optional[Mapping],
+    fingerprint: Optional[Mapping],
+    cases: int,
+) -> List[str]:
+    """What makes two experiments less than directly comparable: a
+    baseline with no fingerprint, or another dataset or evaluator set."""
+    if not base_fp:
+        return [f"baseline {base_id} has no fingerprint: comparable only by case id"]
+    out = []
+    for k in ("dataset_version", "evaluators_hash"):
+        if fingerprint and base_fp.get(k) != fingerprint.get(k):
+            out.append(
+                f"{k} differs from baseline {base_id}: compared on the "
+                f"{cases} shared, unchanged cases"
+            )
+    return out
 
 
 # ── the decision ─────────────────────────────────────────────────────────
@@ -451,17 +478,7 @@ def decide(
             base_id, base_cases, base_fp = baseline
             comparison = compare_runs(gate, base_cases, current, baseline_id=base_id)
             comparison["baseline"] = base_id
-            if not base_fp:
-                warnings.append(
-                    f"baseline {base_id} has no fingerprint: comparable only by case id"
-                )
-            elif fingerprint:
-                for k in ("dataset_version", "evaluators_hash"):
-                    if base_fp.get(k) != fingerprint.get(k):
-                        warnings.append(
-                            f"{k} differs from baseline {base_id}: compared on the "
-                            f"{comparison['cases']} shared, unchanged cases"
-                        )
+            warnings.extend(comparability(base_id, base_fp, fingerprint, comparison["cases"]))
             for t in comparison["tests"]:
                 if not t["gated"]:
                     continue
