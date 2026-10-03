@@ -388,3 +388,27 @@ scripted answer function), never a real model.
   would have been shadowed by the `pairwise` function (the module is `pairs.py`, as
   `rescoring.py` was for `rescore`); a `**kwargs` evaluator must not force the trace text
   (`trace_summary` is built only for an evaluator that names it, D23 kept).
+
+## 12. Decisions (E6: what the Studio reads and edits)
+
+Branch `feat/evals-e6`, stacked on `feat/evals-e5`. The Studio pages (T4 §15) live in
+operonx-studio (`feat/experiments`); the studio renders and calls operonx and never holds a
+copy of its rules or statistics. What it needed from operonx and did not have:
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| D62 | Listing experiments cheaply | `ExperimentData.from_experiment(exp)`: one store row as an experiment with its summary and no items (what `from_store` builds its summary from, now shared). `experiments_of(…, items=False)` lists with one `list_experiments` call and no per-experiment reads, and reads each record's `run.json` without its `items.jsonl` | a list of 30 experiments from ClickHouse was 60 queries (`get_experiment` + `scores` each); a list needs the summaries only |
+| D63 | Editing a case | `Dataset.update(case_id, changes)` changes `expected`, `tags`, `split`, `cluster`, `trajectory`, `note`, `status` of one case; a value `None` removes the key. Not `id` or `input`: a different input is a different case (add it). The changed row is checked like `problems()` and refused with the reason; the file is rewritten through a temporary file beside it and `os.replace`, every other line byte for byte. `add()` and `update()` hold an advisory lock on the dataset's folder (no lock file in git), so an append never lands in the file an edit replaces; a writer that is not a `Dataset` (an editor, a script) is caught by a size/mtime check before the replace, and the edit is refused, not written over it. A bare-input line gains its `id` (the same value) when edited. Returns the new row | T4 §15.2 `PATCH …/rows/{case_id}` "atomic rewrite via operonx `Dataset.update`"; git JSONL stays the truth |
+| D64 | Archived cases | `status` is `active` (the default, never written) or `archived`. `rows()` leaves archived cases out — so a run, a selection and `dataset_version` see the active cases only (T4 §5.1) — and `all_rows()` keeps them; `problems()` flags any other status | archive instead of delete: a case's history across experiments stays readable |
+
+## 13. E6 tests
+
+- `tests/internal/app/evals/test_dataset_edit.py`: each editable key; `None` removes; other
+  lines byte for byte (a bare-input line, a blank line, key order); id/input refused; an unknown
+  case, a duplicate id and an invalid value refused with the file untouched; an edit refused
+  when another writer appended meanwhile; adds and edits from threads lose nothing; archived
+  cases out of `rows()`, `select()` and `dataset_version`, in `all_rows()`; an archived case
+  is not run by an `Eval`; `problems()` on a bad status.
+- `tests/internal/app/evals/test_experiments_list.py`: `from_experiment` has `from_store`'s
+  summary; `experiments_of(items=False)` equals the full listing minus items, from records and
+  from the store, and reads the store with one `list_experiments` and no `get_experiment`.
