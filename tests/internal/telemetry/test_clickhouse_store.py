@@ -67,7 +67,11 @@ class FakeClient:
     """Records what the store sends. ``hang`` blocks every insert until
     set; ``fail`` makes every insert raise."""
 
-    def __init__(self, hang: threading.Event = None, fail: bool = False):
+    def __init__(
+        self, hang: threading.Event = None, fail: bool = False, databases=(), grants_db=True
+    ):
+        self.databases = set(databases)
+        self.grants_db = grants_db
         self.commands = []
         self.inserts = []
         self.hang = hang
@@ -75,9 +79,16 @@ class FakeClient:
         self.versions = []
 
     def command(self, sql, parameters=None):
-        self.commands.append(" ".join(sql.split()))
+        sql = " ".join(sql.split())
+        if sql.startswith("CREATE DATABASE"):
+            if not self.grants_db:  # what ClickHouse answers: code 497
+                raise PermissionError("Code: 497. Not enough privileges")
+            self.databases.add(sql.split()[-1])
+        self.commands.append(sql)
 
     def query(self, sql, parameters=None):
+        if sql.startswith("EXISTS DATABASE"):
+            return _Result([[int(sql.split()[-1] in self.databases)]])
         if "max(version)" in sql:
             return _Result([[max(self.versions, default=0)]])
         return _Result([])
@@ -241,6 +252,16 @@ def test_schema_is_created_once_and_versioned(tmp_path):
     again = _store(tmp_path, client=client)
     again.put_trace(_trace("t-3"))
     assert len([c for c in client.commands if "CREATE TABLE IF NOT EXISTS ox.runs" in c]) == 1
+
+
+def test_a_user_granted_only_tables_writes_and_reads(tmp_path):
+    # the database exists; the user may create tables in it, not databases
+    client = FakeClient(databases={"ox"}, grants_db=False)
+    store = _store(tmp_path, client=client)
+    store.put_trace(_trace())
+    assert not [c for c in client.commands if c.startswith("CREATE DATABASE")]
+    assert [t for t, *_ in client.inserts] == ["ox.nodes", "ox.op_rollups", "ox.runs"]
+    assert store.schema_version() == 1
 
 
 def test_batches_go_out_as_one_insert_per_table(tmp_path):

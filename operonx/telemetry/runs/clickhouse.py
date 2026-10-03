@@ -491,7 +491,10 @@ class ClickHouseRunStore(RunStore):
     def _migrate(self, ch: Any) -> int:
         """Create what is missing; apply migrations newer than recorded."""
         db = self.database
-        ch.command(f"CREATE DATABASE IF NOT EXISTS {db}")
+        # A user granted only tables in an existing database may not run
+        # CREATE DATABASE at all, even IF NOT EXISTS — so ask first.
+        if not ch.query(f"EXISTS DATABASE {db}").result_rows[0][0]:
+            ch.command(f"CREATE DATABASE IF NOT EXISTS {db}")
         ch.command(_DDL_VERSION.format(db=db))
         rows = ch.query(f"SELECT max(version) FROM {db}.schema_version").result_rows
         current = int((rows[0][0] if rows else 0) or 0)

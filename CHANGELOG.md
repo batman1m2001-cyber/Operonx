@@ -60,6 +60,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a 2000-yield streaming run: no difference with gaps between runs; back to
     back, the writer's CPU (about 46 µs per execution) shares the GIL with
     the next run (`scripts/bench_clickhouse_consumer.py`).
+  - **A user granted only tables in an existing database works.** The
+    store creates the database only when `EXISTS DATABASE` says it is
+    missing, so a user without the `CREATE DATABASE` grant can still write
+    and read instead of failing with code 497.
   - **Tables**: `runs`, `nodes` and `op_rollups`, as `ReplacingMergeTree`
     (a retried batch never duplicates a run), partitioned by month and
     ordered for the contract's queries. Every row has a TTL from
