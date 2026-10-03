@@ -1,0 +1,14 @@
+{"blocks": [
+ {"kind": "title", "text": "Sổ tay nhân viên Edupia 2026"},
+ {"kind": "paragraph", "text": "Tài liệu này mô tả  chính sách\nnhân sự áp dụng từ ngày 01/01/2026."},
+ {"kind": "heading", "level": 1, "text": "1. Nghỉ phép năm"},
+ {"kind": "paragraph", "text": "Nhân viên chính thức được nghỉ phép 12 ngày làm việc mỗi năm. Số ngày phép tăng thêm 1 ngày sau mỗi 5 năm công tác."},
+ {"kind": "list_item", "text": "Đăng ký trước ít nhất 3 ngày.", "attrs": {"ordered": false}},
+ {"kind": "list_item", "text": "Được quản lý trực tiếp phê duyệt.", "attrs": {"ordered": false}},
+ {"kind": "heading", "level": 2, "text": "1.1 Nghỉ ốm"},
+ {"kind": "paragraph", "text": "Nghỉ ốm cần giấy xác nhận của cơ sở y tế."},
+ {"kind": "heading", "level": 1, "text": "2. Phúc lợi"},
+ {"kind": "caption", "text": "Bảng 1: Mức phụ cấp"},
+ {"kind": "table", "attrs": {"rows": [["Khoản", "Mức (VNĐ)"], ["Ăn trưa", "730.000"], ["Gửi xe", "150.000"]], "header_rows": 1}},
+ {"kind": "page_footer", "text": "Trang 1"}
+]}

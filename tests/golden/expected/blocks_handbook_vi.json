@@ -1,0 +1,24 @@
+{
+ "title": "Sổ tay nhân viên Edupia 2026",
+ "pages": [],
+ "canonical": "# Sổ tay nhân viên Edupia 2026\n\nTài liệu này mô tả chính sách nhân sự áp dụng từ ngày 01/01/2026.\n\n## 1. Nghỉ phép năm\n\nNhân viên chính thức được nghỉ phép 12 ngày làm việc mỗi năm. Số ngày phép tăng thêm 1 ngày sau mỗi 5 năm công tác.\n\n- Đăng ký trước ít nhất 3 ngày.\n- Được quản lý trực tiếp phê duyệt.\n\n### 1.1 Nghỉ ốm\n\nNghỉ ốm cần giấy xác nhận của cơ sở y tế.\n\n## 2. Phúc lợi\n\nBảng 1: Mức phụ cấp\n\n| Khoản | Mức (VNĐ) |\n| --- | --- |\n| Ăn trưa | 730.000 |\n| Gửi xe | 150.000 |",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [2, 481]},
+  {"path": "0.0", "kind": "title", "span": [2, 30], "text": "Sổ tay nhân viên Edupia 2026"},
+  {"path": "0.1", "kind": "paragraph", "span": [32, 97], "text": "Tài liệu này mô tả chính sách nhân sự áp dụng từ ngày 01/01/2026."},
+  {"path": "0.2", "kind": "section", "level": 1, "span": [102, 364]},
+  {"path": "0.2.0", "kind": "heading", "level": 1, "span": [102, 118], "text": "1. Nghỉ phép năm"},
+  {"path": "0.2.1", "kind": "paragraph", "span": [120, 235], "text": "Nhân viên chính thức được nghỉ phép 12 ngày làm việc mỗi năm. Số ngày phép tăng thêm 1 ngày sau mỗi 5 năm công tác."},
+  {"path": "0.2.2", "kind": "list", "span": [239, 304], "ordered": false},
+  {"path": "0.2.2.0", "kind": "list_item", "span": [239, 268], "text": "Đăng ký trước ít nhất 3 ngày.", "ordered": false},
+  {"path": "0.2.2.1", "kind": "list_item", "span": [271, 304], "text": "Được quản lý trực tiếp phê duyệt.", "ordered": false},
+  {"path": "0.2.3", "kind": "section", "level": 2, "span": [310, 364]},
+  {"path": "0.2.3.0", "kind": "heading", "level": 2, "span": [310, 321], "text": "1.1 Nghỉ ốm"},
+  {"path": "0.2.3.1", "kind": "paragraph", "span": [323, 364], "text": "Nghỉ ốm cần giấy xác nhận của cơ sở y tế."},
+  {"path": "0.3", "kind": "section", "level": 1, "span": [369, 481]},
+  {"path": "0.3.0", "kind": "heading", "level": 1, "span": [369, 380], "text": "2. Phúc lợi"},
+  {"path": "0.3.1", "kind": "caption", "span": [382, 401], "text": "Bảng 1: Mức phụ cấp", "caption_of": "0.3.2"},
+  {"path": "0.3.2", "kind": "table", "span": [403, 481], "text": "| Khoản | Mức (VNĐ) |\n| --- | --- |\n| Ăn trưa | 730.000 |\n| Gửi xe | 150.000 |", "header_rows": 1},
+  {"path": "0.4", "kind": "page_footer", "layer": "furniture", "span": null, "text": "Trang 1"}
+ ]
+}

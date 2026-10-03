@@ -1,0 +1,76 @@
+"""Errors raised by operonx-kb.
+
+Every message says what went wrong and what to do about it, the way operonx
+errors do. Integrity errors (a span that does not round-trip, a catalog write
+that failed) are raised, never logged and swallowed: track5 principle 7,
+"fail-soft enrichment, fail-loud integrity".
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
+__all__ = [
+    "KBError",
+    "SpanInvariantError",
+    "UnsupportedFormatError",
+    "DocumentParseError",
+    "CatalogError",
+    "MissingExtraError",
+]
+
+
+class KBError(Exception):
+    """Base class for operonx-kb errors.
+
+    Args:
+        message: What went wrong, and how to fix it.
+        context: Extra facts printed one per line under the message.
+    """
+
+    def __init__(self, message: str, context: Optional[Dict[str, Any]] = None):
+        self.context = context or {}
+        lines = [message]
+        for key, value in self.context.items():
+            text = repr(value)
+            if len(text) > 200:
+                text = text[:200] + "..."
+            lines.append(f"  {key}: {text}")
+        super().__init__("\n".join(lines))
+
+
+class SpanInvariantError(KBError):
+    """An element or chunk span does not reproduce its text from the canonical text.
+
+    This is a bug in a parser, the structurer or the chunker, never bad input:
+    every span is assigned by our own serializer. The version is not committed.
+    """
+
+
+class UnsupportedFormatError(KBError):
+    """No parser handles this file type."""
+
+
+class DocumentParseError(KBError):
+    """A parser could not read a document (corrupt, encrypted, too large)."""
+
+
+class CatalogError(KBError):
+    """The catalog refused an operation (missing collection, conflicting version, schema)."""
+
+
+class MissingExtraError(KBError, ImportError):
+    """An optional dependency is not installed.
+
+    Args:
+        feature: What needs it, e.g. ``"PDF parsing"``.
+        extra: The extra that installs it, e.g. ``"pdf"``.
+        original: The ``ImportError`` raised by the import.
+    """
+
+    def __init__(self, feature: str, extra: str, original: Optional[BaseException] = None):
+        super().__init__(
+            f"{feature} needs the '{extra}' extra.\n"
+            f"  Install with: pip install 'operonx-kb[{extra}]'",
+            {"original error": str(original)} if original else None,
+        )

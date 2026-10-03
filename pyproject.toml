@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "operonx-kb"
+version = "0.1.0"
+description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+# Core: text, Markdown, HTML, DOCX/PPTX/XLSX (stdlib), SQLite catalog, local
+# blobs, in-memory index. Everything heavier is an extra (PLAN.md §1).
+dependencies = [
+    "operonx>=1.14",
+    "pydantic>=2.0",
+    "defusedxml>=0.7.1",  # Office XML from untrusted files
+    "httpx>=0.24",        # operonx.providers (EmbeddingOp) imports it eagerly
+]
+
+[project.optional-dependencies]
+# PDF text layer with coordinates: docling-parse (MIT, C++), behind PdfBackend.
+pdf = ["docling-parse>=7.22"]
+# ML layout + TableFormer (docling-ibm-models, MIT, torch). Off by default; phase K1b.
+layout = ["docling-ibm-models>=3.4", "docling-parse>=7.22"]
+# Postgres catalog (phase K1c).
+postgres = ["psycopg[binary]>=3.1", "psycopg-pool>=3.2"]
+all = ["operonx-kb[pdf,postgres]"]
+
+[project.scripts]
+operonx-kb = "operonx_kb.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "hypothesis>=6.100",
+    "reportlab>=4.0",  # generates the golden PDFs (tests/golden/make_pdfs.py)
+    "ruff>=0.6",
+]
+
+[tool.uv.sources]
+operonx = { path = "../Operon", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["operonx_kb"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "pdf: needs the 'pdf' extra (docling-parse)",
+]
+filterwarnings = ["ignore::DeprecationWarning:reportlab.*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
