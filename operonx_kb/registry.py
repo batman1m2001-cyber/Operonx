@@ -3,7 +3,7 @@
 ``resources.yaml``::
 
     kb_catalog:main:
-      api_type: sqlite
+      api_type: sqlite              # or: postgres, with dsn: ${KB_PG_DSN}
       path: .operonx/kb/catalog.db
     kb_blob:main:
       api_type: local
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Optional
 
 from operonx.core.media_store import LocalMediaStore, MediaStore
 from operonx.core.registry import REGISTRY
@@ -37,20 +37,25 @@ __all__ = ["CatalogConfig", "BlobStoreConfig", "register", "register_catalog", "
 
 class CatalogType(str, Enum):
     SQLITE = "sqlite"
+    POSTGRES = "postgres"
 
 
 class CatalogConfig(YamlModel):
     """``kb_catalog:<name>`` — the store of record.
 
     Attributes:
-        api_type: ``sqlite`` (``postgres`` is a later phase).
-        path: SQLite file.
+        api_type: ``sqlite`` or ``postgres`` (the ``postgres`` extra).
+        path: SQLite only: the database file.
+        dsn: Postgres only: the connection string (``${VAR}`` in resources.yaml).
+        db_schema: Postgres only: the schema holding the tables.
     """
 
     _category: ClassVar[str] = "kb_catalog"
 
     api_type: CatalogType = CatalogType.SQLITE
     path: str = ".operonx/kb/catalog.db"
+    dsn: Optional[str] = None
+    db_schema: str = "kb"
 
 
 class BlobType(str, Enum):
@@ -73,6 +78,14 @@ class BlobStoreConfig(YamlModel):
 
 
 def create_catalog(config: CatalogConfig) -> Catalog:
+    if config.api_type == CatalogType.POSTGRES:
+        if not config.dsn:
+            raise ValueError(
+                "kb_catalog with api_type: postgres needs dsn: (e.g. dsn: ${KB_PG_DSN})"
+            )
+        from operonx_kb.stores.catalog.postgres import PostgresCatalog
+
+        return PostgresCatalog(config.dsn, schema=config.db_schema)
     return SqliteCatalog(Path(config.path))
 
 

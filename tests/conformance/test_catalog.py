@@ -1,4 +1,12 @@
-"""The Catalog contract, run against SqliteCatalog."""
+"""The Catalog contract, run against every catalog.
+
+SQLite always; Postgres when ``KB_TEST_PG_DSN`` names a database (each test
+gets a throwaway schema, dropped afterwards).
+"""
+
+import os
+import threading
+import uuid
 
 import pytest
 
@@ -7,15 +15,33 @@ from operonx_kb.model.collection import Collection, CollectionSpec
 from operonx_kb.model.document import Chunk, Document, DocumentVersion, VersionChunk
 from operonx_kb.model.ids import sha256_text
 from operonx_kb.parsing.base import ParsedDoc, RawBlock
-from operonx_kb.stores.catalog.sqlite import SqliteCatalog, migrations
+from operonx_kb.stores.catalog.sql import migrations
+from operonx_kb.stores.catalog.sqlite import SqliteCatalog
 from operonx_kb.structure.build import build_version
 
+PG_DSN = os.environ.get("KB_TEST_PG_DSN")
+BACKENDS = [
+    "sqlite",
+    pytest.param("postgres", marks=pytest.mark.skipif(not PG_DSN, reason="set KB_TEST_PG_DSN")),
+]
 
-@pytest.fixture
-def cat(tmp_path):
-    c = SqliteCatalog(tmp_path / "c.db")
+
+def _make(kind, tmp_path):
+    if kind == "sqlite":
+        return SqliteCatalog(tmp_path / "c.db")
+    from operonx_kb.stores.catalog.postgres import PostgresCatalog
+
+    return PostgresCatalog(PG_DSN, schema=f"kbtest_{uuid.uuid4().hex[:12]}")
+
+
+@pytest.fixture(params=BACKENDS)
+def cat(request, tmp_path):
+    c = _make(request.param, tmp_path)
     c.put_collection(Collection(id="col", spec=CollectionSpec()))
-    return c
+    yield c
+    if request.param == "postgres":
+        c.drop_schema()
+        c.close()
 
 
 def _version(vid, texts):
@@ -49,11 +75,36 @@ def _commit(cat, vid, texts):
     return cat.commit_version(DOC, version, tree.elements, tree.pages, chunks, occ), tree
 
 
-def test_migrations_are_numbered_and_idempotent(tmp_path):
-    versions = [v for v, _, _ in migrations()]
+def test_migrations_are_numbered_idempotent_and_match_across_dialects(cat):
+    versions = [v for v, _, _ in migrations(cat.dialect)]
     assert versions == sorted(versions) and versions[0] == 1
-    c = SqliteCatalog(tmp_path / "x.db")
-    assert c.migrate() == versions[-1] and c.schema_version() == versions[-1]
+    assert [v for v, _, _ in migrations("sqlite")] == [v for v, _, _ in migrations("postgres")]
+    assert cat.migrate() == versions[-1] and cat.schema_version() == versions[-1]
+
+
+def test_concurrent_commits_of_one_document_serialise(cat):
+    """Two writers flip one document at once: exactly one version ends up active,
+    the other superseded, and no rows are lost or doubled."""
+    trees = [_version(f"ver_{i}", [f"text {i}"]) for i in range(2)]
+    errors = []
+
+    def commit(i):
+        tree, version, chunks, occ = trees[i]
+        try:
+            cat.commit_version(DOC, version, tree.elements, tree.pages, chunks, occ)
+        except Exception as exc:  # noqa: BLE001 — collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=commit, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    statuses = sorted(v.status for v in cat.list_versions("doc_1"))
+    assert statuses == ["committed", "superseded"]
+    active = cat.get_document("doc_1").active_version_id
+    assert [v.status for v in cat.list_versions("doc_1") if v.id == active] == ["committed"]
 
 
 def test_commit_flips_and_supersedes_and_diffs(cat):
