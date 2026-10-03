@@ -170,11 +170,19 @@ def _run(job: Any, args: argparse.Namespace) -> int:
                 print(f"  {node.status} {node.name}: {node.error or ''}".rstrip())
         return 0 if run.status == "ok" else 1
 
+    return outcome(run, args.failures)
+
+
+def outcome(run: Any, failures: int = 10) -> int:
+    """Print what a finished job run left beyond its summary line — the
+    items that failed, the run's error, an eval's gate reasons — and
+    return its exit status: an eval's gate code, else 0 only when the
+    run is ``ok``."""
     bad = [i for i in run.items if i.status in ("failed", "timeout")]
-    for item in bad[: args.failures]:
+    for item in bad[:failures]:
         print(f"  {item.status} {item.key}: {item.error}")
-    if len(bad) > args.failures:
-        print(f"  … and {len(bad) - args.failures} more, in {run.path / 'items.jsonl'}")
+    if len(bad) > failures:
+        print(f"  … and {len(bad) - failures} more, in {run.path / 'items.jsonl'}")
     if run.meta.get("error"):
         print(f"  {run.meta['error']}")
     gate = (run.meta.get("eval") or {}).get("gate")

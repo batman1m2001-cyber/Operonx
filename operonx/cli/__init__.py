@@ -14,7 +14,9 @@ subcommand each:
 - ``operonx serve`` / ``operonx run`` — serve the application's services,
   run its jobs (:mod:`operonx.cli.serve`, :mod:`operonx.cli.run`);
 - ``operonx play`` — the playground bridge: drive a service's doors
-  (:mod:`operonx.app.play`).
+  (:mod:`operonx.app.play`);
+- ``operonx eval`` — run experiments, compare and report them, size them
+  (:mod:`operonx.cli.eval`).
 
 ``run``, ``serve`` and ``play`` are each their module's own
 ``main(argv)``. The ``operonx-run`` / ``-serve`` / ``-play`` scripts are

@@ -88,7 +88,13 @@ def calibrate(
     evals = sorted({e.eval for e in experiments})
     if len(evals) > 1:
         raise ValueError(f"calibrate compares runs of one eval, not of {evals}")
-    shas = sorted({str(e.fingerprint.get("code_version")) for e in experiments})
+    shas = sorted(
+        {
+            str(e.fingerprint["code_version"])
+            for e in experiments
+            if e.fingerprint.get("code_version")
+        }
+    )
     ids = _shared(experiments)
     if not ids:
         raise ValueError("the experiments share no unchanged case")
@@ -166,8 +172,9 @@ def calibrate(
         if recommended is None:
             best = min(rows, key=lambda row: row["tolerance"])
             notes.append(
-                f"too noisy to gate at tolerance {target * 100:.1f} pts with {n} cases: even "
-                f"{best['repeats']} repeats need {best['tolerance'] * 100:.1f} pts. More cases "
+                f"too noisy to gate at tolerance {target * 100:.1f} pts with {n} cases: the "
+                f"best of the table ({best['repeats']} repeat(s)) needs "
+                f"{best['tolerance'] * 100:.1f} pts. More cases "
                 "narrow the interval (`operonx eval power` says how many); so does a larger "
                 "tolerance"
             )

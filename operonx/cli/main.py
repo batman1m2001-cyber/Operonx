@@ -7,11 +7,12 @@
     operonx run ...                 # run a job or runbook   (operonx.cli.run)
     operonx serve ...               # serve the services     (operonx.cli.serve)
     operonx play ...                # drive a served door    (operonx.app.play)
+    operonx eval ...                # experiments: run, compare, report (operonx.cli.eval)
 
-``run``, ``serve`` and ``play`` are handed the rest of the
-command line untouched: each is its module's own ``main(argv)``, the one
-the deprecated ``operonx-<name>`` alias calls too, so there is one parser
-per command and the two spellings cannot differ.
+``run``, ``serve``, ``play`` and ``eval`` are handed the rest of the
+command line untouched: each is its module's own ``main(argv)`` (for the
+first three, the one the deprecated ``operonx-<name>`` alias calls too),
+so there is one parser per command and two spellings cannot differ.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ DELEGATED = {
     "run": ("operonx.cli.run", "run a job or runbook the application declares"),
     "serve": ("operonx.cli.serve", "serve the application's services"),
     "play": ("operonx.app.play", "the playground bridge: drive a service's doors over JSON lines"),
+    "eval": ("operonx.cli.eval", "run experiments, compare and report them, size them"),
 }
 
 
