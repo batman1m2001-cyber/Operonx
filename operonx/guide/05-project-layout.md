@@ -55,11 +55,13 @@ app  = "app.main:APP"
 
 [resources]
 overlay = "resources.yaml"
+
+[tracing]                 # where every service's and job's runs are recorded
+sinks = ["local"]         # e.g. ["trace_clickhouse:default"]: a resources.yaml key
 ```
 
 ```yaml file=resources.yaml
-trace_local:
-  default: {}
+# models, stores and trace sinks by key; secrets as ${VAR} from .env
 ```
 
 ```toml file=pyproject.toml
@@ -67,7 +69,7 @@ trace_local:
 name = "scorer"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["operonx[serve]>=1.10"]
+dependencies = ["operonx[serve]>=1.13"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
@@ -137,7 +139,6 @@ APP = Application(
             "score_calls", graph=score_flow, source="calls.jsonl", sink="out/scored.jsonl", key="id"
         )
     ],
-    trace=["trace_local:default"],
 )
 ```
 
