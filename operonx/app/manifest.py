@@ -766,7 +766,12 @@ def _reject_duplicates(serves: Tuple[ServeSpec, ...], where: str) -> None:
         if spec.name in seen_names:
             raise ManifestError(f"{where}: two [[serve]] blocks named {spec.name!r}")
         seen_names[spec.name] = 1
-        route = (spec.host, spec.port, spec.path, spec.method if spec.kind in ("http", "webhook") else "*")
+        route = (
+            spec.host,
+            spec.port,
+            spec.path,
+            spec.method if spec.kind in ("http", "webhook") else "*",
+        )
         if route in seen_routes:
             raise ManifestError(
                 f"{where}: {spec.name!r} and {seen_routes[route]!r} both serve "
