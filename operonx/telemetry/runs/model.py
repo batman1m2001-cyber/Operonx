@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 __all__ = [
     "MAX_SAMPLES",
@@ -378,23 +378,15 @@ def summarize(
 
 
 def rows_of_trace(
-    trace: Any,
-    consumer: Any,
-    media_dir: Any = None,
-    threshold: int = 1024,
-    offload: Optional[Callable[[Any], Any]] = None,
+    trace: Any, consumer: Any, media_dir: Any = None, threshold: int = 1024
 ) -> List[Dict[str, Any]]:
     """A live ``WorkflowTrace`` as the rows a consumer writes — values
     sanitised to JSON by *consumer* (any :class:`Consumer`), and large
-    payloads offloaded to *media_dir* when one is given, or by *offload*
-    (a sanitised value in, the value with blobs swapped for refs out; see
-    :func:`operonx.telemetry.media.offload_to_store`)."""
+    payloads offloaded to *media_dir* when one is given."""
 
     def clean(values: Any) -> Any:
         out = consumer.sanitize(values)
-        if offload is not None:
-            out = offload(out)
-        elif media_dir is not None:
+        if media_dir is not None:
             out = consumer.offload_media(out, media_dir, threshold)
         return out
 

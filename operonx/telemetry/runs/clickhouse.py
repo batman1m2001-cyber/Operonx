@@ -46,7 +46,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx.core.loggings import LOGGER
 from operonx.telemetry.consumers.local import resolve_root
-from operonx.telemetry.media import LocalMediaStore, MediaStore, offload_to_store
+from operonx.telemetry.media import LocalMediaStore, MediaStore, json_default
 from operonx.telemetry.writer import BackgroundWriter
 
 from .base import RunStore, _check_by
@@ -58,7 +58,6 @@ from .model import (
     RunRecord,
     RunSummary,
     meta_of_trace,
-    rows_of_trace,
     summarize,
 )
 from .retention import DEFAULT_RETENTION
@@ -235,17 +234,24 @@ _ORDER_SQL = {
 }
 
 
-def _dumps(value: Any) -> str:
-    """JSON text for a value already sanitised — orjson, then the stdlib
-    for anything orjson declines."""
-    try:
-        import orjson
+def _to_json(value: Any, default: Any = str) -> str:
+    """JSON text: orjson (dataclasses go to *default*, so a ``Media`` is
+    seen whole), then the stdlib for anything orjson declines (an int past
+    64 bits)."""
+    import orjson
 
+    try:
         return orjson.dumps(
-            value, default=str, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SERIALIZE_NUMPY
+            value,
+            default=default,
+            option=orjson.OPT_NON_STR_KEYS | orjson.OPT_PASSTHROUGH_DATACLASS,
         ).decode("utf-8")
     except Exception:  # noqa: BLE001
-        return json.dumps(value, default=str, ensure_ascii=False)
+        pass
+    try:
+        return json.dumps(value, default=default, ensure_ascii=False)
+    except Exception:  # noqa: BLE001 — tuple keys, a cycle: say so, never fail the run
+        return json.dumps({"$unserializable": type(value).__name__})
 
 
 def _loads(text: Any) -> Any:
@@ -303,8 +309,15 @@ def run_row(summary: RunSummary, meta: Dict[str, Any], expires: int) -> List[Any
     return out
 
 
-def node_rows(summary: RunSummary, rows: Sequence[Dict[str, Any]], expires: int) -> List[List[Any]]:
-    """A run's rows (the shape ``nodes.jsonl`` holds) as ``nodes`` rows."""
+def node_rows(
+    summary: RunSummary,
+    rows: Sequence[Dict[str, Any]],
+    expires: int,
+    default: Any = str,
+) -> List[List[Any]]:
+    """A run's rows (the shape ``nodes.jsonl`` holds) as ``nodes`` rows.
+    Values are serialised here, with *default* for what JSON cannot hold
+    (:func:`~operonx.telemetry.media.json_default` offloads blobs)."""
     out = []
     for seq, r in enumerate(rows):
         end, wall = r.get("end_time"), r.get("wall_start")
@@ -327,9 +340,9 @@ def node_rows(summary: RunSummary, rows: Sequence[Dict[str, Any]], expires: int)
                 bool(r.get("is_yield")),
                 str(r.get("status") or "ok"),
                 None if r.get("error") is None else str(r.get("error")),
-                _dumps(r.get("inputs")),
-                _dumps(r.get("outputs")),
-                _dumps(r.get("upstreams") or []),
+                _to_json(r.get("inputs"), default),
+                _to_json(r.get("outputs"), default),
+                _to_json(r.get("upstreams") or [], default),
                 expires,
             ]
         )
@@ -521,18 +534,38 @@ class ClickHouseRunStore(RunStore):
     def build(self, trace: Any) -> Tuple[RunSummary, List[Any], List[List[Any]], List[List[Any]]]:
         """A finished trace as its rows: ``(summary, run row, node rows,
         rollup rows)``. Blobs go to :attr:`media` on the way."""
-        rows = rows_of_trace(
-            trace,
-            self,
-            offload=lambda v: offload_to_store(v, self.media, self.media_threshold),
-        )
+        # Values stay raw until node_rows serialises them, in one orjson pass
+        # whose default= hook sanitises and offloads: a sanitize walk, an
+        # offload walk and a dumps cost ~60 us per execution in Python, and
+        # that CPU is taken from the event loop running the next call.
+        wall_of = trace.wall_of
+        rows = [
+            {
+                "op_id": n.op_id,
+                "op_name": n.op_name,
+                "op_full_name": n.op_full_name,
+                "ctx": n.ctx,
+                "start_time": n.start_time,
+                "end_time": n.end_time,
+                "wall_start": wall_of(n.start_time),
+                "duration_ms": n.duration_ms,
+                "op_type": n.op_type,
+                "is_yield": n.is_yield,
+                "status": n.status,
+                "error": n.error,
+                "inputs": n.inputs,
+                "outputs": n.outputs,
+                "upstreams": [u.__dict__ for u in n.upstreams],
+            }
+            for n in trace.nodes
+        ]
         meta = meta_of_trace(trace)
         summary, rollups = summarize(str(trace.trace_id), rows, meta, location=None)
         exp = expires_at(summary.started_at, summary.origin, self.ttl_days)
         return (
             summary,
             run_row(summary, meta, exp),
-            node_rows(summary, rows, exp),
+            node_rows(summary, rows, exp, json_default(self.media, self.media_threshold)),
             rollup_rows(summary, rollups, exp),
         )
 

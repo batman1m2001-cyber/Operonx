@@ -254,3 +254,58 @@ def test_offload_numpy(tmp_path):
     np = pytest.importorskip("numpy")
     out = offload_to_store({"a": np.zeros(1000, dtype="float32")}, LocalMediaStore(tmp_path), 1024)
     assert out["a"]["mime"] == "application/x-npy"
+
+
+# -- the serialisation hook -------------------------------------------------------------
+
+
+def test_json_default_sanitises_and_offloads_in_one_orjson_pass(tmp_path):
+    import orjson
+
+    from operonx.telemetry.media import json_default
+
+    store = LocalMediaStore(tmp_path)
+
+    class Handle:  # a client object an op happened to receive
+        pass
+
+    audio = wav_bytes(0.5)
+    value = {
+        "voice": Media(audio, "audio/wav"),
+        "blob": b"\x00" * 2048,
+        "small": b"ab",
+        "handle": Handle(),
+        "nested": ({"img": Media("https://x/y.png", "image/png")},),
+        1: "int key",
+    }
+    text = orjson.dumps(
+        value,
+        default=json_default(store, 1024),
+        option=orjson.OPT_NON_STR_KEYS | orjson.OPT_PASSTHROUGH_DATACLASS,
+    )
+    out = orjson.loads(text)
+    assert out["voice"]["mime"] == "audio/wav" and store.get(out["voice"]["$media"]) == audio
+    assert out["blob"]["size"] == 2048 and out["small"] == "b'ab'"
+    assert out["handle"] == {"$unserializable": "Handle"}
+    assert out["nested"] == [{"img": {"$media_url": "https://x/y.png", "mime": "image/png"}}]
+    assert out["1"] == "int key"
+    # the same as the two walks it replaces, on what they share
+    walked = offload_to_store({"voice": Media(audio, "audio/wav")}, store, 1024)
+    assert walked["voice"] == out["voice"]
+
+
+def test_json_default_numpy(tmp_path):
+    np = pytest.importorskip("numpy")
+    import orjson
+
+    from operonx.telemetry.media import json_default
+
+    d = json_default(LocalMediaStore(tmp_path), 1024)
+    out = orjson.loads(
+        orjson.dumps(
+            {"big": np.zeros(1000, "float32"), "small": np.arange(3), "x": np.float32(1.5)},
+            default=d,
+        )
+    )
+    assert out["big"]["mime"] == "application/x-npy"
+    assert out["small"] == [0, 1, 2] and out["x"] == 1.5

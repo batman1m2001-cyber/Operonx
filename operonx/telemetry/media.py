@@ -41,6 +41,7 @@ __all__ = [
     "MediaInfo",
     "MediaStore",
     "detect_media",
+    "json_default",
     "offload_to_store",
 ]
 
@@ -402,6 +403,38 @@ def offload_to_store(payload: Any, store: MediaStore, threshold: int = 1024) -> 
         raw = buf.getvalue()
         return _put(raw, store, None) if len(raw) >= threshold else payload
     return payload
+
+
+def json_default(store: MediaStore, threshold: int = 1024) -> Any:
+    """A ``default=`` hook for ``orjson.dumps`` / ``json.dumps`` that does
+    what :meth:`~operonx.telemetry.consumer.Consumer.sanitize` and
+    :func:`offload_to_store` do, while the value is being serialised.
+
+    One pass, and the walk itself runs in orjson's C code: the hook is only
+    called for what JSON cannot hold. A ``Media`` (passed through with
+    ``OPT_PASSTHROUGH_DATACLASS``), large ``bytes`` and large arrays become
+    refs; small ``bytes`` their ``repr`` text, small arrays lists, numpy
+    scalars numbers; anything else ``{"$unserializable": "<type>"}``.
+    """
+
+    def default(v: Any) -> Any:
+        if isinstance(v, _BYTES):
+            if len(v) >= threshold:
+                return _put(bytes(v), store, None)
+            return str(bytes(v))
+        if _is_media(v):
+            if isinstance(v.data, _BYTES):
+                return _put(bytes(v.data), store, v.mime_type)
+            return {"$media_url": str(v.data), "mime": v.mime_type}
+        if _is_ndarray(v):
+            if v.nbytes >= threshold:
+                return offload_to_store(v, store, threshold)
+            return v.tolist()
+        if type(v).__module__ == "numpy" and hasattr(v, "item"):
+            return v.item()
+        return {"$unserializable": type(v).__name__}
+
+    return default
 
 
 def _put(raw: bytes, store: MediaStore, declared: Optional[str]) -> Dict[str, Any]:

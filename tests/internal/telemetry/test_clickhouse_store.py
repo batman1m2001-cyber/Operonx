@@ -552,3 +552,13 @@ def test_storing_a_run_twice_keeps_one_copy(live):
     assert live.count(RunFilter(trace_ids=["twice"])) == 1
     assert len(live.get_run("twice").nodes) == 2
     assert live.schema_version() == 1
+
+
+def test_values_json_cannot_hold_never_sink_a_run(tmp_path):
+    from operonx.telemetry.runs.clickhouse import _to_json
+
+    cyclic = {}
+    cyclic["self"] = cyclic
+    assert json.loads(_to_json(cyclic)) == {"$unserializable": "dict"}
+    assert json.loads(_to_json({(1, 2): "tuple key"})) == {"$unserializable": "dict"}
+    assert json.loads(_to_json({"big": 2**70})) == {"big": 2**70}  # the stdlib takes over
