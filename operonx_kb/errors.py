@@ -16,6 +16,7 @@ __all__ = [
     "UnsupportedFormatError",
     "DocumentParseError",
     "CatalogError",
+    "FilterError",
     "MissingExtraError",
 ]
 
@@ -57,6 +58,15 @@ class DocumentParseError(KBError):
 
 class CatalogError(KBError):
     """The catalog refused an operation (missing collection, conflicting version, schema)."""
+
+
+class FilterError(KBError, ValueError):
+    """A ``KBFilter`` names a field the collection does not declare, holds a value of
+    the wrong type, or cannot be applied by an index backend.
+
+    A filter is never dropped or weakened to make a query run: that would read
+    other tenants' documents (track5 §12.3).
+    """
 
 
 class MissingExtraError(KBError, ImportError):

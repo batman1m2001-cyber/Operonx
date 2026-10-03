@@ -8,6 +8,9 @@
     kb_blob:main:
       api_type: local
       root: .operonx/kb/blobs
+    kb_lexical:main:
+      api_type: sqlite              # or: postgres, with dsn: ${KB_PG_DSN}
+      path: .operonx/kb/lexical.db
     vector_store:kb:            # operonx's own category: the derived dense index
       api_type: faiss
       dim: 1024
@@ -31,8 +34,18 @@ from operonx.core.utils.yaml_model import YamlModel
 
 from operonx_kb.stores.catalog.base import Catalog
 from operonx_kb.stores.catalog.sqlite import SqliteCatalog
+from operonx_kb.stores.lexical.base import LexicalIndex
+from operonx_kb.stores.lexical.sqlite import SqliteLexicalIndex
 
-__all__ = ["CatalogConfig", "BlobStoreConfig", "register", "register_catalog", "register_blob"]
+__all__ = [
+    "CatalogConfig",
+    "BlobStoreConfig",
+    "LexicalIndexConfig",
+    "register",
+    "register_catalog",
+    "register_blob",
+    "register_lexical",
+]
 
 
 class CatalogType(str, Enum):
@@ -77,6 +90,41 @@ class BlobStoreConfig(YamlModel):
     root: str = ".operonx/kb/blobs"
 
 
+class LexicalType(str, Enum):
+    SQLITE = "sqlite"
+    POSTGRES = "postgres"
+
+
+class LexicalIndexConfig(YamlModel):
+    """``kb_lexical:<name>`` — a lexical index (PLAN R1): SQLite FTS5 or Postgres FTS.
+
+    Attributes:
+        api_type: ``sqlite`` or ``postgres`` (the ``postgres`` extra).
+        path: SQLite only: the database file.
+        dsn: Postgres only: the connection string (``${VAR}`` in resources.yaml).
+        db_schema: Postgres only: the schema holding the tables.
+    """
+
+    _category: ClassVar[str] = "kb_lexical"
+
+    api_type: LexicalType = LexicalType.SQLITE
+    path: str = ".operonx/kb/lexical.db"
+    dsn: Optional[str] = None
+    db_schema: str = "kb"
+
+
+def create_lexical_index(config: LexicalIndexConfig) -> LexicalIndex:
+    if config.api_type == LexicalType.POSTGRES:
+        if not config.dsn:
+            raise ValueError(
+                "kb_lexical with api_type: postgres needs dsn: (e.g. dsn: ${KB_PG_DSN})"
+            )
+        from operonx_kb.stores.lexical.postgres import PostgresLexicalIndex
+
+        return PostgresLexicalIndex(config.dsn, schema=config.db_schema)
+    return SqliteLexicalIndex(Path(config.path))
+
+
 def create_catalog(config: CatalogConfig) -> Catalog:
     if config.api_type == CatalogType.POSTGRES:
         if not config.dsn:
@@ -108,10 +156,16 @@ def register_blob() -> None:
     _register(BlobStoreConfig, create_blob_store)
 
 
+def register_lexical() -> None:
+    """Entry point of category ``kb_lexical``."""
+    _register(LexicalIndexConfig, create_lexical_index)
+
+
 def register() -> None:
     """Register every category of the package (idempotent)."""
     register_catalog()
     register_blob()
+    register_lexical()
 
 
 register()

@@ -43,6 +43,7 @@ operonx-kb = "operonx_kb.cli:main"
 [project.entry-points."operonx.resources"]
 kb_catalog = "operonx_kb.registry:register_catalog"
 kb_blob = "operonx_kb.registry:register_blob"
+kb_lexical = "operonx_kb.registry:register_lexical"
 fake_embedding = "operonx_kb.testing.fakes:register_fakes"
 
 [dependency-groups]
