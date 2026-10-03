@@ -104,6 +104,23 @@ async def _finish(name: str, t0: float, pending: Awaitable) -> Tuple[str, Dict[s
     return name, _settled(result, t0)
 
 
+def judge_sync(p: Prepared, avail: Mapping[str, Any]) -> Dict[str, Any]:
+    """One synchronous evaluator on one case: its verdict. An evaluator
+    that turns out to be async raises ``TypeError`` — it needs
+    :func:`judge_all`, under an event loop."""
+    t0 = perf_counter()
+    try:
+        result = p.fn(**p.kwargs(avail))
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc, t0)
+    if inspect.isawaitable(result):
+        close = getattr(result, "close", None)
+        if close is not None:
+            close()  # never awaited: no "coroutine was never awaited" warning
+        raise TypeError(f"evaluator {p.name!r} is async: judge it with judge_all()")
+    return _settled(result, t0)
+
+
 async def judge_all(prepared: Sequence[Prepared], avail: Mapping[str, Any]) -> Dict[str, Any]:
     """Every evaluator on one case: ``{name: verdict}`` in evaluator order.
 

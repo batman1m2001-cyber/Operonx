@@ -51,7 +51,7 @@ from .publish import ScoreWriter, experiment_of, item_of, scores_of, warn_lost
 from .stats import Estimate, estimate, pass_hat_k
 from .traceview import TraceView
 
-__all__ = ["Eval"]
+__all__ = ["Eval", "gate_run", "git_baseline", "numbers", "record_baseline"]
 
 #: How many flaky case ids ``reliability`` lists (the count is whole).
 FLAKY_LIST_MAX = 50
@@ -302,68 +302,20 @@ class Eval(Job):
         return fp, [case_hash(row) for row in rows]
 
     def _git_baseline(self, ref: str) -> Tuple[str, Dict[str, CaseOutcome], Dict, str]:
-        """The experiment of ``git merge-base HEAD <ref>``, from the eval's
-        score store (else the project's): ``(id, outcomes, fingerprint,
-        "git:<ref> @ <sha>")``. None there is an error — nothing has run."""
-        from operonx.telemetry.scores import project_score_store
-
-        from .experiments import ExperimentData, find_baseline, merge_base, store_name
-
-        root = self.root or Path.cwd()
-        sha = merge_base(root, ref)
         rows = self.dataset.rows()
         _, evaluators_hash = evaluators_version({_name(ev): ev for ev in self.evaluators})
-        if self._store is not None:
-            store, owned, where = self._store, False, store_name(self._store)
-        else:
-            src = project_score_store(root)
-            store, owned, where = src.open(), True, f"{src.describe()} ({src.source})"
-        try:
-            exp = find_baseline(
-                store,
-                self.name,
-                sha,
-                dataset_version=dataset_version(rows),
-                evaluators_hash=evaluators_hash,
-            )
-            data = ExperimentData.from_store(store, exp.experiment_id) if exp else None
-        finally:
-            if owned:
-                store.close()
-        if data is None:
-            branch = ref.split("/", 1)[-1]
-            raise ValueError(
-                f"eval {self.name!r}: baseline {self.gate.baseline!r} is the experiment at "  # type: ignore[union-attr]
-                f"{sha}, the merge-base of HEAD and {ref}, and the score store ({where}) has "
-                f"no finished, clean run of this eval there. Run the eval on {branch} first "
-                f"so its experiment is stored (`operonx eval run {self.name}` in a pipeline on "
-                f"{branch}, or a scheduled one, keeps baselines warm), or compare with "
-                "baseline='latest'"
-            )
-        fp = data.fingerprint
-        return data.experiment_id, data.outcomes(), fp, f"git:{ref} @ {sha}"
+        return git_baseline(
+            self.name,
+            str(self.gate.baseline),  # type: ignore[union-attr]
+            ref,
+            root=self.root or Path.cwd(),
+            store=self._store,
+            dataset_version=dataset_version(rows),
+            evaluators_hash=evaluators_hash,
+        )
 
     def _load_baseline(self) -> Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]]:
-        ref = str(self.gate.baseline)  # type: ignore[union-attr]
-        root = Path(self.record_dir)
-        if ref == "latest":
-            for path in reversed(runs_of(root, self.name)):
-                run = JobRun.load(path)
-                ev = run.meta.get("eval") or {}
-                gate = ev.get("gate") or {}
-                if run.status != RUN_RUNNING and run.ended and ev and gate.get("verdict") != ERROR:
-                    break
-            else:
-                return None
-        else:
-            path = root / self.name / ref
-            if not (path / "run.json").is_file():
-                raise ValueError(
-                    f"eval {self.name!r}: baseline run {ref!r} is not under {root / self.name}"
-                )
-            run = JobRun.load(path)
-        ev = run.meta.get("eval") or {}
-        return run.run_id, outcomes(trials_of_items(run.items)), ev.get("fingerprint")
+        return record_baseline(Path(self.record_dir), self.name, str(self.gate.baseline))  # type: ignore[union-attr]
 
     def item_of(self, raw: Any) -> Any:
         row = raw.row if isinstance(raw, _Trial) else raw
@@ -404,20 +356,17 @@ class Eval(Job):
                 trace = getattr(result, "trace", None)
                 avail["trace"] = TraceView.from_trace(trace) if trace is not None else None
             verdict = case_verdict(await judge_all(self._prepared, avail))
-        verdict["output"] = _clip(output)
-        if verdict["output"] is not output:
-            verdict["output_clipped"] = True  # a preview: rescore cannot judge it again
-        if row.get("expected") is not None:
-            verdict["expected"] = _clip(row.get("expected"))
-        if row.get("tags"):
-            verdict["tags"] = list(row["tags"])
-        cluster = self._cluster_of(row)
-        verdict.update(case=case, repeat=repeat, case_hash=digest)
-        if cluster is not None:
-            verdict["cluster"] = cluster
-        verdict.update(_run_cost(getattr(result, "trace", None)))
-        result.verdict = verdict
-        self._verdicts.append(trial_of(result.key, verdict, result.ms))
+        result.verdict = recorded_verdict(
+            verdict,
+            row,
+            output,
+            case=case,
+            repeat=repeat,
+            digest=digest,
+            cluster=self._cluster_of(row),
+            trace=getattr(result, "trace", None),
+        )
+        self._verdicts.append(trial_of(result.key, result.verdict, result.ms))
         if self._writer is not None:
             meta = {"eval": {"fingerprint": self._fingerprint}, "judges": self._judges}
             item = item_of(self._experiment.experiment_id, result)
@@ -434,7 +383,6 @@ class Eval(Job):
         """
         vs, self._verdicts = self._verdicts, []
         nums, cases, metrics = numbers(vs, self.repeats)
-        trials, passed, pass_rate = nums["trials"], nums["passed"], nums["pass_rate"]
         summary: Dict[str, Any] = {
             "dataset": str(self.dataset.path),
             "threshold": self.threshold,
@@ -455,39 +403,18 @@ class Eval(Job):
         self._fingerprint = fp
         summary["fingerprint"] = fp
 
-        if self.gate is None:
-            reasons: List[str] = []
-            if status != RUN_OK:
-                reasons.append(f"the run itself ended {status}")
-            elif trials:
-                if self.threshold is not None and pass_rate < self.threshold:
-                    reasons.append(f"pass rate {pass_rate:.1%} < threshold {self.threshold:.1%}")
-                elif self.threshold is None and passed < trials:
-                    reasons.append(f"{trials - passed} of {trials} trials failed")
-                if reasons:
-                    status = RUN_FAILED
-            ok = status == RUN_OK
-            summary["gate"] = {
-                "verdict": PASS if ok else FAILED,
-                "exit_code": 0 if ok else 1,
-                "reasons": reasons,
-            }
-        else:
-            gate = decide(
-                self.gate,
-                current=cases,
-                metrics=metrics,
-                complete=self._complete,
-                baseline=self._baseline,
-                fingerprint=self._fingerprint,
-            )
-            if self._from_git is not None and "comparison" in gate:
-                gate["comparison"]["baseline_ref"] = self._from_git[3]
-            summary["gate"] = gate
-            if gate["exit_code"] == 0:
-                status = RUN_OK
-            elif gate["verdict"] != ERROR or status == RUN_OK:
-                status = RUN_FAILED
+        summary["gate"], status = gate_run(
+            self.gate,
+            self.threshold,
+            status=status,
+            nums=nums,
+            cases=cases,
+            metrics=metrics,
+            complete=self._complete,
+            baseline=self._baseline,
+            fingerprint=fp,
+            baseline_ref=self._from_git[3] if self._from_git is not None else None,
+        )
         return {"eval": summary}, status
 
     # -- judging a recorded run again ---------------------------------------
@@ -612,6 +539,34 @@ def case_verdict(checks: Dict[str, Any]) -> Dict[str, Any]:
     return verdict
 
 
+def recorded_verdict(
+    verdict: Dict[str, Any],
+    row: Mapping[str, Any],
+    output: Any,
+    *,
+    case: str,
+    repeat: int,
+    digest: str,
+    cluster: Optional[str],
+    trace: Any,
+) -> Dict[str, Any]:
+    """A case's verdict as its record line holds it: the clipped output
+    and expected value, tags, which case and repeat, its hash and cluster,
+    and the case run's own cost."""
+    verdict["output"] = _clip(output)
+    if verdict["output"] is not output:
+        verdict["output_clipped"] = True  # a preview: rescore cannot judge it again
+    if row.get("expected") is not None:
+        verdict["expected"] = _clip(row.get("expected"))
+    if row.get("tags"):
+        verdict["tags"] = list(row["tags"])
+    verdict.update(case=case, repeat=repeat, case_hash=digest)
+    if cluster is not None:
+        verdict["cluster"] = cluster
+    verdict.update(_run_cost(trace))
+    return verdict
+
+
 def trial_of(key: str, verdict: Mapping[str, Any], ms: float) -> Dict[str, Any]:
     """One judged trial, as the statistics read it."""
     return {
@@ -709,6 +664,134 @@ def numbers(
     if repeats > 1:
         out["reliability"] = _reliability(cases, repeats)
     return out, cases, metrics
+
+
+def gate_run(
+    gate: Optional[Gate],
+    threshold: Optional[float],
+    *,
+    status: str,
+    nums: Mapping[str, Any],
+    cases: Mapping[str, CaseOutcome],
+    metrics: Mapping[str, Estimate],
+    complete: bool,
+    baseline: Optional[Tuple[str, Mapping[str, CaseOutcome], Optional[Mapping]]] = None,
+    fingerprint: Optional[Mapping[str, Any]] = None,
+    baseline_ref: Optional[str] = None,
+) -> Tuple[Dict[str, Any], str]:
+    """The gate block of a judged run, and the run's status.
+
+    Without a gate: failed when a trial failed, or with a *threshold*,
+    when the rate is under it (1.9.0, unchanged). With one: whatever the
+    gate decides (see :mod:`operonx.app.evals.gate`)."""
+    if gate is None:
+        trials, passed, pass_rate = nums["trials"], nums["passed"], nums["pass_rate"]
+        reasons: List[str] = []
+        if status != RUN_OK:
+            reasons.append(f"the run itself ended {status}")
+        elif trials:
+            if threshold is not None and pass_rate < threshold:
+                reasons.append(f"pass rate {pass_rate:.1%} < threshold {threshold:.1%}")
+            elif threshold is None and passed < trials:
+                reasons.append(f"{trials - passed} of {trials} trials failed")
+            if reasons:
+                status = RUN_FAILED
+        ok = status == RUN_OK
+        return {
+            "verdict": PASS if ok else FAILED,
+            "exit_code": 0 if ok else 1,
+            "reasons": reasons,
+        }, status
+    block = decide(
+        gate,
+        current=cases,
+        metrics=metrics,
+        complete=complete,
+        baseline=baseline,
+        fingerprint=fingerprint,
+    )
+    if baseline_ref is not None and "comparison" in block:
+        block["comparison"]["baseline_ref"] = baseline_ref
+    if block["exit_code"] == 0:
+        status = RUN_OK
+    elif block["verdict"] != ERROR or status == RUN_OK:
+        status = RUN_FAILED
+    return block, status
+
+
+def record_baseline(
+    record_dir: Path, name: str, ref: str
+) -> Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]]:
+    """A baseline from *name*'s job records: ``"latest"`` (its last finished,
+    judged run that is not an ``error``; ``None`` when there is none) or a
+    run id. ``(run_id, outcomes, fingerprint)``."""
+    if ref == "latest":
+        for path in reversed(runs_of(record_dir, name)):
+            run = JobRun.load(path)
+            ev = run.meta.get("eval") or {}
+            gate = ev.get("gate") or {}
+            if run.status != RUN_RUNNING and run.ended and ev and gate.get("verdict") != ERROR:
+                break
+        else:
+            return None
+    else:
+        path = record_dir / name / ref
+        if not (path / "run.json").is_file():
+            raise ValueError(
+                f"eval {name!r}: baseline run {ref!r} is not under {record_dir / name}"
+            )
+        run = JobRun.load(path)
+    ev = run.meta.get("eval") or {}
+    return run.run_id, outcomes(trials_of_items(run.items)), ev.get("fingerprint")
+
+
+def git_baseline(
+    name: str,
+    baseline: str,
+    ref: str,
+    *,
+    root: Path,
+    store: Optional[ScoreStore],
+    dataset_version: Optional[str] = None,
+    evaluators_hash: Optional[str] = None,
+) -> Tuple[str, Dict[str, CaseOutcome], Dict, str]:
+    """The experiment of ``git merge-base HEAD <ref>``, from *store* (else
+    the project's score store at *root*): ``(id, outcomes, fingerprint,
+    "git:<ref> @ <sha>")`` — the one with this *dataset_version* and
+    *evaluators_hash* when there is one, else the newest. None there
+    raises ``ValueError`` saying how to get one."""
+    from operonx.telemetry.scores import project_score_store
+
+    from .experiments import ExperimentData, find_baseline, merge_base, store_name
+
+    sha = merge_base(root, ref)
+    if store is not None:
+        opened, owned, where = store, False, store_name(store)
+    else:
+        src = project_score_store(root)
+        opened, owned, where = src.open(), True, f"{src.describe()} ({src.source})"
+    try:
+        exp = find_baseline(
+            opened,
+            name,
+            sha,
+            dataset_version=dataset_version,
+            evaluators_hash=evaluators_hash,
+        )
+        data = ExperimentData.from_store(opened, exp.experiment_id) if exp else None
+    finally:
+        if owned:
+            opened.close()
+    if data is None:
+        branch = ref.split("/", 1)[-1]
+        raise ValueError(
+            f"eval {name!r}: baseline {baseline!r} is the experiment at {sha}, the merge-base "
+            f"of HEAD and {ref}, and the score store ({where}) has no finished, clean run of "
+            f"this eval there. Run the eval on {branch} first so its experiment is stored "
+            f"(`operonx eval run {name}` in a pipeline on {branch}, or a scheduled one, keeps "
+            "baselines warm), or compare with baseline='latest'"
+        )
+    return data.experiment_id, data.outcomes(), data.fingerprint, f"git:{ref} @ {sha}"
 
 
 def _check_scores(name: str, value: Any) -> Any:

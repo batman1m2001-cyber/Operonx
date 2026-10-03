@@ -87,9 +87,7 @@ def project(tmp_path, monkeypatch):
     (root / "labels.py").write_text(LABELS)
     (root / "checks.py").write_text(CHECKS)
     (root / "operonx.toml").write_text(_toml())
-    (root / "datasets" / "labels.jsonl").write_text(
-        "".join(json.dumps(r) + "\n" for r in _cases())
-    )
+    (root / "datasets" / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in _cases()))
     monkeypatch.chdir(root)
     monkeypatch.delenv("OPERONX_RUNS_DIR", raising=False)
     monkeypatch.delenv("BROKEN", raising=False)
@@ -108,7 +106,9 @@ def _eval(*argv: str) -> int:
 
 
 def _store(root: Path):
-    return open_score_store({"backend": "files", "root": str(root / ".operonx" / "runs" / "scores")})
+    return open_score_store(
+        {"backend": "files", "root": str(root / ".operonx" / "runs" / "scores")}
+    )
 
 
 def _runs(root: Path):
@@ -199,7 +199,11 @@ def test_selection_repeats_variant_and_reports(project, capsys):
     ev = run["eval"]
     assert (ev["cases"], ev["trials"], ev["repeats"]) == (10, 20, 2)
     assert ev["selection"] == {"split": "smoke"} and ev["variant"] == "v2"
-    assert sorted(p.name for p in out_dir.iterdir()) == ["experiment.json", "junit.xml", "report.md"]
+    assert sorted(p.name for p in out_dir.iterdir()) == [
+        "experiment.json",
+        "junit.xml",
+        "report.md",
+    ]
     assert (out_dir / "report.md").read_text().startswith("## Eval `labels`: PASS (exit 0)")
     ET.fromstring((out_dir / "junit.xml").read_text())
     assert not (project / ".operonx" / "runs" / "scores").exists()  # --no-store
@@ -216,7 +220,9 @@ def test_cases_tags_and_sample(project):
         for line in (project / "evals" / "labels" / first / "items.jsonl").read_text().splitlines()
     ]
     assert sorted(items) == ["c1", "c2"]
-    assert len((project / "evals" / "labels" / second / "items.jsonl").read_text().splitlines()) == 5
+    assert (
+        len((project / "evals" / "labels" / second / "items.jsonl").read_text().splitlines()) == 5
+    )
     assert _eval("run", "labels", "--cases", "zz", "--no-store") == 2
 
 
@@ -332,7 +338,12 @@ def test_dataset_commands(project, capsys):
 
 def test_dataset_diff_against_git(project, capsys):
     def git(*a):
-        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=project, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t", *a],
+            cwd=project,
+            check=True,
+            capture_output=True,
+        )
 
     git("init", "-q", "-b", "main")
     git("add", ".")
