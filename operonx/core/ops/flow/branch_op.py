@@ -48,6 +48,7 @@ class BranchOp(BaseOp):
         "_case_descriptions",
         "_input_keys",
         "condition_ops",
+        "max_iterations",
     ]
 
     def __init__(
@@ -57,6 +58,7 @@ class BranchOp(BaseOp):
         default: Optional[str] = None,
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
+        max_iterations: Optional[int] = None,
         **kwargs,
     ):
         # Parse inputs/outputs from cases
@@ -79,6 +81,10 @@ class BranchOp(BaseOp):
         #: when a condition is an op rather than a Ref. Empty for the
         #: classic `if_(op["field"], ...)` form.
         self.condition_ops: List[BaseOp] = []
+        #: The iteration cap of the loop this branch closes, when one of
+        #: its arms is the loop's back-edge. None keeps the default cap;
+        #: the cycle rewrite reads it (see `cycle_rewrite.loop_cap`).
+        self.max_iterations = _checked_max_iterations(max_iterations)
 
         self._set_core(self._create_core_function())
 
@@ -226,6 +232,18 @@ class BranchOp(BaseOp):
             "candidates": self.candidates,
             "num_conditions": len(self.cases),
         }
+
+
+def _checked_max_iterations(value: Optional[int]) -> Optional[int]:
+    """``value`` if it is a usable loop cap (an int of at least 1), else raise."""
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            f"max_iterations must be a whole number of at least 1, got {value!r}. "
+            f"It caps the loop this branch closes: if_(cond, END, max_iterations=50)."
+        )
+    return value
 
 
 def _rename_op(op: BaseOp, new_name: str) -> None:
@@ -492,8 +510,22 @@ class Branch:
         return branch
 
 
-def if_(condition: Union[Ref, BaseOp], target: Union[str, BaseOp]) -> Branch:
+def if_(
+    condition: Union[Ref, BaseOp],
+    target: Union[str, BaseOp],
+    *,
+    max_iterations: Optional[int] = None,
+) -> Branch:
     """Start a branch declaration with the first condition.
+
+    Args:
+        condition: What to test — a Ref comparison or a single-output op.
+        target: The op (or op name) to route to when it holds.
+        max_iterations: When one of this branch's arms loops back to an
+            earlier op, the most iterations that loop may run (default
+            1000). A loop that reaches it stops, records
+            ``LoopLimitExceeded`` in ``$errors``, and runs nothing after it.
+            Refused at build on a branch that closes no loop.
 
     Example (inline, auto-wired)::
 
@@ -504,5 +536,11 @@ def if_(condition: Union[Ref, BaseOp], target: Union[str, BaseOp]) -> Branch:
         router = if_(PARENT["score"] >= 90, "excellent").else_("fail")
         router >> excellent >> merge
         router >> fail      >> merge
+
+    Example (a loop capped at 50 iterations)::
+
+        START >> s >> if_(s["done"] == True, END, max_iterations=50).else_(s)
     """
-    return Branch().if_(condition, target)
+    if max_iterations is None:
+        return Branch().if_(condition, target)
+    return Branch(max_iterations=_checked_max_iterations(max_iterations)).if_(condition, target)

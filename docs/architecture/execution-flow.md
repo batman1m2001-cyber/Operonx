@@ -234,6 +234,12 @@ out["$errors"]   # {"engine.parse": "Traceback ... ValueError: invalid literal .
   `"<graph>.<op>"` (a nested op by its full path), the value the same text
   as its `error` cell. An op that fails more than once — on several stream
   items — keeps its first error; the per-item texts stay in the cell.
+- An op raising **inside a subgraph** stops the ops after the subgraph,
+  as it would flat: a subgraph run in which an op under it raised and
+  none of its outputs were written yields nothing. `"$errors"` then has
+  an entry for the subgraph too, `"<graph>.<sub>"`, naming the op that
+  raised (`"SubgraphError: 'g.sub.parse' raised, …"`). A subgraph that
+  wrote some of its outputs still yields them.
 - It is present **only when an op failed**, so a clean run's keys are
   unchanged. `collect()` and `result()` carry it the same way;
   `handle.errors` is the same dict (`{}` when none), readable while the

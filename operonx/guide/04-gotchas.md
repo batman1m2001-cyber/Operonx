@@ -39,6 +39,9 @@ async def main():
 asyncio.run(main())
 ```
 
+An op raising inside a subgraph stops the ops after the subgraph too, and
+`$errors` gets a `"<graph>.<sub>"` entry naming the op that raised.
+
 `handle.errors` is the same dict on a started run. Over HTTP a failed run
 is a `500 {"error": "the graph produced no output"}`; the traceback stays
 in the log.

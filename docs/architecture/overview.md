@@ -1,13 +1,8 @@
 # Architecture overview
 
-Operonx ships as a **single Python package** with optional extras.
-
-> The Rust execution backend lives in the
-> [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) repo and
-> ships as its own crate. It reads the same JSON graph spec produced by
-> `graph.serialize()`, so a workflow authored in Python remains portable to
-> the Rust runtime — the two projects are decoupled at the release level
-> but share the JSON contract and fixture tree.
+Operonx ships as a **single Python package** with optional extras. The
+Python scheduler is the only runtime; the Rust backend (`operonx-rs`) was
+dropped.
 
 ## Component map
 
@@ -56,7 +51,7 @@ Operonx/
 ├── examples/python/            # Runnable examples
 ├── tests/
 │   ├── internal/               # Unit tests
-│   └── spec/                   # JSON-fixture tests (shared with operonx-rs)
+│   └── spec/                   # JSON-fixture tests
 └── docs/                       # This site
 ```
 
