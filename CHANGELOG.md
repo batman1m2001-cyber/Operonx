@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-04
+
 ### Added
 
 - **Trace media in ClickHouse: `media: clickhouse` on `trace_clickhouse:`
@@ -2519,7 +2521,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.0...v1.12.1
