@@ -23,13 +23,18 @@ input, so a job's data file is already a dataset of cases with no
 expectations. ``"dataset:name"`` names ``<project>/datasets/name.jsonl``.
 
 **An evaluator** is a function — plain, async, or an ``@op`` (called for
-its body) — that takes any of ``input``, ``output``, ``expected``, ``row``
-and ``outputs`` by name and returns a verdict: ``True``/``False``, a score
-in [0, 1] (passes at 0.5), or ``{"passed", "score", "reason"}``. Helpers:
-:func:`exact`, :func:`contains`, :func:`fuzzy`, :func:`json_match`,
+its body) — that takes any of ``input``, ``output``, ``expected``, ``row``,
+``outputs`` and ``trace`` by name and returns a verdict: ``True``/``False``,
+a score in [0, 1] (passes at 0.5), or ``{"passed", "score", "reason"}``.
+Helpers: :func:`exact`, :func:`contains`, :func:`fuzzy`, :func:`json_match`,
 :func:`llm_judge`. ``output`` is what the case produced: the one item the
 graph sent (or its result, for a graph with no doors), a list when it sent
-several, ``None`` when it sent nothing.
+several, ``None`` when it sent nothing. ``trace`` is a :class:`TraceView`
+of the case's run — built only for an evaluator that takes it — which
+:mod:`.trajectory` (``trajectory.ops``, ``trajectory.tool_calls``,
+``trajectory.op_output``) and :func:`budget` read. A case's async
+evaluators run at the same time. :func:`rescore` judges a recorded run
+again without running the graph.
 
 **A run is an experiment.** ``run.meta["eval"]`` also holds its
 ``fingerprint`` (git commit, graph, resolved config, dataset and evaluator
@@ -49,7 +54,7 @@ from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
 from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
 from .gate import Gate
 from .job import Eval
-from .rescore import Rescored, rescore
+from .rescoring import Rescored, rescore
 from . import trajectory
 from .traceview import OpRow, ToolCall, TraceView
 from .trajectory import budget

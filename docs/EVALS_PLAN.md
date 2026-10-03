@@ -166,3 +166,21 @@ decorator and `Verdict` class, judges as traced graphs and the judge cache's use
 - Found on the way: `ItemResult.as_dict()` deep-copied every verdict (`asdict`), most of
   the per-item record cost; the extra verdict fields made that visible (+60 µs/case) until
   it became a shallow copy.
+
+**E2 built, 2026-10-04** (`feat/evals-e2`).
+
+- Golden: `from_trace(live) == from_rows(store.get_run(id).nodes)` on the files and sqlite
+  stores, for a graph with a subgraph, a branch and a real `LLMOp` against a local stand-in
+  model with a tool call and a price (`test_traceview.py`).
+- Overhead (`scripts/bench_eval_overhead.py`, CPU time, interleaved runs of E1 `2ddd9b0`
+  and E2 on one machine): eval over a plain job **+168 / +138 µs/case** before, **+137 /
+  +146** after — no measurable change; reading the signatures once (`prepare`) pays for the
+  `trace` check. An eval with one check that reads the trace (a one-op graph's path):
+  **+265 / +285 µs/case** over the job, so building a view costs ~120–150 µs on this graph.
+- Concurrency: 50 cases × 3 async fake judges (50 ms each), concurrency 4, median of 5
+  wall times: **2.06 s → 0.74 s**.
+- Found on the way: `Ref.apply(fn)` made `GraphOp.serialize()` raise (an operonx-rs rule),
+  so the fingerprint of any graph using it crashed; the callable now serializes as
+  `{"python_callable": fn}` and is hashed by name and source.
+- The rescore module is `rescoring.py`: `operonx.app.evals.rescore` is the function, and a
+  module of the same name would have been shadowed by it.

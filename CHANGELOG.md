@@ -79,6 +79,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `operonx.app.evals.stats`: Wilson, CLT and clustered SE, pass^k, exact
   McNemar, Newcombe's paired interval, a paired (cluster) bootstrap, Holm
   and Benjamini–Hochberg — pure Python, seeded.
+- **Evaluators can read the run** (phase E2). An evaluator that takes
+  `trace` gets a `TraceView` of the case's run: every op execution in
+  order with inputs, outputs, status, timing and cost; `ops`, `first`,
+  `last`, `path`, `llm_calls`, `tool_calls`, `errors`; and the run store's
+  totals. A view of a live run equals the view of the same run read back
+  from a store (`TraceView.from_rows` / `from_record` / `from_store`). An
+  eval whose evaluators do not take `trace` pays nothing for it.
+- `trajectory.ops` and `trajectory.tool_calls` (AgentEvals' strict /
+  unordered / subset / superset, tool arguments exact / subset / ignore,
+  the reference from the case's `trajectory`), `trajectory.op_output` (any
+  check on one op's outputs, blaming its `op_id`), and `budget(ms,
+  cost_usd, tokens, llm_calls)`.
+- `rescore(run, evaluators, store=)` and `Eval.rescore(run_id)`: judge a
+  recorded eval run again without running its graph. Verdicts note
+  `output_clipped` when the record holds only a preview.
+- A case's async evaluators run at the same time (50 cases × 3 async
+  judges: 2.06 s → 0.74 s).
 - The agent guide's `07-evals.md`, run by `tests/guide/`.
 - `scripts/bench_eval_overhead.py`: what an eval costs over a plain job,
   per case and per run.
@@ -176,6 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   websocket frame it cannot read gets `{"error": ...}` back. A websocket
   run that fails before sending anything sends an error frame with its
   `trace_id`. HTTP and webhook replies carry `x-operonx-trace-id`.
+- A graph using `Ref.apply(fn)` crashed the eval fingerprint:
+  `GraphOp.serialize()` refused a Python callable (an operonx-rs rule). It
+  now serializes as `{"python_callable": fn}`, and the fingerprint hashes it
+  by name and source.
 
 ### Changed
 
@@ -264,6 +285,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ItemResult.as_dict()` is shallow: the deep copy of an eval's verdict was
   most of what writing an item cost.
 - Without a `gate`, an eval passes, fails and exits exactly as in 1.9.0.
+- `llm_judge` evaluators carry `eval_kind = "judge"`.
 
 ### Removed
 

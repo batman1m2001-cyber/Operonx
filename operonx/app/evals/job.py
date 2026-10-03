@@ -371,10 +371,10 @@ class Eval(Job):
         dataset: Any = None,
     ) -> Any:
         """Judge this eval's recorded run *run_id* again without running the
-        graph (:func:`~operonx.app.evals.rescore.rescore`). Without
+        graph (:func:`~operonx.app.evals.rescore`). Without
         *evaluators*, the eval's own — its judges left out, and named in
         ``skipped``. *store* is the run store its traces went to."""
-        from .rescore import is_judge, rescore
+        from .rescoring import is_judge, rescore
 
         path = Path(self.record_dir) / self.name / run_id
         if not (path / "run.json").is_file():
