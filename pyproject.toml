@@ -22,9 +22,12 @@ dependencies = [
 # PDF text layer with coordinates: docling-parse (MIT, C++), behind PdfBackend.
 pdf = ["docling-parse>=7.22"]
 # ML layout + TableFormer (docling-ibm-models, MIT, torch). Off by default; phase K1b.
-layout = ["docling-ibm-models>=3.4", "docling-parse>=7.22"]
+layout = ["docling-ibm-models[opencv-python-headless]>=4.0", "docling-parse>=7.22", "pypdfium2>=4.30", "torch>=2.2.2", "torchvision"]
 # Postgres catalog (phase K1c).
-postgres = ["psycopg[binary]>=3.1", "psycopg-pool>=3.2"]
+postgres = [
+    "psycopg[binary]>=3.1",
+    "psycopg-pool>=3.2",
+]
 all = ["operonx-kb[pdf,postgres,faiss]"]
 
 # Dense index backends: operonx's vector stores.
@@ -54,6 +57,14 @@ dev = [
 
 [tool.uv.sources]
 operonx = { path = "../Operon", editable = true }
+# CPU-only torch for the `layout` extra: the default PyPI wheel pulls ~3 GB of CUDA.
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["operonx_kb"]
@@ -62,6 +73,7 @@ packages = ["operonx_kb"]
 testpaths = ["tests"]
 markers = [
     "pdf: needs the 'pdf' extra (docling-parse)",
+    "corpus: the 200-document and 100-page scale gates (about a minute)",
 ]
 filterwarnings = ["ignore::DeprecationWarning:reportlab.*"]
 

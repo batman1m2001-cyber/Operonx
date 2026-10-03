@@ -50,7 +50,7 @@ from operonx_kb.pdf.assemble import (
     join_lines,
     split_list_marker,
 )
-from operonx_kb.pdf.backend import BBox, PdfPage, Rule, Word
+from operonx_kb.pdf.backend import BBox, PageRenderer, PdfPage, Rule, Word
 
 __all__ = ["Segment", "LayoutBlock", "LayoutModel", "HeuristicLayout"]
 
@@ -129,10 +129,16 @@ class LayoutBlock:
 
 
 class LayoutModel(ABC):
-    """Labels a document's pages and orders the blocks."""
+    """Labels a document's pages and orders the blocks.
+
+    Attributes:
+        needs_images: The model looks at page images; the parser then opens a
+            :class:`~operonx_kb.pdf.backend.PageRenderer` for it.
+    """
 
     name: str = ""
     version: str = "1"
+    needs_images: bool = False
 
     def config(self) -> Dict[str, Any]:
         return {}
@@ -142,8 +148,11 @@ class LayoutModel(ABC):
         return fingerprint(f"{cls.__module__}.{cls.__qualname__}", self.version, self.config())
 
     @abstractmethod
-    def layout(self, pages: Sequence[PdfPage]) -> List[LayoutBlock]:
-        """Blocks of every page, in reading order."""
+    def layout(
+        self, pages: Sequence[PdfPage], renderer: Optional[PageRenderer] = None
+    ) -> List[LayoutBlock]:
+        """Blocks of every page, in reading order. ``renderer`` is given when
+        :attr:`needs_images` is set."""
 
 
 # ── helpers ─────────────────────────────────────────────────────────────
@@ -161,6 +170,17 @@ def _mask(text: str) -> str:
 
 def _overlap(a0: float, a1: float, b0: float, b1: float) -> float:
     return max(0.0, min(a1, b1) - max(a0, b0))
+
+
+def set_style(block: "LayoutBlock", segments: List[Segment]) -> None:
+    """Font size and the bold and monospace shares of a block, from its segments."""
+    words = [w for seg in segments for w in seg.words]
+    if not words:
+        return
+    chars = sum(len(w.text) for w in words) or 1
+    block.size = sum(w.size * len(w.text) for w in words) / chars
+    block.bold = sum(len(w.text) for w in words if w.bold) / chars
+    block.mono = sum(len(w.text) for w in words if w.mono) / chars
 
 
 def _crosses(x0: float, x1: float, gutters: List[Tuple[float, float]]) -> bool:
@@ -454,7 +474,9 @@ class HeuristicLayout(LayoutModel):
 
     # -- 5-7. blocks, labels, merges -------------------------------------------
 
-    def layout(self, pages: Sequence[PdfPage]) -> List[LayoutBlock]:
+    def layout(
+        self, pages: Sequence[PdfPage], renderer: Optional[PageRenderer] = None
+    ) -> List[LayoutBlock]:
         segs = {}
         for page in pages:
             big = [
@@ -595,12 +617,8 @@ class HeuristicLayout(LayoutModel):
                 out.append(current)
             last = s
         for block in out:
-            words = [w for seg in members.get(id(block), []) for w in seg.words]
-            if words:
-                chars = sum(len(w.text) for w in words) or 1
-                block.size = sum(w.size * len(w.text) for w in words) / chars
-                block.bold = sum(len(w.text) for w in words if w.bold) / chars
-                block.mono = sum(len(w.text) for w in words if w.mono) / chars
+            if id(block) in members:
+                set_style(block, members[id(block)])
         return out
 
     def _by_column(
@@ -626,13 +644,25 @@ class HeuristicLayout(LayoutModel):
             return False
         if (s.share("bold") >= 0.5) != (last.share("bold") >= 0.5):
             return False
-        if split_list_marker(s.text) is not None:
+        if split_list_marker(s.text) is not None and not self._full(last, block):
+            # A marker-like start ("826. For …") right after a line that runs to
+            # the block's edge is wrapped text, not a new list item.
             return False
         if split_list_marker(block.lines[0]) is not None:
             return s.x0 > block.x0 + 0.3 * size  # a list item's wrapped lines hang under its text
         if s.x0 > block.x0 + 0.8 * size and s.x0 - last.x0 > 0.8 * size:
             return False  # first-line indent of a new paragraph
         return True
+
+    @staticmethod
+    def _full(last: Segment, block: LayoutBlock) -> bool:
+        """Whether ``last`` (the block's latest line) runs to the block's right edge."""
+        right = max(r[1][2] for r in block.regions)
+        return (
+            len(block.lines) >= 1
+            and last.x1 >= right - 2 * max(last.size, 1.0)
+            and last.x0 <= block.x0 + 1.0
+        )
 
     @staticmethod
     def _grow(block: LayoutBlock, s: Segment) -> None:

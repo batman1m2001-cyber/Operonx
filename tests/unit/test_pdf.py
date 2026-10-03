@@ -185,3 +185,18 @@ def test_not_a_pdf_is_a_parse_error():
 
     with pytest.raises(DocumentParseError):
         PdfParser().parse(b"%PDF-1.4 garbage that is not a pdf")
+
+
+def test_a_marker_like_start_after_a_full_line_is_wrapped_text():
+    """'826. For …' after a line that runs to the edge continues the paragraph."""
+    page = PdfPage(1, 595, 842)
+    page.words = (
+        _words("the team keeps reference number one two", 50, 100)
+        + _words("826. For release management the", 50, 112)
+        + _words("1. a real list item", 50, 140)
+    )
+    blocks = HeuristicLayout().layout([page])
+    assert [(b.kind, b.text) for b in blocks] == [
+        ("paragraph", "the team keeps reference number one two 826. For release management the"),
+        ("list_item", "a real list item"),
+    ]

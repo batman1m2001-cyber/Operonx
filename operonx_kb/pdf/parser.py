@@ -52,7 +52,11 @@ class PdfParser(Parser):
         started = time.perf_counter()
         pages = self.backend.pages(data, password=self.password)
         parsed_at = time.perf_counter()
-        blocks = self.layout_model.layout(pages)
+        if self.layout_model.needs_images:
+            with self.backend.renderer(data, password=self.password) as renderer:
+                blocks = self.layout_model.layout(pages, renderer)
+        else:
+            blocks = self.layout_model.layout(pages)
         dims = {p.page_no: (p.width, p.height) for p in pages}
         out: List[RawBlock] = []
         for b in blocks:

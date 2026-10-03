@@ -23,7 +23,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from operonx_kb.errors import DocumentParseError, MissingExtraError
 from operonx_kb.model.ids import fingerprint
 
-__all__ = ["Word", "Rule", "PdfPage", "PdfBackend", "DoclingParseBackend", "font_style"]
+__all__ = [
+    "Word",
+    "Rule",
+    "PdfPage",
+    "PageRenderer",
+    "PdfBackend",
+    "DoclingParseBackend",
+    "font_style",
+]
 
 BBox = Tuple[float, float, float, float]  # x0, y0, x1, y1; origin top-left, points
 
@@ -99,6 +107,44 @@ def font_style(font_name: str) -> Tuple[bool, bool, bool]:
     return bold, italic, bool(_MONO.search(name))
 
 
+class PageRenderer(ABC):
+    """Page images of one open document, for layout models that look at pixels.
+
+    Use as a context manager; the document is closed on exit.
+    """
+
+    @abstractmethod
+    def render(self, page_no: int, scale: float = 1.0) -> Any:
+        """Page ``page_no`` (1-based) as an RGB ``PIL.Image``; ``scale`` 1.0 is 72 dpi,
+        so one pixel is one point."""
+
+    @abstractmethod
+    def close(self) -> None: ...
+
+    def __enter__(self) -> "PageRenderer":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+
+class PdfiumRenderer(PageRenderer):
+    """Renders with ``pypdfium2`` (Apache-2.0/BSD; the ``layout`` extra), as docling does."""
+
+    def __init__(self, data: bytes, password: Optional[str] = None):
+        try:
+            import pypdfium2
+        except ImportError as exc:
+            raise MissingExtraError("Rendering PDF pages for the ML layout", "layout", exc) from exc
+        self._doc = pypdfium2.PdfDocument(data, password=password)
+
+    def render(self, page_no: int, scale: float = 1.0) -> Any:
+        return self._doc[page_no - 1].render(scale=scale).to_pil().convert("RGB")
+
+    def close(self) -> None:
+        self._doc.close()
+
+
 class PdfBackend(ABC):
     """Reads a PDF into :class:`PdfPage`\\ s."""
 
@@ -111,6 +157,10 @@ class PdfBackend(ABC):
     def fingerprint(self) -> str:
         cls = type(self)
         return fingerprint(f"{cls.__module__}.{cls.__qualname__}", self.version, self.config())
+
+    def renderer(self, data: bytes, password: Optional[str] = None) -> PageRenderer:
+        """Page images of the document (pypdfium2 by default)."""
+        return PdfiumRenderer(data, password)
 
     @abstractmethod
     def pages(self, data: bytes, password: Optional[str] = None) -> List[PdfPage]:
