@@ -24,7 +24,6 @@ from typing import (
 from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
 from operonx.core.ops import _cache
-from operonx.core.ops._cache import CacheStore
 from operonx.core.ops._events import Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
 from operonx.core.states.cell import DEFAULT_CONTEXT
@@ -327,7 +326,7 @@ class BaseOp(ABC):
     # Op-level cache stores shared across instances and engines, keyed by the
     # file path for ``cache="path"`` and by the op's scope digest otherwise.
     # See operonx/core/ops/_cache.py for what a key is made of.
-    _cache_stores: Dict[str, "CacheStore"] = {}
+    _cache_stores: Dict[str, "_cache.CacheStore"] = {}
 
     _VALID_BOUNDS = (None, "sync", "io", "cpu")
 
@@ -366,7 +365,7 @@ class BaseOp(ABC):
         self._metrics_idx = None  # (schema, st_idx, et_idx, dur_idx)
         self._error_idx = None  # (schema, err_idx)
         self.cache = cache
-        self._cache_scope = None  # (full_name, scope, store), on the first cached call
+        self._cache_scope = None  # (full_name, scope, store id), on the first cached call
         self.delay = delay
         self.transient = transient
         self._transient_vars = None  # stamped post-compile by StateSchema
@@ -865,7 +864,7 @@ class BaseOp(ABC):
         cls = type(self)
         return [f"{cls.__module__}.{cls.__qualname__}", self.specific_metadata]
 
-    def _cache_lookup(self, inputs: Dict[str, Any]) -> Tuple["CacheStore", bytes]:
+    def _cache_lookup(self, inputs: Dict[str, Any]) -> Tuple["_cache.CacheStore", bytes]:
         """The store this op caches into and the key of a call with ``inputs``.
 
         The scope (graph fingerprint, full name, identity) is computed on
@@ -875,12 +874,13 @@ class BaseOp(ABC):
         if scope is None or scope[0] != self.full_name:
             digest = _cache.op_scope(self)
             path = self.cache if isinstance(self.cache, str) else None
-            store_id = path or digest.hex()
-            store = BaseOp._cache_stores.get(store_id)
-            if store is None:
-                store = BaseOp._cache_stores[store_id] = _cache.CacheStore(path)
-            scope = self._cache_scope = (self.full_name, digest, store)
-        return scope[2], _cache.entry_key(self, scope[1], inputs)
+            scope = self._cache_scope = (self.full_name, digest, path or digest.hex())
+        _, digest, store_id = scope
+        store = BaseOp._cache_stores.get(store_id)
+        if store is None:
+            path = self.cache if isinstance(self.cache, str) else None
+            store = BaseOp._cache_stores[store_id] = _cache.CacheStore(path)
+        return store, _cache.entry_key(self, digest, inputs)
 
     @staticmethod
     def save_all_caches() -> int:
