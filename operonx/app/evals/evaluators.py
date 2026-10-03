@@ -265,4 +265,5 @@ def llm_judge(resource: str, rubric: str, *, name: str = "llm_judge") -> Callabl
         return verdict
 
     judge.eval_name = name
+    judge.eval_kind = "judge"  # asks a model: not rescored, and not deterministic
     return judge

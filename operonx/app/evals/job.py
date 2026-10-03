@@ -284,15 +284,10 @@ class Eval(Job):
             if self._wants_trace:
                 trace = getattr(result, "trace", None)
                 avail["trace"] = TraceView.from_trace(trace) if trace is not None else None
-            checks = await judge_all(self._prepared, avail)
-            verdict = {
-                "passed": all(c["passed"] for c in checks.values()) if checks else True,
-                "checks": checks,
-            }
-            cost = [c["cost_usd"] for c in checks.values() if c.get("cost_usd") is not None]
-            if cost:
-                verdict["judge_cost_usd"] = round(sum(cost), 8)
+            verdict = case_verdict(await judge_all(self._prepared, avail))
         verdict["output"] = _clip(output)
+        if verdict["output"] is not output:
+            verdict["output_clipped"] = True  # a preview: rescore cannot judge it again
         if row.get("expected") is not None:
             verdict["expected"] = _clip(row.get("expected"))
         if row.get("tags"):
@@ -302,57 +297,9 @@ class Eval(Job):
         if cluster is not None:
             verdict["cluster"] = cluster
         result.verdict = verdict
-        self._verdicts.append(
-            {
-                "key": result.key,
-                "case": case,
-                "repeat": repeat,
-                "case_hash": verdict["case_hash"],
-                "cluster": cluster,
-                "tags": verdict.get("tags") or (),
-                "passed": verdict["passed"],
-                "checks": {k: v["passed"] for k, v in verdict["checks"].items()},
-                "ms": result.ms,
-                "error": bool(verdict.get("error")),
-                "judge_cost_usd": verdict.get("judge_cost_usd"),
-            }
-        )
+        self._verdicts.append(trial_of(result.key, verdict, result.ms))
 
     # -- the run's numbers ---------------------------------------------------
-
-    @staticmethod
-    def _metrics(cases: Mapping[str, CaseOutcome]) -> Dict[str, Estimate]:
-        """``pass`` and each check: the mean over cases of the share of
-        their trials that passed, with its interval."""
-        names = [PASS_METRIC] + sorted({m for o in cases.values() for m in o.checks})
-        clustered = any(o.cluster is not None for o in cases.values())
-        out: Dict[str, Estimate] = {}
-        for metric in names:
-            held = [(o.share(metric), o.cluster or o.case) for o in cases.values()]
-            held = [h for h in held if h[0] is not None]
-            if held:
-                out[metric] = estimate(
-                    [h[0] for h in held],
-                    [h[1] for h in held] if clustered else None,
-                    bounds=(0.0, 1.0),
-                )
-        return out
-
-    def _reliability(self, cases: Mapping[str, CaseOutcome]) -> Dict[str, Any]:
-        by = {STABLE_PASS: 0, STABLE_FAIL: 0, FLAKY: 0}
-        for o in cases.values():
-            by[o.stability] += 1
-        flaky = sorted(c for c, o in cases.items() if o.stability == FLAKY)
-        hat = {}
-        for k in range(1, self.repeats + 1):
-            vals = [
-                pass_hat_k(sum(o.passed), len(o.passed), k)
-                for o in cases.values()
-                if len(o.passed) >= k
-            ]
-            if vals:
-                hat[str(k)] = round(sum(vals) / len(vals), 6)
-        return {**by, "flaky_cases": flaky[:FLAKY_LIST_MAX], "pass_hat_k": hat}
 
     def summarize(self, status: str) -> tuple:
         """What run.json says about the eval, and the run's status.
@@ -362,42 +309,13 @@ class Eval(Job):
         the gate decides (see :mod:`operonx.app.evals.gate`).
         """
         vs, self._verdicts = self._verdicts, []
-        trials = len(vs)
-        passed = sum(1 for v in vs if v["passed"])
-        per_check: Dict[str, Dict[str, int]] = {}
-        for v in vs:
-            for k, ok in v["checks"].items():
-                c = per_check.setdefault(k, {"passed": 0, "cases": 0})
-                c["cases"] += 1
-                c["passed"] += int(ok)
-        ms = sorted(v["ms"] for v in vs if v["ms"])
-        judge = [v["judge_cost_usd"] for v in vs if v.get("judge_cost_usd") is not None]
-        cases = outcomes(vs)
-        if self.repeats == 1:
-            n_cases = trials
-            pass_rate = round(passed / trials, 4) if trials else None
-        else:
-            shares = [o.share(PASS_METRIC) for o in cases.values()]
-            n_cases = len(cases)
-            pass_rate = round(sum(shares) / len(shares), 4) if shares else None
+        nums, cases, metrics = numbers(vs, self.repeats)
+        trials, passed, pass_rate = nums["trials"], nums["passed"], nums["pass_rate"]
         summary: Dict[str, Any] = {
             "dataset": str(self.dataset.path),
-            "cases": n_cases,
-            "passed": passed,
-            "failed": trials - passed,
-            "errored": sum(1 for v in vs if v["error"]),
-            "pass_rate": pass_rate,
             "threshold": self.threshold,
-            "checks": per_check,
-            "p50_ms": ms[len(ms) // 2] if ms else None,
-            "judge_cost_usd": round(sum(judge), 8) if judge else None,
-            "repeats": self.repeats,
-            "trials": trials,
+            **nums,
         }
-        metrics = self._metrics(cases)
-        summary["metrics"] = {k: e.as_dict() for k, e in metrics.items()}
-        if self.repeats > 1:
-            summary["reliability"] = self._reliability(cases)
         fp = self._fingerprint
         if fp is not None and self._code is not None:
             code = self._code.result()
@@ -441,6 +359,36 @@ class Eval(Job):
             elif gate["verdict"] != ERROR or status == RUN_OK:
                 status = RUN_FAILED
         return {"eval": summary}, status
+
+    # -- judging a recorded run again ---------------------------------------
+
+    async def rescore(
+        self,
+        run_id: str,
+        evaluators: Optional[Sequence[Any]] = None,
+        *,
+        store: Any = None,
+        dataset: Any = None,
+    ) -> Any:
+        """Judge this eval's recorded run *run_id* again without running the
+        graph (:func:`~operonx.app.evals.rescore.rescore`). Without
+        *evaluators*, the eval's own — its judges left out, and named in
+        ``skipped``. *store* is the run store its traces went to."""
+        from .rescore import is_judge, rescore
+
+        path = Path(self.record_dir) / self.name / run_id
+        if not (path / "run.json").is_file():
+            raise ValueError(f"eval {self.name!r}: no run {run_id!r} under {path.parent}")
+        chosen = list(self.evaluators if evaluators is None else evaluators)
+        skipped: List[str] = []
+        if evaluators is None:
+            skipped = [_name(ev) for ev in chosen if is_judge(ev)]
+            chosen = [ev for ev in chosen if not is_judge(ev)]
+        out = await rescore(
+            path, chosen, store=store, dataset=self.dataset if dataset is None else dataset
+        )
+        out.skipped = skipped
+        return out
 
     # -- declared, described -------------------------------------------------
 
@@ -503,8 +451,117 @@ class Eval(Job):
         return out
 
 
+# ── verdicts and the numbers over them (an eval run and a rescore share them) ──
+
+
+def case_verdict(checks: Dict[str, Any]) -> Dict[str, Any]:
+    """A case's checks as its verdict: passed when every check passed."""
+    verdict = {
+        "passed": all(c["passed"] for c in checks.values()) if checks else True,
+        "checks": checks,
+    }
+    cost = [c["cost_usd"] for c in checks.values() if c.get("cost_usd") is not None]
+    if cost:
+        verdict["judge_cost_usd"] = round(sum(cost), 8)
+    return verdict
+
+
+def trial_of(key: str, verdict: Mapping[str, Any], ms: float) -> Dict[str, Any]:
+    """One judged trial, as the statistics read it."""
+    return {
+        "key": key,
+        "case": verdict.get("case", key),
+        "repeat": verdict.get("repeat", 0),
+        "case_hash": verdict.get("case_hash"),
+        "cluster": verdict.get("cluster"),
+        "tags": verdict.get("tags") or (),
+        "passed": verdict["passed"],
+        "checks": {k: v["passed"] for k, v in (verdict.get("checks") or {}).items()},
+        "ms": ms,
+        "error": bool(verdict.get("error")),
+        "judge_cost_usd": verdict.get("judge_cost_usd"),
+    }
+
+
+def _metrics(cases: Mapping[str, CaseOutcome]) -> Dict[str, Estimate]:
+    """``pass`` and each check: the mean over cases of the share of their
+    trials that passed, with its interval."""
+    names = [PASS_METRIC] + sorted({m for o in cases.values() for m in o.checks})
+    clustered = any(o.cluster is not None for o in cases.values())
+    out: Dict[str, Estimate] = {}
+    for metric in names:
+        held = [(o.share(metric), o.cluster or o.case) for o in cases.values()]
+        held = [h for h in held if h[0] is not None]
+        if held:
+            out[metric] = estimate(
+                [h[0] for h in held],
+                [h[1] for h in held] if clustered else None,
+                bounds=(0.0, 1.0),
+            )
+    return out
+
+
+def _reliability(cases: Mapping[str, CaseOutcome], repeats: int) -> Dict[str, Any]:
+    by = {STABLE_PASS: 0, STABLE_FAIL: 0, FLAKY: 0}
+    for o in cases.values():
+        by[o.stability] += 1
+    flaky = sorted(c for c, o in cases.items() if o.stability == FLAKY)
+    hat = {}
+    for k in range(1, repeats + 1):
+        vals = [
+            pass_hat_k(sum(o.passed), len(o.passed), k) for o in cases.values() if len(o.passed) >= k
+        ]
+        if vals:
+            hat[str(k)] = round(sum(vals) / len(vals), 6)
+    return {**by, "flaky_cases": flaky[:FLAKY_LIST_MAX], "pass_hat_k": hat}
+
+
+def numbers(
+    vs: Sequence[Mapping[str, Any]], repeats: int
+) -> Tuple[Dict[str, Any], Dict[str, CaseOutcome], Dict[str, Estimate]]:
+    """The counts, rates, per-check tallies and metrics over judged trials
+    (:func:`trial_of`): what ``run.json["eval"]`` reports beside the
+    dataset, threshold, fingerprint and gate."""
+    trials = len(vs)
+    passed = sum(1 for v in vs if v["passed"])
+    per_check: Dict[str, Dict[str, int]] = {}
+    for v in vs:
+        for k, ok in v["checks"].items():
+            c = per_check.setdefault(k, {"passed": 0, "cases": 0})
+            c["cases"] += 1
+            c["passed"] += int(ok)
+    ms = sorted(v["ms"] for v in vs if v["ms"])
+    judge = [v["judge_cost_usd"] for v in vs if v.get("judge_cost_usd") is not None]
+    cases = outcomes(vs)
+    if repeats == 1:
+        n_cases = trials
+        pass_rate = round(passed / trials, 4) if trials else None
+    else:
+        shares = [o.share(PASS_METRIC) for o in cases.values()]
+        n_cases = len(cases)
+        pass_rate = round(sum(shares) / len(shares), 4) if shares else None
+    metrics = _metrics(cases)
+    out: Dict[str, Any] = {
+        "cases": n_cases,
+        "passed": passed,
+        "failed": trials - passed,
+        "errored": sum(1 for v in vs if v["error"]),
+        "pass_rate": pass_rate,
+        "checks": per_check,
+        "p50_ms": ms[len(ms) // 2] if ms else None,
+        "judge_cost_usd": round(sum(judge), 8) if judge else None,
+        "repeats": repeats,
+        "trials": trials,
+        "metrics": {k: e.as_dict() for k, e in metrics.items()},
+    }
+    if repeats > 1:
+        out["reliability"] = _reliability(cases, repeats)
+    return out, cases, metrics
+
+
 def _clip(value: Any, limit: int = 4000) -> Any:
-    """A value small enough for a record line; large ones as a preview."""
+    """A value small enough for a record line; large ones as a preview.
+    Returns *value* itself when it fits — anything else is a preview."""
     try:
         text = json.dumps(value, ensure_ascii=False, default=str)
     except (TypeError, ValueError):
