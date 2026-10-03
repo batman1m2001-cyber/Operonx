@@ -1,8 +1,7 @@
 # Architecture overview
 
 Operonx ships as a **single Python package** with optional extras. The
-Python scheduler is the only runtime; the Rust backend (`operonx-rs`) was
-dropped.
+Python scheduler is the only runtime.
 
 ## Component map
 
