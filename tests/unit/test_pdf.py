@@ -71,6 +71,33 @@ def test_font_style_from_pdf_font_names():
     assert font_style("/F2") == (False, False, False)
 
 
+@pytest.mark.parametrize(
+    "name,style",
+    [
+        # Fonts of docling's test PDFs whose style the token rules missed.
+        ("/YZVCCI+SFBX1000", (True, False, False)),  # 2305.03393 section headings
+        ("/FKSUBL+SFBX0900", (True, False, False)),
+        ("/HFSIEU+SFTT0900", (False, False, True)),  # its code and URLs
+        ("/DEZAUG+SFTI1000", (False, True, False)),
+        ("/AAAAAA+CMBX12", (True, False, False)),
+        ("/AAAAAA+CMTT10", (False, False, True)),
+        ("/QQHTPQ+NimbusRomNo9L-Medi", (True, False, False)),  # 2203.01017 headings
+        ("/SEKJLF+LinLibertineTB", (True, False, False)),  # 2206.01062 headings
+        ("/HBBBIV+LinBiolinumTB", (True, False, False)),
+        ("/TKQZJF+LinLibertineTI", (False, True, False)),
+        ("/AAAAAW+FoundrySterling-Demi", (True, False, False)),
+        # ... and names that must stay regular.
+        ("/YTAGLJ+SFRM1000", (False, False, False)),
+        ("/FWFPFX+CMR10", (False, False, False)),
+        ("/RWPIRK+LinLibertineT", (False, False, False)),
+        ("/OHAIEK+NimbusRomNo9L-Regu", (False, False, False)),
+        ("/AAAAAR+Avenir-Book", (False, False, False)),
+    ],
+)
+def test_font_style_reads_tex_urw_and_libertine_names(name, style):
+    assert font_style(name) == style
+
+
 # ── heuristic layout on synthetic pages ───────────────────────────────
 
 

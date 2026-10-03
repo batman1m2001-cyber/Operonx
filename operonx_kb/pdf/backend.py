@@ -101,9 +101,20 @@ class PdfPage:
 # Font-name tokens, after docling's utils/font_style.py: strip the subset
 # prefix ("ABCDEF+"), split on separators and camelCase, look for weight and
 # slant words or their abbreviations.
-_BOLD = re.compile(r"(bold|black|heavy|semibold|demibold|extrabold|ultrabold|^bd$|^b$|^sb$)", re.I)
+_BOLD = re.compile(
+    r"(bold|black|heavy|semibold|demibold|extrabold|ultrabold|^demi$|^medi$|^bd$|^b$|^sb$)", re.I
+)
 _ITALIC = re.compile(r"(italic|oblique|kursiv|^it$|^i$|^bi$)", re.I)
 _MONO = re.compile(r"(mono|courier|consolas|menlo|monaco|code|typewriter|fixed)", re.I)
+# Families that encode the style in a code glued to the name, where the token
+# rules above cannot see it:
+# - TeX's Computer Modern and its EC/TC/SF (cm-super) encodings: CMBX10 and
+#   SFBX1000 are bold, CMTT10 and SFTT0900 typewriter, CMTI10 and SFSL1000 slanted;
+# - Linux Libertine/Biolinum: LinLibertineTB is bold, ...TI italic, ...TZ semibold.
+# URW's Nimbus fonts call their bold "Medi" (NimbusRomNo9L-Medi), docling's
+# conventions have "Demi" for semibold; both are the "^medi$|^demi$" tokens.
+_TEX = re.compile(r"^(?:CM|EC|TC|SF)([A-Z]+)\d+$")
+_LIBERTINE = re.compile(r"^Lin(?:Libertine|Biolinum)[TO]?([BZ]?)(I?)$")
 
 
 def font_style(font_name: str) -> Tuple[bool, bool, bool]:
@@ -114,7 +125,18 @@ def font_style(font_name: str) -> Tuple[bool, bool, bool]:
     tokens = [t[:-2] if t.endswith("MT") and len(t) > 2 else t for t in tokens]
     bold = any(_BOLD.search(t) for t in tokens)
     italic = any(_ITALIC.search(t) for t in tokens)
-    return bold, italic, bool(_MONO.search(name))
+    mono = bool(_MONO.search(name))
+    tex = _TEX.match(name)
+    if tex:
+        code = tex.group(1)
+        bold = bold or "BX" in code or code.startswith("B")
+        italic = italic or code.endswith(("TI", "SL", "IT", "I"))
+        mono = mono or "TT" in code
+    libertine = _LIBERTINE.match(name)
+    if libertine:
+        bold = bold or bool(libertine.group(1))
+        italic = italic or bool(libertine.group(2))
+    return bold, italic, mono
 
 
 class PageRenderer(ABC):
