@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejects on the next request. `run_tools` now answers each call that has
   no tool message with an error (`DISPATCH_FAILED`), the cause stays in
   `$errors`, and the model takes the next turn.
+- `tests/internal/providers/test_embedding_openai.py` passes on every
+  supported openai SDK. On openai < 3 `AsyncAzureOpenAI` sends the API key
+  as `Authorization: Bearer <key>` next to `api-key`. That is the SDK's
+  own behaviour (it inherits `AsyncOpenAI.auth_headers`; a bare SDK client
+  does it), the same key to the same host. The test pins exactly that, and
+  no `authorization` header on openai 3.
 
 ## [1.12.1] - 2026-10-02
 

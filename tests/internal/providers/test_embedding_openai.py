@@ -16,6 +16,7 @@ import warnings
 from pathlib import Path
 
 import httpx
+import openai
 import pytest
 import yaml
 
@@ -171,7 +172,15 @@ class TestAzure:
         assert url.path == "/openai/deployments/emb-deploy/embeddings"
         assert url.params["api-version"] == "2024-10-21"
         assert req["headers"]["api-key"] == "az-key"
-        assert "authorization" not in req["headers"]
+        # openai < 3 echoes the key as a bearer as well: `AsyncAzureOpenAI`
+        # inherits `AsyncOpenAI.auth_headers` and adds `api-key` on top. A
+        # bare SDK client does it with no operonx code involved, and every
+        # Azure user of those SDKs sends it. The same key to the same host,
+        # so harmless — but it must be that key, never another credential.
+        if int(openai.__version__.split(".")[0]) < 3:
+            assert req["headers"]["authorization"] == "Bearer az-key"
+        else:
+            assert "authorization" not in req["headers"]
 
     def test_api_version_is_required(self):
         with pytest.raises(ValueError, match="api_version"):
