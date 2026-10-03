@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`engine.stream(mode="interrupts")`, and `InterruptEvent.resume(value)`.**
+  When an `InterruptOp` pauses, `mode="updates"` now yields its
+  `InterruptEvent` after the updates that landed before it, and
+  `mode="interrupts"` yields only the events. `event.resume(value)` answers
+  the op (it outputs `response=value`) and returns whether it was still
+  waiting. Events from `bind_interrupt_bus` have the same method.
+- **`if_(..., max_iterations=N)`** sets the iteration cap of the loop the
+  branch closes (default 1000). It is refused on a branch that closes no
+  loop, and two different caps on one loop are refused.
+
+### Fixed
+
+- **An op failing inside a subgraph stops the ops after the subgraph**, as
+  it does flat. The subgraph yielded its all-`None` outputs, so the next op
+  ran on `None` and an HTTP door answered `200 null` (now `500`).
+  `$errors` gets a `"<graph>.<sub>"` entry naming the op that raised. A
+  subgraph that wrote some of its outputs still yields them.
+- **`handle.cancel()` ends the run for everyone waiting on it.**
+  `result()`, `collect()`, `await handle[op, var]` and `async for` waited
+  forever; they now raise `asyncio.CancelledError`. Cancelling a finished
+  run keeps its result and no longer interrupts its trace consumers.
+- **`asyncio.wait_for(engine.run(...), t)` cancels the graph** when it
+  times out (or when the caller is cancelled). The graph kept running, and
+  the op after the timeout still ran.
+- **`.collect()` no longer writes the collected op's outputs twice.** A
+  reducer cell fed by one of its outputs got every item a second time, as
+  one list (`ReducerError` with `dict_merge`).
+- **A loop that reaches its iteration cap reports it**: `LoopLimitExceeded`
+  in `$errors` under the hidden loop, and nothing after the loop runs. It
+  stopped silently.
+
+### Changed
+
+- `$errors` of a run whose subgraph failed has one more key, the
+  subgraph's.
+- `docs/architecture`: per-yield dispatch is sequential by default (it said
+  parallel), and the overview no longer advertises `operonx-rs`.
+
 ## [1.14.0] - 2026-10-04
 
 ### Added
