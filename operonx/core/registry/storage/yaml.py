@@ -169,10 +169,10 @@ class YamlConfigStorage(ConfigStorage):
           claude-haiku:
             api_type: anthropic
 
-        triton:
-          stt:
-            url: ${TRITON_URL:localhost:8001}
-            model: fastconformer_asr
+        embedding:
+          bge-m3:
+            api_type: tei
+            base_url: ${TEI_URL:http://localhost:8080}
 
     Flat (legacy)::
 

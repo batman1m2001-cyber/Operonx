@@ -53,3 +53,18 @@ class ResourceUnreachable(RuntimeError):
             "Check the VPN, or pass only the keys you need to "
             "hub.require_reachable(...)."
         )
+
+
+class ResourceCategoryError(KeyError):
+    """A resource key's category has no config class to parse it with.
+
+    Either no package registers the category, or the package that should
+    (an ``operonx.resources`` entry point) failed to. Subclasses
+    ``KeyError`` because :meth:`ResourceHub.get` has always raised that
+    for a resource it cannot build, and callers catch it.
+    """
+
+    def __str__(self) -> str:
+        # KeyError's own __str__ quotes its argument, which turns a
+        # multi-line explanation into one repr'd string.
+        return str(self.args[0]) if self.args else ""

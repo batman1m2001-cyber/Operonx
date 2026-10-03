@@ -10,6 +10,7 @@ Resource hub, configuration storage, and op registry.
 
 ::: operonx.core.registry.EnvVarUnsetError
 ::: operonx.core.registry.ResourceHubWarning
+::: operonx.core.registry.ResourceCategoryError
 
 ## Bootstrap state
 

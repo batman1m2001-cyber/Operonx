@@ -989,4 +989,4 @@ def test_bootstrap_then_get_resolves_a_builtin_category_in_a_fresh_process(tmp_p
     assert out.returncode == 0, out.stderr[-800:]
     lines = out.stdout.strip().splitlines()
     assert lines[0] == "VLLMEmbedding"
-    assert "no provider is registered for category 'widget'" in lines[-1]
+    assert "no package registers category 'widget'" in lines[-1]
