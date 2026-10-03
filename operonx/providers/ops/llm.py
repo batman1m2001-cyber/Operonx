@@ -186,7 +186,9 @@ class LLMOp(BaseOp):
         model_used (str): Actual model that served the request.
         tool_calls (list): Tool-call objects (empty list when absent).
         usage (dict): Flat token-cost metrics.
-        extras (dict): Bag of uncommon fields (``thinking_content``, ``refusal``, ``logprobs``).
+        extras (dict): Bag of uncommon fields (``thinking_content``, ``refusal``, ``logprobs``,
+            ``citations`` — a provider's native citations as spans of ``content``;
+            Anthropic only for now, None elsewhere).
 
     Example::
 
@@ -1148,6 +1150,7 @@ class LLMOp(BaseOp):
                 thinking_content=acc["thinking_content"] or None,
                 refusal=acc["refusal"],
                 logprobs=None,
+                citations=acc["citations"],
             ),
         }
 
@@ -1255,6 +1258,7 @@ class LLMOp(BaseOp):
                 thinking_content=thinking_content or None,
                 refusal=refusal,
                 logprobs=logprobs_data,
+                citations=getattr(message, "citations", None),
             ),
         }
 
@@ -1380,13 +1384,18 @@ class LLMOp(BaseOp):
 
     @staticmethod
     def _build_extras(
-        *, thinking_content: Optional[str], refusal: Optional[str], logprobs: Any
+        *,
+        thinking_content: Optional[str],
+        refusal: Optional[str],
+        logprobs: Any,
+        citations: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        """Build the extras bag — always three keys, null when absent."""
+        """Build the extras bag — always four keys, null when absent."""
         return {
             "thinking_content": thinking_content,
             "refusal": refusal,
             "logprobs": logprobs,
+            "citations": citations,
         }
 
     @staticmethod
@@ -1420,6 +1429,10 @@ class LLMOp(BaseOp):
 
         if hasattr(choice.delta, "refusal") and choice.delta.refusal:
             acc["refusal"] = (acc["refusal"] or "") + choice.delta.refusal
+
+        # Anthropic sends the whole list once, on the last chunk.
+        if getattr(choice.delta, "citations", None):
+            acc["citations"] = choice.delta.citations
 
         return yield_dict
 
@@ -1489,6 +1502,7 @@ class LLMOp(BaseOp):
             # so this scratch key never reaches a caller.
             "_tool_call_index": {},
             "refusal": None,
+            "citations": None,
         }
 
     # =========================================================================
