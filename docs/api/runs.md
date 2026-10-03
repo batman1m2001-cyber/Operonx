@@ -29,6 +29,27 @@ alerts](../guide/11-runs.md).
 ::: operonx.telemetry.runs.RunStoreConfig
 ::: operonx.telemetry.runs.open_run_store
 
+## ClickHouse
+
+::: operonx.telemetry.runs.clickhouse.ClickHouseRunStore
+::: operonx.telemetry.consumers.clickhouse.ClickHouseConsumerConfig
+
+## Media
+
+::: operonx.telemetry.media
+    options:
+      members: false
+::: operonx.telemetry.media.detect_media
+::: operonx.telemetry.media.MediaInfo
+::: operonx.telemetry.media.MediaStore
+::: operonx.telemetry.media.LocalMediaStore
+::: operonx.telemetry.media.offload_to_store
+::: operonx.telemetry.media.json_default
+
+## The background writer
+
+::: operonx.telemetry.writer.BackgroundWriter
+
 ## Retention
 
 ::: operonx.telemetry.runs.retention

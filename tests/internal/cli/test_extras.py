@@ -35,7 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = ROOT / "operonx"
 
-_LITERAL = re.compile(r"pip install operonx\[([a-z0-9_,\- ]+)\]")
+_LITERAL = re.compile(r'pip install ["\']?operonx\[([a-z0-9_,\- ]+)\]')
 
 
 def declared_extras() -> set[str]:

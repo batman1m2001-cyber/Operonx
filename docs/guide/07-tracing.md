@@ -39,6 +39,7 @@ run_store:
 | `trace_local` | One directory per run: `nodes.jsonl` (every execution), `view.txt` (a readable timeline), `media/` (large payloads, content-addressed) |
 | `trace_langfuse` | A Langfuse trace, one span per op, LLM generations with their model, tokens and cost (`pip install "operonx[langfuse]"`) |
 | `run_store` | A run store: the run in full plus its summary, queryable later ([Runs](11-runs.md)) |
+| `trace_clickhouse` | The ClickHouse run store, written from a background queue so a run never waits on the database; blobs stored once, typed from their bytes ([Runs → ClickHouse](11-runs.md#clickhouse); `pip install "operonx[clickhouse]"`) |
 
 ## Wiring them to a run
 

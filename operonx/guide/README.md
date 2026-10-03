@@ -26,7 +26,7 @@ pip install "operonx[serve,openai]"   # serve: HTTP/websocket; openai: OpenAI-co
 ```
 
 Other extras: `anthropic`, `gemini`, `langfuse`, `postgres`, `mongo`,
-`mcp`, `standard` (common set), `all`.
+`clickhouse`, `mcp`, `standard` (common set), `all`.
 
 ## Imports
 

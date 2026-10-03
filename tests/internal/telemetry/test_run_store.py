@@ -2,8 +2,9 @@
 
 The gates:
 
-* one contract, every backend: the same tests run against ``files`` and
-  ``sqlite`` — write through the engine, list, filter, page, read one
+* one contract, every backend: the same tests run against ``files``,
+  ``sqlite``, ``mongo`` (mongomock), and — when a server is configured —
+  ``postgres`` and ``clickhouse`` — write through the engine, list, filter, page, read one
   run fully (media included), roll ops up, delete, apply retention;
 * the numbers are the raw records' numbers: every summary and rollup is
   recomputed here from the rows and compared;
@@ -220,6 +221,8 @@ _PG_DSN = os.environ.get("OPERONX_TEST_PG_DSN", "")
         pytest.param(
             "postgres", marks=pytest.mark.skipif(not _PG_DSN, reason="set OPERONX_TEST_PG_DSN")
         ),
+        # a throwaway server: see _clickhouse.py; skips when none answers
+        "clickhouse",
     ]
 )
 def store(request, tmp_path):
@@ -236,6 +239,10 @@ def store(request, tmp_path):
             database=f"t{uuid.uuid4().hex[:8]}",
             media_dir=tmp_path / "media",
         )
+    elif request.param == "clickhouse":
+        from tests.internal.telemetry._clickhouse import open_store
+
+        s = open_store(request, tmp_path)
     else:
         from operonx.telemetry.runs.postgres import PostgresRunStore
 
@@ -587,5 +594,7 @@ def test_the_team_backends_say_what_they_need():
         open_run_store({"backend": "postgres"})
     with pytest.raises(ValueError, match="needs uri"):
         open_run_store({"backend": "mongo"})
+    with pytest.raises(ValueError, match="needs host"):
+        open_run_store({"backend": "clickhouse"})
     with pytest.raises(ValueError, match="postgres, mongo"):
         open_run_store({"backend": "cassandra"})

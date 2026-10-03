@@ -377,3 +377,8 @@ asyncio.run(main())
 - **Inputs and outputs are traced as JSON.** A dict with tuple keys breaks
   the trace; use string keys.
 - **HTTP doors reply after the run ends**; stream with a websocket door.
+- **`trace_clickhouse` drops runs rather than wait.** Its queue is
+  bounded (`queue_size`); while ClickHouse is down or slow, runs past the
+  bound are dropped. A warning is logged once per outage, and the count is
+  in `store.writer.stats` (`dropped_full`, `dropped_failed`). A short
+  script that must not lose its last runs calls `store.flush()`.
