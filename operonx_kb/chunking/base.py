@@ -20,7 +20,7 @@ from operonx_kb.structure.build import VersionTree
 from operonx_kb.text.spans import chunk_text, elements_in_span, merge_spans
 from operonx_kb.text.tokenize import RegexTokenizer, Tokenizer
 
-__all__ = ["ChunkDraft", "Chunker", "materialize", "heading_paths", "embed_text"]
+__all__ = ["ChunkDraft", "Chunker", "materialize", "heading_paths", "section_of", "embed_text"]
 
 
 @dataclass
@@ -31,6 +31,9 @@ class ChunkDraft:
     kind: str = "text"
     heading_path: List[str] = field(default_factory=list)
     element_ids: List[str] = field(default_factory=list)
+    #: The section the chunk belongs to; chunks of different sections never merge,
+    #: even when their headings read the same.
+    scope: str = ""
 
 
 class Chunker(ABC):
@@ -45,7 +48,12 @@ class Chunker(ABC):
     name: str = ""
     version: str = "1"
 
-    def __init__(self, max_tokens: int = 400, heading_context: bool = True, tokenizer: Optional[Tokenizer] = None):
+    def __init__(
+        self,
+        max_tokens: int = 400,
+        heading_context: bool = True,
+        tokenizer: Optional[Tokenizer] = None,
+    ):
         self.max_tokens = max_tokens
         self.heading_context = heading_context
         self.tokenizer = tokenizer or RegexTokenizer()
@@ -66,15 +74,28 @@ class Chunker(ABC):
         """Chunk drafts in document order; spans must be non-empty and inside the canonical text."""
 
 
+def section_of(tree: VersionTree) -> Dict[str, str]:
+    """Element id → id of its nearest enclosing section (the root when there is none)."""
+    by_id = tree.by_id()
+    out: Dict[str, str] = {}
+    for e in tree.elements:
+        node = by_id.get(e.parent_id) if e.parent_id else None
+        while node is not None and node.kind != "section" and node.parent_id:
+            node = by_id.get(node.parent_id)
+        out[e.id] = node.id if node is not None else e.id
+    return out
+
+
 def heading_paths(tree: VersionTree) -> Dict[str, List[str]]:
-    """Element id → the heading texts of its enclosing sections (title first)."""
+    """Element id → the heading texts of its enclosing sections (the title element first)."""
     by_id = tree.by_id()
     heading_of: Dict[str, str] = {}
     for e in tree.elements:
         if e.kind == "heading" and e.parent_id and by_id[e.parent_id].kind == "section":
             heading_of.setdefault(e.parent_id, e.text)
     out: Dict[str, List[str]] = {}
-    prefix = [tree.title] if tree.title else []
+    title = next((e.text for e in tree.elements if e.kind == "title"), None)
+    prefix = [title] if title else []
     for e in tree.elements:
         path: List[str] = []
         node = by_id.get(e.parent_id) if e.parent_id else None
@@ -98,7 +119,10 @@ def leaves(tree: VersionTree) -> List[Element]:
     return [
         e
         for e in tree.elements
-        if e.layer == "body" and e.kind not in CONTAINER_KINDS and e.span is not None and e.span[1] > e.span[0]
+        if e.layer == "body"
+        and e.kind not in CONTAINER_KINDS
+        and e.span is not None
+        and e.span[1] > e.span[0]
     ]
 
 

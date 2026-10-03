@@ -5,9 +5,9 @@ element tree:
 
 1. Every leaf is a unit, carrying its heading path. Headings and the title are
    context, not content: they reach the embedding through the heading path.
-2. Consecutive units with the same heading path are packed greedily up to
-   ``max_tokens`` (docling's ``merge_peers``); units under different headings
-   never share a chunk.
+2. Consecutive units of the same section are packed greedily up to
+   ``max_tokens`` (docling's ``merge_peers``); units of different sections
+   never share a chunk, even when their headings read the same.
 3. A unit over the budget is split at sentence boundaries, and a sentence over
    the budget at word boundaries.
 4. Tables and figures are **evidence units** (arXiv 2604.00500): the table or
@@ -22,14 +22,23 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
-from operonx_kb.chunking.base import ChunkDraft, Chunker, contiguous, heading_paths, leaves
+from operonx_kb.chunking.base import (
+    ChunkDraft,
+    Chunker,
+    contiguous,
+    heading_paths,
+    leaves,
+    section_of,
+)
 from operonx_kb.model.document import Element, Span
 from operonx_kb.structure.build import VersionTree
 from operonx_kb.text.sentences import sentence_spans
 
 __all__ = ["StructuralChunker"]
 
-_LABEL = re.compile(r"^((?:fig(?:ure)?|tab(?:le)?|chart|exhibit|listing|bảng|hình)\.?\s*[\dIVX]+[a-z]?)", re.I)
+_LABEL = re.compile(
+    r"^((?:fig(?:ure)?|tab(?:le)?|chart|exhibit|listing|bảng|hình)\.?\s*[\dIVX]+[a-z]?)", re.I
+)
 _CONTEXT_KINDS = frozenset({"title", "heading"})
 
 
@@ -47,8 +56,16 @@ class StructuralChunker(Chunker):
     name = "structural"
     version = "1"
 
-    def __init__(self, max_tokens: int = 400, min_tokens: int = 32, heading_context: bool = True, tokenizer=None):
-        super().__init__(max_tokens=max_tokens, heading_context=heading_context, tokenizer=tokenizer)
+    def __init__(
+        self,
+        max_tokens: int = 400,
+        min_tokens: int = 32,
+        heading_context: bool = True,
+        tokenizer=None,
+    ):
+        super().__init__(
+            max_tokens=max_tokens, heading_context=heading_context, tokenizer=tokenizer
+        )
         self.min_tokens = min_tokens
 
     def config(self):
@@ -69,6 +86,7 @@ class StructuralChunker(Chunker):
                 continue
             start = None
             count = 0
+            prev_end = 0
             for m in re.finditer(r"\S+", sentence):
                 n = self.tokenizer.count(m.group())
                 if start is not None and count + n > self.max_tokens:
@@ -105,7 +123,10 @@ class StructuralChunker(Chunker):
         current: Optional[Span] = None
         budget = self.max_tokens - self.tokenizer.count(canonical[header[0] : header[1]])
         for row in lines[2:]:
-            if current is not None and self.tokenizer.count(canonical[current[0] : row[1]]) > budget:
+            if (
+                current is not None
+                and self.tokenizer.count(canonical[current[0] : row[1]]) > budget
+            ):
                 groups.append([header, current])
                 current = None
             current = row if current is None else (current[0], row[1])
@@ -118,6 +139,7 @@ class StructuralChunker(Chunker):
     def draft(self, tree: VersionTree) -> List[ChunkDraft]:
         canonical = tree.canonical
         paths = heading_paths(tree)
+        scopes = section_of(tree)
         units = [e for e in leaves(tree) if e.kind not in _CONTEXT_KINDS]
         by_id = tree.by_id()
 
@@ -133,7 +155,7 @@ class StructuralChunker(Chunker):
                 members.append(caption)
                 label = _LABEL.match(caption.text)
                 if label:
-                    ref = self._referrer(units, e, label.group(1), paths, absorbed)
+                    ref = self._referrer(units, e, label.group(1), scopes, absorbed)
                     if ref is not None:
                         members.append(ref)
             evidence[e.id] = members
@@ -142,6 +164,7 @@ class StructuralChunker(Chunker):
         drafts: List[ChunkDraft] = []
         pending: List[Tuple[List[Span], List[str]]] = []  # packed text units of one heading path
         pending_path: Optional[List[str]] = None
+        pending_scope: Optional[str] = None
         pending_tokens = 0
 
         def flush() -> None:
@@ -149,13 +172,22 @@ class StructuralChunker(Chunker):
             if pending:
                 spans = contiguous([s for spans, _ in pending for s in spans], canonical)
                 ids = [i for _, ids in pending for i in ids]
-                drafts.append(ChunkDraft(spans=spans, kind="text", heading_path=list(pending_path or []), element_ids=ids))
+                drafts.append(
+                    ChunkDraft(
+                        spans=spans,
+                        kind="text",
+                        heading_path=list(pending_path or []),
+                        element_ids=ids,
+                        scope=pending_scope or "",
+                    )
+                )
             pending, pending_tokens = [], 0
 
         for e in units:
             if e.id in absorbed:
                 continue
             path = paths.get(e.id, [])
+            scope = scopes.get(e.id, "")
             if e.id in evidence:
                 flush()
                 members = evidence[e.id]
@@ -164,29 +196,39 @@ class StructuralChunker(Chunker):
                 pieces = self._table_pieces(canonical, e) if e.kind == "table" else [[e.span]]
                 for piece in pieces:
                     spans = sorted(piece + extra, key=lambda s: s[0])
-                    drafts.append(ChunkDraft(spans=spans, kind=kind, heading_path=path, element_ids=[m.id for m in members]))
+                    drafts.append(
+                        ChunkDraft(
+                            spans=spans,
+                            kind=kind,
+                            heading_path=path,
+                            element_ids=[m.id for m in members],
+                            scope=scope,
+                        )
+                    )
                 continue
-            if path != pending_path:
+            if scope != pending_scope:
                 flush()
-                pending_path = path
+                pending_path, pending_scope = path, scope
             for piece in self._pieces(canonical, e.span):
                 n = self.tokenizer.count(canonical[piece[0] : piece[1]])
                 if pending and pending_tokens + n > self.max_tokens:
                     flush()
-                    pending_path = path
                 pending.append(([piece], [e.id]))
                 pending_tokens += n
         flush()
         return self._merge_small(drafts, canonical)
 
-    def _referrer(self, units, graphic, label, paths, absorbed) -> Optional[Element]:
+    def _referrer(self, units, graphic, label, scopes, absorbed) -> Optional[Element]:
         """The paragraph in the graphic's section that mentions ``label`` (nearest first)."""
-        path = paths.get(graphic.id, [])
+        scope = scopes.get(graphic.id)
         pattern = re.compile(r"\b" + re.escape(label).replace(r"\ ", r"\s*") + r"\b", re.I)
         candidates = [
             u
             for u in units
-            if u.kind == "paragraph" and paths.get(u.id, []) == path and u.id not in absorbed and pattern.search(u.text)
+            if u.kind == "paragraph"
+            and scopes.get(u.id) == scope
+            and u.id not in absorbed
+            and pattern.search(u.text)
         ]
         if not candidates:
             return None
@@ -195,12 +237,7 @@ class StructuralChunker(Chunker):
     def _merge_small(self, drafts: List[ChunkDraft], canonical: str) -> List[ChunkDraft]:
         out: List[ChunkDraft] = []
         for d in drafts:
-            if (
-                out
-                and d.kind == "text"
-                and out[-1].kind == "text"
-                and out[-1].heading_path == d.heading_path
-            ):
+            if out and d.kind == "text" and out[-1].kind == "text" and out[-1].scope == d.scope:
                 prev = out[-1]
                 small = min(
                     self.tokenizer.count("".join(canonical[s:e] for s, e in prev.spans)),
