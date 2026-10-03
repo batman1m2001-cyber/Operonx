@@ -290,7 +290,7 @@ class Job:
             max_inflight=spec.max_inflight or DEFAULT_MAX_INFLIGHT,
             on_error=spec.on_error,
             item_timeout=spec.item_timeout,
-            trace=list(spec.trace) or None,
+            trace=list(spec.trace) if spec.trace is not None else None,
             inputs=dict(spec.inputs),
             item_input=spec.item_input,
             schedule=spec.schedule,

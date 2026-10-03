@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`[tracing]` in `operonx.toml`: which trace sinks are on, in one
+  place.** `[tracing] sinks = ["local", "trace_langfuse:edupia"]` sends
+  every run to all of them; `[tracing.services.<name>]` and
+  `[tracing.jobs.<name>]` override one service or job, and `sinks = []`
+  turns tracing off there. `"local"` is the built-in local consumer (also
+  accepted by `trace=` anywhere, `Operon(trace="local")` included); any
+  other entry is a resource key, as in `trace=[...]`. Precedence, most
+  specific first: `[tracing.<services|jobs>.<name>]`, the service's or
+  job's own `trace=` (or `trace =` on its block), `[tracing] sinks`,
+  `Application(trace=...)` / `[project] trace`, then the default (a job
+  records locally; a service is not traced). A typo, a non-list, a
+  malformed sink or a name that is no service or job fails at load, naming
+  the key; a sink missing from `resources.yaml` fails when the service or
+  job starts, naming the level that chose it. `operonx-serve --list`,
+  `operonx-run --list` and `Application.describe()` (`sinks`,
+  `sinks_from`) show each service's and job's sinks and where they came
+  from. `[project] trace` and `[tracing] sinks` together is an error.
+- `ResourceHub.declares(key)`: whether a key is configured, without
+  parsing or caching it.
+
+### Fixed
+
+- **`[[job]] trace = []` is kept.** It read as "nothing declared", so the
+  job inherited the application's consumers (or recorded locally) instead
+  of tracing nothing, unlike `Job(trace=[])`.
+
 ## [1.12.2] - 2026-10-03
 
 ### Fixed

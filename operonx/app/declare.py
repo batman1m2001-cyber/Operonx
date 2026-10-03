@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from .manifest import SESSION_MODES, STREAM_KINDS, ManifestError, ServeSpec, _default_session
+from .tracing import sink_name
 
 __all__ = ["Listener", "Service", "asgi", "env", "http", "schedule", "webhook", "websocket"]
 
@@ -239,6 +240,8 @@ def Service(  # noqa: N802 — reads as a declaration
         variants=variants_out,
         workers=listener.workers,
         on_startup=tuple(on_startup),
+        trace_own=tuple(trace) if trace is not None else None,
+        trace_from="service" if trace is not None else "default",
     )
 
 
@@ -353,13 +356,20 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "key_ops": list(s.options.get("key_ops") or []),
         "playground": ref_name(s.options["playground"]) if s.options.get("playground") else None,
         "replay": bool(s.options.get("replay")),
+        # what its runs are traced to, and which level of the precedence
+        # said so (`operonx.app.tracing`): what an operator checks first
+        "sinks": [sink_name(x) for x in s.options.get("trace") or []],
+        "sinks_from": None if s.kind == "asgi" else s.trace_from,
     }
 
 
-def describe_job(job: Any) -> Dict[str, Any]:
+def describe_job(job: Any, manifest: Any = None) -> Dict[str, Any]:
     """A `Job` or `Runbook` object as the same plain data a ``[[job]]``
-    block describes to."""
-    if hasattr(job, "jobs") and not hasattr(job, "source"):  # a Runbook
+    block describes to; with the application's *manifest*, the sinks it
+    will use as ``[tracing]`` and the application's default decide."""
+    trace, tracing = _app_tracing(manifest)
+    if _is_runbook(job):
+        sinks, source = _job_sinks(job.name, None, trace, tracing)
         return {
             "name": job.name,
             "kind": "runbook",
@@ -371,7 +381,10 @@ def describe_job(job: Any) -> Dict[str, Any]:
             "sink": None,
             "schedule": getattr(job, "schedule", None),
             "description": getattr(job, "description", "") or "",
+            "sinks": sinks,
+            "sinks_from": source,
         }
+    sinks, source = _job_sinks(job.name, _declared_trace(job), trace, tracing)
     d = job.describe()
     return {
         **(
@@ -388,7 +401,46 @@ def describe_job(job: Any) -> Dict[str, Any]:
         "sink": d.get("sink"),
         "schedule": d.get("schedule"),
         "description": d.get("description") or "",
+        "sinks": sinks,
+        "sinks_from": source,
     }
+
+
+def _app_tracing(manifest: Any) -> tuple:
+    """The application's default consumers and its ``[tracing]``."""
+    if manifest is None:
+        return None, None
+    return manifest.project.get("trace"), getattr(manifest, "tracing", None)
+
+
+def _is_runbook(job: Any) -> bool:
+    return hasattr(job, "jobs") and not hasattr(job, "source")
+
+
+def _declared_trace(job: Any) -> Optional[Sequence[Any]]:
+    """What the job itself said, before any application default reached it."""
+    return job._trace_own if hasattr(job, "_trace_own") else getattr(job, "trace", None)
+
+
+def _job_sinks(
+    name: str,
+    own: Optional[Sequence[Any]],
+    trace: Optional[Sequence[Any]],
+    tracing: Any,
+    runbook: Optional[str] = None,
+) -> tuple:
+    """``(names, level)`` of the sinks a job uses — the built-in default
+    being the local consumer, so a job is never untraced by omission."""
+    from .tracing import LOCAL, job_override, pick
+
+    sinks, source = pick(
+        overrides=job_override(tracing, name, runbook),
+        own=own,
+        own_label="job",
+        tracing=tracing,
+        app=trace,
+    )
+    return ([LOCAL] if sinks is None else [sink_name(x) for x in sinks]), source
 
 
 def load_declared(manifest: Any) -> Any:
@@ -412,14 +464,22 @@ def load_declared(manifest: Any) -> Any:
     # one, and then `[]` is a choice ("trace nothing"), not an empty default.
     mine = {k: v for k, v in obj.manifest.project.items() if v or k == "trace"}
     project = {**manifest.project, **mine}
-    from .manifest import with_default_trace
+    from .tracing import check_names, settle_serves
+
+    # `[tracing]` lives only in the file. Its names are checked against
+    # what the object declares; a runbook's members count as jobs.
+    where = str(manifest.source) if manifest.source else "<manifest>"
+    tracing = manifest.tracing
+    check_names(tracing, where, obj.manifest.serves, _job_names((obj._jobs or {}).values()))
 
     obj.manifest = replace(
         obj.manifest,
         project=project,
-        # `[project] trace` in the file reaches services the object left
-        # without one (the object's own default was applied at declaration)
-        serves=with_default_trace(obj.manifest.serves, project.get("trace")),
+        # `[project] trace` and `[tracing]` in the file reach services the
+        # object left without their own; recomputed from what each service
+        # declared, so the object's default does not pass for its own
+        serves=settle_serves(obj.manifest.serves, project.get("trace"), tracing),
+        tracing=tracing,
         source=manifest.source,
         src=manifest.src,
         graphs=obj.manifest.graphs or manifest.graphs,
@@ -455,8 +515,11 @@ def build_job(spec: Any, root: Path) -> Any:
     return Job.from_spec(spec, root)
 
 
-def describe_jobspec(j: Any) -> Dict[str, Any]:
-    """A ``[[job]]`` block as plain data, without importing the project."""
+def describe_jobspec(j: Any, manifest: Any = None) -> Dict[str, Any]:
+    """A ``[[job]]`` block as plain data, without importing the project. A
+    runbook's sinks are what a member that names none of its own uses."""
+    trace, tracing = _app_tracing(manifest)
+    sinks, source = _job_sinks(j.name, None if j.runbook else j.trace, trace, tracing)
     opts = j.options or {}
     is_eval = opts.get("dataset") is not None
     return {
@@ -478,6 +541,8 @@ def describe_jobspec(j: Any) -> Dict[str, Any]:
         "sink": j.sink,
         "schedule": j.schedule,
         "description": j.description,
+        "sinks": sinks,
+        "sinks_from": source,
     }
 
 
@@ -511,28 +576,61 @@ def graph_refs(manifest: Any) -> list:
 
 def settle_jobs(jobs: Optional[Dict[str, Any]], manifest: Any, root: Path) -> Dict[str, Any]:
     """An application's jobs: the declared objects, or built from its
-    ``[[job]]`` blocks — each tracing to its own consumers, else the
-    application's (``trace=`` / ``[project] trace``), else locally.
-    Idempotent: a job that already has consumers keeps them."""
+    ``[[job]]`` blocks — each tracing where `operonx.app.tracing` says:
+    ``[tracing.jobs.<name>]``, its own consumers, ``[tracing] sinks``,
+    the application's (``trace=`` / ``[project] trace``), else locally.
+    Idempotent: each job's own choice is kept aside the first time."""
     if jobs is None:
         jobs = {spec.name: build_job(spec, root) for spec in manifest.jobs}
+    tracing = getattr(manifest, "tracing", None)
+    if tracing is not None:
+        from .tracing import check_names
+
+        where = str(manifest.source) if manifest.source else "<manifest>"
+        check_names(tracing, where, None, _job_names(jobs.values()))
     trace = manifest.project.get("trace")
     for job in jobs.values():
-        inherit_trace(job, trace)
+        inherit_trace(job, trace, tracing)
     return jobs
 
 
-def inherit_trace(job: Any, trace: Optional[Sequence[Any]]) -> None:
-    """A job that names no consumers takes the application's; with none
-    there either, it records locally (``.operonx/runs``). A job's item
-    records point at traces — a job that silently recorded none left
-    every one of those links pointing nowhere — so a job is never
-    untraced by omission. ``trace=[]`` on the job is the explicit way to
-    trace nothing. A runbook passes the default to each of its jobs."""
-    members = getattr(job, "jobs", None) if not hasattr(job, "source") else None
-    for j in members if members is not None else [job]:
-        if getattr(j, "trace", None) is None:
-            j.trace = list(trace) if trace is not None else default_consumers()
+def _job_names(jobs: Any) -> list:
+    """Every job a ``[tracing.jobs.<name>]`` may name: the application's,
+    and each runbook's members."""
+    out = []
+    for job in jobs:
+        out.append(job.name)
+        if _is_runbook(job):
+            out.extend(j.name for j in job.jobs)
+    return out
+
+
+def inherit_trace(job: Any, trace: Optional[Sequence[Any]], tracing: Any = None) -> None:
+    """A job that names no consumers takes ``[tracing] sinks``, else the
+    application's; with none there either, it records locally
+    (``.operonx/runs``). A job's item records point at traces — a job
+    that silently recorded none left every one of those links pointing
+    nowhere — so a job is never untraced by omission. ``trace=[]`` on the
+    job is the explicit way to trace nothing; ``[tracing.jobs.<name>]``
+    overrides it. A runbook passes all of this to each of its jobs, its
+    own ``[tracing.jobs.<runbook>]`` included."""
+    from .tracing import job_override, pick
+
+    runbook = job.name if _is_runbook(job) else None
+    for j in job.jobs if runbook is not None else [job]:
+        if not hasattr(j, "_trace_own"):
+            # what the job declared, kept before an inherited list
+            # replaces `trace` and could pass for its own next time
+            j._trace_own = getattr(j, "trace", None)
+        sinks, source = pick(
+            overrides=job_override(tracing, j.name, runbook),
+            own=j._trace_own,
+            own_label="job",
+            tracing=tracing,
+            app=trace,
+        )
+        j.trace = default_consumers() if sinks is None else sinks
+        j._trace_from = source
 
 
 def default_consumers() -> list:

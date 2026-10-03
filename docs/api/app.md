@@ -27,6 +27,21 @@ Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10
 ::: operonx.app.manifest.ServeSpec
 ::: operonx.app.manifest.JobSpec
 
+## Tracing
+
+`[tracing]` in `operonx.toml`: which trace sinks are on, and the precedence
+between it and `trace=` in Python. See [Tracing](../guide/07-tracing.md#switching-sinks-in-operonxtoml).
+
+::: operonx.app.tracing
+    options:
+      members:
+        - Tracing
+        - parse_tracing
+        - pick
+        - settle_serves
+        - check_names
+        - check_sinks
+
 ## Services
 
 ::: operonx.app.serve.app.compile_graph

@@ -357,6 +357,16 @@ class ResourceHub:
 
         return list(self._cache.keys())
 
+    def declares(self, key: str) -> bool:
+        """Whether *key* is configured, without loading it.
+
+        Unlike :meth:`has` this parses nothing and caches nothing: a check
+        made before a project has imported the module that registers a
+        custom category must not leave that key cached as a raw dict that
+        :meth:`get` then refuses."""
+        key = self._resolve_alias(key)
+        return key in self._cache or self._storage.load_one(key) is not None
+
     def has(self, key: str) -> bool:
         """Check if resource exists in registry."""
         if key in self._cache:

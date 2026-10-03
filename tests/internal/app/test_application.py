@@ -166,6 +166,8 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "key_ops": [],
         "playground": None,
         "replay": False,
+        "sinks": [],  # nothing configured: a service is not traced
+        "sinks_from": "default",
     }
     assert [(j["name"], j["kind"]) for j in d["jobs"]] == [
         ("score_calls", "job"),

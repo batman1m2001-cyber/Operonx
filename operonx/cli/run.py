@@ -27,6 +27,7 @@ from typing import Any, Optional, Sequence
 
 from operonx.app import Application, ManifestError
 from operonx.app.serve.registry import load_object
+from operonx.cli.serve import _sinks
 
 
 def _application(path: Optional[str]) -> Application:
@@ -48,6 +49,7 @@ def _list(app: Application) -> int:
             print(f"  {j['name']:18s} {j['session']:9s} {j['graph']:30s} {io}{when}")
         if j["description"]:
             print(f"  {'':18s} {j['description']}")
+        print(f"  {'':18s} {_sinks(j)}")
     return 0
 
 

@@ -215,6 +215,11 @@ def build_app(
             'pip install "operonx[serve]"'
         ) from exc
 
+    from operonx.app.tracing import check_sinks
+
+    # before any engine is compiled: a missing sink named with the level
+    # that chose it, not a KeyError from inside the first `Operon(...)`
+    check_sinks("serve", specs)
     engines = dict(engines or {})
     routes: List[Any] = []
     runners: List[ServeRunner] = []
@@ -432,7 +437,12 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
     except ImportError as exc:  # pragma: no cover
         raise ImportError('serving needs the extra: pip install "operonx[serve]"') from exc
 
+    from operonx.app.tracing import check_sinks
+
     listeners = plan(manifest, only)
+    # here too, before a pooled listener's workers fail one by one in
+    # processes of their own
+    check_sinks(manifest.name, [s for _, group, _ in listeners for s in group])
     pooled = [entry for entry in listeners if entry[2] > 1]
     here = [entry for entry in listeners if entry[2] == 1]
     root = manifest.root
