@@ -40,6 +40,9 @@ vector_store:kb2:
   dim: 32
 fake_embedding:hash:
   dim: 32
+fake_reranking:overlap: {{}}
+fake_llm:scripted:
+  responses: []
 """
 
 

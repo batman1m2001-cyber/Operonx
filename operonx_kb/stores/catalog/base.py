@@ -141,6 +141,18 @@ class Catalog(ABC):
         """
 
     @abstractmethod
+    def update_document(
+        self, document_id: str, *, tags: Sequence[str], acl: Sequence[str], metadata: dict
+    ) -> bool:
+        """Replace a document's tags, ACL and metadata (no new version); return whether
+        anything changed. Index payloads keep the old values until the document's
+        entries are rewritten; the hydration gate reads these.
+
+        Raises:
+            CatalogError: No such document.
+        """
+
+    @abstractmethod
     def tombstone(self, document_id: str) -> List[str]:
         """Mark a document deleted (invisible at once); return its formerly active chunk ids."""
 

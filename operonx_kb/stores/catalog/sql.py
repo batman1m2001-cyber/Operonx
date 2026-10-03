@@ -488,6 +488,27 @@ class SqlCatalog(Catalog):
             added_chunk_ids=sorted(new - old),
         )
 
+    def update_document(
+        self, document_id: str, *, tags: Sequence[str], acl: Sequence[str], metadata: dict
+    ) -> bool:
+        with self._tx(write=True) as c:
+            self._lock_document(c, document_id)
+            row = c.one("SELECT tags, acl, metadata FROM kb_documents WHERE id = ?", (document_id,))
+            if row is None:
+                raise CatalogError(f"no document {document_id!r}")
+            new = (_j(list(tags)), _j(list(acl)), _j(dict(metadata)))
+            if (json.loads(row["tags"]), json.loads(row["acl"]), json.loads(row["metadata"])) == (
+                list(tags),
+                list(acl),
+                dict(metadata),
+            ):
+                return False
+            c.run(
+                "UPDATE kb_documents SET tags = ?, acl = ?, metadata = ? WHERE id = ?",
+                (*new, document_id),
+            )
+        return True
+
     def tombstone(self, document_id: str) -> List[str]:
         with self._tx(write=True) as c:
             self._lock_document(c, document_id)

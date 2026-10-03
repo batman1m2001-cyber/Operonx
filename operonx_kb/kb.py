@@ -13,6 +13,7 @@ traced exactly like a served one.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from operonx import Operon
@@ -27,6 +28,13 @@ from operonx_kb.graphs.maintenance import (
     build_lexical_rebuild_graph,
     build_rebuild_graph,
 )
+from operonx_kb.graphs.retrieve import (
+    dense_retriever,
+    hybrid_retriever,
+    lexical_retriever,
+    reranked,
+    search_graph,
+)
 from operonx_kb.maintenance import VerifyReport, verify
 from operonx_kb.model.collection import (
     Collection,
@@ -35,14 +43,42 @@ from operonx_kb.model.collection import (
     LexicalIndexSpec,
 )
 from operonx_kb.model.document import Document
+from operonx_kb.model.filter import KBFilter
 from operonx_kb.model.ids import document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
 
-__all__ = ["KnowledgeBase", "IngestError"]
+__all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
+
+#: Retrieval modes of :meth:`KnowledgeBase.search`.
+MODES = ("dense", "lexical", "hybrid")
+#: The mode a search uses unless told otherwise. Dense stays the default until
+#: hybrid beats it on Recall@10 on at least two of the three eval sets
+#: (PLAN K2 gate; the table is in ``docs/bench/k2.md``).
+DEFAULT_MODE = "dense"
 
 
 class IngestError(KBError):
     """A KB graph run failed; the message holds the failing op and its error."""
+
+
+class QueryError(KBError):
+    """A search or an answer run failed; the message holds the failing op and its error."""
+
+
+_EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit|Interrupt)\b.*")
+
+
+def _exception_text(traceback: str) -> str:
+    """The exception a traceback ends with, all of its message lines joined.
+
+    A KB error's message runs over several lines (the message, then one context
+    fact per line); the last line alone would be a context fact without the error.
+    """
+    lines = [line for line in traceback.strip().splitlines() if line.strip()]
+    for i in range(len(lines) - 1, -1, -1):
+        if _EXCEPTION_LINE.match(lines[i]):
+            return " ".join(line.strip() for line in lines[i:])
+    return lines[-1].strip() if lines else traceback
 
 
 class KnowledgeBase:
@@ -110,16 +146,23 @@ class KnowledgeBase:
         config: str,
         inputs: Dict[str, Any],
         output: Optional[str],
+        error: type = IngestError,
+        required: Sequence[str] = (),
     ) -> Any:
+        """Run a graph; return ``out[output]``, or every output when ``output`` is ``None``.
+
+        Raises:
+            error: An op failed, or an expected output is missing.
+        """
         engine = self._engine(kind, collection_id, factory, list(inputs), config)
         out = await engine.run(inputs=inputs)
-        if "$errors" in out or (output is not None and output not in out):
+        expected = [*required, *([output] if output is not None else [])]
+        if "$errors" in out or any(name not in out for name in expected):
             errors = out.get("$errors") or {kind: "the run produced no result"}
             op, text = next(iter(errors.items()))
-            # The error text is the op's traceback; its last line names the exception.
-            last = [line for line in str(text).strip().splitlines() if line.strip()][-1].strip()
-            raise IngestError(
-                f"{kind} in {collection_id!r} failed in {op}: {last}", {"ops": sorted(errors)}
+            raise error(
+                f"{kind} in {collection_id!r} failed in {op}: {_exception_text(str(text))}",
+                {"ops": sorted(errors)},
             )
         return out[output] if output is not None else out
 
@@ -201,6 +244,80 @@ class KnowledgeBase:
                 {"sha": version.text_sha},
             )
         return data.decode("utf-8")
+
+    # retrieval ------------------------------------------------------------------------------
+
+    def retriever(self, collection_id: str, mode: str = DEFAULT_MODE):
+        """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``).
+
+        Raises:
+            QueryError: Unknown mode, or the collection lacks the index it needs.
+        """
+        spec = self.collection(collection_id).spec
+        if mode not in MODES:
+            raise QueryError(f"unknown retrieval mode {mode!r}; use one of {list(MODES)}")
+        if mode in ("dense", "hybrid") and spec.dense is None:
+            raise QueryError(f"collection {collection_id!r} has no dense index for mode {mode!r}")
+        if mode in ("lexical", "hybrid") and spec.lexical is None:
+            raise QueryError(
+                f"collection {collection_id!r} has no lexical index for mode {mode!r}; set "
+                "CollectionSpec(lexical=LexicalIndexSpec(...)) and run rebuild_lexical()"
+            )
+        if mode == "dense":
+            return dense_retriever(spec.dense, catalog=self.catalog_key)
+        if mode == "lexical":
+            return lexical_retriever(spec.lexical, catalog=self.catalog_key)
+        return hybrid_retriever(
+            dense_retriever(spec.dense, catalog=self.catalog_key),
+            lexical_retriever(spec.lexical, catalog=self.catalog_key),
+        )
+
+    def search_graph(
+        self,
+        collection_id: str,
+        mode: Optional[str] = None,
+        reranker: Optional[str] = None,
+        rerank_depth: int = 30,
+    ):
+        """The search graph: the retriever, the hydration gate, and with ``reranker``
+        (a ``reranking:`` resource name) a rerank of ``rerank_depth`` hits."""
+        search = search_graph(
+            self.retriever(collection_id, mode or DEFAULT_MODE), catalog=self.catalog_key
+        )
+        return reranked(search, reranker, depth=rerank_depth) if reranker else search
+
+    async def search(
+        self,
+        collection_id: str,
+        query: str,
+        *,
+        filter: Optional[Any] = None,
+        k: int = 10,
+        mode: Optional[str] = None,
+        reranker: Optional[str] = None,
+        rerank_depth: int = 30,
+    ) -> Dict[str, Any]:
+        """Search a collection; return ``{"hits", "stats"}`` (hits hydrated, best first).
+
+        Args:
+            filter: A :class:`~operonx_kb.model.filter.KBFilter` or its dict.
+            mode: ``dense``, ``lexical`` or ``hybrid`` (default :data:`DEFAULT_MODE`).
+            reranker: A ``reranking:`` resource name to rerank with.
+
+        Raises:
+            QueryError: An op failed (a filter on an undeclared field, a missing index…).
+        """
+        mode = mode or DEFAULT_MODE
+        flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
+        spec = self.collection(collection_id).spec
+        config = f"{mode}|{reranker}|{rerank_depth}|{spec.model_dump_json()}"
+        out = await self._run_graph(
+            "search", collection_id,
+            lambda: self.search_graph(collection_id, mode, reranker, rerank_depth), config,
+            {"query": query, "collection": collection_id, "filter": flt, "k": k}, None,
+            error=QueryError, required=("hits",),
+        )  # fmt: skip
+        return {"hits": out["hits"], "stats": out.get("stats", {})}
 
     # maintenance ----------------------------------------------------------------------------
 

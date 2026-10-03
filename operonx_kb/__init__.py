@@ -19,7 +19,7 @@ from operonx_kb.errors import (
     SpanInvariantError,
     UnsupportedFormatError,
 )
-from operonx_kb.kb import IngestError, KnowledgeBase
+from operonx_kb.kb import DEFAULT_MODE, IngestError, KnowledgeBase, QueryError
 from operonx_kb.model.collection import (
     ChunkerSpec,
     Collection,
@@ -52,7 +52,9 @@ __all__ = [
     "Page",
     "Region",
     "VersionChunk",
+    "DEFAULT_MODE",
     "IngestError",
+    "QueryError",
     "KnowledgeBase",
     "KBError",
     "SpanInvariantError",

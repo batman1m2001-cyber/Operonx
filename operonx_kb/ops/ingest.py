@@ -337,13 +337,24 @@ def forget_index_writes(
 
 @op(bound="cpu", show_keys="result")
 def skipped(plan: dict, catalog: str) -> dict:
-    """The skip arm: record it and report."""
-    catalog_of(catalog).log_ingest(
+    """The skip arm: the bytes and pipeline are unchanged, so nothing is parsed or indexed.
+
+    Tags, ACL and metadata given with the item still replace the document's in the
+    catalog. Its index entries keep the payload they were written with until they are
+    rewritten (``rebuild``); the hydration gate reads the catalog, so a revoked ACL or
+    a removed tag holds at once, and only a grant waits for the rewrite.
+    """
+    cat = catalog_of(catalog)
+    updated = cat.update_document(
+        plan["document_id"], tags=plan["tags"], acl=plan["acl"], metadata=plan["metadata"]
+    )
+    cat.log_ingest(
         plan["collection_id"],
         plan["key"],
         "skip",
         document_id=plan["document_id"],
         version_id=plan["version_id"],
+        stats={"metadata_updated": updated},
     )
     return {
         "result": {
@@ -351,6 +362,7 @@ def skipped(plan: dict, catalog: str) -> dict:
             "action": "skip",
             "document_id": plan["document_id"],
             "version_id": plan["version_id"],
+            "metadata_updated": updated,
         }
     }
 

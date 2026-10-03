@@ -217,3 +217,19 @@ def test_active_chunks_is_the_hydration_gate(cat):
     assert beta not in got
     cat.tombstone("doc_1")
     assert cat.active_chunks("col", asked) == {}  # a deleted document is invisible at once
+
+
+def test_update_document_replaces_tags_acl_metadata_without_a_version(cat):
+    _commit(cat, "ver_1", ["alpha"])
+    assert cat.update_document("doc_1", tags=["a"], acl=["u"], metadata={"x": 1}) is True
+    assert cat.update_document("doc_1", tags=["a"], acl=["u"], metadata={"x": 1}) is False
+    doc = cat.get_document("doc_1")
+    assert (doc.tags, doc.acl, doc.metadata, doc.active_version_id) == (
+        ["a"],
+        ["u"],
+        {"x": 1},
+        "ver_1",
+    )
+    assert len(cat.list_versions("doc_1")) == 1
+    with pytest.raises(CatalogError):
+        cat.update_document("doc_x", tags=[], acl=[], metadata={})

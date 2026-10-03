@@ -28,7 +28,9 @@ postgres = [
     "psycopg[binary]>=3.1",
     "psycopg-pool>=3.2",
 ]
-all = ["operonx-kb[pdf,postgres,faiss]"]
+# Answers with citations (LLMOp): operonx's OpenAI-compatible providers.
+answer = ["operonx[openai]"]
+all = ["operonx-kb[pdf,postgres,faiss,answer]"]
 
 # Dense index backends: operonx's vector stores.
 faiss = ["operonx[faiss]"]
@@ -45,6 +47,8 @@ kb_catalog = "operonx_kb.registry:register_catalog"
 kb_blob = "operonx_kb.registry:register_blob"
 kb_lexical = "operonx_kb.registry:register_lexical"
 fake_embedding = "operonx_kb.testing.fakes:register_fakes"
+fake_reranking = "operonx_kb.testing.fakes:register_fakes"
+fake_llm = "operonx_kb.testing.fakes:register_fakes"
 
 [dependency-groups]
 dev = [
@@ -54,6 +58,7 @@ dev = [
     "ruff>=0.6",
     "faiss-cpu>=1.15.1",
     "numpy>=2.2.6",
+    "openai>=1.0",  # LLMOp's message types (the ScriptedLLM fake)
 ]
 
 [tool.uv.sources]
