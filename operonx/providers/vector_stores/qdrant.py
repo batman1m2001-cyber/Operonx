@@ -176,6 +176,8 @@ class QdrantVectorStore(BaseVectorStore):
             raise ValueError(f"ids/vectors length mismatch: {len(ids)} vs {len(vectors)}")
         if metadata is not None and len(metadata) != len(ids):
             raise ValueError(f"ids/metadata length mismatch: {len(ids)} vs {len(metadata)}")
+        if not ids:
+            return  # an empty batch writes nothing; the server answers 400 to one
 
         declared = self.config.metadata_columns
         points = []

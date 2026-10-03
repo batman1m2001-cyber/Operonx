@@ -162,8 +162,10 @@ class FaissVectorStore(BaseVectorStore):
             )
 
         index = self._index_for(collection)
-        arr = self._prepare(vectors)
         id_arr = np.asarray(ids, dtype=np.int64)
+        if not len(id_arr) and not len(vectors):
+            return  # an empty batch writes nothing (_prepare would make it one empty row)
+        arr = self._prepare(vectors)
         if len(id_arr) != len(arr):
             raise ValueError(f"ids/vectors length mismatch: {len(id_arr)} vs {len(arr)}")
 

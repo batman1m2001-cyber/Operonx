@@ -240,6 +240,14 @@ async def test_an_empty_id_list_deletes_nothing(backend):
     assert await _all_ids(backend) == {1, 2, 3, 4}
 
 
+async def test_an_empty_upsert_batch_writes_nothing(backend):
+    """An ingest pass with nothing new upserts an empty batch; that is a
+    no-op, as ``delete(ids=[])`` is, not a length mismatch."""
+    await _seed(backend)
+    assert await backend.store.upsert([], []) is None
+    assert await _all_ids(backend) == {1, 2, 3, 4}
+
+
 async def test_delete_with_neither_ids_nor_filter_is_refused(backend):
     await _seed(backend)
     with pytest.raises(ValueError, match="ids= or filter="):
