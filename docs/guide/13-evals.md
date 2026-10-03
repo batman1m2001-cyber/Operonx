@@ -39,6 +39,15 @@ works too. A case saved from a recorded run carries
 `"from": {"run": "<run id>"}`, so a failure leads back to where the case
 came from.
 
+A case may also say its `split` (`"smoke"`, `"test"`…), its `cluster`
+(cases that move together) and a reference `trajectory`.
+`Dataset(path).select(split=…, tags=[…], ids=[…], sample=N)` chooses
+cases — `sample` is the same N on every machine — and an eval over a
+selection is an experiment over those cases: its `dataset_version` is
+theirs. `operonx eval dataset validate` checks a file line by line
+(JSON, duplicate ids, field types); `diff --against main` says which
+cases were added, removed or changed.
+
 ## Evaluators
 
 An evaluator is a function — plain, async, or an `@op` (called for its
@@ -222,7 +231,8 @@ replies = Eval(
     repeats=3,
     gate=Gate(
         threshold=0.9,           # the 1.9.0 floor, now per metric if you like
-        baseline="latest",       # this eval's last finished run, or a run id
+        baseline="latest",       # this eval's last finished run, a run id,
+                                 # or "main" / "git:<ref>": the merge-base's experiment
         tolerance=0.03,          # a drop over 3 points matters (required with a baseline)
         must_pass_tag="critical",
         max_error_rate=0.05,
@@ -298,6 +308,190 @@ operonx run replies          # exits with the gate's code: 0 pass, 1 failed/regr
 
 Runs carry `origin=eval` and are filed under `.operonx/runs/evals/`,
 kept forever by default ([Runs](11-runs.md#retention)).
+
+## The command line: `operonx eval`
+
+```bash
+operonx eval list                                   # evals, their cases, the last verdict
+operonx eval run replies                            # one experiment; exits with the gate's code
+operonx eval run replies --repeats 3 --split smoke --tag critical --sample 50
+operonx eval run replies --baseline main --tolerance 0.03 --strict --report md,junit --out out/eval
+operonx eval compare <expA> <expB> [--tolerance 0.03]   # any two experiments, paired
+operonx eval report <exp> --format md|json|junit        # from its record, or the score store
+operonx eval rescore <exp> --evaluators checks:strict   # new checks on recorded outputs
+operonx eval calibrate replies --runs 3 --tolerance 0.03
+operonx eval power replies --delta 0.05
+operonx eval dataset validate|stats|diff replies [--against main]
+```
+
+`run` writes the experiment to the project's **score store** — `[evals]
+scores = "score_store:<name>"` in `operonx.toml`, else the ClickHouse sink
+of `[tracing]` (the runs' database), else files under the runs root —
+unless the eval names its own store or `--no-store` is given. An
+experiment is named by its run id (looked up in the evals' record
+directories, then the store) or a record directory.
+
+| Exit | `run`, and `compare` with a `--tolerance` |
+|---|---|
+| 0 | pass, or inconclusive (a warning says why) |
+| 1 | failed or regressed |
+| 2 | inconclusive under `--strict`; or the command could not run as asked — an unknown eval, a bad flag, no baseline at the merge-base, a store that cannot be opened (stderr says which) |
+| 3 | an infrastructure error: retry the job, the quality is unknown |
+
+**`--baseline main`** (the same as `git:origin/main`; use `git:<ref>` for
+another branch) compares with the experiment of `git merge-base HEAD
+origin/main`: the commit the branch started from, which is what the
+change should be measured against. It is read from the score store: the
+newest finished run of this eval at that commit on a clean tree, the one
+with the same dataset and evaluators if there is one. If main never
+stored one, the command stops before running anything and says so —
+run the eval on main (a pipeline on main, or a nightly one, keeps
+baselines warm).
+
+**Reports.** `--report md,json,junit` writes `report.md` (the verdict
+first, then why: metrics with intervals, the comparison, the cases that
+flipped, failing and flaky cases, cost), `experiment.json` and
+`junit.xml` (a `gate` testcase, then one per case and check; it
+validates against the JUnit schema GitLab's test widget reads).
+
+## Calibrate before you pick a tolerance
+
+A tolerance smaller than the eval's noise turns every run
+`inconclusive`; a larger one hides real drops. Measure it:
+
+```bash
+operonx eval calibrate replies --runs 3 --tolerance 0.03
+```
+
+`calibrate` runs the eval three times on this commit (an A/A test), fits
+each case's pass probability, and checks synthetic A/A pairs through the
+gate itself: the tolerance 95% of them pass at, for 1, 2, 3 and 5
+repeats, and the fewest repeats that reach yours. The interval covers
+the choice of cases, not only flakes: 40 cases that always pass still
+cannot rule out an 8.8-point drop. Then:
+
+```bash
+operonx eval power replies --delta 0.05     # how many cases a 5-point drop needs
+```
+
+With 10% of cases changing between versions, a 5-point drop needs about
+312 cases to be seen 80% of the time.
+
+## In CI
+
+The merge request's job compares with main's experiment at the
+merge-base, so main must store its experiments somewhere CI can read —
+a ClickHouse in `[tracing]` (or `[evals] scores`) with its credentials
+in CI variables — and the checkout needs the history down to the fork
+point.
+
+**GitLab:**
+
+```yaml
+variables:
+  GIT_DEPTH: 0                         # the merge-base needs history
+
+.eval:
+  stage: test
+  artifacts:
+    when: always
+    reports: { junit: out/eval/junit.xml }   # the MR's test widget
+    paths: [out/eval/]
+  retry: { max: 1, exit_codes: [3] }         # 3 = infrastructure, not quality
+
+eval:main:                             # stores the experiment MRs compare with
+  extends: .eval
+  script:
+    - uv run operonx eval run replies --report md,junit --out out/eval
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+eval:mr:
+  extends: .eval
+  script:
+    - git fetch origin $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+    - uv run operonx eval run replies --baseline git:origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+        --tolerance 0.03 --report md,junit --out out/eval
+  after_script:                        # the report as an MR comment (a project token)
+    - >-
+      curl -sS --request POST --header "PRIVATE-TOKEN: $EVAL_BOT_TOKEN"
+      --data-urlencode "body@out/eval/report.md"
+      "$CI_API_V4_URL/projects/$CI_PROJECT_ID/merge_requests/$CI_MERGE_REQUEST_IID/notes"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+```
+
+**GitHub Actions** (GitHub has no built-in JUnit widget; a report action
+renders it):
+
+```yaml
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, pull-requests: write, checks: write }
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }       # the merge-base needs history
+      - uses: astral-sh/setup-uv@v5
+      - name: eval on main (stores the baseline)
+        if: github.event_name == 'push'
+        run: uv run operonx eval run replies --report md,junit --out out/eval
+      - name: eval against main's merge-base
+        if: github.event_name == 'pull_request'
+        run: uv run operonx eval run replies --baseline main --tolerance 0.03 --report md,junit --out out/eval
+      - name: comment the report
+        if: always() && github.event_name == 'pull_request'
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file out/eval/report.md
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+      - uses: mikepenz/action-junit-report@v5
+        if: always()
+        with: { report_paths: out/eval/junit.xml }
+```
+
+On either, a merge-request pipeline that runs on the merge result
+compares with the target branch's tip — the merge-base of the merge
+commit — so main's pipeline must have run on that commit.
+
+## pytest
+
+An opt-in plugin makes a pytest session one experiment: each test that
+calls `run_case` is a case, its verdict is the test's outcome, and the
+session ends with a record, a gate and reports. Installing operonx never
+loads it:
+
+```bash
+pytest -p operonx.app.evals.pytest_plugin --operonx-eval-report md,junit
+# or, in the root conftest.py:  pytest_plugins = ["operonx.app.evals.pytest_plugin"]
+```
+
+```python
+import pytest
+
+from operonx.app.evals import exact
+from operonx.app.evals.pytest_plugin import cases
+
+from bot import reply_flow
+
+
+@pytest.mark.parametrize("case", cases("dataset:replies", split="smoke"))
+async def test_reply(case, run_case):
+    got = await run_case(reply_flow, case, evaluators=[exact("intent")])
+    assert got.trace.path(types={"llm"}) == ["classify", "answer"]
+```
+
+A failing check fails its test with the reason; a failing `assert` is
+recorded on the case. `got.check(evaluator)` adds a synchronous check;
+a sync test calls `run_case.sync(...)`. Options: `--operonx-eval-name`,
+`--operonx-eval-dir`, `--operonx-eval-baseline` / `--operonx-eval-tolerance`
+/ `--operonx-eval-strict` (a gate that does not pass makes a passing
+session exit 1), `--operonx-eval-report` / `--operonx-eval-out`,
+`--operonx-eval-store`. Keep tests that call a real model behind a
+marker, so plain `pytest` stays offline.
 
 ## Where to go next
 

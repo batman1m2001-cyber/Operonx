@@ -112,6 +112,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The agent guide's `07-evals.md`, run by `tests/guide/`.
 - `scripts/bench_eval_overhead.py`: what an eval costs over a plain job,
   per case and per run.
+- **`operonx eval`** (phase E4): `run`, `compare`, `report`, `rescore`,
+  `calibrate`, `power`, `list`, `dataset validate|stats|diff`. `run` exits
+  with the gate's code (0 pass or inconclusive, 1 failed or regressed, 2
+  inconclusive under `--strict` or a command that could not run, 3
+  infrastructure), takes `--repeats`, `--split`/`--tag`/`--cases`/`--sample`,
+  `--baseline`/`--tolerance`/`--strict`, `--variant`, and writes
+  `--report md,json,junit`. Its experiment goes to the project's score
+  store unless `--no-store`.
+- `Gate(baseline="main" | "git:<ref>")`: the experiment of `git merge-base
+  HEAD <ref>` from the score store (`"main"` is `git:origin/main`); none
+  there stops the run before it starts, saying how to get one.
+- `project_score_store(root)`: `[evals] scores = "score_store:<name>"`,
+  else the ClickHouse sink of `[tracing]`, else files under the runs root.
+- `load_experiment` / `ExperimentData` (one experiment from its record or
+  the store), `compare(a, b, tolerance=)`, `calibrate(experiments)` (the
+  A/A noise floor measured through the gate, per number of repeats),
+  `stats.paired_sample_size` / `detectable_drop`, and `report.markdown` /
+  `junit` (valid against `junit-10.xsd`) / `as_json`.
+- `Dataset.select(split=, tags=, ids=, sample=)`, `Dataset.problems()`;
+  `Eval(variant=)`; `run.json["eval"]` gains `p95_ms`, `cost_usd`,
+  `selection` and `variant`.
+- An opt-in pytest plugin, `operonx.app.evals.pytest_plugin` (never in
+  `pytest11`): a session is one experiment, `run_case` runs a case, its
+  verdict is the test's outcome, reports and the gate at the end.
 
 - **`BaseVectorStore.delete(ids=None, filter=None, collection=None)`**,
   for FAISS (by id, on an id-mapped or IVF index), pgvector (by id or the

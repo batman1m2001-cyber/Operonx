@@ -20,7 +20,8 @@ websocket, and an **Application** bundles a product's jobs and services.
 5. [Project layout](05-project-layout.md): how to lay out a product.
 6. [Failures](06-failures.md): `retry=`, `timeout=`, `on_error`,
    `errors="raise"`, `max_concurrency=`, concurrent writers.
-7. [Evals](07-evals.md): cases, repeats, a gate with a baseline, exit codes.
+7. [Evals](07-evals.md): cases, repeats, a gate with a baseline, exit codes;
+   `operonx eval`, reports, calibrate, the pytest plugin.
 
 ## Install
 

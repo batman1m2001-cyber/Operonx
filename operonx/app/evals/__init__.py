@@ -48,11 +48,22 @@ inconclusive / failed / error::
     ev = Eval("replies", graph="bot:reply_flow", dataset="dataset:replies",
               evaluators=[exact("intent")], repeats=3,
               gate=Gate(threshold=0.9, baseline="latest", tolerance=0.03))
+
+``baseline="main"`` compares with the experiment main's code produced
+(the merge-base's, from the score store). :func:`load_experiment` reads
+any experiment back — from its record or the store — for :func:`compare`,
+:func:`calibrate` (the A/A noise floor, the tolerance it supports) and the
+reports (:mod:`.report`: Markdown, JSON, JUnit XML). ``operonx eval`` is
+the command line over all of it, and :mod:`.pytest_plugin` (opt-in) makes
+a pytest session one experiment.
 """
 
 from . import trajectory
+from .calibrate import calibrate
+from .compare import compare
 from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
 from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
+from .experiments import ExperimentData, load_experiment
 from .gate import Gate
 from .job import Eval
 from .publish import publish
@@ -63,18 +74,22 @@ from .trajectory import budget
 __all__ = [
     "Dataset",
     "Eval",
+    "ExperimentData",
     "Gate",
     "OpRow",
     "Rescored",
     "ToolCall",
     "TraceView",
     "budget",
+    "calibrate",
+    "compare",
     "contains",
     "dataset_path",
     "exact",
     "fuzzy",
     "json_match",
     "llm_judge",
+    "load_experiment",
     "publish",
     "rescore",
     "trajectory",
