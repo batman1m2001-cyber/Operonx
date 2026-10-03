@@ -309,6 +309,10 @@ class BaseOp(ABC):
         # "ingress" | "egress" | None — this op is where a served graph meets
         # its caller. See door_default.
         "door",
+        # frozenset of the output keys this op can produce, when that is
+        # known before it runs (a function returning dict literals), else
+        # None. Graph validation checks every Ref to the op against it.
+        "_static_outputs",
     ]
 
     # The kind's show keys, used when an instance declares none. A
@@ -366,6 +370,7 @@ class BaseOp(ABC):
         self._error_idx = None  # (schema, err_idx)
         self.cache = cache
         self._cache_scope = None  # (full_name, scope, store id), on the first cached call
+        self._static_outputs = None  # unknown unless a subclass knows better
         self.delay = delay
         self.transient = transient
         self._transient_vars = None  # stamped post-compile by StateSchema
@@ -482,8 +487,30 @@ class BaseOp(ABC):
         self._full_name = self.full_name
 
     def __getitem__(self, item) -> "Ref":
-        """Allow ``op["var"]`` syntax to reference an output as a Ref."""
+        """Allow ``op["var"]`` syntax to reference an output as a Ref.
+
+        When the op's outputs are known before it runs (a function that
+        returns dict literals), building the graph checks ``var`` against
+        them, so a misspelled key is an error rather than a default. Read
+        an output the op may leave out with :meth:`get`.
+        """
         return Ref(self, item)
+
+    def get(self, key: str) -> "Ref":
+        """``op["key"]`` for an output this op may not produce.
+
+        The build-time check that ``op["key"]`` names one of the op's
+        outputs is skipped, and when the op does not write the key the
+        reading op gets its own parameter default — the same as for any
+        input that arrives empty. For an op handed in by someone else,
+        whose contract makes some outputs optional::
+
+            ended = how_it_ended(finish_reason=model.get("finish_reason"))
+
+        There is no ``default=`` here: the reading op's parameter default
+        is the one place a default lives.
+        """
+        return Ref(self, key, optional=True)
 
     # =========================================================================
     # 2. EDGE OPERATORS — wiring ops inside a GraphOp

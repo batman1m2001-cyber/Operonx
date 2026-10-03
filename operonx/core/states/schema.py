@@ -7,7 +7,11 @@ from operonx.core.states.ref import Ref, StreamPolicy
 if TYPE_CHECKING:
     from operonx.core.states.state import MemoryState
 
-__all__ = ["StateSchema"]
+__all__ = ["OP_META_VARS", "StateSchema"]
+
+#: Variables every op has besides its declared outputs: its timing, its
+#: cost and its error. A downstream ``op["error"]`` reads one of them.
+OP_META_VARS = ("start_time", "end_time", "duration_ms", "cost_usd", "error")
 
 
 class StateSchema:
@@ -124,7 +128,7 @@ class StateSchema:
                     self._transient_indices.add(idx)
 
         # Đăng ký các biến metadata
-        for meta_var in ("start_time", "end_time", "duration_ms", "cost_usd", "error"):
+        for meta_var in OP_META_VARS:
             self._register(op_name, meta_var, None)
 
         # Load đệ quy các op con

@@ -1,5 +1,6 @@
 """Validation types and functions for graph structure validation."""
 
+import difflib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
@@ -7,6 +8,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 
 from operonx.core.loggings import LOGGER
 from operonx.core.states.ref import Ref
+from operonx.core.states.schema import OP_META_VARS
 from operonx.core.utils.algo import find_cycles, reachable
 
 if TYPE_CHECKING:
@@ -112,9 +114,10 @@ class GraphValidationError(Exception):
 
     def __init__(self, result: ValidationResult):
         self.result = result
+        details = "\n".join(f"- {issue.message}" for issue in result.errors)
         super().__init__(
             f"Graph '{result.graph_name}' validation failed with "
-            f"{len(result.errors)} error(s). See logs above for details."
+            f"{len(result.errors)} error(s):\n{details}"
         )
 
 
@@ -160,6 +163,7 @@ def validate_graph(
     result.issues.extend(_validate_cycles(ops, edges))
     result.issues.extend(_validate_reachability(ops, nexts, prevs, entries, exits))
     result.issues.extend(_validate_refs(ops, name, ancestor_names, descendant_names, sibling_names))
+    result.issues.extend(_validate_output_keys(ops))
 
     for issue in result.warnings:
         LOGGER.warning("Graph '%s': %s", name, issue.message)
@@ -385,3 +389,59 @@ def _validate_refs(
                         )
                     )
     return issues
+
+
+def _validate_output_keys(ops: Dict[str, "BaseOp"]) -> List[ValidationIssue]:
+    """Check each ``op["key"]`` an input reads against what ``op`` returns.
+
+    Only for producers whose output keys are known before they run
+    (``BaseOp._static_outputs``: a function that returns dict literals).
+    A misspelled key used to build and run, and the consumer silently got
+    its default: ``show(total=m["totl"])`` printed ``total=0``. A
+    misspelled input name already raises at the call site; this is the
+    other half. Every op's metadata (``error``, timing, cost) is readable
+    too, and ``op.get("key")`` reads an output the op may leave out.
+    """
+    issues = []
+    for op_name, child in ops.items():
+        for var, param in child.inputs.items():
+            if not isinstance(param.value, Ref):
+                continue
+            for ref in param.value.get_all_refs():
+                if ref._optional:
+                    continue  # op.get("key"): the producer may leave it out
+                producer = ref.raw_source
+                known = getattr(producer, "_static_outputs", None)
+                if known is None or ref.var in known or ref.var in OP_META_VARS:
+                    continue
+                func = _callable_name(producer)
+                close = difflib.get_close_matches(ref.var, sorted(known), n=1)
+                hint = f" — did you mean '{close[0]}'?" if close else ""
+                issues.append(
+                    ValidationIssue(
+                        level=ValidationLevel.ERROR,
+                        category="Unknown output",
+                        message=(
+                            f"'{ref.var}' is not an output of {func}(); outputs: "
+                            f"{set(sorted(known))}{hint} (op '{op_name}', "
+                            f"{_callable_name(child)}(), reads it as '{var}'). "
+                            f"Read an output {func}() may leave out as "
+                            f"{producer.name}.get('{ref.var}')."
+                        ),
+                        op_name=op_name,
+                        target_name=producer.name,
+                        suggestions=[
+                            f"Read one of {sorted(known)} from '{producer.name}'",
+                            f"Or return '{ref.var}' from {func}()",
+                            f"Or, if {func}() may leave it out, read it as "
+                            f"{producer.name}.get('{ref.var}')",
+                        ],
+                    )
+                )
+    return issues
+
+
+def _callable_name(op: "BaseOp") -> str:
+    """A function op's function name, else the op's class name."""
+    fn = getattr(op, "code_fn", None)
+    return getattr(fn, "__name__", None) or type(op).__name__

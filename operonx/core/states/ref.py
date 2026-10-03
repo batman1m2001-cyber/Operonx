@@ -123,6 +123,9 @@ class Ref:
         "_stream_parallel_max",
         "_stream_collect",
         "_stream_bound",
+        # True for ``op.get("key")``: an output the producer may not write,
+        # so graph validation does not check the key against its outputs.
+        "_optional",
     )
 
     _RESERVED_ATTRS = frozenset(
@@ -152,6 +155,7 @@ class Ref:
             "_stream_parallel_max",
             "_stream_collect",
             "_stream_bound",
+            "_optional",
         }
     )
 
@@ -162,6 +166,7 @@ class Ref:
         _transforms: Optional[List[Tuple[str, Any]]] = None,
         _fn: Optional[Callable] = None,
         is_output: bool = False,
+        optional: bool = False,
     ) -> None:
         """Initialize a Ref.
 
@@ -181,6 +186,7 @@ class Ref:
         object.__setattr__(self, "_stream_parallel_max", None)
         object.__setattr__(self, "_stream_collect", False)
         object.__setattr__(self, "_stream_bound", None)
+        object.__setattr__(self, "_optional", optional)
         # Nếu có transforms nhưng không có fn, rebuild từ transforms (trường hợp deserialization)
         if _fn is None and _transforms:
             _fn = lambda x, ctx={}: x
@@ -214,7 +220,14 @@ class Ref:
 
     def _clone(self) -> "Ref":
         """Tạo bản sao của Ref."""
-        new = Ref(self._source, self.var, list(self._transforms), self._fn, self.is_output)
+        new = Ref(
+            self._source,
+            self.var,
+            list(self._transforms),
+            self._fn,
+            self.is_output,
+            optional=self._optional,
+        )
         object.__setattr__(new, "_stream_parallel", self._stream_parallel)
         object.__setattr__(new, "_stream_parallel_max", self._stream_parallel_max)
         object.__setattr__(new, "_stream_collect", self._stream_collect)
@@ -301,7 +314,7 @@ class Ref:
         """Tạo Ref mới với thêm một transform."""
         new_transforms = self._transforms + [(op, args)]
         new_fn = self._wrap(self._fn, op, args)
-        new_ref = Ref(self._source, self.var, new_transforms, new_fn)
+        new_ref = Ref(self._source, self.var, new_transforms, new_fn, optional=self._optional)
         object.__setattr__(new_ref, "_stream_parallel", self._stream_parallel)
         object.__setattr__(new_ref, "_stream_parallel_max", self._stream_parallel_max)
         object.__setattr__(new_ref, "_stream_collect", self._stream_collect)
@@ -466,7 +479,10 @@ class Ref:
         def visit(ref: "Ref") -> None:
             key = ref._ctx_key()
             if key not in found:
-                found[key] = Ref(ref._source, ref.var)
+                found[key] = Ref(ref._source, ref.var, optional=ref._optional)
+            elif not ref._optional:
+                # Read plainly anywhere, the key is checked.
+                object.__setattr__(found[key], "_optional", False)
             for op, args in ref._transforms:
                 for v in Ref._arg_values(op, args):
                     if isinstance(v, Ref):

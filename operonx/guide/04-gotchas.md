@@ -87,6 +87,59 @@ asyncio.run(main())
 Ops must be defined in a `.py` file (not a REPL or `exec`) for the same
 reason.
 
+## A misspelled output key fails the build; `op.get` reads an optional one
+
+When an op returns dict literals, its output keys are known, and building
+the graph checks every `op["key"]` against them: a typo raises
+`GraphValidationError` with "did you mean". An output the op may leave
+out — an op someone else wrote, whose contract makes it optional — is
+read with `op.get("key")`: not checked, and the reader gets its own
+parameter default when the key never arrives.
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, graph, op
+from operonx.core.ops.graph import GraphValidationError
+
+
+@op
+def make(x: int) -> dict:
+    return {"total": x + 1}
+
+
+@op
+def show(total: int = 0, note: str = "none") -> dict:
+    return {"text": f"total={total} note={note}"}
+
+
+@graph
+def typo(x):
+    m = make(x=x)
+    s = show(total=m["totl"])
+    START >> m >> s >> END
+
+
+@graph
+def optional(x):
+    m = make(x=x)
+    s = show(total=m["total"], note=m.get("note"))  # make() never returns "note"
+    START >> m >> s >> END
+
+
+async def main():
+    try:
+        Operon(typo, params={"x": None})
+        raise AssertionError("expected a build error")
+    except GraphValidationError as e:
+        assert "did you mean 'total'?" in str(e)
+    out = await Operon(optional, params={"x": None}).run(inputs={"x": 1})
+    assert out["text"] == "total=2 note=none"
+
+
+asyncio.run(main())
+```
+
 ## A Ref does not order anything; `>>` does
 
 `b(x=a["y"])` reads a's output but does not wait for it. Without `a >> b`,
