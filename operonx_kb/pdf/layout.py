@@ -7,7 +7,8 @@ table structure → page assemble → reading order), with rules instead of mode
 
 1. **Lines and segments.** Words sharing a baseline band form a line; a line is
    cut into segments where the gap between words exceeds ``segment_gap`` em —
-   column gutters and table cells live in those gaps.
+   column gutters and table cells live in those gaps. Rotated words (an arXiv
+   stamp, a form's side label) are turned upright and form blocks of their own.
 2. **Furniture.** A segment in the top or bottom margin band is a page header or
    footer when its digit-masked text repeats on another page, or when it is a
    page number ("3", "Page 3 of 9", "- 3 -", "Trang 3"). Docling relies on its
@@ -210,7 +211,7 @@ class HeuristicLayout(LayoutModel):
     """
 
     name = "heuristic"
-    version = "1"
+    version = "2"
 
     def __init__(
         self,
@@ -261,6 +262,75 @@ class HeuristicLayout(LayoutModel):
                     current = []
                 current.append(word)
             out.append(Segment(current, page.page_no, index))
+        return out
+
+    # -- 1b. rotated text ------------------------------------------------------
+
+    def rotated_blocks(
+        self, page: PdfPage, words: List[Word], segs: List[Segment]
+    ) -> List[LayoutBlock]:
+        """Blocks of text that does not run left to right.
+
+        Rotated words never join horizontal lines: their tall boxes would chain
+        every line they cross into one (an arXiv stamp beside an abstract, a
+        form's side label). Each direction is turned upright — 90° text (read
+        bottom to top) has its first line on the left, 270° text on the right —
+        and cut into lines and blocks like horizontal text. A block outside the
+        horizontal text's x-range sits in the margin: a page header, as docling
+        labels the arXiv stamp. Others are paragraphs.
+        """
+        if not words:
+            return []
+        w_, h_ = page.width, page.height
+        frames = {
+            90: lambda w: (h_ - w.y1, w.x0, h_ - w.y0, w.x1),
+            180: lambda w: (w_ - w.x1, h_ - w.y1, w_ - w.x0, h_ - w.y0),
+            270: lambda w: (w.y0, w_ - w.x1, w.y1, w_ - w.x0),
+        }
+        left = min((s.x0 for s in segs), default=w_)
+        right = max((s.x1 for s in segs), default=0.0)
+        out: List[LayoutBlock] = []
+        for angle, turn in frames.items():
+            group = [w for w in words if abs((w.angle - angle + 180.0) % 360.0 - 180.0) < 45.0]
+            if not group:
+                continue
+            upright: Dict[int, Word] = {}
+            turned = []
+            for w in group:
+                x0, y0, x1, y1 = turn(w)
+                t = Word(w.text, x0, y0, x1, y1, w.font, w.size, w.bold, w.italic, w.mono)
+                upright[id(t)] = w
+                turned.append(t)
+            lines = self.segments(page, turned)
+            blocks: List[List[Segment]] = []
+            for s in lines:
+                prev = blocks[-1][-1] if blocks else None
+                if (
+                    prev is not None
+                    and s.y0 - prev.y1 <= self.paragraph_gap * max(s.size, prev.size)
+                    and _overlap(s.x0, s.x1, prev.x0, prev.x1) > 0
+                ):
+                    blocks[-1].append(s)
+                else:
+                    blocks.append([s])
+            for members in blocks:
+                orig = [upright[id(w)] for s in members for w in s.words]
+                bbox = (
+                    min(w.x0 for w in orig),
+                    min(w.y0 for w in orig),
+                    max(w.x1 for w in orig),
+                    max(w.y1 for w in orig),
+                )
+                margin = bbox[2] <= left or bbox[0] >= right
+                block = LayoutBlock(
+                    kind="page_header" if margin else "paragraph",
+                    page_no=page.page_no,
+                    lines=[s.text for s in members],
+                    regions=[(page.page_no, bbox)],
+                    x0=bbox[0],
+                )
+                set_style(block, members)
+                out.append(block)
         return out
 
     # -- 2. furniture ------------------------------------------------------------
@@ -477,7 +547,8 @@ class HeuristicLayout(LayoutModel):
     def layout(
         self, pages: Sequence[PdfPage], renderer: Optional[PageRenderer] = None
     ) -> List[LayoutBlock]:
-        segs = {}
+        segs: Dict[int, List[Segment]] = {}
+        rotated: Dict[int, List[Word]] = {}
         for page in pages:
             big = [
                 b
@@ -493,7 +564,8 @@ class HeuristicLayout(LayoutModel):
                     if b not in big
                 )
             ]
-            segs[page.page_no] = self.segments(page, words)
+            segs[page.page_no] = self.segments(page, [w for w in words if w.horizontal])
+            rotated[page.page_no] = [w for w in words if not w.horizontal]
         self.mark_furniture(pages, segs)
         sizes: Counter = Counter()
         for page_segs in segs.values():
@@ -504,14 +576,18 @@ class HeuristicLayout(LayoutModel):
 
         blocks: List[LayoutBlock] = []
         for page in pages:
-            blocks.extend(self._page_blocks(page, segs[page.page_no], body))
+            blocks.extend(self._page_blocks(page, segs[page.page_no], rotated[page.page_no], body))
         self._label(blocks, pages, body)
         return self._merge(blocks)
 
-    def _page_blocks(self, page: PdfPage, segs: List[Segment], body: float) -> List[LayoutBlock]:
+    def _page_blocks(
+        self, page: PdfPage, segs: List[Segment], rotated: List[Word], body: float
+    ) -> List[LayoutBlock]:
         furniture = [s for s in segs if s.furniture]
         flow = [s for s in segs if not s.furniture]
         out: List[LayoutBlock] = []
+        side_blocks = self.rotated_blocks(page, rotated, segs)
+        out.extend(b for b in side_blocks if b.kind == "page_header")
         for s in furniture:
             out.append(
                 LayoutBlock(
@@ -581,6 +657,7 @@ class HeuristicLayout(LayoutModel):
                     )
                 )
         items.extend((s.bbox, s) for s in flow)
+        items.extend((b.regions[0][1], b) for b in side_blocks if b.kind != "page_header")
 
         current: Optional[LayoutBlock] = None
         last: Optional[Segment] = None

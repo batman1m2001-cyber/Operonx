@@ -14,6 +14,7 @@ what separate columns and table cells.
 from __future__ import annotations
 
 import io
+import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -44,6 +45,9 @@ class Word:
         size: Font size estimate: the glyph box height, in points.
         bold, italic, mono: From the font name (:func:`font_style`); ``False``
             when the PDF does not name the font (base-14 fonts in docling-parse).
+        angle: Direction of the baseline in degrees, counter-clockwise on the
+            page: 0 for ordinary text, 90 for text read bottom to top (an arXiv
+            stamp, a form's side label), 270 for top to bottom.
     """
 
     text: str
@@ -56,10 +60,16 @@ class Word:
     bold: bool = False
     italic: bool = False
     mono: bool = False
+    angle: float = 0.0
 
     @property
     def bbox(self) -> BBox:
         return (self.x0, self.y0, self.x1, self.y1)
+
+    @property
+    def horizontal(self) -> bool:
+        """Whether the word runs left to right (within 10 degrees)."""
+        return abs((self.angle + 180.0) % 360.0 - 180.0) <= 10.0
 
 
 @dataclass
@@ -235,11 +245,20 @@ class DoclingParseBackend(PdfBackend):
             text = cell.text.strip()
             if not text:
                 continue
-            x0, y0, x1, y1 = flip(cell.rect)
+            rect = cell.rect
+            x0, y0, x1, y1 = flip(rect)
             bold, italic, mono = font_style(cell.font_name or "")
+            # The cell is a quad r0..r3 (bottom-left origin) whose r0 -> r1 edge
+            # is the baseline; its direction is the text direction and its
+            # r0 -> r3 edge is the glyph height, whatever the rotation.
+            angle = math.degrees(math.atan2(rect.r_y1 - rect.r_y0, rect.r_x1 - rect.r_x0)) % 360.0
+            size = math.hypot(rect.r_x3 - rect.r_x0, rect.r_y3 - rect.r_y0) or (y1 - y0)
             words.append(
-                Word(text, x0, y0, x1, y1, cell.font_name or "", y1 - y0, bold, italic, mono)
-            )
+                Word(
+                    text, x0, y0, x1, y1, cell.font_name or "", size, bold, italic, mono,
+                    round(angle, 1),
+                )
+            )  # fmt: skip
         rules: List[Rule] = []
         for shape in page.shapes:
             pts = [(float(p.x), height - float(p.y)) for p in shape.points]

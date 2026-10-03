@@ -200,3 +200,14 @@ def test_a_marker_like_start_after_a_full_line_is_wrapped_text():
         ("paragraph", "the team keeps reference number one two 826. For release management the"),
         ("list_item", "a real list item"),
     ]
+
+
+@needs_pdf
+def test_backend_reports_the_text_direction():
+    from operonx_kb.pdf.backend import DoclingParseBackend
+
+    pdf = Path(__file__).parents[1] / "layout_reference" / "pdfs" / "irs_fw9_p1.pdf"
+    words = {w.text: w for w in DoclingParseBackend().pages(pdf.read_bytes())[0].words}
+    assert words["Specific"].angle == 90.0 and not words["Specific"].horizontal
+    assert words["Request"].angle == 0.0 and words["Request"].horizontal
+    assert words["Specific"].size < 10  # the glyph height, not the rotated box's height
