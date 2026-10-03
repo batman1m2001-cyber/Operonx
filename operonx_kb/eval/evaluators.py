@@ -82,12 +82,14 @@ def ndcg_at(k: int, resolver: LabelResolver, pass_at: float = 0.5) -> Callable:
 
 
 def citation_precision(pass_at: float = 0.9) -> Callable:
-    """Verified citations over all citations of an answer; an answer citing nothing scores 0."""
+    """Verified citations over all citations of an answer. An answer citing nothing has
+    no precision (no score: it is left out of the mean); its sentences count against the
+    faithfulness proxy instead."""
 
     def evaluate(output: Any = None) -> Dict[str, Any]:
         score = metrics.citation_precision(output or {})
         if score is None:
-            return {"passed": False, "score": 0.0, "reason": "the answer cites nothing"}
+            return {"passed": False, "reason": "the answer cites nothing"}
         return {"passed": score >= pass_at, "score": score}
 
     return _named(evaluate, "citation_precision")
@@ -126,13 +128,14 @@ def answer_evaluators(resolver: LabelResolver) -> List[Callable]:
 
 
 def metric_means(run: Any) -> Dict[str, Any]:
-    """Per evaluator, the mean score over a finished eval run's cases; plus case counts,
-    errors and latency percentiles (ms) from the item records.
+    """Per evaluator, the mean score over a finished eval run's cases (and each case's
+    score, by case id, in ``per_case``); plus case counts, errors and latency
+    percentiles (ms) from the item records.
 
     The 1.14 ``Eval`` summary counts passes per check; the scores are on each item's
     verdict, and this averages them.
     """
-    scores: Dict[str, List[float]] = {}
+    scores: Dict[str, Dict[str, float]] = {}
     errors: List[str] = []
     for item in run.items:
         verdict: Optional[Mapping[str, Any]] = item.verdict
@@ -143,13 +146,14 @@ def metric_means(run: Any) -> Dict[str, Any]:
             if check.get("error"):
                 errors.append(f"{name}: {check['error']}")
             elif check.get("score") is not None:
-                scores.setdefault(name, []).append(float(check["score"]))
+                scores.setdefault(name, {})[item.key] = float(check["score"])
     ms = sorted(i.ms for i in run.items if i.ms)
     return {
         "cases": len(run.items),
         "errors": errors,
-        "metrics": {name: round(mean(v), 4) for name, v in scores.items()},
-        "per_case": {name: v for name, v in scores.items()},
+        "metrics": {name: round(mean(v.values()), 4) for name, v in scores.items()},
+        "scored": {name: len(v) for name, v in scores.items()},
+        "per_case": scores,
         "p50_ms": ms[len(ms) // 2] if ms else None,
         "p95_ms": ms[min(len(ms) - 1, int(0.95 * len(ms)))] if ms else None,
     }

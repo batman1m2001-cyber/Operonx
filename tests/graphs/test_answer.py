@@ -116,3 +116,10 @@ def test_the_answer_flow_runs_behind_doors(loaded, llm, tmp_path):
     record = run(job.run())
     assert record.status == "ok", record
     assert got[0]["citations"] and got[0]["citations"][0]["support"] == "verified"
+
+
+def test_an_answer_without_citations_is_shown_as_unsupported(loaded, llm):
+    llm.script = lambda messages: json.dumps({"answer": "The sources do not say."})
+    answer = run(loaded.ask("docs", "what is the meaning of life", "answerer", k=2))
+    assert answer["citations"] == [] and answer["unsupported_sentences"] == [0]
+    assert answer["stats"]["precision"] is None

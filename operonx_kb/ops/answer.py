@@ -23,14 +23,17 @@ ANSWER_PROMPT = {
     "system": (
         "You answer questions using only the numbered sources you are given.\n"
         "Reply with JSON only, in this shape:\n"
-        '{{"answer": "…", "citations": [{{"source": 1, "quote": "…"}}]}}\n'
+        '{{"answer": "Employees get twelve days of leave [1], booked in the HR portal [2].", '
+        '"citations": [{{"source": 1, "quote": "twelve days of annual leave"}}, '
+        '{{"source": 2, "quote": "booked in the HR portal"}}]}}\n'
         "Rules:\n"
-        "- Put the source number in brackets, like [1], after each claim it supports.\n"
-        "- For every source you mark, add at least one citation whose quote is copied "
+        "- Every sentence that states a fact carries the bracketed number of the source "
+        "that supports it, like [1], written in the answer text itself.\n"
+        "- For every number you write, add at least one citation whose quote is copied "
         "word for word from that source: a sentence or a phrase, never shortened with an "
         "ellipsis, never reworded, never translated.\n"
         "- Answer in the language of the question.\n"
-        "- If the sources do not answer the question, say so and cite nothing."
+        '- If the sources do not answer the question, say so and return "citations": [].'
     ),
     "user": "Sources:\n\n{passages}\n\nQuestion: {question}",
 }

@@ -52,7 +52,7 @@ def answer_graph(
         model = LLMOp.of(
             resource=llm,
             prompt=ANSWER_PROMPT,
-            fields=["answer: str", "citations: list"],
+            fields=["answer: str", "citations?: list"],
             parser="json",
             passages=context["prompt"],
             question=query,
