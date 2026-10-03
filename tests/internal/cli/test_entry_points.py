@@ -58,7 +58,7 @@ def test_console_script_target_resolves(name: str, target: str):
     assert callable(fn), f"{name} = {target!r} — `{attr}` is not callable"
 
 
-ALIASES = ("run", "serve", "pack", "play")
+ALIASES = ("run", "serve", "play")
 
 
 def test_the_operonx_command_lists_every_subcommand():
@@ -121,16 +121,32 @@ def test_each_alias_warns_once_and_behaves_the_same(command: str, tmp_path: Path
     assert new.stderr == ""
 
 
-class TestPackMovedNamespace:
+class TestToolsNamespaceMoved:
     """`operonx.tools` → `operonx.cli` (1.2.0). No shim: leaving one
     would keep `tools` occupied, which is the whole reason for the move
     — `operonx.agents` needs `tools` to mean *agent tools*."""
 
-    def test_pack_lives_under_cli(self):
-        from operonx.cli.pack import main
-
-        assert callable(main)
-
     def test_old_namespace_is_gone(self):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module("operonx.tools")
+
+
+def test_pack_is_gone():
+    """`operonx pack` serialised graphs for the Rust runtime, which is
+    dropped; it raised on any looping graph and nothing read its output.
+    The command, its deprecated script and its module are gone together."""
+    got = subprocess.run(
+        [str(BIN / "operonx"), "--help"], capture_output=True, text=True, timeout=60
+    )
+    assert got.returncode == 0
+    assert "    pack " not in got.stdout, got.stdout
+
+    refused = subprocess.run(
+        [str(BIN / "operonx"), "pack"], capture_output=True, text=True, timeout=60
+    )
+    assert refused.returncode == 2
+    assert "invalid choice: 'pack'" in refused.stderr
+
+    assert "operonx-pack" not in _scripts()
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("operonx.cli.pack")

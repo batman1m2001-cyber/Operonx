@@ -21,4 +21,4 @@ Files per fixture folder:
 - `expected.json` — golden output.
 - `scratch.json` — optional, seeds `engine.run(scratch=...)`.
 - `builder.py` — Python-side builder that regenerates `graph.json`
-  via `operonx pack`. Present in this repo only.
+  via `scripts/regen_fixture.py`. Present in this repo only.

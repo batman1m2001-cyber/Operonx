@@ -24,6 +24,34 @@ from pathlib import Path
 
 TIMING_KEYS = {"$start_time", "$end_time", "$duration_ms"}
 
+# Python-only values serialize() emits that a JSON fixture cannot hold,
+# and secrets that must not be written to disk. Moved here from the
+# deleted `operonx pack`; graph.json and this scrub go with
+# GraphOp.serialize() once the Rust serialize path is removed.
+DROP_KEYS = {"python_callable", "resource_config", "resource_configs", "fallback_configs"}
+SENSITIVE_KEYS = {
+    "api_key",
+    "secret_key",
+    "access_token",
+    "refresh_token",
+    "private_key",
+    "private_key_id",
+}
+
+
+def _scrub(node):
+    """Drop Python-only and cached resource fields; redact stray secrets."""
+    if isinstance(node, dict):
+        out = {}
+        for k, v in node.items():
+            if k in DROP_KEYS:
+                continue
+            out[k] = "<REDACTED>" if k in SENSITIVE_KEYS and isinstance(v, str) and v else _scrub(v)
+        return out
+    if isinstance(node, list):
+        return [_scrub(v) for v in node]
+    return node
+
 
 def _strip(o):
     if isinstance(o, dict):
@@ -46,7 +74,6 @@ def regen(fixture_dir: Path) -> None:
     graph = module.build_graph()
     graph.build()
 
-    from operonx.cli.pack import _scrub
     cleaned = _scrub(graph.serialize())
     cleaned["schema_version"] = "1.0"
     graph_path.write_text(json.dumps(cleaned, indent=2, default=str))

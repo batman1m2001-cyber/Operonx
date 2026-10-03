@@ -71,10 +71,9 @@ operonx, `operonx guide --sync` refreshes `.operonx/guide/`.
 | `operonx guide` | print the guide for coding assistants; `--path`, `--sync` |
 | `operonx serve` | serve the services the application declares; `--list` shows them |
 | `operonx run NAME` | run a job or runbook; `--list` shows them |
-| `operonx pack` | serialise `@graph` factories to the Rust runtime's JSON spec |
 | `operonx play` | the playground bridge: drive a service's doors over JSON lines |
 
-`operonx-run`, `operonx-serve`, `operonx-pack` and `operonx-play` still
+`operonx-run`, `operonx-serve` and `operonx-play` still
 work for this release, as deprecated aliases that print a warning; switch
 scripts and Dockerfiles to `operonx <command>`.
 

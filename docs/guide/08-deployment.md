@@ -119,11 +119,6 @@ JSON gets `{"error": ...}` back. `codec = "text"` (or
 `websocket(..., codec="text")`) passes text through instead. HTTP and
 webhook replies carry the run's `x-operonx-trace-id` header.
 
-For a static-binary edge deployment, the
-[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) crate ships
-an equivalent Axum server (`operonx-serve` binary) that reads the same
-`graph.json` and `resources.yaml`.
-
 ## One door, several graphs: variants
 
 A door whose graph differs by caller — one turn graph per agent, one
