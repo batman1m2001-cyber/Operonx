@@ -1,7 +1,8 @@
 """A streaming fallback never contradicts deltas the consumer already has.
 
-The deltas of a stream (``final=False``) and its last frame (``final=True``)
-are two ways to read one answer, and the docs promise they agree. A
+The deltas of a stream (``final=False``) and its last frame's
+``full_content`` are two ways to read one answer, and the docs promise
+they agree. A
 primary that failed *after* emitting deltas broke that: its frames had
 already reached the consumer, then the fallback replayed its whole answer
 from the start —
@@ -112,7 +113,7 @@ class TestFailureBeforeAnyDelta:
         assert error is None
         final = [f for f in frames if f["final"]]
         assert len(final) == 1
-        assert _joined(frames) == final[0]["content"] == "Monday."
+        assert _joined(frames) == final[0]["full_content"] == "Monday."
         assert final[0]["model_used"] == "fb0"
 
     @pytest.mark.asyncio
@@ -124,7 +125,7 @@ class TestFailureBeforeAnyDelta:
         frames, error = await _collect(_op(primary, fallback))
 
         assert error is None
-        assert _joined(frames) == next(f for f in frames if f["final"])["content"] == "Hi."
+        assert _joined(frames) == next(f for f in frames if f["final"])["full_content"] == "Hi."
 
     @pytest.mark.asyncio
     async def test_a_fallback_failing_before_any_delta_moves_to_the_next(self):
@@ -134,7 +135,7 @@ class TestFailureBeforeAnyDelta:
         frames, error = await _collect(_op(primary, first, second))
 
         assert error is None
-        assert _joined(frames) == next(f for f in frames if f["final"])["content"] == "Hello"
+        assert _joined(frames) == next(f for f in frames if f["final"])["full_content"] == "Hello"
         assert next(f for f in frames if f["final"])["model_used"] == "fb1"
 
 

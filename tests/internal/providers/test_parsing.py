@@ -108,7 +108,7 @@ class TestConvertType:
             assert convert_type(s, "bool") is True
 
     def test_bool_false_strings(self):
-        for s in ("false", "FALSE", "0", "no", ""):
+        for s in ("false", "FALSE", "0", "no"):
             assert convert_type(s, "bool") is False
 
     def test_bool_none(self):
@@ -117,8 +117,10 @@ class TestConvertType:
     def test_int_ok(self):
         assert convert_type("42", "int") == 42
 
-    def test_int_bad_returns_original(self):
-        assert convert_type("abc", "int") == "abc"
+    def test_int_bad_raises(self):
+        # It used to return "abc" unchanged, so an int field held a string.
+        with pytest.raises(ValueError, match="not an int"):
+            convert_type("abc", "int")
 
     def test_float_ok(self):
         assert convert_type("3.14", "float") == 3.14

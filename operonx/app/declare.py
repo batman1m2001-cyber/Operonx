@@ -34,7 +34,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
-from .manifest import SESSION_MODES, STREAM_KINDS, ManifestError, ServeSpec, _default_session
+from .manifest import (
+    SESSION_MODES,
+    STREAM_KINDS,
+    ManifestError,
+    ServeSpec,
+    _default_session,
+    check_codec,
+)
 from .tracing import sink_name
 
 __all__ = ["Listener", "Service", "asgi", "env", "http", "schedule", "webhook", "websocket"]
@@ -83,29 +90,65 @@ def _workers(workers: Any) -> int:
     return n
 
 
-def websocket(path: str, port: int = 8000, host: str = "0.0.0.0", workers: int = 1) -> Listener:
-    return Listener("websocket", path, int(port), host, workers=_workers(workers))
+def _codec_options(codec: Optional[str], label: str) -> Dict[str, Any]:
+    """``codec=`` as listener options: none when unset, so a door declared
+    in Python and the same door in ``operonx.toml`` build equal specs."""
+    if codec is None:
+        return {}
+    check_codec(codec, label)
+    return {"codec": codec}
+
+
+def websocket(
+    path: str,
+    port: int = 8000,
+    host: str = "0.0.0.0",
+    workers: int = 1,
+    codec: Optional[str] = None,
+) -> Listener:
+    """A websocket door: each text frame is one ingress item, decoded by
+    ``codec`` — ``"json"`` (the default) or ``"text"``. Bytes frames are
+    bytes. A frame the codec cannot read is answered with an error frame
+    and does not reach the graph."""
+    options = _codec_options(codec, f"websocket({path!r})")
+    return Listener("websocket", path, int(port), host, workers=_workers(workers), options=options)
 
 
 def http(
-    method: str, path: str, port: int = 8000, host: str = "0.0.0.0", workers: int = 1
+    method: str,
+    path: str,
+    port: int = 8000,
+    host: str = "0.0.0.0",
+    workers: int = 1,
+    codec: Optional[str] = None,
 ) -> Listener:
-    return Listener("http", path, int(port), host, str(method).upper(), _workers(workers))
+    """An HTTP door: the body is the one ingress item, decoded by ``codec``
+    — ``"json"`` (the default) or ``"text"``. An empty body is ``None``; a
+    body the codec cannot read is answered ``400`` and starts no run."""
+    options = _codec_options(codec, f"http({method!r}, {path!r})")
+    return Listener(
+        "http", path, int(port), host, str(method).upper(), _workers(workers), options=options
+    )
 
 
 def asgi(path: str = "/", port: int = 8000, host: str = "0.0.0.0", workers: int = 1) -> Listener:
     return Listener("asgi", path, int(port), host, workers=_workers(workers))
 
 
-def webhook(path: str, port: int = 8000, host: str = "0.0.0.0") -> Listener:
+def webhook(
+    path: str, port: int = 8000, host: str = "0.0.0.0", codec: Optional[str] = None
+) -> Listener:
     """A POST that starts a run and is answered at once.
 
     The reply is ``202 {"accepted": true, "run_id": ...}`` before the run
     begins; the run goes on in the background, traced like any service run.
     For events nobody waits on: a new email, a Slack message, a CRM change.
     ``max_inflight=N`` on the service answers ``429`` beyond N pending runs.
+    The body is read by ``codec`` as for :func:`http`; a body it cannot
+    read is answered ``400`` and starts no run.
     """
-    return Listener("webhook", path, int(port), host, "POST")
+    options = _codec_options(codec, f"webhook({path!r})")
+    return Listener("webhook", path, int(port), host, "POST", options=options)
 
 
 def schedule(

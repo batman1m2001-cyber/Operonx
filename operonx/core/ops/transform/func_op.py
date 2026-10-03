@@ -16,6 +16,7 @@ from typing import (
 
 from operonx.core.configs.op_config import OpType
 from operonx.core.loggings import LOGGER
+from operonx.core.ops._cache import code_digest
 from operonx.core.ops.base import (
     _BASE_INIT_KEYS,
     SCALAR_OUTPUT,
@@ -509,6 +510,17 @@ class FuncOp(BaseOp):
             outputs = {SCALAR_OUTPUT: Param(type=None if ann is inspect.Signature.empty else ann)}
 
         return inputs, outputs
+
+    def _cache_identity(self) -> Any:
+        """The function and a hash of its code, so an edited body misses."""
+        fn = self.code_fn
+        if fn is None:
+            return super()._cache_identity()
+        return [
+            f"{type(self).__module__}.{type(self).__qualname__}",
+            f"{fn.__module__}.{fn.__qualname__}",
+            code_digest(fn).hex(),
+        ]
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:

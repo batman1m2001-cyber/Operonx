@@ -207,9 +207,17 @@ asyncio.run(main())
 - `prompt` is a string (one user message) or `{"system": ..., "user": ...}`
   with `{placeholders}`; `messages=[...]` passes a ready message list.
 - `stream=True` makes it a streaming op that yields `content` deltas.
+  The last frame has `final=True`, an empty `content` and the whole
+  answer in `full_content`, so joining every frame's `content` gives the
+  answer once. Read `full_content` for the whole text, streamed or not.
 - Name template variables after what they hold (`question`, `message`).
   Never `{user}`, `{temperature}` and the like: those are model settings,
   and such a placeholder raises `PromptError` when the op is built.
+- `fields=` types are checked, not guessed: `int` from `"2.5"` or `bool`
+  from `"maybe"` (it takes true/false/yes/no/1/0) sets `error`, and
+  `max_retries=N` asks the model again. A `list` field is a list even
+  with one item. The JSON parser reads the first fenced block, or the
+  first `{...}` in the text, so prose around the answer is fine.
 - `validators=` takes literal values. A Ref there raises `TypeError`;
   check values that arrive at run time in an op after the LLM.
 - `cost_usd` is `None` unless the resource sets `cost_per_input_token`

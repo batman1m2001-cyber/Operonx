@@ -403,10 +403,14 @@ class LLMOp(BaseOp):
 
         output_schema = {
             "role": Param(type=str, default="assistant"),
+            # What this frame adds: a token delta while streaming, ""
+            # on the closing frame, the whole answer for a batch call.
             "content": Param(type=str, required=True),
-            # Streaming only: False on a token delta, True on the frame
-            # that repeats the accumulated content. Batch calls are always
-            # final. See ``_stream_final``.
+            # The whole answer. Set on the closing frame of a stream and on
+            # a batch call; None on a delta. See ``_stream_final``.
+            "full_content": Param(type=str, default=None),
+            # Streaming only: False on a token delta, True on the closing
+            # frame. Batch calls are always final.
             "final": Param(type=bool, default=True),
             "finish_reason": Param(type=str, default=None),
             "model_used": Param(type=str, required=True),
@@ -1122,20 +1126,19 @@ class LLMOp(BaseOp):
     def _stream_final(self, acc, resource):
         """Build the final metadata yield for a stream.
 
-        ``content`` here is the **whole** accumulated response, not the
-        remaining tail — the per-token frames already carried every piece
-        of it. ``final=True`` is what separates the two; before it existed
-        the only difference was the incidental presence of
-        ``finish_reason``, and nothing said so.
-
-        Consumers should either join the ``final=False`` frames or read
-        this one, never both.
+        ``content`` is every frame's delta, and this frame adds none: it is
+        ``""``. The whole accumulated answer is ``full_content``. Up to
+        1.14 this frame repeated the answer under ``content``, so a
+        consumer that forwarded each frame's ``content`` sent it twice
+        unless it filtered on ``final``. Joining every frame's ``content``
+        now gives the answer once, and ``full_content`` reads it whole.
         """
         usage = self._normalize_usage(acc["usage_raw"])
         return {
             "role": "assistant",
             "final": True,
-            "content": acc["response"],
+            "content": "",
+            "full_content": acc["response"],
             "finish_reason": acc["finish_reason"],
             "model_used": resource,
             "tool_calls": acc["tool_calls"],
@@ -1237,9 +1240,12 @@ class LLMOp(BaseOp):
             )
 
         usage = self._normalize_usage(usage_raw)
+        content = _content_to_text(message.content)
         return {
             "role": "assistant",
-            "content": _content_to_text(message.content),
+            # One frame is the whole answer: its delta and its full text.
+            "content": content,
+            "full_content": content,
             "finish_reason": choice.finish_reason,
             "model_used": resource or completion.model,
             "tool_calls": tool_calls,
@@ -1399,10 +1405,9 @@ class LLMOp(BaseOp):
 
         if choice.delta.content:
             acc["response"] += choice.delta.content
-            # ``final=False`` marks this as a delta. The last frame of a
-            # stream repeats the whole accumulated text under the same
-            # ``content`` key, so a consumer that joins frames without
-            # checking would emit the answer twice.
+            # ``final=False`` marks this as a delta. The closing frame adds
+            # no text of its own (``content == ""``) and carries the whole
+            # answer as ``full_content``; see ``_stream_final``.
             yield_dict = {"content": choice.delta.content, "role": "assistant", "final": False}
         else:
             yield_dict = None
@@ -1582,6 +1587,25 @@ class LLMOp(BaseOp):
             base["fallback_configs"] = fallback_configs
 
         return base
+
+    def _cache_identity(self) -> Any:
+        """Model and prompt (``specific_metadata``) plus the structured layer.
+
+        ``fields``, ``parser`` and ``validators`` change the outputs of a
+        call with the same inputs, so an op cached with ``cache=`` keys on
+        them too. A validator function counts by its code, any other
+        callable by its class.
+        """
+        from operonx.core.ops._cache import code_digest
+
+        validators = self.validators
+        if callable(validators):
+            if hasattr(validators, "__code__"):
+                validators = {"$code": code_digest(validators).hex()}
+            else:
+                cls = type(validators)
+                validators = {"$callable": f"{cls.__module__}.{cls.__qualname__}"}
+        return [*super()._cache_identity(), self.fields, self.parser, validators]
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:

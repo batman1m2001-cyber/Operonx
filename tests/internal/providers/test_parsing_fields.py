@@ -66,10 +66,14 @@ class TestStructureWhereAScalarWasDeclared:
         out = parse_and_extract("<action><type>greet</type></action>", "xml", F("type: str"))
         assert out == {"type": "greet", "error": None}
 
-    @pytest.mark.parametrize("hint", ["dict", "Any", "list"])
+    @pytest.mark.parametrize("hint", ["dict", "Any"])
     def test_a_structural_hint_keeps_the_subtree(self, hint):
         out = parse_and_extract("<action><type>greet</type></action>", "xml", F(f"action: {hint}"))
         assert out == {"action": {"type": "greet"}, "error": None}
+
+    def test_a_list_hint_holds_the_lone_subtree_as_one_item(self):
+        out = parse_and_extract("<action><type>greet</type></action>", "xml", F("action: list"))
+        assert out == {"action": [{"type": "greet"}], "error": None}
 
     def test_an_untyped_field_keeps_the_subtree(self):
         out = parse_and_extract('{"action": {"type": "greet"}}', "json", F("action"))
