@@ -23,6 +23,8 @@ from typing import (
 
 from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
+from operonx.core.ops import _cache
+from operonx.core.ops._cache import CacheStore
 from operonx.core.ops._events import Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
 from operonx.core.states.cell import DEFAULT_CONTEXT
@@ -286,6 +288,7 @@ class BaseOp(ABC):
         "enabled",
         "bound",
         "cache",
+        "_cache_scope",
         "delay",
         "is_gen",
         "_input_cache",
@@ -321,8 +324,10 @@ class BaseOp(ABC):
     door_default: Optional[str] = None
     _VALID_DOORS = (None, "ingress", "egress")
 
-    # Class-level cache stores shared across instances: {op_full_name: (path_or_none, {hash: result})}
-    _cache_stores: Dict[str, tuple] = {}
+    # Op-level cache stores shared across instances and engines, keyed by the
+    # file path for ``cache="path"`` and by the op's scope digest otherwise.
+    # See operonx/core/ops/_cache.py for what a key is made of.
+    _cache_stores: Dict[str, "CacheStore"] = {}
 
     _VALID_BOUNDS = (None, "sync", "io", "cpu")
 
@@ -361,6 +366,7 @@ class BaseOp(ABC):
         self._metrics_idx = None  # (schema, st_idx, et_idx, dur_idx)
         self._error_idx = None  # (schema, err_idx)
         self.cache = cache
+        self._cache_scope = None  # (full_name, scope, store), on the first cached call
         self.delay = delay
         self.transient = transient
         self._transient_vars = None  # stamped post-compile by StateSchema
@@ -847,87 +853,39 @@ class BaseOp(ABC):
     # 3b. OP-LEVEL CACHE
     # =========================================================================
 
-    def _get_cache_store(self) -> Dict[int, Dict]:
-        """Get or create the in-memory cache store for this op."""
-        key = self.full_name
-        if key not in BaseOp._cache_stores:
-            store: Dict[int, Dict] = {}
+    def _cache_identity(self) -> Any:
+        """What this op computes beyond its inputs, as JSON values.
+
+        Part of every cache key, for this op and for each cached op in the
+        same graph: two ops that share a name but differ here never share
+        an entry. The default is the op's class and ``specific_metadata``
+        (an LLM op's model, a retrieval op's store). A subclass whose
+        behaviour lives in code or settings outside those extends it.
+        """
+        cls = type(self)
+        return [f"{cls.__module__}.{cls.__qualname__}", self.specific_metadata]
+
+    def _cache_lookup(self, inputs: Dict[str, Any]) -> Tuple["CacheStore", bytes]:
+        """The store this op caches into and the key of a call with ``inputs``.
+
+        The scope (graph fingerprint, full name, identity) is computed on
+        the first call and kept; it is recomputed if a rebuild renamed the op.
+        """
+        scope = self._cache_scope
+        if scope is None or scope[0] != self.full_name:
+            digest = _cache.op_scope(self)
             path = self.cache if isinstance(self.cache, str) else None
-            if path:
-                store = self._load_cache_file(path)
-            BaseOp._cache_stores[key] = (path, store)
-        return BaseOp._cache_stores[key][1]
-
-    @staticmethod
-    def _cache_hash(inputs: Dict[str, Any]) -> int:
-        """FNV-1a hash of JSON-serialized inputs."""
-        import json
-
-        data = json.dumps(inputs, sort_keys=True, default=str).encode()
-        h = 0xCBF29CE484222325
-        for b in data:
-            h ^= b
-            h = (h * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-        return h
-
-    @staticmethod
-    def _load_cache_file(path: str) -> Dict[int, Dict]:
-        """Load cache from binary file."""
-        import json
-        import struct
-        from pathlib import Path
-
-        store: Dict[int, Dict] = {}
-        p = Path(path)
-        if not p.exists():
-            return store
-
-        data = p.read_bytes()
-        if len(data) < 8:
-            return store
-
-        (count,) = struct.unpack_from("<Q", data, 0)
-        offset = 8
-        for _ in range(count):
-            if offset + 12 > len(data):
-                break
-            h, json_len = struct.unpack_from("<QI", data, offset)
-            offset += 12
-            if offset + json_len > len(data):
-                break
-            try:
-                value = json.loads(data[offset : offset + json_len])
-                store[h] = value
-            except Exception:
-                pass
-            offset += json_len
-
-        return store
+            store_id = path or digest.hex()
+            store = BaseOp._cache_stores.get(store_id)
+            if store is None:
+                store = BaseOp._cache_stores[store_id] = _cache.CacheStore(path)
+            scope = self._cache_scope = (self.full_name, digest, store)
+        return scope[2], _cache.entry_key(self, scope[1], inputs)
 
     @staticmethod
     def save_all_caches() -> int:
-        """Save all file-backed caches. Returns total entries saved."""
-        import json
-        import struct
-        from pathlib import Path
-
-        total = 0
-        for _, (path, store) in BaseOp._cache_stores.items():
-            if not path or not store:
-                continue
-            p = Path(path)
-            p.parent.mkdir(parents=True, exist_ok=True)
-
-            buf = struct.pack("<Q", len(store))
-            for h, value in store.items():
-                json_bytes = json.dumps(value, default=str).encode()
-                buf += struct.pack("<QI", h, len(json_bytes))
-                buf += json_bytes
-
-            p.write_bytes(buf)
-            total += len(store)
-
-        return total
+        """Write every file-backed op cache to its file. Returns entries written."""
+        return sum(store.save() for store in BaseOp._cache_stores.values())
 
     # =========================================================================
     # 4. OBSERVABILITY — logging and metrics
@@ -1217,10 +1175,10 @@ class BaseOp(ABC):
 
             # Cache check
             if self.cache is not None:
-                _cache_key = self._cache_hash(_inputs)
-                _cache_store = self._get_cache_store()
-                if _cache_key in _cache_store:
-                    _outputs = _cache_store[_cache_key]
+                _cache_store, _cache_key = self._cache_lookup(_inputs)
+                _hit = _cache_store.get(_cache_key)
+                if _hit is not _cache.MISS:
+                    _outputs = _hit
                     self.store_result(state, _outputs, context_id)
                     yield context_id, _outputs
                     return
@@ -1256,7 +1214,7 @@ class BaseOp(ABC):
                     end_time = datetime.now(timezone.utc)
                     duration_ms = (_batch_end - perf_start) * 1000
                 if not self.is_gen and self.cache is not None:
-                    _cache_store[_cache_key] = result
+                    _cache_store.put(_cache_key, result)
                 # V3 tracing: one OpExecution per yield for generator ops.
                 # ctx already carries the yield sub-index (`("main","[T]","[i]")`),
                 # so op_id is unique per yield → downstream consumers of

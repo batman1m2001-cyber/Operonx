@@ -1583,6 +1583,25 @@ class LLMOp(BaseOp):
 
         return base
 
+    def _cache_identity(self) -> Any:
+        """Model and prompt (``specific_metadata``) plus the structured layer.
+
+        ``fields``, ``parser`` and ``validators`` change the outputs of a
+        call with the same inputs, so an op cached with ``cache=`` keys on
+        them too. A validator function counts by its code, any other
+        callable by its class.
+        """
+        from operonx.core.ops._cache import code_digest
+
+        validators = self.validators
+        if callable(validators):
+            if hasattr(validators, "__code__"):
+                validators = {"$code": code_digest(validators).hex()}
+            else:
+                cls = type(validators)
+                validators = {"$callable": f"{cls.__module__}.{cls.__qualname__}"}
+        return [*super()._cache_identity(), self.fields, self.parser, validators]
+
     @property
     def specific_metadata(self) -> Dict[str, Any]:
         """Return LLM + prompt metadata dictionary."""
