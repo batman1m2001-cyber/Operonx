@@ -110,6 +110,15 @@ read the session the transport minted, so the same graph is served on
 one day and run over a file by a job on the next. See
 [Jobs and runbooks](10-jobs.md).
 
+Every door reads what its caller sends the same way. An HTTP body, a
+webhook body and a websocket text frame are JSON by default, so one graph
+served on HTTP and on a websocket gets the same item for the same
+payload; a websocket bytes frame stays bytes. A body that is not JSON is
+answered `400` before a run starts, and a websocket frame that is not
+JSON gets `{"error": ...}` back. `codec = "text"` (or
+`websocket(..., codec="text")`) passes text through instead. HTTP and
+webhook replies carry the run's `x-operonx-trace-id` header.
+
 For a static-binary edge deployment, the
 [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) crate ships
 an equivalent Axum server (`operonx-serve` binary) that reads the same

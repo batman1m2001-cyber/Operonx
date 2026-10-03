@@ -159,6 +159,10 @@ class BoundedSession:
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_inflight or 0)
         self._closed = asyncio.Event()
         self.overflowed = 0
+        #: The trace id of the run this session minted, set by the serve
+        #: runner as the run starts — so a transport can hand it to its
+        #: peer (an HTTP reply's ``x-operonx-trace-id`` header).
+        self.trace_id: Optional[str] = None
 
     async def feed(self, item: Any) -> None:
         """Push one inbound item, waiting when the bound is reached."""
@@ -224,6 +228,16 @@ class BoundedSession:
 
     async def _send(self, item: Any) -> bool:
         raise NotImplementedError
+
+    async def run_failed(self) -> None:
+        """The run this session minted ended with an error.
+
+        Called by the serve runner after the run, before ``on_close``. A
+        transport whose peer would otherwise wait in silence tells it
+        here; the default does nothing, because a transport such as HTTP
+        answers from its own endpoint (a ``500``). Never pass the error
+        text on: it is a traceback, and it stays in the log and the trace.
+        """
 
     async def close(self) -> None:
         if not self._closed.is_set():
