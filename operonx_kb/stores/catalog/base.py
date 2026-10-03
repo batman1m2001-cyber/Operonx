@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Set
+from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from operonx_kb.model.collection import Collection
 from operonx_kb.model.document import Chunk, Document, DocumentVersion, Element, Page, VersionChunk
@@ -71,7 +71,9 @@ class Catalog(ABC):
     def get_document(self, document_id: str) -> Optional[Document]: ...
 
     @abstractmethod
-    def list_documents(self, collection_id: str, include_deleted: bool = False) -> List[Document]: ...
+    def list_documents(
+        self, collection_id: str, include_deleted: bool = False
+    ) -> List[Document]: ...
 
     @abstractmethod
     def get_version(self, version_id: str) -> Optional[DocumentVersion]: ...
@@ -94,7 +96,9 @@ class Catalog(ABC):
     def get_chunks(self, chunk_ids: Sequence[str]) -> Dict[str, Chunk]: ...
 
     @abstractmethod
-    def active_chunk_ids(self, collection_id: Optional[str] = None, document_id: Optional[str] = None) -> Set[str]:
+    def active_chunk_ids(
+        self, collection_id: Optional[str] = None, document_id: Optional[str] = None
+    ) -> Set[str]:
         """Chunks referenced by an active version of a live document."""
 
     # writes ---------------------------------------------------------------------
@@ -131,10 +135,46 @@ class Catalog(ABC):
     def blob_refs(self) -> Set[str]:
         """Every blob sha some version references (raw bytes and canonical text)."""
 
+    # the derived-index ledger ----------------------------------------------------
+
+    @abstractmethod
+    def record_index_entries(
+        self,
+        store: str,
+        collection: str,
+        collection_id: str,
+        entries: Sequence[Tuple[str, int, str]],
+    ) -> None:
+        """Record ``(chunk_id, vector_id, document_id)`` rows about to be written to a vector store.
+
+        Called *before* the upsert, so the ledger always covers the index.
+
+        Raises:
+            CatalogError: A vector id is already recorded for a different chunk
+                (a 63-bit key collision); writing it would overwrite that chunk.
+        """
+
+    @abstractmethod
+    def forget_index_entries(self, store: str, collection: str, chunk_ids: Sequence[str]) -> int:
+        """Drop ledger rows after their vectors were deleted; return how many."""
+
+    @abstractmethod
+    def index_entries(
+        self,
+        store: str,
+        collection: str,
+        *,
+        collection_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """``chunk_id -> vector_id`` recorded for a vector store collection."""
+
     # caches and log ---------------------------------------------------------------
 
     @abstractmethod
-    def get_embeddings(self, embedder_fp: str, text_shas: Iterable[str]) -> Dict[str, List[float]]: ...
+    def get_embeddings(
+        self, embedder_fp: str, text_shas: Iterable[str]
+    ) -> Dict[str, List[float]]: ...
 
     @abstractmethod
     def put_embeddings(self, embedder_fp: str, vectors: Dict[str, List[float]]) -> None: ...

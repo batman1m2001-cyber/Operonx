@@ -27,6 +27,7 @@ __all__ = [
     "version_id",
     "element_id",
     "chunk_id",
+    "vector_id",
     "canonical_json",
     "fingerprint",
     "combine_fingerprints",
@@ -88,6 +89,18 @@ def chunk_id(document_id: str, chunker_fp: str, content_sha: str, occurrence: in
     """Stable across versions: an unchanged chunk keeps its id, its embedding and
     its index entries. ``occurrence`` tells identical chunks of one document apart."""
     return make_id("ch", document_id, chunker_fp, content_sha, occurrence)
+
+
+def vector_id(chunk_id: str) -> int:
+    """The int64 key a chunk has in a vector store: the first 63 bits of its id.
+
+    Vector stores disagree on key types (FAISS takes int64 only, Qdrant ints
+    or UUIDs); a non-negative int64 works in all of them. It is a function of
+    the chunk id, so writes stay idempotent, and the catalog records it
+    (``kb_index_entries``) to map hits back. Two chunks collide with
+    probability ~n²/2⁶⁴: under 10⁻⁷ for a million chunks.
+    """
+    return int(chunk_id.split("_", 1)[1][:16], 16) & 0x7FFF_FFFF_FFFF_FFFF
 
 
 def canonical_json(value: Any) -> str:

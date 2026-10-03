@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 from operonx_kb.errors import CatalogError
 from operonx_kb.model.collection import Collection, CollectionSpec
@@ -113,16 +113,27 @@ class SqliteCatalog(Catalog):
             c.execute(
                 "INSERT INTO kb_collections (id, spec, tags, created_at) VALUES (?, ?, ?, ?) "
                 "ON CONFLICT(id) DO UPDATE SET spec = excluded.spec, tags = excluded.tags",
-                (collection.id, collection.spec.model_dump_json(), _j(collection.tags), _dt(utcnow())),
+                (
+                    collection.id,
+                    collection.spec.model_dump_json(),
+                    _j(collection.tags),
+                    _dt(utcnow()),
+                ),
             )
 
     @staticmethod
     def _collection(row: sqlite3.Row) -> Collection:
-        return Collection(id=row["id"], spec=CollectionSpec.model_validate_json(row["spec"]), tags=json.loads(row["tags"]))
+        return Collection(
+            id=row["id"],
+            spec=CollectionSpec.model_validate_json(row["spec"]),
+            tags=json.loads(row["tags"]),
+        )
 
     def get_collection(self, collection_id: str) -> Optional[Collection]:
         with self._tx() as c:
-            row = c.execute("SELECT * FROM kb_collections WHERE id = ?", (collection_id,)).fetchone()
+            row = c.execute(
+                "SELECT * FROM kb_collections WHERE id = ?", (collection_id,)
+            ).fetchone()
         return self._collection(row) if row else None
 
     def list_collections(self) -> List[Collection]:
@@ -182,7 +193,9 @@ class SqliteCatalog(Catalog):
 
     def list_versions(self, document_id: str) -> List[DocumentVersion]:
         with self._tx() as c:
-            rows = c.execute("SELECT * FROM kb_versions WHERE document_id = ? ORDER BY ordinal", (document_id,)).fetchall()
+            rows = c.execute(
+                "SELECT * FROM kb_versions WHERE document_id = ? ORDER BY ordinal", (document_id,)
+            ).fetchall()
         return [self._version(r) for r in rows]
 
     def elements(self, version_id: str, canonical: str) -> List[Element]:
@@ -217,17 +230,27 @@ class SqliteCatalog(Catalog):
 
     def pages(self, version_id: str) -> List[Page]:
         with self._tx() as c:
-            rows = c.execute("SELECT * FROM kb_pages WHERE version_id = ? ORDER BY page_no", (version_id,)).fetchall()
+            rows = c.execute(
+                "SELECT * FROM kb_pages WHERE version_id = ? ORDER BY page_no", (version_id,)
+            ).fetchall()
         return [
-            Page(version_id=version_id, page_no=r["page_no"], width=r["width"], height=r["height"], unit=r["unit"],
-                 image_sha=r["image_sha"], text_layer=bool(r["text_layer"]))  # fmt: skip
+            Page(
+                version_id=version_id,
+                page_no=r["page_no"],
+                width=r["width"],
+                height=r["height"],
+                unit=r["unit"],
+                image_sha=r["image_sha"],
+                text_layer=bool(r["text_layer"]),
+            )  # fmt: skip
             for r in rows
         ]
 
     def version_chunks(self, version_id: str) -> List[VersionChunk]:
         with self._tx() as c:
             rows = c.execute(
-                "SELECT * FROM kb_version_chunks WHERE version_id = ? ORDER BY ordinal", (version_id,)
+                "SELECT * FROM kb_version_chunks WHERE version_id = ? ORDER BY ordinal",
+                (version_id,),
             ).fetchall()
         return [
             VersionChunk(
@@ -262,7 +285,9 @@ class SqliteCatalog(Catalog):
                     )
         return out
 
-    def active_chunk_ids(self, collection_id: Optional[str] = None, document_id: Optional[str] = None) -> Set[str]:
+    def active_chunk_ids(
+        self, collection_id: Optional[str] = None, document_id: Optional[str] = None
+    ) -> Set[str]:
         sql = (
             "SELECT vc.chunk_id FROM kb_version_chunks vc JOIN kb_documents d ON d.active_version_id = vc.version_id "
             "WHERE d.deleted_at IS NULL"
@@ -289,7 +314,12 @@ class SqliteCatalog(Catalog):
         occurrences: Sequence[VersionChunk],
     ) -> CommitResult:
         with self._tx(write=True) as c:
-            if c.execute("SELECT 1 FROM kb_collections WHERE id = ?", (document.collection_id,)).fetchone() is None:
+            if (
+                c.execute(
+                    "SELECT 1 FROM kb_collections WHERE id = ?", (document.collection_id,)
+                ).fetchone()
+                is None
+            ):
                 raise CatalogError(
                     f"collection {document.collection_id!r} does not exist; create it first "
                     "(KnowledgeBase.create_collection)"
@@ -298,11 +328,17 @@ class SqliteCatalog(Catalog):
             previous = row["active_version_id"] if row and row["deleted_at"] is None else None
             if previous == version.id:
                 return CommitResult(committed=False, previous_version_id=previous)
-            existing = c.execute("SELECT document_id, status FROM kb_versions WHERE id = ?", (version.id,)).fetchone()
+            existing = c.execute(
+                "SELECT document_id, status FROM kb_versions WHERE id = ?", (version.id,)
+            ).fetchone()
             if existing is not None and existing["document_id"] != document.id:
                 raise CatalogError(
                     "version id already belongs to another document; ids are content derived, so this is a bug",
-                    {"version": version.id, "document": document.id, "owner": existing["document_id"]},
+                    {
+                        "version": version.id,
+                        "document": document.id,
+                        "owner": existing["document_id"],
+                    },
                 )
             if row is None:
                 c.execute(
@@ -314,11 +350,18 @@ class SqliteCatalog(Catalog):
             else:
                 c.execute(
                     "UPDATE kb_documents SET title = ?, mime = ?, tags = ?, metadata = ?, deleted_at = NULL WHERE id = ?",
-                    (document.title, document.mime, _j(document.tags), _j(document.metadata), document.id),
+                    (
+                        document.title,
+                        document.mime,
+                        _j(document.tags),
+                        _j(document.metadata),
+                        document.id,
+                    ),
                 )
             if existing is None:
                 ordinal = c.execute(
-                    "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM kb_versions WHERE document_id = ?", (document.id,)
+                    "SELECT COALESCE(MAX(ordinal), 0) + 1 FROM kb_versions WHERE document_id = ?",
+                    (document.id,),
                 ).fetchone()[0]
                 c.execute(
                     "INSERT INTO kb_versions (id, document_id, ordinal, raw_sha, text_sha, pipeline_fp, status, stats, "
@@ -341,7 +384,18 @@ class SqliteCatalog(Catalog):
                 c.executemany(
                     "INSERT INTO kb_pages (version_id, page_no, width, height, unit, image_sha, text_layer) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    [(version.id, p.page_no, p.width, p.height, p.unit, p.image_sha, int(p.text_layer)) for p in pages],
+                    [
+                        (
+                            version.id,
+                            p.page_no,
+                            p.width,
+                            p.height,
+                            p.unit,
+                            p.image_sha,
+                            int(p.text_layer),
+                        )
+                        for p in pages
+                    ],
                 )
                 c.executemany(
                     "INSERT OR IGNORE INTO kb_chunks (id, document_id, content_sha, kind, heading_path, token_count, "
@@ -359,8 +413,20 @@ class SqliteCatalog(Catalog):
                 c.execute("UPDATE kb_versions SET status = 'committed' WHERE id = ?", (version.id,))
             if previous is not None:
                 c.execute("UPDATE kb_versions SET status = 'superseded' WHERE id = ?", (previous,))
-            c.execute("UPDATE kb_documents SET active_version_id = ? WHERE id = ?", (version.id, document.id))
-            old = {r[0] for r in c.execute("SELECT chunk_id FROM kb_version_chunks WHERE version_id = ?", (previous,))} if previous else set()
+            c.execute(
+                "UPDATE kb_documents SET active_version_id = ? WHERE id = ?",
+                (version.id, document.id),
+            )
+            old = (
+                {
+                    r[0]
+                    for r in c.execute(
+                        "SELECT chunk_id FROM kb_version_chunks WHERE version_id = ?", (previous,)
+                    )
+                }
+                if previous
+                else set()
+            )
             new = {o.chunk_id for o in occurrences}
         return CommitResult(
             committed=True,
@@ -371,7 +437,9 @@ class SqliteCatalog(Catalog):
 
     def tombstone(self, document_id: str) -> List[str]:
         with self._tx(write=True) as c:
-            row = c.execute("SELECT active_version_id FROM kb_documents WHERE id = ?", (document_id,)).fetchone()
+            row = c.execute(
+                "SELECT active_version_id FROM kb_documents WHERE id = ?", (document_id,)
+            ).fetchone()
             if row is None:
                 raise CatalogError(f"no document {document_id!r}")
             active = row["active_version_id"]
@@ -382,17 +450,35 @@ class SqliteCatalog(Catalog):
             if active is None:
                 return []
             c.execute("UPDATE kb_versions SET status = 'superseded' WHERE id = ?", (active,))
-            return sorted({r[0] for r in c.execute("SELECT chunk_id FROM kb_version_chunks WHERE version_id = ?", (active,))})
+            return sorted(
+                {
+                    r[0]
+                    for r in c.execute(
+                        "SELECT chunk_id FROM kb_version_chunks WHERE version_id = ?", (active,)
+                    )
+                }
+            )
 
     def purge(self, document_id: str) -> PurgeResult:
         with self._tx(write=True) as c:
-            versions = [r["id"] for r in c.execute("SELECT id FROM kb_versions WHERE document_id = ?", (document_id,))]
+            versions = [
+                r["id"]
+                for r in c.execute(
+                    "SELECT id FROM kb_versions WHERE document_id = ?", (document_id,)
+                )
+            ]
             shas = {
                 sha
-                for r in c.execute("SELECT raw_sha, text_sha FROM kb_versions WHERE document_id = ?", (document_id,))
+                for r in c.execute(
+                    "SELECT raw_sha, text_sha FROM kb_versions WHERE document_id = ?",
+                    (document_id,),
+                )
                 for sha in (r["raw_sha"], r["text_sha"])
             }
-            chunk_ids = [r["id"] for r in c.execute("SELECT id FROM kb_chunks WHERE document_id = ?", (document_id,))]
+            chunk_ids = [
+                r["id"]
+                for r in c.execute("SELECT id FROM kb_chunks WHERE document_id = ?", (document_id,))
+            ]
             for table in ("kb_version_chunks", "kb_elements", "kb_pages"):
                 c.executemany(f"DELETE FROM {table} WHERE version_id = ?", [(v,) for v in versions])
             c.execute("DELETE FROM kb_chunks WHERE document_id = ?", (document_id,))
@@ -403,11 +489,79 @@ class SqliteCatalog(Catalog):
                 for r in c.execute("SELECT raw_sha, text_sha FROM kb_versions")
                 for sha in (r["raw_sha"], r["text_sha"])
             }
-        return PurgeResult(chunk_ids=sorted(chunk_ids), version_ids=versions, orphan_blobs=sorted(shas - still))
+        return PurgeResult(
+            chunk_ids=sorted(chunk_ids), version_ids=versions, orphan_blobs=sorted(shas - still)
+        )
 
     def blob_refs(self) -> Set[str]:
         with self._tx() as c:
-            return {sha for r in c.execute("SELECT raw_sha, text_sha FROM kb_versions") for sha in (r[0], r[1])}
+            return {
+                sha
+                for r in c.execute("SELECT raw_sha, text_sha FROM kb_versions")
+                for sha in (r[0], r[1])
+            }
+
+    # the derived-index ledger ------------------------------------------------------
+
+    def record_index_entries(
+        self,
+        store: str,
+        collection: str,
+        collection_id: str,
+        entries: Sequence[Tuple[str, int, str]],
+    ) -> None:
+        if not entries:
+            return
+        with self._tx(write=True) as c:
+            for chunk_id, vid, _ in entries:
+                row = c.execute(
+                    "SELECT chunk_id FROM kb_index_entries WHERE store = ? AND collection = ? AND vector_id = ? "
+                    "AND chunk_id != ?",
+                    (store, collection, vid, chunk_id),
+                ).fetchone()
+                if row is not None:
+                    raise CatalogError(
+                        "two chunks map to the same vector key; writing would overwrite the other chunk's vector",
+                        {
+                            "store": store,
+                            "vector_id": vid,
+                            "chunk": chunk_id,
+                            "holder": row["chunk_id"],
+                        },
+                    )
+            c.executemany(
+                "INSERT OR IGNORE INTO kb_index_entries (store, collection, chunk_id, vector_id, document_id, "
+                "collection_id) VALUES (?, ?, ?, ?, ?, ?)",
+                [(store, collection, cid, vid, doc, collection_id) for cid, vid, doc in entries],
+            )
+
+    def forget_index_entries(self, store: str, collection: str, chunk_ids: Sequence[str]) -> int:
+        with self._tx(write=True) as c:
+            before = c.total_changes
+            c.executemany(
+                "DELETE FROM kb_index_entries WHERE store = ? AND collection = ? AND chunk_id = ?",
+                [(store, collection, cid) for cid in chunk_ids],
+            )
+            return c.total_changes - before
+
+    def index_entries(
+        self,
+        store: str,
+        collection: str,
+        *,
+        collection_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> Dict[str, int]:
+        sql = "SELECT chunk_id, vector_id FROM kb_index_entries WHERE store = ? AND collection = ?"
+        args: List[Any] = [store, collection]
+        if collection_id is not None:
+            sql += " AND collection_id = ?"
+            args.append(collection_id)
+        if document_id is not None:
+            sql += " AND document_id = ?"
+            args.append(document_id)
+        with self._tx() as c:
+            return {r[0]: r[1] for r in c.execute(sql, args)}
 
     # caches and log -------------------------------------------------------------------
 
@@ -447,7 +601,16 @@ class SqliteCatalog(Catalog):
             c.execute(
                 "INSERT INTO kb_ingest_log (collection_id, key, document_id, version_id, action, stats, error, at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (collection_id, key, document_id, version_id, action, _j(stats or {}), error, _dt(utcnow())),
+                (
+                    collection_id,
+                    key,
+                    document_id,
+                    version_id,
+                    action,
+                    _j(stats or {}),
+                    error,
+                    _dt(utcnow()),
+                ),
             )
 
     def ingest_log(self, collection_id: str, key: Optional[str] = None) -> List[dict]:

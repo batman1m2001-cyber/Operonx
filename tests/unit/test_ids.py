@@ -9,6 +9,7 @@ from operonx_kb.model.ids import (
     sha256_bytes,
     sha256_text,
     text_sha,
+    vector_id,
     version_id,
 )
 
@@ -45,3 +46,10 @@ def test_fingerprint_changes_with_any_input_and_ignores_key_order():
 
 def test_canonical_json_is_stable():
     assert canonical_json({"b": [1, "é"], "a": None}) == '{"a":null,"b":[1,"é"]}'
+
+
+def test_vector_id_is_a_non_negative_int64_derived_from_the_chunk_id():
+    cid = chunk_id("doc_x", "fp", "sha", 0)
+    vid = vector_id(cid)
+    assert 0 <= vid < 2**63 and vid == vector_id(cid)
+    assert vid != vector_id(chunk_id("doc_x", "fp", "sha", 1))

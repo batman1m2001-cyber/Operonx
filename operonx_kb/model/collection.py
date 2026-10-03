@@ -1,6 +1,6 @@
 """Collections and their spec: data, not code (track5 §7.9).
 
-A spec names *resources* (``embedding:…``, ``kb_index:…``) by key and *pure
+A spec names *resources* (``embedding:…``, ``vector_store:…``) by key and *pure
 algorithms* (chunker, layout) by kind and parameters. It is stored in the
 catalog and is round-trippable to YAML.
 """
@@ -51,17 +51,26 @@ class LayoutSpec(_Spec):
 class DenseIndexSpec(_Spec):
     """A dense (vector) index derived from the collection's chunks.
 
+    The index is an operonx vector store (``vector_store:`` resource: FAISS,
+    pgvector, Qdrant), written with ``VectorUpsertOp`` and ``VectorDeleteOp``.
+    It holds chunk vectors under int64 keys (:func:`operonx_kb.model.ids.vector_id`)
+    and nothing else; the catalog records every key written
+    (``kb_index_entries``), so garbage collection and ``verify`` never need to
+    enumerate the index.
+
     Attributes:
-        name: Unique within the collection.
         embedder: Resource key of the embedder. A bare name means
             ``embedding:<name>``; a key with ``:`` is used as is.
-        index: Resource key of the index store (``kb_index:<name>``).
+        store: Resource key of the vector store. A bare name means
+            ``vector_store:<name>``.
+        collection: The vector store's collection (FAISS collection, pgvector
+            table, Qdrant collection); ``None`` uses the resource's default.
         batch_size: Texts per embedder call.
     """
 
-    name: str = "dense"
     embedder: str
-    index: str
+    store: str
+    collection: Optional[str] = None
     batch_size: int = Field(default=64, ge=1)
 
 
