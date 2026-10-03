@@ -28,7 +28,10 @@ kb_catalog:main:
   path: {root}/catalog.db
 kb_blob:main:
   root: {root}/blobs
-kb_index:dense: {{}}
+vector_store:kb:
+  api_type: faiss
+  metric: cosine
+  dim: 32
 fake_embedding:hash:
   dim: 32
 """
@@ -36,10 +39,11 @@ fake_embedding:hash:
 
 @pytest.fixture
 def hub(tmp_path):
-    """A fresh ResourceHub over a temporary catalog, blob store, memory index and HashEmbedder."""
+    """A fresh ResourceHub over a temporary catalog, blob store, in-memory FAISS index and HashEmbedder."""
+    from operonx.core.registry import ResourceHub
+
     import operonx_kb  # noqa: F401 — registers kb_* categories
     import operonx_kb.testing.fakes  # noqa: F401 — registers fake_embedding
-    from operonx.core.registry import ResourceHub
 
     path = tmp_path / "resources.yaml"
     path.write_text(RESOURCES.format(root=tmp_path / "kb"), encoding="utf-8")
@@ -51,7 +55,7 @@ def hub(tmp_path):
 
 @pytest.fixture
 def kb(hub):
-    """A KnowledgeBase with a 'docs' collection: structural chunker, HashEmbedder, memory index."""
+    """A KnowledgeBase with a 'docs' collection: structural chunker, HashEmbedder, FAISS index."""
     from operonx_kb import ChunkerSpec, CollectionSpec, DenseIndexSpec, KnowledgeBase
     from operonx_kb.testing import RecordingConsumer
 
@@ -62,9 +66,9 @@ def kb(hub):
         "docs",
         CollectionSpec(
             chunker=ChunkerSpec(max_tokens=120, min_tokens=16),
-            dense=DenseIndexSpec(embedder="fake_embedding:hash", index="kb_index:dense"),
+            dense=DenseIndexSpec(embedder="fake_embedding:hash", store="vector_store:kb"),
         ),
     )
     kb.embedder = hub.get("fake_embedding:hash")
-    kb.index = hub.get("kb_index:dense")
+    kb.store = hub.get("vector_store:kb")
     return kb

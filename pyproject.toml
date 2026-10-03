@@ -25,10 +25,22 @@ pdf = ["docling-parse>=7.22"]
 layout = ["docling-ibm-models>=3.4", "docling-parse>=7.22"]
 # Postgres catalog (phase K1c).
 postgres = ["psycopg[binary]>=3.1", "psycopg-pool>=3.2"]
-all = ["operonx-kb[pdf,postgres]"]
+all = ["operonx-kb[pdf,postgres,faiss]"]
+
+# Dense index backends: operonx's vector stores.
+faiss = ["operonx[faiss]"]
+pgvector = ["operonx[pgvector]"]
+qdrant = ["operonx[qdrant]"]
 
 [project.scripts]
 operonx-kb = "operonx_kb.cli:main"
+
+# operonx finds the KB's resource categories without importing the package
+# (the entry point's name is the category).
+[project.entry-points."operonx.resources"]
+kb_catalog = "operonx_kb.registry:register_catalog"
+kb_blob = "operonx_kb.registry:register_blob"
+fake_embedding = "operonx_kb.testing.fakes:register_fakes"
 
 [dependency-groups]
 dev = [
