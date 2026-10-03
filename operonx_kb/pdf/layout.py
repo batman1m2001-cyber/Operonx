@@ -189,6 +189,39 @@ def _crosses(x0: float, x1: float, gutters: List[Tuple[float, float]]) -> bool:
     return any(x0 < g0 + 1.0 and x1 > g1 - 1.0 for g0, g1 in gutters)
 
 
+def _contains(outer: BBox, inner: BBox) -> bool:
+    """Whether ``inner``'s centre lies in ``outer``."""
+    cx, cy = (inner[0] + inner[2]) / 2, (inner[1] + inner[3]) / 2
+    return outer[0] <= cx <= outer[2] and outer[1] <= cy <= outer[3]
+
+
+def _wrapped_prose(rows: List[List[str]]) -> bool:
+    """Whether a column of ``rows`` reads as text wrapped from line to line.
+
+    Narrow newspaper columns and side-by-side labels line up like a borderless
+    table. A table's cells stand alone; wrapped text breaks mid-sentence: a
+    line of three or more words without closing punctuation followed by one
+    starting in lower case, or a line ending in a hyphenated word. A column
+    where half the line pairs break like that is prose.
+    """
+    for c in range(max(len(r) for r in rows)):
+        cells = [r[c] for r in rows if c < len(r) and r[c]]
+        pairs = list(zip(cells, cells[1:]))
+        wraps = sum(
+            1
+            for a, b in pairs
+            if re.search(r"\w-$", a)
+            or (
+                len(a.split()) >= 3
+                and not a.endswith((".", ":", ";", "!", "?"))
+                and b[:1].islower()
+            )
+        )
+        if pairs and wraps >= 0.5 * len(pairs):
+            return True
+    return False
+
+
 def _cluster(values: List[float], tol: float) -> List[float]:
     out: List[float] = []
     for v in sorted(values):
@@ -416,6 +449,34 @@ class HeuristicLayout(LayoutModel):
                 rows.append(row)
         return rows
 
+    @staticmethod
+    def _grid_kind(
+        rows: List[List[str]],
+        bbox: BBox,
+        images: Sequence[BBox],
+        words: List[Word],
+        text_size: float,
+    ) -> Optional[str]:
+        """What a ruled grid holds: ``"table"``, ``"figure"``, or ``None`` for a frame.
+
+        A table has text in at least two rows and two columns; a box around a
+        label, a listing or a slide (one used column, or one row) only frames
+        its text. A grid drawn over pictures is a figure's panels: bitmaps cover
+        half of it, or its text is miniature (page thumbnails: under 0.6 of the
+        size of the page's other text).
+        """
+        used_cols = {c for row in rows for c, cell in enumerate(row) if cell}
+        area = max((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]), 1e-6)
+        covered = sum(
+            _overlap(b[0], b[2], bbox[0], bbox[2]) * _overlap(b[1], b[3], bbox[1], bbox[3])
+            for b in images
+        )
+        if covered >= 0.5 * area or statistics.median(w.size for w in words) < 0.6 * text_size:
+            return "figure"
+        if len(rows) < 2 or len(used_cols) < 2:
+            return None
+        return "table"
+
     def aligned_tables(self, segs: List[Segment]) -> List[Tuple[List[Segment], List[List[str]]]]:
         """Borderless tables: runs of lines whose segments share column intervals."""
         by_line: Dict[int, List[Segment]] = defaultdict(list)
@@ -464,10 +525,11 @@ class HeuristicLayout(LayoutModel):
                         )
                         row[k] = (row[k] + " " + s.text).strip()
                     rows.append(row)
-                tables.append((members, rows))
-                i = j
-            else:
-                i += 1
+                if not _wrapped_prose(rows):
+                    tables.append((members, rows))
+                    i = j
+                    continue
+            i += 1
         return tables
 
     # -- 4. columns and reading order ---------------------------------------------
@@ -600,6 +662,7 @@ class HeuristicLayout(LayoutModel):
             )
 
         items: List[Tuple[BBox, Any]] = []
+        figures: List[BBox] = []
         for bbox, xs, ys in self.ruled_tables(page):
             inside = [
                 s
@@ -609,8 +672,25 @@ class HeuristicLayout(LayoutModel):
             ]
             if not inside:
                 continue
+            words = [w for s in inside for w in s.words]
+            rows = self.fill_grid(words, xs, ys)
+            around = [s.size for s in flow if s not in inside]
+            text_size = statistics.median(around) if around else body
+            kind = self._grid_kind(rows, bbox, page.images, words, text_size)
+            if kind is None:
+                continue  # a frame around text: its words stay in the flow
             flow = [s for s in flow if s not in inside]
-            rows = self.fill_grid([w for s in inside for w in s.words], xs, ys)
+            if kind == "figure":
+                figures.append(bbox)
+                items.append(
+                    (
+                        bbox,
+                        LayoutBlock(
+                            kind="figure", page_no=page.page_no, regions=[(page.page_no, bbox)]
+                        ),
+                    )
+                )
+                continue
             items.append(
                 (
                     bbox,
@@ -623,6 +703,8 @@ class HeuristicLayout(LayoutModel):
                 )
             )
         for b in page.images:
+            if any(_contains(f, b) for f in figures):
+                continue  # a panel of a figure already found
             if (b[2] - b[0]) * (b[3] - b[1]) <= 0.5 * page.width * page.height:
                 items.append(
                     (
@@ -719,6 +801,8 @@ class HeuristicLayout(LayoutModel):
             return False
         if abs(s.size - last.size) > 0.1 * size:
             return False
+        if s.share("mono") >= 0.9 and last.share("mono") >= 0.9:
+            return True  # code: indentation and markers are content, not structure
         if (s.share("bold") >= 0.5) != (last.share("bold") >= 0.5):
             return False
         if split_list_marker(s.text) is not None and not self._full(last, block):

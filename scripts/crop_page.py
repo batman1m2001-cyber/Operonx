@@ -8,7 +8,6 @@ Coordinates are points, origin top-left. See operonx_kb.testing.layout_crops.
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -22,12 +21,12 @@ def main() -> int:
     args = ap.parse_args()
 
     from operonx_kb.pdf.backend import DoclingParseBackend
-    from operonx_kb.testing.layout_crops import crop_page
+    from operonx_kb.testing.layout_crops import crop_page, write_crop
 
     page = DoclingParseBackend().pages(args.pdf.read_bytes())[args.page - 1]
     crop = crop_page(page, args.box, f"{args.pdf.name} page {args.page}")
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(crop, ensure_ascii=False, indent=0) + "\n", encoding="utf-8")
+    write_crop(crop, args.out)
     print(
         f"{args.out}: {len(crop['words'])} words, {len(crop['rules'])} rules, {len(crop['images'])} images"
     )
