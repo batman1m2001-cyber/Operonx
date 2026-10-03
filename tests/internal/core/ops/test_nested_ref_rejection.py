@@ -264,9 +264,11 @@ class TestRefCombinedWithRef:
     def test_the_message_names_both_refs(self):
         with pytest.raises(TypeError) as e:
             with GraphOp(name="g"):
-                a, b = _left(), _right()
+                # named explicitly: auto-naming a tuple unpack differs by
+                # Python version (3.10 reads `_left`/`_right`, 3.11+ `b`)
+                a, b = _left(name="left"), _right(name="right")
                 sink(v=a["n"] + b["n"])
-        assert "_left.n" in str(e.value) and "_right.n" in str(e.value)
+        assert "g.left.n" in str(e.value) and "g.right.n" in str(e.value)
 
     def test_one_ref_with_literals_still_works(self):
         with GraphOp(name="g"):
