@@ -125,3 +125,24 @@ def test_chunker_fingerprint_and_spec():
     )
     assert isinstance(chunker_from_spec(ChunkerSpec(kind="recursive")), RecursiveChunker)
     assert heading_paths(_tree(RawBlock(kind="paragraph", text="x")))  # every element has a path
+
+
+def test_an_oversize_paragraph_never_shares_a_chunk_with_its_neighbours():
+    """Growing an oversize paragraph must not move the chunk boundaries around it."""
+    small = RawBlock(kind="paragraph", text="A short note.")
+    big = " ".join([SENT] * 8)
+
+    def chunks(text):
+        tree = _tree(
+            small,
+            RawBlock(kind="paragraph", text=text),
+            RawBlock(kind="paragraph", text="Closing remark."),
+        )
+        return _chunks(tree, StructuralChunker(max_tokens=60, min_tokens=0))[0]
+
+    before = chunks(big)
+    assert before[0].text == "A short note." and before[-1].text == "Closing remark."
+    after = chunks(big.replace("quick", "very quick", 1))
+    changed = {c.text for c in after} - {c.text for c in before}
+    assert {before[0].text, before[-1].text} <= {c.text for c in after}  # neighbours untouched
+    assert changed and all("Closing" not in t and "short note" not in t for t in changed)

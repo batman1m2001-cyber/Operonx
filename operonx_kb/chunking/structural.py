@@ -8,8 +8,10 @@ element tree:
 2. Consecutive units of the same section are packed greedily up to
    ``max_tokens`` (docling's ``merge_peers``); units of different sections
    never share a chunk, even when their headings read the same.
-3. A unit over the budget is split at sentence boundaries, and a sentence over
-   the budget at word boundaries.
+3. A unit over the budget is split at sentence boundaries (sentences packed
+   up to the budget), and a sentence over the budget at word boundaries. Its
+   pieces are chunks of their own, never packed with neighbouring units, so an
+   edit inside it does not move the boundaries of the chunks around it.
 4. Tables and figures are **evidence units** (arXiv 2604.00500): the table or
    figure, its caption, and the paragraph of the same section that refers to it
    by label ("Table 1"), as one chunk with non-contiguous spans. A table over
@@ -209,12 +211,24 @@ class StructuralChunker(Chunker):
             if scope != pending_scope:
                 flush()
                 pending_path, pending_scope = path, scope
-            for piece in self._pieces(canonical, e.span):
-                n = self.tokenizer.count(canonical[piece[0] : piece[1]])
-                if pending and pending_tokens + n > self.max_tokens:
+            pieces = self._pieces(canonical, e.span)
+            if len(pieces) > 1:
+                # An oversize element is chunked on its own: its pieces never share a
+                # chunk with a neighbour, so an edit inside it cannot shift the
+                # boundaries of the chunks around it (measured: docs/bench/k1c.md).
+                flush()
+                pending_path, pending_scope = path, scope
+                for piece in pieces:
+                    pending.append(([piece], [e.id]))
                     flush()
-                pending.append(([piece], [e.id]))
-                pending_tokens += n
+                    pending_path, pending_scope = path, scope
+                continue
+            n = self.tokenizer.count(canonical[e.span[0] : e.span[1]])
+            if pending and pending_tokens + n > self.max_tokens:
+                flush()
+                pending_path, pending_scope = path, scope
+            pending.append(([e.span], [e.id]))
+            pending_tokens += n
         flush()
         return self._merge_small(drafts, canonical)
 
