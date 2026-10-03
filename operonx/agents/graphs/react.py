@@ -50,7 +50,7 @@ from operonx.core.ops.transform.func_op import op
 from operonx.core.utils.auto_name import register_skip
 from operonx.reducers import add_messages
 
-__all__ = ["build_react_agent", "agent_result", "BUDGET_EXHAUSTED", "NOT_RUN"]
+__all__ = ["build_react_agent", "agent_result", "BUDGET_EXHAUSTED", "NOT_RUN", "DISPATCH_FAILED"]
 
 BUDGET_EXHAUSTED = (
     "You have used your entire turn budget ({max_turns} turns) and cannot "
@@ -69,6 +69,14 @@ NOT_RUN = {
         "dispatched. Do not assume it happened."
     ),
 }
+
+#: The tool result given to a call whose dispatch failed before the tool
+#: could answer (an op inside dispatch raised); the cause is in ``$errors``.
+DISPATCH_FAILED = (
+    "Error: the {name!r} call could not be run: dispatching it failed before "
+    "the tool was reached. Do not assume it happened; do not retry it, ask "
+    "how to proceed."
+)
 
 
 # The graph input is named `messages`, the same as the shared cell, so
@@ -119,21 +127,42 @@ def last_user_text(messages: Optional[list] = None) -> dict:
 
 
 @op
-def gather_tool_messages(tool_messages: Optional[list] = None) -> dict:
-    """Re-wrap collected tool results as one list for the reducer.
+def gather_tool_messages(
+    tool_messages: Optional[list] = None, tool_calls: Optional[list] = None
+) -> dict:
+    """One tool message per call the model asked for, as one list for the reducer.
 
     ``Ref.collect()`` buffers per-call frames, but each frame carries a
     single message *dict*. ``add_messages`` takes lists on both sides and
     raises on a dict, so writing the raw frames blows up the reducer —
     and because operonx records op errors into state rather than raising
     (§15.1 V5), the run then ends quietly with a partial conversation.
+
+    A call whose dispatch failed at the op level — not a tool that raised,
+    which `execute` answers itself, but something around it, such as an
+    approval sink that raises — produced no message. Its result is left
+    out of the collect, and the history would keep that call unanswered,
+    which every provider rejects on the next request. It is answered here
+    with an error instead, so the model is told and the history stays valid.
     """
     if tool_messages is None:
-        return {"messages": []}
-    if isinstance(tool_messages, dict):
+        collected = []
+    elif isinstance(tool_messages, dict):
         # Single call: collect() hands back the frame itself, not a list.
-        return {"messages": [tool_messages]}
-    return {"messages": [m for m in tool_messages if isinstance(m, dict)]}
+        collected = [tool_messages]
+    else:
+        collected = [m for m in tool_messages if isinstance(m, dict)]
+    answered = {m.get("tool_call_id") for m in collected}
+    for call in tool_calls or []:
+        if not isinstance(call, dict):
+            continue
+        call_id, name = call_identity(call)
+        if call_id not in answered:
+            answered.add(call_id)
+            collected.append(
+                tool_message(call_id, name, DISPATCH_FAILED.format(name=name), is_error=True)
+            )
+    return {"messages": collected}
 
 
 # There is deliberately no terminal `finish` op. The obvious design — an
@@ -365,10 +394,14 @@ def build_react_agent(
     def run_tools(tool_calls=None):
         """Every tool the model asked for, at once: one tool message per call.
         The collect is here, beside the stream it ends: it fires once the
-        last dispatch is done and hands the loop one list."""
+        last dispatch is done — even when every one of them failed, so a
+        call that produced no message is still answered — and hands the
+        loop one list."""
         calls = each_call_of(tool_calls=tool_calls)
         disp = dispatch_one(call=calls["call"].parallel(max=8))
-        gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
+        gathered = gather_tool_messages(
+            tool_messages=disp["tool_message"].collect(), tool_calls=tool_calls
+        )
         START >> calls >> disp >> gathered >> END
 
     @graph

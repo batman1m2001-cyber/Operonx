@@ -156,13 +156,11 @@ def test_an_explicit_show_keys_wins(runs):
     assert tuple(node.show_keys) == ("messages",)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="A call whose dispatch failed at the op level — not a tool exception, "
-    "which becomes an error tool message — has no tool message, and nothing "
-    "answers it: the next turn runs on a history with that call unanswered.",
-)
 async def test_a_turn_whose_every_dispatch_fails_still_continues(runs):
+    """An op inside dispatch failing — here the approval sink raises — is not
+    a tool that raises (which `execute` answers itself): that call has no
+    tool message at all. The turn still ends, the call is answered with an
+    error, and the model gets the next turn."""
     import asyncio
 
     from operonx.agents import ToolPolicy
@@ -191,3 +189,34 @@ async def test_a_turn_whose_every_dispatch_fails_still_continues(runs):
     answers = [m for m in result["messages"] if m.get("role") == "tool"]
     assert [m["tool_call_id"] for m in answers] == ["w0"]
     assert answers[0]["status"] == "error"
+
+
+async def test_one_failed_dispatch_among_several_is_answered_too(runs):
+    """Some calls answered by dispatch, one not: each still gets exactly one."""
+    import asyncio
+
+    from operonx.agents import ToolPolicy
+    from operonx.checkpoint import bind_interrupt_bus
+
+    @tool(name="wipe", description="Delete.", schema=NUM, destructive=True)
+    async def wipe(a: float) -> dict:
+        return {"gone": a}
+
+    turn = calls(0, 2) + [{"id": "w0", "name": "wipe", "args": {"a": 1}}]
+    built = build_react_agent(
+        call_model=scripted([turn]),
+        max_turns=4,
+        approval_timeout=5,
+        policy=ToolPolicy(destructive="ask"),
+    )(messages=None)
+    handle = Operon(built).start(inputs={"messages": [{"role": "user", "content": "go"}]})
+
+    def broken_sink(event):
+        raise RuntimeError("the approval channel is down")
+
+    bind_interrupt_bus(handle.state, sink=broken_sink)
+    await asyncio.wait_for(handle.result(), timeout=30)
+    result = agent_result(handle.state, built)
+    answered = [m["tool_call_id"] for m in result["messages"] if m.get("role") == "tool"]
+    assert answered == ["t0_0", "t0_1", "w0"]
+    assert result["final"]["content"] == "done"

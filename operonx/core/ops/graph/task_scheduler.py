@@ -130,6 +130,28 @@ def _edge_policy(graph, src: str, dst: str) -> tuple:
     return False, 1, None
 
 
+def _collected_vars(graph, src: str, dst: str) -> tuple:
+    """The variables of src that dst reads through a ``.collect()`` Ref."""
+    dst_op = graph._ops.get(dst)
+    return tuple(
+        ref.var
+        for param in getattr(dst_op, "inputs", {}).values()
+        if isinstance(ref := getattr(param, "value", None), Ref)
+        and ref._stream_collect
+        and getattr(ref.raw_source, "name", None) == src
+    )
+
+
+def _mints_contexts(op) -> bool:
+    """Does op emit at contexts of its own: a generator, or a graph with one inside?"""
+    if op is None:
+        return False
+    if getattr(op, "is_gen", False):
+        return True
+    children = getattr(op, "_ops", None)
+    return bool(children) and any(_mints_contexts(c) for c in children.values())
+
+
 class Scheduler:
     """Created once at graph.build(). Shared across all executions.
     All per-execution mutable state lives as locals inside run().
@@ -155,6 +177,7 @@ class Scheduler:
         "_loop_ops",
         "_loop_watch",
         "_collect_gens",
+        "_collect_groups",
     )
 
     def __init__(self, graph):
@@ -225,6 +248,32 @@ class Scheduler:
                 if seen & deferred_srcs:
                     gens.add(name)
             self._collect_gens = frozenset(gens)
+
+        # gen -> ((src, dst), ...): the deferred collect edges whose
+        # items are this generator's own — reached without passing another
+        # op that mints contexts of its own (a nested generator's items are
+        # its stream, not this one's). The scheduler opens these groups when
+        # the generator mints a stream, so a stream whose every item stopped
+        # short of the collect (failed, or took another branch) still flushes,
+        # with empty lists, rather than leaving the consumer — and everything
+        # after it — waiting for an item that will never come.
+        self._collect_groups: Dict[str, tuple] = {}
+        for name in self._collect_gens:
+            groups = []
+            seen, stack = {name}, [name]
+            while stack:
+                node = stack.pop()
+                for link in graph._adj.get(node, ()):
+                    dst = link.dst
+                    collect, _limit = self._route_policy.get((node, dst), (False, 1))
+                    if collect and node in deferred_srcs:
+                        groups.append((node, dst))
+                    if dst in seen or _mints_contexts(graph._ops.get(dst)):
+                        continue
+                    seen.add(dst)
+                    stack.append(dst)
+            if groups:
+                self._collect_groups[name] = tuple(groups)
 
         # When THIS graph is a synthetic loop: the ops whose frames decide
         # how an iteration ended. op -> (back-edge targets, exit targets,
@@ -434,6 +483,7 @@ class Scheduler:
         # stream_ctx -> the generator that minted its items, for the streams
         # of `collect_gens` only.
         collect_gens = self._collect_gens
+        collect_groups = self._collect_groups
         stream_minter: Dict[tuple, str] = {}
 
         # Ordered list of item contexts produced by generators.
@@ -760,7 +810,16 @@ class Scheduler:
                 item_ctxs.append(ctx)
                 rc = ready[ctx] = dict(g._stream_initial_ready.get(src, g._initial_ready))
                 if collect_gens and src in collect_gens:
-                    stream_minter.setdefault(ctx[:-1], src)
+                    stream_ctx = ctx[:-1]
+                    if stream_minter.setdefault(stream_ctx, src) == src:
+                        # Open this stream's collect groups now, not when an
+                        # item first reaches the collect: if none ever does,
+                        # the group still flushes when the stream ends.
+                        for gsrc, gdst in collect_groups.get(src, ()):
+                            key = (stream_ctx, gsrc, gdst)
+                            if key not in collect_bufs:
+                                collect_bufs[key] = []
+                                deferred.add(key)
 
             # Check for branch target — only route to the selected branch.
             # A branch that matched nothing (no `.else_()`) reports None:
@@ -860,6 +919,10 @@ class Scheduler:
             for _, r in buf:
                 for k, v in r.items():
                     merged.setdefault(k, []).append(v)
+            if not buf:
+                # No item reached the collect: what it reads is an empty
+                # list, not a missing value (which would bind the default).
+                merged = {var: [] for var in _collected_vars(g, src, dst)}
             collect_ctx = stream_ctx + ("__collect__",)
             # Listed once and seeded here, as `_advance` does for a new item.
             # Left unseeded, the consumer's frame at this context looked like

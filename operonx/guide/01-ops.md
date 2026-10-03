@@ -278,6 +278,9 @@ asyncio.run(main())
   The node is named after its variable (`research`) and shows `final`; one
   turn inside it is three zones — `context` (compaction, memory, skills,
   the prompt), `model`, `tools` (one tool message per call) — then back.
+  Every call is answered: one whose dispatch failed before the tool ran
+  (an approval sink that raises, say) gets an error tool message, the
+  cause goes to `$errors`, and the model takes the next turn.
 - On the budget's last turn `make_llm_caller` sends `tool_choice="none"`,
   so the model must answer in text. A hand-written `call_model` gets the
   same signal by declaring `last_turn: bool = False`.

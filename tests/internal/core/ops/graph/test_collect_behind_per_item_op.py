@@ -134,6 +134,30 @@ async def test_an_item_that_fails_before_the_collect_is_left_out():
     assert JOINS == [["A!", "C!"]]
 
 
+async def test_a_stream_whose_every_item_failed_collects_an_empty_list():
+    """Left out one by one, every item: the collect still fires, once.
+
+    The group was created by the first item to *reach* the collect, so
+    with none reaching it there was nothing to flush and the consumer
+    never ran — nor did anything after it, with no error of its own.
+    """
+    out = await _run(two_hops, text="bad bad")
+    assert JOINS == [[]]
+    assert out["line"] == ""
+
+
+async def test_a_generator_that_yields_nothing_has_no_stream_to_collect():
+    """No item, no stream: unchanged, and what the guide says."""
+    await _run(two_hops, text="")
+    assert JOINS == []
+
+
+async def test_an_empty_list_per_inner_stream_whose_items_all_failed():
+    JOINS.clear()
+    await Operon(nested_failing, params={"n": None}).run(inputs={"n": 3})
+    assert sorted(JOINS) == [[], ["G0A!", "G0B!"], ["G2A!", "G2B!"]]
+
+
 # ── a nested stream: one list per run of the inner generator ────────────
 
 
@@ -165,6 +189,22 @@ def nested_behind_per_item(n):
     s = shout(word=sp["word"])
     j = join(words=s["loud"].collect())
     START >> gr >> sp >> s >> j >> END
+
+
+@op
+def bad_middle(n: int):
+    for g in range(n):
+        yield {"text": "bad bad" if g == 1 else f"g{g}a g{g}b"}
+
+
+@graph
+def nested_failing(n):
+    gr = bad_middle(n=n)
+    sp = split(text=gr["text"].parallel())
+    s = shout(word=sp["word"])
+    e = exclaim(loud=s["loud"])
+    j = join(words=e["loud"].collect())
+    START >> gr >> sp >> s >> e >> j >> END
 
 
 async def test_nested_streams_collect_per_inner_stream():

@@ -22,6 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twice, inside a loop or not. Two collects off one stream got it three
   times. The ReAct loop's `run_tools` now gathers its tool messages with a
   `.collect()` inside the subgraph, beside the stream it ends.
+- **A `.collect()` over a stream whose every item failed runs, with `[]`.**
+  A failed item is left out of the list, but the collect's group was opened
+  by the first item to *reach* it, so with none reaching it the consumer
+  never ran, and nothing after it did either, with no error of its own.
+  The group now opens when the generator mints the stream, so the consumer
+  runs once, with an empty list, per stream (per inner stream when nested).
+  A generator that yields nothing still has no stream to collect.
+- **A turn whose every tool call fails at the op level no longer ends the
+  agent with no answer.** A call whose dispatch failed before the tool ran,
+  such as an approval sink that raises, produced no tool message. Every
+  call failing ended the loop after that turn, and one failing among
+  several left that call unanswered in the history, which a real provider
+  rejects on the next request. `run_tools` now answers each call that has
+  no tool message with an error (`DISPATCH_FAILED`), the cause stays in
+  `$errors`, and the model takes the next turn.
 
 ## [1.12.1] - 2026-10-02
 
