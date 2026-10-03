@@ -816,10 +816,10 @@ class LLMOp(BaseOp):
         not send at all (Claude 4.6 rejects temperature+top_p together).
         """
         extras = getattr(getattr(llm, "config", None), "generation_extras", None)
-        # isinstance rather than truthiness: a config need not be a
-        # YamlModel — the hub stores a raw dict for an unregistered
-        # category — and an attribute that answers anything at all would
-        # otherwise reach `.items()` and fail there instead of here.
+        # isinstance rather than truthiness: the object behind `config` is
+        # whatever the resource handed over (a typed model, a plain mapping,
+        # a test double), and an attribute that answers anything at all
+        # would otherwise reach `.items()` and fail there instead of here.
         if not isinstance(extras, dict) or not extras:
             return llm_params
         per_call = dict(llm_params)
