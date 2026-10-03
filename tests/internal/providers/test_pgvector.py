@@ -299,3 +299,44 @@ class TestUpsert:
         assert cap.batch[0]["tenant"] == "acme"
         assert cap.batch[0]["id"] == 1
         assert cap.batch[0]["embedding"] == "[1.0]"
+
+
+# =============================================================================
+# Delete — SQL shape (the behaviour itself is in test_vector_store_contract.py,
+# which runs against a real Postgres when OPERONX_TEST_PG_DSN is set)
+# =============================================================================
+
+
+class TestDeleteSQL:
+    @pytest.mark.asyncio
+    async def test_ids_are_one_bound_array(self):
+        store = _store()
+        cap = _Captured().install(store)
+        await store.delete(ids=[3, 1])
+        assert cap.sql == "DELETE FROM docs_vec WHERE id = ANY(%(ids)s)"
+        assert cap.params == {"ids": [3, 1]}
+
+    @pytest.mark.asyncio
+    async def test_filter_uses_the_search_dialect(self):
+        store = _store()
+        cap = _Captured().install(store)
+        await store.delete(filter={"tenant": "acme"})
+        assert cap.sql == "DELETE FROM docs_vec WHERE tenant = %(f_tenant)s"
+        assert cap.params == {"f_tenant": "acme"}
+
+    @pytest.mark.asyncio
+    async def test_collection_overrides_table_and_is_validated(self):
+        store = _store()
+        cap = _Captured().install(store)
+        await store.delete(ids=[1], collection="other_vec")
+        assert cap.sql.startswith("DELETE FROM other_vec ")
+        with pytest.raises(ValueError, match="Invalid collection identifier"):
+            await store.delete(ids=[1], collection="x; DROP TABLE y")
+
+    @pytest.mark.asyncio
+    async def test_a_string_filter_is_refused_before_any_sql(self):
+        store = _store()
+        cap = _Captured().install(store)
+        with pytest.raises(ValueError, match="must be a dict, not a string"):
+            await store.delete(filter="tenant = 'acme'")
+        assert cap.sql is None

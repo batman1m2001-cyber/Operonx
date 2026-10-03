@@ -5,7 +5,9 @@ from operonx.core.utils import YamlModel
 
 
 class RerankingType(Enum):
-    COHERE = "cohere"
+    """Supported reranking backends. Each one has a branch in
+    :func:`~operonx.providers.rerankers.factory.create_reranking`."""
+
     TEXT_EMBEDDING_INFERENCE = "tei"
     VLLM = "vllm"
     PINECONE = "pinecone"

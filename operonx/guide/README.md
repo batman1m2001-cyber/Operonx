@@ -50,7 +50,14 @@ from operonx.app import Application, Eval, Service, asgi, env, http, schedule, w
 from operonx.app.jobs import Job, Runbook
 from operonx.app.serve import RunRequest, egress, ingress
 from operonx.core.ops import if_
-from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
+from operonx.providers.ops import (
+    EmbeddingOp,
+    LLMOp,
+    RerankOp,
+    VectorDeleteOp,
+    VectorSearchOp,
+    VectorUpsertOp,
+)
 ```
 
 ## The rules that matter most

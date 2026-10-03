@@ -41,13 +41,16 @@ alerts](../guide/11-runs.md).
 
 ## Media
 
+::: operonx.core.media_store
+    options:
+      members: false
+::: operonx.core.media_store.detect_media
+::: operonx.core.media_store.MediaInfo
+::: operonx.core.media_store.MediaStore
+::: operonx.core.media_store.LocalMediaStore
 ::: operonx.telemetry.media
     options:
       members: false
-::: operonx.telemetry.media.detect_media
-::: operonx.telemetry.media.MediaInfo
-::: operonx.telemetry.media.MediaStore
-::: operonx.telemetry.media.LocalMediaStore
 ::: operonx.telemetry.media.offload_to_store
 ::: operonx.telemetry.media.json_default
 

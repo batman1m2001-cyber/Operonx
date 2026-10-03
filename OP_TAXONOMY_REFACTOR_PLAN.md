@@ -519,6 +519,14 @@ Add `VectorUpsertOp` when agent-memory concretely needs it — no rework,
 because the backend contract is already right. Consistent with the
 "no speculation" discipline in §3.
 
+*Shipped after 1.14.0:* the trigger came from the knowledge base, which
+keeps an index in step with its catalog and so needs deletes as much as
+writes. `BaseVectorStore.delete(ids=None, filter=None, collection=None)`
+joined the ABC (FAISS by id, pgvector and Qdrant by id or native filter),
+and `VectorUpsertOp` / `VectorDeleteOp` ship with it.
+`tests/internal/providers/test_vector_store_contract.py` runs one suite
+against every backend.
+
 ### 5.8 · `DocFetchOp` — the store of record
 
 §5.1 makes hydration unconditional, which puts it on the critical path
@@ -938,7 +946,9 @@ The refactor is clean but not free.
 5. **Pre-existing bug not fixed by this plan:**
    `providers/rerankers/config.py` declares `RerankingType.COHERE` but
    `create_reranking()` has no COHERE branch (dead enum entry). Flag
-   for follow-up PR; out of scope here.
+   for follow-up PR; out of scope here. *(Removed after 1.14.0: a type
+   the config accepts must have a factory branch, and
+   `tests/internal/providers/test_reranker_types.py` checks both lists.)*
 
 6. **Decisions now settled (were open in earlier drafts):**
    - **Two-store model** — index carries vector + id + filterable

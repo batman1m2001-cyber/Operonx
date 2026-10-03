@@ -121,7 +121,7 @@ warn for the other nine at bootstrap, even if the workflow only uses
 OpenAI. That's the cost of early signal; users who don't want it can
 scope their `resources.yaml` or filter the warning.
 
-## Errors — five disambiguated branches
+## Errors — seven disambiguated branches
 
 Every error message names the fix. The hub tracks enough state for
 `get()` to tell which branch fired.
@@ -133,6 +133,39 @@ Every error message names the fix. The hub tracks enough state for
 | 3 | File loaded, key absent | `Resource 'llm:gpt-4o' not found in <source_path>.\nAvailable: <hub.keys()>.` | `hub.get` |
 | 4 | Key present, `${VAR}` interpolation failed at resolve time | `Resource 'llm:gpt-4o': environment variable OPENAI_API_KEY is unset.\nLoaded from: <source_path>. .env searched: <list>.` | `YamlConfigStorage.load_one` (wrapped as `EnvVarUnsetError`) |
 | 5 | Key present, env OK, factory raised | `Resource 'llm:gpt-4o' failed to initialize: <inner error>` | `hub.get` |
+| 6 | Key present, no package registers its category (or the `type:` it names) | `Resource 'kb_catalog:main' in <source_path>: no package registers category 'kb_catalog'. …` (`ResourceCategoryError`, a `KeyError`) | `hub.get` / `hub.get_config` |
+| 7 | Key present, config does not parse as its class | `Resource 'llm:x' in <source_path> has an invalid config for LLMConfig: <validation error>` | `hub.get` / `hub.get_config` |
+
+### Where a category's config class comes from
+
+A key is `<category>:<name>`, and the category picks the config class the
+YAML parses into. On first use of a category nobody has registered yet,
+the hub looks in two places, then raises branch (6):
+
+1. **operonx's own categories** — it imports the modules that register
+   them (`operonx.providers.registry`, `operonx.telemetry`,
+   `operonx.telemetry.consumers`, `operonx.telemetry.runs`,
+   `operonx.app.jobs`), so `run_store:` or `source:` resolves in a script
+   that has not imported those.
+2. **Installed packages** — an `operonx.resources` entry point named after
+   the category, whose value is a function taking no arguments that calls
+   `REGISTRY.register`. Only that one entry point is loaded:
+
+   ```toml
+   [project.entry-points."operonx.resources"]
+   kb_catalog = "operonx_kb.registry:register"
+   blob = "operonx_kb.registry:register"
+   ```
+
+   An entry point that fails to load, is not a function, runs without
+   registering its category, or shares its name with another package's
+   raises `ResourceCategoryError` naming it.
+
+Until 1.14 an unknown category parsed to the raw YAML dict and was cached,
+so a `REGISTRY.register` that ran later never took effect. Nothing
+unparsed is cached now. `has()`, `declares()` and `keys()` answer from
+storage without parsing, so asking "is it declared?" never fails and never
+fixes a key's class early.
 
 ### State the hub tracks
 

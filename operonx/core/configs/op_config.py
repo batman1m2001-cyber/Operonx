@@ -10,6 +10,8 @@ OpType = Literal[
     "embedding",
     "rerank",
     "vector-search",
+    "vector-upsert",
+    "vector-delete",
     "doc-fetch",
     # Node điều khiển luồng
     "branch",
@@ -39,6 +41,10 @@ Removed in 1.2.0:
         ``vector-search`` and ``doc-fetch``.
     ``onnx`` / ``triton`` — assigned by the ops deleted in 1.2.0 (they
         were never in this Literal, which is the drift this cleanup ends).
+
+Added after 1.14.0:
+    ``vector-upsert`` / ``vector-delete`` — ``VectorUpsertOp`` /
+        ``VectorDeleteOp``, the write half of ``vector-search``.
 
 Added in 1.2.0:
     ``interrupt`` / ``emit`` — set by ``InterruptOp`` / ``EmitOp`` since

@@ -14,7 +14,13 @@ Extension from other packages:
     from operonx.core.registry import REGISTRY
     from my_package.configs import MyConfig
 
-    REGISTRY.register(MyConfig, lambda c: MyBackend(c))
+    def register():
+        REGISTRY.register(MyConfig, lambda c: MyBackend(c))
+
+    # and in the package's pyproject.toml, so the hub finds it without
+    # anyone importing my_package first:
+    #   [project.entry-points."operonx.resources"]
+    #   custom = "my_package.registry:register"
 
 Config class requirements:
     class MyConfig(YamlModel):
@@ -30,6 +36,7 @@ from .config_registry import (
 from .errors import (
     BOOTSTRAP_ENV_PATHS,
     EnvVarUnsetError,
+    ResourceCategoryError,
     ResourceHubWarning,
     ResourceUnreachable,
 )
@@ -56,6 +63,7 @@ __all__ = [
     "CacheEntry",
     "HealthCheckResult",
     "ResourceUnreachable",
+    "ResourceCategoryError",
     # Errors and warnings
     "ResourceHubWarning",
     "EnvVarUnsetError",

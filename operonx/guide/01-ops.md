@@ -332,10 +332,62 @@ All take `resource=` (a `resources.yaml` key) and are built with `.of(...)`:
 |---|---|---|
 | `EmbeddingOp` | `texts` | `embeddings` |
 | `RerankOp` | `query`, `documents`, `top_k`, `threshold` | `reranks` |
-| `VectorSearchOp` | `query_vector`, `top_k`, `filter`, `collection` | `ids`, `scores`, `metadata` |
+| `VectorSearchOp` | `query_vector`, `top_k`, `filter`, `collection` | `ids`, `scores`, `metadata`, `empty_index` |
+| `VectorUpsertOp` | `ids`, `vectors`, `metadata`, `collection` | `upserted` |
+| `VectorDeleteOp` | `ids` or `filter`, `collection` | `deleted` |
 | `DocFetchOp` | `ids`, `collection`, `fields` | `rows`, `missing` |
 
-Import them from `operonx.providers.ops`.
+Import them from `operonx.providers.ops`. A vector store is an index
+derived from your store of record: write to it when a document arrives,
+delete from it when one goes.
+
+```yaml file=resources.yaml
+vector_store:docs:
+  api_type: faiss   # in memory, no server; pgvector and qdrant take the same ops
+  metric: ip
+  dim: 3
+```
+
+```python
+import asyncio
+
+import operonx
+from operonx import END, START, Operon, graph
+from operonx.providers.ops import VectorDeleteOp, VectorSearchOp, VectorUpsertOp
+
+
+@graph
+def sync(ids, vectors, removed, query):
+    write = VectorUpsertOp.of(resource="docs", ids=ids, vectors=vectors)
+    drop = VectorDeleteOp.of(resource="docs", ids=removed)
+    hits = VectorSearchOp.of(resource="docs", query_vector=query, top_k=2)
+    START >> write >> drop >> hits >> END
+
+
+async def main():
+    operonx.bootstrap(resources="resources.yaml")
+    params = {"ids": None, "vectors": None, "removed": None, "query": None}
+    out = await Operon(sync, params=params).run(
+        inputs={
+            "ids": [1, 2, 3],
+            "vectors": [[1, 0, 0], [0.9, 0.1, 0], [0, 1, 0]],
+            "removed": [2],
+            "query": [1, 0, 0],
+        }
+    )
+    assert out["ids"] == [1, 3]  # 2 was deleted
+    assert out["empty_index"] is False
+
+
+asyncio.run(main())
+```
+
+- `VectorDeleteOp` takes `ids=` **or** `filter=`. Neither, both, or an
+  empty filter raise: none of them means "delete everything". `ids=[]`
+  deletes nothing, and a missing id is not an error.
+- `deleted` is `None` on Qdrant, which does not report a count.
+- A search on an index that holds no vectors logs a WARNING and sets
+  `empty_index`; under a `filter`, no hits is just the answer.
 
 ## Doors — how a served graph meets its caller
 

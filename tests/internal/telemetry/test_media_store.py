@@ -23,12 +23,8 @@ import zlib
 import pytest
 
 from operonx.core.media import Media
-from operonx.telemetry.media import (
-    OCTET,
-    LocalMediaStore,
-    detect_media,
-    offload_to_store,
-)
+from operonx.core.media_store import OCTET, LocalMediaStore, detect_media
+from operonx.telemetry.media import offload_to_store
 
 # -- samples ---------------------------------------------------------------------
 
@@ -309,3 +305,31 @@ def test_json_default_numpy(tmp_path):
     )
     assert out["big"]["mime"] == "application/x-npy"
     assert out["small"] == [0, 1, 2] and out["x"] == 1.5
+
+
+# -- where the store lives -----------------------------------------------------------
+
+
+def test_the_store_and_the_detector_live_outside_telemetry():
+    """A content-addressed blob store is not telemetry: a knowledge base
+    keeps page images in one. Importing it must not load the trace stack."""
+    import subprocess
+    import sys
+
+    script = (
+        "import sys\n"
+        "from operonx.core.media_store import LocalMediaStore, MediaInfo, MediaStore, detect_media\n"
+        "print(sorted(m for m in sys.modules if m.startswith('operonx.telemetry')))\n"
+    )
+    out = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr[-800:]
+    assert out.stdout.strip() == "[]"
+
+
+def test_the_telemetry_path_still_exports_the_same_objects():
+    import operonx.core.media_store as neutral
+    import operonx.telemetry.media as old
+
+    for name in ("OCTET", "MediaInfo", "MediaStore", "LocalMediaStore", "detect_media"):
+        assert getattr(old, name) is getattr(neutral, name), name
+        assert name in old.__all__

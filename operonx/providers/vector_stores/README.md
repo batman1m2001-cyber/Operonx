@@ -1,6 +1,7 @@
 # Vector stores
 
-Backends for `VectorSearchOp`. A vector store here is a **derived index**:
+Backends for `VectorSearchOp`, `VectorUpsertOp` and `VectorDeleteOp`.
+A vector store here is a **derived index**:
 vectors, ids, and small filterable metadata. It never holds document
 content — that lives in your store of record and is hydrated by
 `DocFetchOp`.
@@ -111,6 +112,39 @@ filter = 'tenant == "acme" && created_at >= 1700000000'  # Milvus
 filter = {"$and": [{"tenant": {"$eq": "acme"}}]}  # Chroma
 ```
 
+## Writes and deletes
+
+`upsert(ids, vectors, metadata=None, collection=None)` inserts or
+replaces by id. `delete(ids=None, filter=None, collection=None)` removes
+by id **or** by filter — the same native dialect `search` takes:
+
+```python
+await store.delete(ids=[3, 7])                                   # any backend
+await store.delete(filter={"tenant": "acme"})                    # pgvector
+await store.delete(filter={"must": [{"key": "tenant", "match": {"value": "acme"}}]})  # Qdrant
+```
+
+Neither, both, or an empty filter raise: each could otherwise read as
+"delete everything". `ids=[]` deletes nothing, and ids the index does not
+hold are not an error, so a cleanup pass can simply run again. It returns
+how many vectors went, or `None` on Qdrant, which does not say.
+
+FAISS deletes by id only, and only from an id-mapped index
+(`IndexIDMap`/`IndexIDMap2`, which `dim=` builds, or an IVF index). On a
+bare flat index the ids are row positions, and removing one renumbers the
+rest, so it raises instead. Deletes change the in-memory index; call
+`save()` to persist.
+
+In a graph these are `VectorUpsertOp` and `VectorDeleteOp`.
+
+## Searching an empty index
+
+`VectorSearchOp` sets `empty_index=True` and logs a WARNING when an
+unfiltered search finds nothing: a nearest-neighbour index returns hits
+whenever it holds any vector, so none means nothing was ever written (or
+everything was deleted). Under a filter, no hits is a real answer and is
+not flagged.
+
 ## Scores
 
 Ordering is always best-match first. The score follows the metric, and is
@@ -133,7 +167,8 @@ but opaque to the planner and silently drops the HNSW index.
 1. Subclass `BaseVectorStore` in `providers/vector_stores/<name>.py`.
    Set `bound` (`"cpu"` for in-process, `"io"` for networked).
 2. Implement `search()` → `(ids, scores, metadata)`, index-aligned and
-   best-first. Implement `upsert()`.
+   best-first. Implement `upsert()` and `_delete()` (`delete()` itself
+   lives on the base, which checks its arguments first).
 3. Validate your filter dialect and raise on unknown shapes. Never
    ignore a filter you don't understand.
 4. Add the enum entry to `config.py` and a lazy-import branch to

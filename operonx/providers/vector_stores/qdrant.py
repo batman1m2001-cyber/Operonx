@@ -176,6 +176,8 @@ class QdrantVectorStore(BaseVectorStore):
             raise ValueError(f"ids/vectors length mismatch: {len(ids)} vs {len(vectors)}")
         if metadata is not None and len(metadata) != len(ids):
             raise ValueError(f"ids/metadata length mismatch: {len(ids)} vs {len(metadata)}")
+        if not ids:
+            return  # an empty batch writes nothing; the server answers 400 to one
 
         declared = self.config.metadata_columns
         points = []
@@ -201,3 +203,28 @@ class QdrantVectorStore(BaseVectorStore):
             collection_name=self._collection(collection),
             points=points,
         )
+
+    async def _delete(
+        self,
+        ids: Optional[List[Any]],
+        filter: Optional[Union[Dict[str, Any], str]],
+        collection: Optional[str],
+    ) -> None:
+        """Delete points by id, or by a condition-tree filter.
+
+        ``wait=True``: the call returns once the points are gone, so a
+        search right after it does not find them. Qdrant does not say how
+        many points it removed, so this returns ``None``.
+        """
+        from qdrant_client import models
+
+        if ids is not None:
+            selector = models.PointIdsList(points=ids)
+        else:
+            selector = models.FilterSelector(filter=self._to_filter(filter))
+        await self._client.delete(
+            collection_name=self._collection(collection),
+            points_selector=selector,
+            wait=True,
+        )
+        return None
