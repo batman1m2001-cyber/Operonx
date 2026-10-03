@@ -52,7 +52,6 @@ from operonx.core.tracing.pipeline import TracePipeline  # noqa: E402
 from operonx.telemetry import LangfuseTracer  # noqa: E402
 from operonx.telemetry.exporters import LangfuseTreeExporter  # noqa: E402
 
-
 # =============================================================================
 # Output
 # =============================================================================
