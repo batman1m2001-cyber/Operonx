@@ -9,6 +9,13 @@ most have a table, built from a seeded random generator so the same seed gives
 the same bytes. :func:`long_pdf` makes the 100-page document of the
 one-paragraph-edit gate. Nothing here is committed: the tests generate the
 corpus into a temporary directory.
+
+Each Vietnamese document also states three facts of its own unit (a team and
+a region, unique per document): :func:`vi_facts`. They come from a generator
+seeded by the document's index, so the other documents are unchanged, and
+:func:`vi_cases` derives the K2 Vietnamese eval set from them mechanically: the
+question of a fact's template, the fact sentence as the quote-anchored label,
+the fact's value as the answer.
 """
 
 from __future__ import annotations
@@ -90,6 +97,89 @@ VI = [
     "Chính sách này áp dụng cho toàn bộ nhân viên chính thức của công ty.",
     "Chi phí phát sinh được hoàn trả khi có hóa đơn hợp lệ.",
 ]
+VI_TEAMS = {
+    "HR": "Nhân sự",
+    "IT": "Công nghệ thông tin",
+    "Finance": "Tài chính",
+    "Operations": "Vận hành",
+    "Legal": "Pháp chế",
+    "Sales": "Kinh doanh",
+    "Support": "Chăm sóc khách hàng",
+    "Engineering": "Kỹ thuật",
+}
+VI_REGIONS = ["miền Bắc", "miền Trung", "miền Nam", "Tây Nguyên", "đồng bằng sông Cửu Long"]
+_MONEY = ["150.000", "200.000", "250.000", "300.000", "350.000", "400.000", "500.000"]
+_BIG = ["5 triệu", "10 triệu", "20 triệu", "50 triệu", "100 triệu"]
+_APPS = ["Lịch Chung", "Bàn Làm Việc", "Hẹn Gặp", "Phòng Xanh", "Đặt Chỗ"]
+_CITIES = ["Hà Nội", "Đà Nẵng", "Thành phố Hồ Chí Minh", "Cần Thơ", "Hải Phòng"]
+#: (name, statement, question, answer, slots): ``{u}`` is the unit, ``{U}`` the unit
+#: capitalised; each slot draws from its list.
+VI_FACTS = [
+    ("nghi_phep", "Nhân viên {u} được nghỉ phép năm {n} ngày làm việc.",
+     "Người làm việc ở {u} có bao nhiêu ngày phép mỗi năm?", "{n} ngày làm việc",
+     {"n": [str(x) for x in range(12, 21)]}),
+    ("taxi", "Chi phí đi taxi khi công tác của {u} được hoàn tối đa {m} đồng mỗi chuyến.",
+     "{U} được hoàn bao nhiêu tiền cho một chuyến taxi đi công tác?", "{m} đồng", {"m": _MONEY}),
+    ("mat_khau", "Mật khẩu hệ thống của {u} phải được thay đổi sau mỗi {n} ngày.",
+     "Bao lâu thì {u} phải đổi mật khẩu hệ thống một lần?", "{n} ngày",
+     {"n": ["30", "45", "60", "90", "120"]}),
+    ("mua_hang", "Mọi đơn mua hàng của {u} có giá trị trên {b} đồng cần giám đốc khối phê duyệt.",
+     "Đơn mua hàng của {u} từ mức giá nào thì phải có giám đốc khối duyệt?", "{b} đồng",
+     {"b": _BIG}),
+    ("phong_hop", "Phòng họp của {u} nằm ở tầng {f} và được đặt qua ứng dụng {a}.",
+     "Muốn đặt phòng họp của {u} thì dùng ứng dụng nào?", "ứng dụng {a}",
+     {"f": [str(x) for x in range(2, 16)], "a": _APPS}),
+    ("ca_truc", "Ca trực hỗ trợ của {u} bắt đầu lúc {h} giờ sáng và kết thúc lúc {e} giờ tối.",
+     "Ca trực hỗ trợ ở {u} kéo dài từ mấy giờ đến mấy giờ?", "từ {h} giờ sáng đến {e} giờ tối",
+     {"h": ["6", "7", "8"], "e": ["8", "9", "10"]}),
+    ("may_tinh", "Nhân viên mới của {u} nhận máy tính xách tay trong vòng {n} ngày kể từ ngày đi làm.",
+     "Sau bao lâu thì người mới vào {u} được cấp máy tính?", "{n} ngày",
+     {"n": ["2", "3", "5", "7"]}),
+    ("hop_dong", "Hợp đồng của {u} có giá trị trên {b} đồng phải được phòng pháp chế rà soát trong {n} ngày.",
+     "Phòng pháp chế cần bao nhiêu ngày để rà soát hợp đồng lớn của {u}?", "{n} ngày",
+     {"b": _BIG, "n": ["3", "5", "7", "10"]}),
+    ("an_trua", "Phụ cấp ăn trưa của {u} là {m} đồng cho mỗi ngày làm việc tại văn phòng.",
+     "Mỗi ngày đi làm ở văn phòng, {u} được phụ cấp bữa trưa bao nhiêu?", "{m} đồng",
+     {"m": ["30.000", "35.000", "40.000", "45.000", "50.000"]}),
+    ("su_co", "Khi có sự cố bảo mật, nhân viên {u} phải gọi số máy lẻ {x} trong vòng {n} phút.",
+     "Nhân viên {u} gặp sự cố bảo mật thì gọi số máy lẻ nào?", "số máy lẻ {x}",
+     {"x": [str(x) for x in range(1100, 1200, 7)], "n": ["10", "15", "30"]}),
+    ("lam_them", "Giờ làm thêm vào ngày lễ của {u} được trả {p} phần trăm lương cơ bản.",
+     "Làm thêm giờ ngày lễ ở {u} được tính lương thế nào?", "{p} phần trăm lương cơ bản",
+     {"p": ["200", "250", "300", "400"]}),
+    ("sao_luu", "Dữ liệu sao lưu của {u} được lưu giữ trong {n} tháng tại trung tâm dữ liệu {c}.",
+     "{U} giữ bản sao lưu dữ liệu bao lâu và ở đâu?", "{n} tháng tại {c}",
+     {"n": ["6", "12", "18", "24", "36"], "c": _CITIES}),
+    ("dao_tao", "Mỗi năm, nhân viên {u} phải hoàn thành ít nhất {n} giờ đào tạo bắt buộc.",
+     "{U} yêu cầu tối thiểu bao nhiêu giờ đào tạo mỗi năm?", "{n} giờ",
+     {"n": ["16", "20", "24", "32", "40"]}),
+    ("tu_xa", "Nhân viên {u} được làm việc từ xa tối đa {n} ngày mỗi tuần.",
+     "Một tuần nhân viên {u} được làm ở nhà mấy ngày?", "{n} ngày mỗi tuần",
+     {"n": ["1", "2", "3"]}),
+]  # fmt: skip
+
+
+def vi_unit(index: int) -> str:
+    """The unit of Vietnamese document ``index`` (a multiple of 5): its team and a region,
+    so no two Vietnamese documents share one."""
+    team = TEAMS[index % len(TEAMS)]
+    return f"khối {VI_TEAMS[team]} {VI_REGIONS[(index // 5) // len(TEAMS)]}"
+
+
+def vi_facts(index: int, count: int = 3) -> List[Dict[str, str]]:
+    """The facts Vietnamese document ``index`` states: ``name``, ``statement`` (a sentence
+    of the document), ``question``, ``answer``. Seeded by the index alone."""
+    rng = random.Random(10_000 + index)
+    unit = vi_unit(index)
+    out = []
+    for name, statement, question, answer, slots in rng.sample(VI_FACTS, count):
+        values = {k: rng.choice(v) for k, v in slots.items()}
+        values.update(u=unit, U=unit[0].upper() + unit[1:])
+        out.append({"name": name, "statement": statement.format(**values),
+                    "question": question.format(**values), "answer": answer.format(**values)})  # fmt: skip
+    return out
+
+
 VI_HEADINGS = [
     "Phạm vi áp dụng",
     "Quy trình thực hiện",
@@ -154,7 +244,19 @@ def document(rng: random.Random, index: int) -> Tuple[str, List[Block], bool]:
                 for r in range(rng.randint(2, 6))
             ]
             blocks.append(("table", [header] + rows))
+    if vi:
+        blocks = _with_facts(blocks, index)
     return title, blocks, vi
+
+
+def _with_facts(blocks: List[Block], index: int) -> List[Block]:
+    """Each fact of :func:`vi_facts` as its own paragraph, after a paragraph of the body."""
+    rng = random.Random(20_000 + index)
+    out = list(blocks)
+    for fact in vi_facts(index):
+        paragraphs = [i for i, (kind, _) in enumerate(out) if kind == "p"]
+        out.insert(rng.choice(paragraphs) + 1, ("p", fact["statement"]))
+    return out
 
 
 def to_markdown(title: str, blocks: List[Block]) -> str:
@@ -309,18 +411,23 @@ def long_pdf(pages: int = 100, edited: Optional[int] = None) -> bytes:
 FORMATS = [(".md", 60), (".html", 50), (".txt", 40), (".docx", 30), (".pdf", 20)]
 
 
-def corpus(n_docs: int = 200, seed: int = 2026) -> Dict[str, bytes]:
-    """``file name -> bytes`` for ``n_docs`` documents (the format mix scales with n)."""
-    rng = random.Random(seed)
+def corpus_plan(n_docs: int = 200) -> List[str]:
+    """The file names of :func:`corpus`, in order (the format mix scales with n)."""
     plan: List[str] = []
     total = sum(k for _, k in FORMATS)
     for ext, k in FORMATS:
         plan += [ext] * round(k * n_docs / total)
     plan = (plan + [".md"] * n_docs)[:n_docs]
+    return [f"doc_{i:03d}{ext}" for i, ext in enumerate(plan)]
+
+
+def corpus(n_docs: int = 200, seed: int = 2026) -> Dict[str, bytes]:
+    """``file name -> bytes`` for ``n_docs`` documents (the format mix scales with n)."""
+    rng = random.Random(seed)
     out: Dict[str, bytes] = {}
-    for i, ext in enumerate(plan):
+    for i, name in enumerate(corpus_plan(n_docs)):
+        ext = "." + name.rsplit(".", 1)[1]
         title, blocks, _ = document(rng, i)
-        name = f"doc_{i:03d}{ext}"
         if ext == ".md":
             out[name] = to_markdown(title, blocks).encode("utf-8")
         elif ext == ".html":
@@ -332,6 +439,29 @@ def corpus(n_docs: int = 200, seed: int = 2026) -> Dict[str, bytes]:
         else:
             out[name] = to_pdf(title, blocks, columns=1 + i % 2)
     return out
+
+
+def vi_cases(n_docs: int = 200, collection: str = "corpus_vi", k: int = 20) -> List[Dict]:
+    """The Vietnamese eval cases of :func:`corpus`: one per fact of a Vietnamese document.
+
+    Each case is an operonx dataset row whose label is the fact sentence, by document
+    key (the file name) and quote, so it resolves to a span in whatever version the
+    pipeline makes of the file.
+    """
+    names = list(corpus_plan(n_docs))
+    cases = []
+    for index, name in enumerate(names):
+        if index % 5:
+            continue
+        for fact in vi_facts(index):
+            cases.append({
+                "id": f"cvi-{index:03d}-{fact['name']}",
+                "input": {"query": fact["question"], "collection": collection, "k": k},
+                "expected": {"relevant": [{"doc_key": name, "quote": fact["statement"]}],
+                             "answer": fact["answer"]},
+                "tags": ["vi", fact["name"], name.rsplit(".", 1)[1]],
+            })  # fmt: skip
+    return cases
 
 
 if __name__ == "__main__":
