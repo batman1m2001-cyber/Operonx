@@ -31,6 +31,53 @@ Extras compose: `pip install "operonx[anthropic,langfuse]"`.
 The Rust execution backend lives in a separate repo:
 [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs).
 
+## Start a project: `operonx init`
+
+```bash
+pip install "operonx[serve]"
+operonx init myapp                    # or --template http | chat | agent
+cd myapp
+uv sync && uv run pytest              # the generated tests run offline
+uv run operonx serve --list           # the services the app declares
+```
+
+`operonx init` writes a project laid out the way the
+[guide for coding assistants](https://github.com/batman1m2001-cyber/Operonx/blob/main/operonx/guide/05-project-layout.md)
+says:
+
+- `operonx.toml`, which points the CLIs at `app.main:APP`;
+- `app/main.py`, where `APP = Application(...)` declares every service and job;
+- one feature, `src/<feature>/graph.py` (wiring) and `ops.py` (logic), with its tests;
+- `resources.yaml` and `.env.example` (models by key, secrets as `${VAR}`);
+- `AGENTS.md`, plus a `CLAUDE.md` holding `@AGENTS.md`, so a coding assistant knows the rules;
+- `.operonx/guide/`, a copy of the installed guide.
+
+| Template | What the first feature is |
+|---|---|
+| `hello` (default) | Pure compute, run as a job and served over HTTP; no model |
+| `http` | An HTTP service on a doors graph, tested in-process |
+| `chat` | An `LLMOp` on an `llm:assistant` resource; tested against a fake model |
+| `agent` | A ReAct agent with one `@tool`; tested with a scripted model |
+
+Existing files are never overwritten unless you pass `--force`; on an
+existing project `init` only adds what is missing. After upgrading
+operonx, `operonx guide --sync` refreshes `.operonx/guide/`.
+
+## The `operonx` command
+
+| Command | Does |
+|---|---|
+| `operonx init` | create a project (above) |
+| `operonx guide` | print the guide for coding assistants; `--path`, `--sync` |
+| `operonx serve` | serve the services the application declares; `--list` shows them |
+| `operonx run NAME` | run a job or runbook; `--list` shows them |
+| `operonx pack` | serialise `@graph` factories to the Rust runtime's JSON spec |
+| `operonx play` | the playground bridge: drive a service's doors over JSON lines |
+
+`operonx-run`, `operonx-serve`, `operonx-pack` and `operonx-play` still
+work for this release, as deprecated aliases that print a warning; switch
+scripts and Dockerfiles to `operonx <command>`.
+
 ## Python version support
 
 Python 3.10, 3.11, and 3.12 are tested in CI. Older versions are not

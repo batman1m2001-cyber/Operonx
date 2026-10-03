@@ -1,0 +1,22 @@
+"""The textstats feature's logic. Every op returns a dict literal: its keys
+are the op's outputs."""
+
+from operonx import op
+
+
+@op
+def read_text(body: dict) -> dict:
+    """The request body's `text`, with its whitespace collapsed."""
+    return {"text": " ".join(str(body.get("text", "")).split())}
+
+
+@op
+def measure(text: str) -> dict:
+    words = text.split()
+    return {
+        "result": {
+            "words": len(words),
+            "chars": len(text),
+            "longest": max(words, key=len, default=""),
+        }
+    }

@@ -1,0 +1,35 @@
+# {{name}}
+
+{{summary}} Built on [operonx](https://pypi.org/project/operonx/).
+
+`src/assistant/` is the feature: `ops.py` holds the agent's `word_count`
+tool and the ops around it, `graph.py` wires a ReAct agent (model → tools →
+model) on the `llm:assistant` model from `resources.yaml`. `app/main.py`
+declares the `assistant` service that runs it, with a webhook example. The
+tests swap `MODEL` in `graph.py` for a scripted model.
+
+## Run
+
+```bash
+uv sync
+uv run pytest                 # offline: the tests drive the agent with a scripted model
+cp .env.example .env          # then set LLM_API_KEY (and LLM_BASE_URL / LLM_MODEL if not OpenAI)
+```
+
+## Serve
+
+```bash
+uv run operonx serve --list   # what would listen, and where
+uv run operonx serve          # POST /ask on :8000 (PORT overrides)
+curl -s localhost:8000/ask -d '{"question": "How many words are in: to be or not to be?"}'
+```
+
+The model must support tool calling (an OpenAI-compatible endpoint that
+honours `tools`).
+
+## Grow it
+
+A new tool is one more `@tool` in `ops.py` and its name in `TOOLS` in
+`graph.py`. A new feature is a new folder under `src/` with its own
+`graph.py` and `ops.py`, and one more `Service` (or `Job`) in `app/main.py`.
+Read `AGENTS.md` and `.operonx/guide/README.md` first.

@@ -1,0 +1,10 @@
+# What this project reaches out to — models, stores, tracing — by key.
+# Ops name a key (`LLMOp.of(resource="assistant")`), never build a client.
+# Secrets are `${VAR}` here (`${VAR:default}` when optional) and their
+# values live in .env; list every name in .env.example.
+
+llm:assistant:
+  api_type: openai          # openai | azure | vllm | gemini | anthropic
+  api_key: ${LLM_API_KEY}
+  base_url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  model: ${LLM_MODEL:gpt-4o-mini}

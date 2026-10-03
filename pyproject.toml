@@ -208,10 +208,11 @@ mcp = [
 ]
 
 [project.scripts]
-operonx-pack = "operonx.cli.pack:main"
-operonx-serve = "operonx.cli.serve:main"
-operonx-run = "operonx.cli.run:main"
-operonx-play = "operonx.app.play:main"
+operonx = "operonx.cli.main:main"
+operonx-pack = "operonx.cli.aliases:pack"    # deprecated: `operonx pack`
+operonx-serve = "operonx.cli.aliases:serve"  # deprecated: `operonx serve`
+operonx-run = "operonx.cli.aliases:run"      # deprecated: `operonx run`
+operonx-play = "operonx.cli.aliases:play"    # deprecated: `operonx play`
 
 [project.urls]
 Homepage = "https://github.com/batman1m2001-cyber/Operonx"

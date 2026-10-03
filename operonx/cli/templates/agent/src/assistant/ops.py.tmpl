@@ -1,0 +1,37 @@
+"""The assistant feature's logic: the agent's tool, and the ops around it.
+
+A `@tool` is a function the model may call; its `schema` is what the model
+is shown. Every op returns a dict literal: its keys are the op's outputs.
+"""
+
+from operonx import op
+from operonx.agents import tool
+from operonx.core.loggings import LOGGER
+
+
+@tool(
+    name="word_count",
+    description="Count the words in a text.",
+    schema={
+        "type": "object",
+        "properties": {"text": {"type": "string"}},
+        "required": ["text"],
+    },
+    readonly=True,  # no side effects: runs without asking for approval
+)
+def word_count(text: str) -> dict:
+    words = len(text.split())
+    LOGGER.debug("word_count: %d words", words)
+    return {"words": words}
+
+
+@op
+def ask(body: dict) -> dict:
+    """The request body's `question` as the conversation the agent starts from."""
+    return {"messages": [{"role": "user", "content": str(body.get("question", ""))}]}
+
+
+@op
+def reply(final: dict = None, stopped_early: bool = False) -> dict:
+    """The agent's answer; `None` when it never answered."""
+    return {"reply": {"answer": (final or {}).get("content"), "stopped_early": stopped_early}}

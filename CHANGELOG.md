@@ -77,17 +77,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`operonx.telemetry.writer.BackgroundWriter`**: a bounded queue and a
   batching thread. `submit` never blocks or raises; items past the bound
   are dropped and counted; failed batches are retried, then dropped.
+- **`operonx init`: a new project a coding assistant can build on at once.**
+  `pip install operonx` → `operonx init myapp [--template hello|http|chat|agent]
+  [--name NAME] [--force]` writes the layout of
+  `operonx/guide/05-project-layout.md`: `operonx.toml` (it only points the
+  CLIs at `app.main:APP`, plus `[tracing] sinks = ["local"]`), `app/main.py`
+  with the `Application` declaring the template's services and jobs, one
+  feature as `src/<feature>/graph.py` + `ops.py`, `resources.yaml` and
+  `.env.example` (secrets as `${VAR}`), tests that run offline, a
+  `pyproject.toml` on `operonx>=<this version>`, `.gitignore` and a README.
+  For assistants it adds `AGENTS.md` (read the guide first, the ladder, the
+  layout rules, the commands, no `print()`), a `CLAUDE.md` holding
+  `@AGENTS.md`, and `.operonx/guide/`, a copy of the installed guide.
+  `hello` is pure compute (a job and an HTTP service), `http` a service
+  tested in-process, `chat` an `LLMOp` tested against a local fake model,
+  `agent` a ReAct agent with one `@tool` tested with a scripted model. An
+  existing file is never overwritten without `--force`, so on an existing
+  project `init` only adds what is missing, and says so when that is
+  nothing. Every template is tested end to end: its own tests pass, and
+  `operonx serve --list` / `operonx run --list` list every service and job.
+- **`operonx guide`** prints the guide's index; `--path` prints where the
+  installed guide is; `--sync [DIR]` copies it into the project's
+  `.operonx/guide/` (removing pages the installed version dropped) and
+  writes its version to `.operonx/guide/VERSION`. Run it after upgrading.
+  `operonx.guide.sync(project)` does the same from Python.
 
 ### Changed
 
 - `tests/internal/cli/test_extras.py` also checks quoted install hints
   (`pip install "operonx[postgres]"`), which it used to skip.
+- **One command: `operonx run`, `operonx serve`, `operonx pack`,
+  `operonx play`** beside `operonx init` and `operonx guide`. Each takes
+  exactly the arguments its `operonx-*` script took and is the same
+  `main(argv)` (the rest of the command line is handed over untouched, so
+  there is one parser per command); `operonx --help` lists them all. Usage
+  lines, `--list` hints, the guide, `docs/`, the README and the examples
+  now spell them `operonx <command>`.
+
+### Deprecated
+
+- **`operonx-run`, `operonx-serve`, `operonx-pack`, `operonx-play`.** They
+  still work, exactly as before, and print one line to stderr:
+  ``DeprecationWarning: `operonx-run` is deprecated and will be removed in
+  the next release; use `operonx run` ``. Deployed projects and Dockerfiles
+  call them, so they stay for this release; switch to `operonx <command>`.
 
 ### Fixed
 
 - **`[[job]] trace = []` is kept.** It read as "nothing declared", so the
   job inherited the application's consumers (or recorded locally) instead
   of tracing nothing, unlike `Job(trace=[])`.
+
 
 ## [1.12.2] - 2026-10-03
 

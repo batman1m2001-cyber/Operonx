@@ -1,0 +1,19 @@
+# Where the project is, and where its application is declared.
+#
+# The services and jobs are declared in Python in app/main.py (`APP`), next
+# to the graphs they run; this file only points the CLIs at it.
+# resources.yaml is the other half: what the project reaches out to
+# (models, stores), by key.
+
+[project]
+name = "{{name}}"
+src  = ["src", "."]     # import roots: the features and `app` import from here
+app  = "app.main:APP"
+
+[resources]
+overlay = "resources.yaml"
+
+# Which trace sinks every run goes to. "local" records each run under
+# .operonx/runs.
+[tracing]
+sinks = ["local"]

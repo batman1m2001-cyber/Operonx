@@ -40,9 +40,9 @@ uv run python main.py
 Give call `c3` a transcript in `data/calls.jsonl`, then:
 
 ```bash
-uv run operonx-run main:score_calls --resume
+uv run operonx run main:score_calls --resume
 #   score_calls 20260924T… ok  ok=1 failed=0 empty=0 skipped=2
-uv run operonx-run main:score_calls --show      # what would run, and exit
+uv run operonx run main:score_calls --show      # what would run, and exit
 ```
 
 `score_from_resources` is the same job with its source and sink declared
@@ -55,7 +55,7 @@ sink:scores:  {kind: jsonl, path: /tmp/operonx_jobs/ex17/scores_from_resources.j
 ```
 
 ```bash
-uv run operonx-run main:score_from_resources
+uv run operonx run main:score_from_resources
 ```
 
 ## The manifest form
@@ -65,11 +65,11 @@ deployment's form, next to the `[[serve]]` block that puts the *same*
 graph behind an HTTP route:
 
 ```bash
-uv run operonx-run --list                     # every [[job]], with its schedule
-uv run operonx-run score_calls                # by name; paths relative to the manifest
-uv run operonx-run score_calls --resume
-uv run operonx-run score_stream               # session = "stream": one run, all calls
-uv run operonx-serve --only score             # the served form of the same graph
+uv run operonx run --list                     # every [[job]], with its schedule
+uv run operonx run score_calls                # by name; paths relative to the manifest
+uv run operonx run score_calls --resume
+uv run operonx run score_stream               # session = "stream": one run, all calls
+uv run operonx serve --only score             # the served form of the same graph
 ```
 
 A stream job records what was fed and what egress sent, plus the one
@@ -102,8 +102,8 @@ with Runbook("nightly") as nightly:
 ```
 
 ```bash
-uv run operonx-run nightly            # or: operonx-run main:nightly
-uv run operonx-run nightly --show     # prints the wires: score_calls >> [export_csv, summarise]
+uv run operonx run nightly            # or: operonx run main:nightly
+uv run operonx run nightly --show     # prints the wires: score_calls >> [export_csv, summarise]
 ```
 
 Hand-off is by naming the same file: `score_calls` writes `scores.jsonl`

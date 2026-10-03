@@ -1,0 +1,27 @@
+"""The assistant feature's wiring: no logic here, only ops and edges.
+
+`MODEL` is the agent's `call_model`: `llm:assistant` from resources.yaml.
+The graph reads it when it is built, so a test swaps in a scripted model
+with `monkeypatch.setattr(assistant.graph, "MODEL", ...)`.
+"""
+
+from operonx import END, START, graph
+from operonx.agents import build_react_agent, get_tool_definitions
+from operonx.agents.ops.model_ops import make_llm_caller
+from operonx.app.serve import egress, ingress
+
+from assistant.ops import ask, reply
+
+TOOLS = ["word_count"]  # the @tool names in ops.py the model may call
+MODEL = make_llm_caller("assistant", tools=get_tool_definitions(TOOLS))
+
+
+@graph
+def assistant_flow():
+    src = ingress()  # an http door: the JSON body is the one item
+    a = ask(body=src["item"])
+    # model -> tools -> model until it answers, at most 6 turns
+    agent = build_react_agent(call_model=MODEL, max_turns=6)(messages=a["messages"])
+    r = reply(final=agent["final"], stopped_early=agent["stopped_early"])
+    out = egress(item=r["reply"])
+    START >> src >> a >> agent >> r >> out >> END

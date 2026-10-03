@@ -1,8 +1,8 @@
 """`operonx serve` — run what the manifest declares.
 
-operonx-serve                    # every [[serve]] entry
-operonx-serve --only call        # one of them
-operonx-serve --list             # what would run, and where
+operonx serve                    # every [[serve]] entry
+operonx serve --only call        # one of them
+operonx serve --list             # what would run, and where
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def _sinks(d: dict) -> str:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        prog="operonx-serve",
+        prog="operonx serve",
         description="Serve the graphs declared in operonx.toml.",
     )
     parser.add_argument(
