@@ -67,10 +67,10 @@ def experiment_of(run: JobRun) -> Experiment:
         ended_at=_epoch(run.ended),
         cases=int(ev.get("cases") or 0),
         errored=int(ev.get("errored") or 0),
-        cost_usd=round(sum(costs), 10) if costs else None,
+        cost_usd=ev["cost_usd"] if "cost_usd" in ev else (round(sum(costs), 10) if costs else None),
         judge_cost_usd=ev.get("judge_cost_usd"),
         p50_ms=ev.get("p50_ms"),
-        p95_ms=percentile(ms, 95) if ms else None,
+        p95_ms=ev["p95_ms"] if "p95_ms" in ev else (percentile(ms, 95) if ms else None),
         metrics=dict(ev.get("metrics") or {}),
         gate=dict(gate),
         metadata={

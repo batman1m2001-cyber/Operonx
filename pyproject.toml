@@ -194,6 +194,8 @@ dev = [
     "pymongo>=4.6",
     # the ClickHouse run store's live tests (a throwaway container)
     "clickhouse-connect>=0.7",
+    # the eval reports' JUnit XML is validated against the JUnit schema
+    "xmlschema>=3.0",
     # tests/internal/cli/ parses pyproject.toml to verify every
     # [project.scripts] target resolves; tomllib is stdlib only on 3.11+.
     "tomli>=2.0; python_version < '3.11'",

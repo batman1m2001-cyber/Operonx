@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from operonx.core.workflow_trace import run_metadata
+from operonx.telemetry.runs.model import percentile
 from operonx.telemetry.scores import Experiment, ScoreStore, open_score_store
 
 from ..jobs import Job
@@ -625,6 +626,7 @@ def trial_of(key: str, verdict: Mapping[str, Any], ms: float) -> Dict[str, Any]:
         "ms": ms,
         "error": bool(verdict.get("error")),
         "judge_cost_usd": verdict.get("judge_cost_usd"),
+        "cost_usd": verdict.get("cost_usd"),
     }
 
 
@@ -679,6 +681,7 @@ def numbers(
             c["passed"] += int(ok)
     ms = sorted(v["ms"] for v in vs if v["ms"])
     judge = [v["judge_cost_usd"] for v in vs if v.get("judge_cost_usd") is not None]
+    cost = [v["cost_usd"] for v in vs if v.get("cost_usd") is not None]
     cases = outcomes(vs)
     if repeats == 1:
         n_cases = trials
@@ -696,6 +699,8 @@ def numbers(
         "pass_rate": pass_rate,
         "checks": per_check,
         "p50_ms": ms[len(ms) // 2] if ms else None,
+        "p95_ms": percentile(ms, 95) if ms else None,
+        "cost_usd": round(sum(cost), 10) if cost else None,
         "judge_cost_usd": round(sum(judge), 8) if judge else None,
         "repeats": repeats,
         "trials": trials,
