@@ -21,5 +21,8 @@ upstream gaps) and each phase's gate.
 - An op that raises does not raise: graph tests assert `"$errors" not in out`.
 - Every behaviour change ships with a test. Golden snapshots change only with `--update-golden`
   and a reviewed diff.
-- `uv run pytest -q` must stay green. Never call a real model in tests: use
+- Until operonx PR #74 (`feat/kb-upstream`) merges, run everything with
+  `PYTHONPATH=/home/thanglq/operonx-wt/feat-kb-upstream uv run pytest -q` (the KB uses its
+  `VectorUpsertOp`/`VectorDeleteOp`, `operonx.core.media_store` and entry points).
+- The suite must stay green. Never call a real model in tests: use
   `operonx_kb.testing.fakes`.

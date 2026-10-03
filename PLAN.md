@@ -15,9 +15,10 @@ refer to it) and `ROADMAP.md` §5. This file records where we differ and what ea
 | D3 | **ML layout and tables (`docling-ibm-models`, MIT, torch) are an optional extra `layout`, off by default**, behind `LayoutModel`/`TableModel` ABCs. The default is our heuristic layout: font size/weight, positions, columns, reading order, ruled and aligned tables. | Core install has no torch. The heuristic is the `LayoutModel` everyone gets; the ML adapter must beat it on golden docs (K1b gate) to be recommended. |
 | D4 | **Office, HTML, Markdown parse with the stdlib** (`zipfile`, `defusedxml`, `html.parser`), porting the useful rules of docling's pure-Python backends. | Core deps: `operonx`, `pydantic`, `defusedxml`. No python-docx/pptx/openpyxl/selectolax/marko. |
 | D5 | **No Rust.** A native hotspot is reported with a profile, never added. | |
-| D6 | **No shims for upstream gaps.** U1 (vector delete/upsert ops) and U2 (entry-point discovery of resource categories) are being built upstream on `feat/kb-upstream`. Work that needs them comes last. Until then the derived index sits behind our `Index` ABC with the in-memory implementation, and categories register at `import operonx_kb` (the existing `REGISTRY.register` mechanism, as `operonx.providers.registry` does). | K1 tests run against `MemoryDenseIndex`; the operonx-vector-store-backed index and the `operonx.resources` entry point land when upstream is ready. |
+| D6 | **No shims for upstream gaps.** U1 (`BaseVectorStore.delete`, `VectorUpsertOp`/`VectorDeleteOp`), U2 (`operonx.resources` entry points; an unknown category raises) and U6 (`operonx.core.media_store`) were built upstream on `feat/kb-upstream` (operonx PR #74) and the KB uses them directly. | The dense index **is** an operonx `vector_store:` resource written by `VectorUpsertOp`/`VectorDeleteOp` inside the ingest, delete and GC graphs; there is no KB index abstraction. Until PR #74 merges, run with `PYTHONPATH=<feat-kb-upstream>`. |
 | D7 | Token counts use a deterministic regex tokenizer (`RegexTokenizer`, fingerprinted), not tiktoken: tiktoken downloads its BPE file on first use, which breaks offline CI. A model tokenizer can be plugged in later through the same `Tokenizer` protocol. | `chunker_fp` includes the tokenizer fingerprint. |
 | D8 | The canonical text of a version is stored in the blob store under its own SHA-256 (`text_sha`), so `text_sha` *is* its blob key. The catalog stores spans; the blob store stores bytes. | `verify` checks `sha256(blob(text_sha)) == text_sha` and every span against it. |
+| D9 | **Vector keys and the index ledger.** A chunk's vector key is the first 63 bits of its id (`vector_id`), an int64 every operonx backend accepts. Because a vector store cannot list what it holds, the catalog records every key the KB writes (`kb_index_entries`, the LangChain record-manager idea): a row is added before the upsert and removed after the delete, so the ledger always covers the index. GC deletes ledger entries no active version holds; `verify` compares ledger and active chunks; a 63-bit key collision raises instead of overwriting. | Works on FAISS, which stores no metadata and deletes by id only. |
 
 Everything else in track5 §3 (principles), §5-§6 (model, ids, fingerprints), §11 (incremental
 indexing) and §17 "Avoid" stands.
@@ -45,8 +46,9 @@ indexing) and §17 "Avoid" stands.
 
 ```
 item {key, path | data, mime?, metadata?}
-  └► plan_ingest ─► if skip ─► skipped ───────────────────────────────────────────────┐
-                    else  ─► store_raw ─► parse ─► structure ─► chunk ─► EmbedChunksOp ─► write_index ─► commit ─► collect_garbage ─► report
+  └► plan_ingest ─► if skip ─► skipped ─────────────────────────────────────────────────────────────┐
+                    else  ─► parse ─► build_tree ─► chunk_version ─► EmbedChunksOp ─► stage_index_writes
+                          ─► (if any) VectorUpsertOp ─► commit_version ─► VectorDeleteOp(removed) ─► forget ─► report
 ```
 
 - `operonx_kb.parsing`: `Parser` ABC → `ParsedDoc` (`RawBlock`s with kind, text, page, bbox, level,
@@ -63,28 +65,34 @@ item {key, path | data, mime?, metadata?}
   migrations, no ORM) — the store of record. Blobs: operonx `MediaStore`/`LocalMediaStore` used
   as is (it is content addressed by SHA-256, writes atomically, and is not the expiring ClickHouse
   store). Postgres catalog behind the same ABC is K1c.
-- `operonx_kb.index`: `Index` ABC (upsert/delete/search/count/ids/drop per generation) and
-  `MemoryDenseIndex`. Derived and rebuildable from the catalog + embedding cache.
+- Dense index: an operonx `vector_store:` (FAISS, pgvector, Qdrant) named in `DenseIndexSpec.store`,
+  written by `VectorUpsertOp`/`VectorDeleteOp`, plus the catalog's index ledger (D9). Derived and
+  rebuildable from the catalog + embedding cache.
 - `operonx_kb.ops` (logic) / `operonx_kb.graphs` (wiring only): the ingest graph above;
   `EmbedChunksOp` is a `BaseOp` over `embedding:` resources with a catalog-backed embedding cache
   keyed by `(embedder_fp, embed_text_sha)`.
-- `operonx_kb.kb.KnowledgeBase`: library API (`create_collection`, `add`, `delete`, `gc`, `verify`,
-  `rebuild_index`). `operonx_kb.cli`: `operonx-kb add|list|status|delete|gc|verify`.
-- Resource categories registered on import: `kb_catalog:` (sqlite), `kb_blob:` (local), `kb_index:`
-  (memory). Ops receive resource *keys* (strings), never objects, so traces stay JSON.
+- `operonx_kb.kb.KnowledgeBase`: library API (`create_collection`, `add`, `delete`, `gc`, `verify`),
+  each running its graph. `operonx_kb.cli`: `operonx-kb collections|create|add|list|status|delete|gc|verify`.
+- Resource categories `kb_catalog:` (sqlite) and `kb_blob:` (local) reach operonx through
+  `operonx.resources` entry points (and register on import). Ops receive resource *keys* (strings),
+  never objects, so traces stay JSON.
 
 Consistency (§11.2): index writes happen before the catalog flip; hydration (K2) joins hits to
 active versions, so un-flipped entries are invisible and a crash leaves the catalog consistent.
-Removed chunks are deleted from the index after the flip (`collect_garbage`).
+Removed chunks are deleted from the index after the flip (`VectorDeleteOp`), then leave the ledger.
+
+Known limitations (K1): XLSX cells are stored values (dates are Excel serials, number formats are not
+applied); PDFs without a text layer produce no text (OCR is out of scope); the heuristic layout does
+not detect figures without an image resource, nor tables with neither rules nor ≥3 aligned rows.
 
 ## 4 · Phases and gates (measured; numbers recorded in `docs/bench/`)
 
 | Phase | Scope | Gate |
 |---|---|---|
 | **K0** | PLAN, skeleton, pyproject + extras, test layout, model, normalisation, ids, hashes, fingerprints, span utilities, canonical serializer, fakes (`HashEmbedder`, `CountingEmbedder`) | Span invariant holds on 100% of K0 golden block fixtures and on hypothesis-generated trees |
-| **K1a** | Blob store, SQLite catalog + migrations, parsers (plain, md, html, docx, pptx, xlsx, pdf via docling-parse), heuristic layout, structurer, structural + recursive chunkers, ingest graph, embedding cache, chunk diff, commit flip, delete/tombstone/purge, GC, `verify`, CLI basics, golden corpus | (a) span invariant on 100% of golden docs; (b) re-ingest of the unchanged corpus = 0 parse spans and 0 embed calls; (c) one-paragraph edit re-embeds only the changed chunks (≤ 3); (d) purge leaves 0 index entries and 0 orphan blobs for that document; (e) PDF ingest throughput recorded |
+| **K1a** | Blob store, SQLite catalog, dense index on operonx vector stores (U1) with the ledger, entry points (U2) + migrations, parsers (plain, md, html, docx, pptx, xlsx, pdf via docling-parse), heuristic layout, structurer, structural + recursive chunkers, ingest graph, embedding cache, chunk diff, commit flip, delete/tombstone/purge, GC, `verify`, CLI basics, golden corpus | (a) span invariant on 100% of golden docs; (b) re-ingest of the unchanged corpus = 0 parse spans and 0 embed calls; (c) one-paragraph edit re-embeds only the changed chunks (≤ 3); (d) purge leaves 0 index entries and 0 orphan blobs for that document; (e) PDF ingest throughput recorded |
 | **K1b** | `layout` extra: `docling-ibm-models` layout + TableFormer behind `LayoutModel`/`TableModel` | Element-kind accuracy and table-cell accuracy vs. the heuristic on the golden PDFs; recorded, default stays heuristic unless it wins |
-| **K1c** (after upstream) | U1: index backed by operonx vector stores (`VectorUpsertOp`/`VectorDeleteOp`); U2: `operonx.resources` entry point; Postgres catalog; `rebuild` from catalog | Conformance suite passes on memory + FAISS (+ pgvector in docker); rebuild reproduces the id set |
+| **K1c** | Postgres catalog behind `Catalog`; `rebuild` (new index from catalog + embedding cache); conformance suite on pgvector and Qdrant (docker) | Rebuild reproduces the id set and top-10 results on 50 queries; conformance passes per backend |
 | K2+ | track5 §18 P2-P7 (lexical, hybrid, citations, eval; Studio; enrichment; visual; graph) | track5 gates |
 
 ## 5 · Testing
