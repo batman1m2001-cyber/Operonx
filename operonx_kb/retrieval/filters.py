@@ -28,11 +28,13 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from operonx_kb.errors import FilterError
-from operonx_kb.model.filter import CheckedFilter, field_key
+from operonx_kb.model.collection import CollectionSpec
+from operonx_kb.model.filter import PAYLOAD_KEYS, CheckedFilter, field_key
 
 __all__ = [
     "PostFilter",
     "native_filter",
+    "pgvector_columns",
     "compile_pgvector",
     "compile_postgres_fts",
     "compile_qdrant",
@@ -112,6 +114,39 @@ def _pg_json(name: str, kind: str, value: Any, p: _Params) -> str:
     if isinstance(value, list):
         return f"{expr} = ANY({p(value)})"
     return f"{expr} = {p(value)}"
+
+
+_PG_TYPES = {
+    "kb_collection": "text",
+    "kb_document": "text",
+    "kb_tags": "text[]",
+    "kb_acl": "text[]",
+    "kb_mime": "text",
+    "kb_created": "double precision",
+}
+_PG_FIELD_TYPES = {
+    "keyword": "text",
+    "keyword[]": "text[]",
+    "int": "bigint",
+    "float": "double precision",
+    "datetime": "double precision",
+    "bool": "boolean",
+}
+
+
+def pgvector_columns(spec: CollectionSpec) -> Dict[str, str]:
+    """``column -> SQL type`` a pgvector table needs for a collection's payload.
+
+    List them as the resource's ``metadata_columns`` and create them with the
+    table::
+
+        cols = pgvector_columns(spec)
+        f"CREATE TABLE kb_vectors (id bigint PRIMARY KEY, embedding vector(384), "
+        + ", ".join(f"{c} {t}" for c, t in cols.items()) + ")"
+    """
+    out = {k: _PG_TYPES[k] for k in PAYLOAD_KEYS}
+    out.update({field_key(n): _PG_FIELD_TYPES[t] for n, t in spec.filterable.items()})
+    return out
 
 
 def compile_pgvector(checked: CheckedFilter, collection_id: str) -> Dict[str, Any]:

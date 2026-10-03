@@ -19,7 +19,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from operonx_kb.model.collection import Collection
 from operonx_kb.model.document import Chunk, Document, DocumentVersion, Element, Page, VersionChunk
 
-__all__ = ["Catalog", "CommitResult", "PurgeResult"]
+__all__ = ["Catalog", "CommitResult", "PurgeResult", "ActiveChunk"]
 
 
 @dataclass
@@ -48,6 +48,15 @@ class PurgeResult:
     chunk_ids: List[str] = field(default_factory=list)
     version_ids: List[str] = field(default_factory=list)
     orphan_blobs: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ActiveChunk:
+    """A chunk as the active version of a live document holds it: what hydration returns."""
+
+    chunk: Chunk
+    occurrence: VersionChunk
+    document: Document
 
 
 class Catalog(ABC):
@@ -100,6 +109,14 @@ class Catalog(ABC):
         self, collection_id: Optional[str] = None, document_id: Optional[str] = None
     ) -> Set[str]:
         """Chunks referenced by an active version of a live document."""
+
+    @abstractmethod
+    def active_chunks(self, collection_id: str, chunk_ids: Sequence[str]) -> Dict[str, ActiveChunk]:
+        """The hydration gate (track5 §11.2): of ``chunk_ids``, those an active version of a
+        live document of ``collection_id`` holds, with that occurrence and document.
+
+        A chunk that is gone, superseded, tombstoned or in another collection is absent.
+        """
 
     # writes ---------------------------------------------------------------------
 
@@ -168,6 +185,13 @@ class Catalog(ABC):
         document_id: Optional[str] = None,
     ) -> Dict[str, int]:
         """``chunk_id -> vector_id`` recorded for a vector store collection."""
+
+    @abstractmethod
+    def chunks_for_keys(
+        self, store: str, collection: str, collection_id: str, keys: Sequence[int]
+    ) -> Dict[int, str]:
+        """``key -> chunk_id`` for the keys the ledger records in this store and
+        collection for ``collection_id``; other keys are absent."""
 
     # caches and log ---------------------------------------------------------------
 

@@ -23,10 +23,17 @@ from operonx_kb.graphs.maintenance import (
     build_delete_graph,
     build_drop_index_graph,
     build_gc_graph,
+    build_lexical_drop_graph,
+    build_lexical_rebuild_graph,
     build_rebuild_graph,
 )
 from operonx_kb.maintenance import VerifyReport, verify
-from operonx_kb.model.collection import Collection, CollectionSpec, DenseIndexSpec
+from operonx_kb.model.collection import (
+    Collection,
+    CollectionSpec,
+    DenseIndexSpec,
+    LexicalIndexSpec,
+)
 from operonx_kb.model.document import Document
 from operonx_kb.model.ids import document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
@@ -85,32 +92,26 @@ class KnowledgeBase:
         return dense
 
     def _engine(
-        self,
-        kind: str,
-        collection_id: str,
-        build: Callable,
-        params: Sequence[str],
-        dense: Optional[DenseIndexSpec] = None,
-    ) -> Operon:
-        dense = dense or self._dense(collection_id)
-        key = (kind, collection_id, dense.model_dump_json())
+        self, kind: str, collection_id: str, factory: Callable[[], Any], params: Sequence[str],
+        config: str,
+    ) -> Operon:  # fmt: skip
+        key = (kind, collection_id, config)
         if key not in self._engines:
-            graph = build(dense, catalog=self.catalog_key, blobs=self.blobs_key)
             self._engines[key] = Operon(
-                graph, params={**{p: None for p in params}, "name": kind}, trace=self.trace
+                factory(), params={**{p: None for p in params}, "name": kind}, trace=self.trace
             )
         return self._engines[key]
 
-    async def _run(
+    async def _run_graph(
         self,
         kind: str,
         collection_id: str,
-        build,
+        factory: Callable[[], Any],
+        config: str,
         inputs: Dict[str, Any],
         output: Optional[str],
-        dense: Optional[DenseIndexSpec] = None,
     ) -> Any:
-        engine = self._engine(kind, collection_id, build, list(inputs), dense)
+        engine = self._engine(kind, collection_id, factory, list(inputs), config)
         out = await engine.run(inputs=inputs)
         if "$errors" in out or (output is not None and output not in out):
             errors = out.get("$errors") or {kind: "the run produced no result"}
@@ -121,6 +122,25 @@ class KnowledgeBase:
                 f"{kind} in {collection_id!r} failed in {op}: {last}", {"ops": sorted(errors)}
             )
         return out[output] if output is not None else out
+
+    async def _run(
+        self,
+        kind: str,
+        collection_id: str,
+        build,
+        inputs: Dict[str, Any],
+        output: Optional[str],
+        dense: Optional[DenseIndexSpec] = None,
+    ) -> Any:
+        """Run a graph built from the collection's dense and lexical index specs."""
+        dense = dense or self._dense(collection_id)
+        lexical = self.collection(collection_id).spec.lexical
+        config = dense.model_dump_json() + (lexical.model_dump_json() if lexical else "")
+
+        def factory():
+            return build(dense, lexical=lexical, catalog=self.catalog_key, blobs=self.blobs_key)
+
+        return await self._run_graph(kind, collection_id, factory, config, inputs, output)
 
     # ingest ------------------------------------------------------------------------
 
@@ -135,15 +155,22 @@ class KnowledgeBase:
         mime: Optional[str] = None,
         title: Optional[str] = None,
         tags: Optional[Sequence[str]] = None,
+        acl: Optional[Sequence[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Ingest one document; return the run's result (``action``: new, update or skip).
+
+        Args:
+            acl: Principals allowed to read the document (``KBFilter.acl_any``).
+            metadata: Free-form; the fields the collection declares ``filterable``
+                are copied into its index entries and must have the declared type.
 
         Raises:
             IngestError: An op failed. The failure is also recorded in the ingest log.
         """
         item: Dict[str, Any] = {"path": str(path) if path is not None else None, "data": data, "key": key, "name": name,
-                                "mime": mime, "title": title, "tags": list(tags or []), "metadata": metadata or {}}  # fmt: skip
+                                "mime": mime, "title": title, "tags": list(tags or []), "acl": list(acl or []),
+                                "metadata": metadata or {}}  # fmt: skip
         doc_key = key or (str(path) if path is not None else "")
         try:
             return await self._run("ingest_document", collection_id, build_ingest_graph,
@@ -222,13 +249,51 @@ class KnowledgeBase:
             report["previous_deleted"] = out.get("deleted")
         return report
 
+    async def rebuild_lexical(
+        self,
+        collection_id: str,
+        lexical: Optional[LexicalIndexSpec] = None,
+        *,
+        switch: bool = True,
+        drop_previous: bool = False,
+    ) -> Dict[str, Any]:
+        """Rebuild the lexical index from the catalog into ``lexical`` (default: the current
+        spec): another table, or the same text under another analyzer. Nothing is parsed or
+        embedded. With ``switch`` it becomes the collection's lexical index; with
+        ``drop_previous`` the old one's entries are deleted after the switch."""
+        current = self.collection(collection_id).spec.lexical
+        target = lexical or current
+        if target is None:
+            raise CatalogError(
+                f"collection {collection_id!r} has no lexical index; pass one to rebuild_lexical()"
+            )
+        report = await self._run_graph(
+            "rebuild_lexical", collection_id,
+            lambda: build_lexical_rebuild_graph(target, catalog=self.catalog_key, blobs=self.blobs_key),
+            target.model_dump_json(), {"collection": collection_id, "switch": switch}, "report",
+        )  # fmt: skip
+        moved = current is not None and (target.index, target.collection) != (
+            current.index,
+            current.collection,
+        )
+        if drop_previous and switch and moved:
+            out = await self._run_graph(
+                "drop_lexical", collection_id,
+                lambda: build_lexical_drop_graph(current, catalog=self.catalog_key, blobs=self.blobs_key),
+                current.model_dump_json(), {"collection": collection_id}, None,
+            )  # fmt: skip
+            report["previous_deleted"] = out.get("deleted")
+        return report
+
     def verify(self, collection_id: str) -> VerifyReport:
-        dense = self.collection(collection_id).spec.dense
-        store = full_key(dense.store, "vector_store") if dense else None
+        spec = self.collection(collection_id).spec
+        dense, lexical = spec.dense, spec.lexical
         return verify(
             self.catalog,
             self.blobs,
             collection_id,
-            store,
+            full_key(dense.store, "vector_store") if dense else None,
             (dense.collection or "") if dense else "",
+            full_key(lexical.index, "kb_lexical") if lexical else None,
+            (lexical.collection or "") if lexical else "",
         )

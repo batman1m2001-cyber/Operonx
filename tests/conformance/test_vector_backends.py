@@ -17,7 +17,9 @@ from pathlib import Path
 
 import pytest
 
+from operonx_kb.model.collection import CollectionSpec
 from operonx_kb.model.ids import document_id, vector_id
+from operonx_kb.retrieval.filters import pgvector_columns
 
 DOCS = Path(__file__).parents[1] / "golden" / "docs"
 CORPUS = [
@@ -45,16 +47,20 @@ def run(coro):
     return asyncio.run(coro)
 
 
+PAYLOAD = pgvector_columns(CollectionSpec())
+
+
 def _pg_tables(names, drop=False):
     import psycopg
 
+    columns = ", ".join(f"{c} {t}" for c, t in PAYLOAD.items())
     with psycopg.connect(PG, autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
         for name in names:
             conn.execute(f"DROP TABLE IF EXISTS {name}")
             if not drop:
                 conn.execute(
-                    f"CREATE TABLE {name} (id bigint PRIMARY KEY, embedding vector({DIM}))"
+                    f"CREATE TABLE {name} (id bigint PRIMARY KEY, embedding vector({DIM}), {columns})"
                 )
 
 
@@ -96,6 +102,7 @@ def kb(request, tmp_path):
         catalog = f"kb_catalog:main:\n  api_type: postgres\n  dsn: {PG}\n  db_schema: kb_{tag}\n"
         stores = {
             k: f"  api_type: pgvector\n  metric: cosine\n  dsn: {PG}\n  table: {n}\n"
+            f"  metadata_columns: [{', '.join(PAYLOAD)}]\n"
             for k, n in zip(("kb", "kb2"), names)
         }
     else:

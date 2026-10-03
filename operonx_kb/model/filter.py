@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from operonx_kb.errors import FilterError
 from operonx_kb.model.collection import CollectionSpec, FieldType
+from operonx_kb.model.document import Document
 
 __all__ = [
     "KBFilter",
@@ -40,6 +41,7 @@ __all__ = [
     "PAYLOAD_KEYS",
     "field_key",
     "index_payload",
+    "document_payload",
     "matches",
     "epoch",
 ]
@@ -215,6 +217,20 @@ def index_payload(
         else:
             out[field_key(name)] = _coerce(kind, value, name)
     return out
+
+
+def document_payload(spec: CollectionSpec, document: Document) -> Dict[str, Any]:
+    """:func:`index_payload` of a catalog document: what its index entries carry."""
+    return index_payload(
+        spec=spec,
+        collection_id=document.collection_id,
+        document_id=document.id,
+        tags=document.tags,
+        acl=document.acl,
+        mime=document.mime,
+        created_at=document.created_at,
+        metadata=document.metadata,
+    )
 
 
 def _any(have: Any, wanted: Sequence[Any]) -> bool:

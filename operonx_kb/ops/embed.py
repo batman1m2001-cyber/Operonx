@@ -27,9 +27,10 @@ __all__ = ["EmbedChunksOp", "embedder_fingerprint"]
 _SECRET_HINTS = ("key", "token", "secret", "password", "url", "header")
 
 
-def embedder_fingerprint(resource_key: str, backend: Any) -> str:
-    """``H(model and settings)`` of an embedding backend; credentials and endpoints excluded,
-    so rotating a key does not re-embed the corpus."""
+def embedder_fingerprint(resource_key: str, backend: Any, template: str = "{text}") -> str:
+    """``H(model, settings, template)`` of an embedding backend; credentials and endpoints
+    excluded, so rotating a key does not re-embed the corpus. The default template adds
+    nothing, so caches written before templates existed stay valid."""
     config = getattr(backend, "config", None)
     data: Dict[str, Any] = {}
     if config is not None and hasattr(config, "model_dump"):
@@ -39,6 +40,8 @@ def embedder_fingerprint(resource_key: str, backend: Any) -> str:
             for k, v in dump.items()
             if v is not None and not any(h in k.lower() for h in _SECRET_HINTS)
         }
+    if template != "{text}":
+        data["template"] = template
     return fingerprint(f"{type(backend).__module__}.{type(backend).__qualname__}", "1", data)
 
 
@@ -59,7 +62,7 @@ class EmbedChunksOp(BaseOp):
 
     show_keys_default = ("stats",)
 
-    __slots__ = ["resource", "catalog", "batch_size", "backend", "_initialized"]
+    __slots__ = ["resource", "catalog", "batch_size", "template", "backend", "_initialized"]
 
     type: OpType = "embedding"
 
@@ -68,6 +71,7 @@ class EmbedChunksOp(BaseOp):
         resource: Optional[str] = None,
         catalog: Optional[str] = None,
         batch_size: int = 64,
+        template: str = "{text}",
         inputs: Dict[str, Any] = None,
         outputs: Dict[str, Any] = None,
         **kwargs: Any,
@@ -79,6 +83,9 @@ class EmbedChunksOp(BaseOp):
                 ``:`` is used verbatim.
             catalog: The catalog key holding the embedding cache.
             batch_size: Texts per embedder call.
+            template: How a chunk's embed text is presented to the model
+                (``"passage: {text}"`` for E5). Part of the cache key: the
+                same text under another template is another vector.
         """
         kwargs.setdefault("bound", "io")
         kwargs.setdefault("exclude", {"trace": ["chunks", "vectors"]})
@@ -90,6 +97,9 @@ class EmbedChunksOp(BaseOp):
         self.resource = resource
         self.catalog = catalog
         self.batch_size = batch_size
+        if "{text}" not in template:
+            raise ValueError(f"EmbedChunksOp template {template!r} must contain {{text}}")
+        self.template = template
         self.inputs = self._merge_params({"chunks": Param(type=list, required=True)}, inputs)
         self.outputs = self._merge_params(
             {"vectors": Param(type=dict, required=True), "stats": Param(type=dict, required=True)},
@@ -111,7 +121,7 @@ class EmbedChunksOp(BaseOp):
     async def _process(self, chunks: list) -> Dict[str, Any]:
         self._ensure_initialized()
         catalog = catalog_of(self.catalog)
-        fp = embedder_fingerprint(self.resource, self.backend)
+        fp = embedder_fingerprint(self.resource, self.backend, self.template)
         by_sha: Dict[str, str] = {}
         for c in chunks:
             by_sha.setdefault(c["embed_text_sha"], c["embed_text"])
@@ -121,7 +131,9 @@ class EmbedChunksOp(BaseOp):
         calls = 0
         for start in range(0, len(missing), self.batch_size):
             batch = missing[start : start + self.batch_size]
-            result = await self.backend.run([by_sha[sha] for sha in batch])
+            result = await self.backend.run(
+                [self.template.replace("{text}", by_sha[sha]) for sha in batch]
+            )
             calls += 1
             vectors = result["embeddings"]
             if len(vectors) != len(batch):
@@ -138,13 +150,16 @@ class EmbedChunksOp(BaseOp):
         }
 
     @shorthand
-    def of(cls, resource=None, catalog=None, batch_size=64, **kwargs) -> "EmbedChunksOp":
+    def of(
+        cls, resource=None, catalog=None, batch_size=64, template="{text}", **kwargs
+    ) -> "EmbedChunksOp":
         """Create an EmbedChunksOp with flat kwargs."""
         input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
         return cls(
             resource=resource,
             catalog=catalog,
             batch_size=batch_size,
+            template=template,
             inputs=input_mappings or None,
             **init_kwargs,
         )

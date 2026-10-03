@@ -149,6 +149,10 @@ class Document(_Model):
 
     ``active_version_id`` is ``None`` before the first commit and after a delete
     (tombstone), which makes the document invisible at once.
+
+    Attributes:
+        acl: Principals allowed to read it (``KBFilter.acl_any``); empty means
+            no ACL filter matches it.
     """
 
     id: str
@@ -157,6 +161,7 @@ class Document(_Model):
     title: Optional[str] = None
     mime: str
     tags: List[str] = Field(default_factory=list)
+    acl: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     active_version_id: Optional[str] = None
     deleted_at: Optional[datetime] = None

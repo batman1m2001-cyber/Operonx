@@ -1,20 +1,35 @@
-"""Delete and GC graphs (wiring only; the logic is in :mod:`operonx_kb.ops.maintenance`).
+"""Delete, GC and rebuild graphs (wiring only; the logic is in :mod:`operonx_kb.ops.maintenance`
+and :mod:`operonx_kb.ops.lexical`).
 
 ::
 
-    delete:  tombstone_document ─► VectorDeleteOp ─► finish_delete (forget ledger rows; purge)
-    gc:      find_stale_entries ─► VectorDeleteOp ─► forget_index_writes ─► collect_blobs ─► gc_report
-    rebuild: plan_rebuild ─► EmbedChunksOp (cache) ─► stage_index_writes ─► VectorUpsertOp ─► finish_rebuild
-    drop:    find_stale_entries(everything) ─► VectorDeleteOp ─► forget_index_writes
+    delete:          tombstone_document ─► VectorDeleteOp ─► delete_document_lexical ─► finish_delete
+    gc:              find_stale_entries ─► VectorDeleteOp ─► forget_index_writes ─► collect_lexical
+                     ─► collect_blobs ─► gc_report
+    rebuild:         plan_rebuild ─► EmbedChunksOp (cache) ─► stage_index_writes ─► VectorUpsertOp
+                     ─► finish_rebuild
+    drop:            find_stale_entries(everything) ─► VectorDeleteOp ─► forget_index_writes
+    rebuild_lexical: plan_rebuild ─► write_lexical ─► finish_lexical_rebuild
+    drop_lexical:    collect_lexical(everything)
+
+The lexical ops do nothing when the collection has no lexical index.
 """
 
 from __future__ import annotations
 
+from typing import Optional
+
 from operonx import END, START, graph
 from operonx.providers.ops import VectorDeleteOp, VectorUpsertOp
 
-from operonx_kb.model.collection import DenseIndexSpec
+from operonx_kb.model.collection import DenseIndexSpec, LexicalIndexSpec
 from operonx_kb.ops import EmbedChunksOp, forget_index_writes, stage_index_writes
+from operonx_kb.ops.lexical import (
+    collect_lexical,
+    delete_document_lexical,
+    finish_lexical_rebuild,
+    write_lexical,
+)
 from operonx_kb.ops.maintenance import (
     collect_blobs,
     find_stale_entries,
@@ -25,14 +40,30 @@ from operonx_kb.ops.maintenance import (
     tombstone_document,
 )
 
-__all__ = ["build_delete_graph", "build_gc_graph", "build_rebuild_graph", "build_drop_index_graph"]
+__all__ = [
+    "build_delete_graph",
+    "build_gc_graph",
+    "build_rebuild_graph",
+    "build_drop_index_graph",
+    "build_lexical_rebuild_graph",
+    "build_lexical_drop_graph",
+]
+
+
+def _dump(lexical: Optional[LexicalIndexSpec]) -> Optional[dict]:
+    return lexical.model_dump(mode="json") if lexical else None
 
 
 def build_delete_graph(
-    dense: DenseIndexSpec, *, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main"
+    dense: DenseIndexSpec,
+    *,
+    lexical: Optional[LexicalIndexSpec] = None,
+    catalog: str = "kb_catalog:main",
+    blobs: str = "kb_blob:main",
 ):
-    """Delete one document (``collection``, ``key``, ``purge``) from the catalog and the index."""
+    """Delete one document (``collection``, ``key``, ``purge``) from the catalog and the indexes."""
     vcollection = dense.collection or ""
+    lexical_spec = _dump(lexical)
 
     @graph
     def delete_document(collection, key, purge):
@@ -46,6 +77,9 @@ def build_delete_graph(
         delete = VectorDeleteOp.of(
             resource=dense.store, ids=tomb["vector_ids"], collection=dense.collection
         )
+        lex = delete_document_lexical(
+            document_id=tomb["document_id"], catalog=catalog, lexical=lexical_spec
+        )
         finish = finish_delete(
             collection=collection,
             key=key,
@@ -57,17 +91,24 @@ def build_delete_graph(
             catalog=catalog,
             blobs=blobs,
             deleted=delete["deleted"],
+            lexical=lexical_spec,
+            lexical_deleted=lex["deleted"],
         )
-        START >> tomb >> delete >> finish >> END
+        START >> tomb >> delete >> lex >> finish >> END
 
     return delete_document
 
 
 def build_gc_graph(
-    dense: DenseIndexSpec, *, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main"
+    dense: DenseIndexSpec,
+    *,
+    lexical: Optional[LexicalIndexSpec] = None,
+    catalog: str = "kb_catalog:main",
+    blobs: str = "kb_blob:main",
 ):
     """Garbage-collect one collection (``collection``, ``blobs_enabled``, ``grace_seconds``)."""
     vcollection = dense.collection or ""
+    lexical_spec = _dump(lexical)
 
     @graph
     def collect_garbage(collection, blobs_enabled, grace_seconds):
@@ -84,6 +125,7 @@ def build_gc_graph(
             catalog=catalog,
             deleted=delete["deleted"],
         )
+        lex = collect_lexical(collection=collection, catalog=catalog, lexical=lexical_spec)
         sweep = collect_blobs(
             enabled=blobs_enabled, grace_seconds=grace_seconds, catalog=catalog, blobs=blobs
         )
@@ -92,14 +134,19 @@ def build_gc_graph(
             deleted=delete["deleted"],
             forgotten=forget["forgotten"],
             blobs_deleted=sweep["blobs_deleted"],
+            lexical_deleted=lex["deleted"],
         )
-        START >> stale >> delete >> forget >> sweep >> summary >> END
+        START >> stale >> delete >> forget >> lex >> sweep >> summary >> END
 
     return collect_garbage
 
 
 def build_rebuild_graph(
-    dense: DenseIndexSpec, *, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main"
+    dense: DenseIndexSpec,
+    *,
+    lexical: Optional[LexicalIndexSpec] = None,
+    catalog: str = "kb_catalog:main",
+    blobs: str = "kb_blob:main",
 ):
     """Rebuild a collection's dense index into ``dense.store``/``dense.collection`` from the
     catalog alone: no parsing, and embeddings come from the cache when the embedder is
@@ -113,6 +160,7 @@ def build_rebuild_graph(
             resource=dense.embedder,
             catalog=catalog,
             batch_size=dense.batch_size,
+            template=dense.passage_template,
             chunks=plan["chunks"],
         )
         stage = stage_index_writes(
@@ -122,11 +170,13 @@ def build_rebuild_graph(
             vcollection=vcollection,
             collection=collection,
             catalog=catalog,
+            payloads=plan["payloads"],
         )
         upsert = VectorUpsertOp.of(
             resource=dense.store,
             ids=stage["ids"],
             vectors=stage["vectors"],
+            metadata=stage["metadata"],
             collection=dense.collection,
         )
         finish = finish_rebuild(
@@ -144,7 +194,11 @@ def build_rebuild_graph(
 
 
 def build_drop_index_graph(
-    dense: DenseIndexSpec, *, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main"
+    dense: DenseIndexSpec,
+    *,
+    lexical: Optional[LexicalIndexSpec] = None,
+    catalog: str = "kb_catalog:main",
+    blobs: str = "kb_blob:main",
 ):
     """Delete every vector the ledger records for a collection in ``dense.store`` (an old
     index generation). Input: ``collection``."""
@@ -173,3 +227,50 @@ def build_drop_index_graph(
         delete >> END  # its count is part of the result
 
     return drop_index
+
+
+def build_lexical_rebuild_graph(
+    lexical: LexicalIndexSpec, *, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main"
+):
+    """Rebuild a collection's lexical index into ``lexical`` (another table, or another
+    analyzer) from the catalog alone. Inputs: ``collection``, ``switch``."""
+    lexical_spec = _dump(lexical)
+
+    @graph
+    def rebuild_lexical(collection, switch):
+        plan = plan_rebuild(collection=collection, catalog=catalog)
+        write = write_lexical(
+            todo=plan["chunks"],
+            payloads=plan["payloads"],
+            collection=collection,
+            catalog=catalog,
+            lexical=lexical_spec,
+        )
+        finish = finish_lexical_rebuild(
+            collection=collection,
+            lexical=lexical_spec,
+            switch=switch,
+            catalog=catalog,
+            chunks=plan["count"],
+            upserted=write["written"],
+        )
+        START >> plan >> write >> finish >> END
+
+    return rebuild_lexical
+
+
+def build_lexical_drop_graph(
+    lexical: LexicalIndexSpec, *, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main"
+):
+    """Delete every entry the ledger records for a collection in ``lexical`` (an old
+    generation). Input: ``collection``."""
+    lexical_spec = _dump(lexical)
+
+    @graph
+    def drop_lexical(collection):
+        drop = collect_lexical(
+            collection=collection, catalog=catalog, lexical=lexical_spec, everything=True
+        )
+        START >> drop >> END
+
+    return drop_lexical
