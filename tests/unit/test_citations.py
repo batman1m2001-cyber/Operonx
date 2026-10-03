@@ -147,3 +147,14 @@ def test_a_marker_after_the_full_stop_belongs_to_the_sentence_before():
     text = "Twelve days a year. [1] Unused days expire [2]. Ask HR."
     got = [text[s:e] for s, e in answer_sentences(text)]
     assert got == ["Twelve days a year. [1]", "Unused days expire [2].", "Ask HR."]
+
+
+def test_a_touching_hit_that_does_not_fit_is_not_claimed_by_the_source(version):
+    from operonx_kb.text.tokenize import RegexTokenizer
+
+    _, chunks, occ = version
+    a = next(i for i, o in enumerate(occ) if "twelve days" in chunks[o.chunk_id].text)
+    b = next(i for i, o in enumerate(occ) if "31 March" in chunks[o.chunk_id].text)
+    budget = RegexTokenizer().count(chunks[occ[a].chunk_id].text)
+    (src,) = sources_for(version, [a, b], neighbours=0, budget_tokens=budget)
+    assert src.hit_ranks == [1] and "31 March" not in src.text

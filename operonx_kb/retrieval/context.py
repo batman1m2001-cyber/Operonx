@@ -115,37 +115,31 @@ def build_sources(
             for o in occ[max(0, at - neighbours) : at + neighbours + 1]
             if heading_paths.get(o.chunk_id, []) == section
         ]
-        own = occ[at]
-        window_spans = [tuple(sp) for o in window for sp in o.spans]
-        touched = next(
-            (
-                src
-                for src in sources
-                if src.version_id == version and _touches(src.spans, window_spans, canonical)
-            ),
-            None,
-        )
-        if touched is not None:
-            spans = merge_touching(touched.spans + window_spans, canonical)
+        for group in (window, [occ[at]]):  # with its neighbours, else alone
+            group_spans = [tuple(sp) for o in group for sp in o.spans]
+            touched = next(
+                (
+                    src
+                    for src in sources
+                    if src.version_id == version and _touches(src.spans, group_spans, canonical)
+                ),
+                None,
+            )
+            base = touched.spans if touched is not None else []
+            spans = merge_touching(base + group_spans, canonical)
             text = _text(canonical, spans)
-            extra = tokenizer.count(text) - tokenizer.count(touched.text)
-            if used + extra <= budget_tokens:
-                used += extra
+            cost = tokenizer.count(text) - (tokenizer.count(touched.text) if touched else 0)
+            if used + cost > budget_tokens:
+                continue
+            used += cost
+            ids = [hit["chunk_id"]] + [o.chunk_id for o in group]
+            pages = {p for o in group for p in o.pages}
+            if touched is not None:
                 touched.spans, touched.text = spans, text
-                touched.chunk_ids = list(
-                    dict.fromkeys(
-                        touched.chunk_ids + [hit["chunk_id"]] + [o.chunk_id for o in window]
-                    )
-                )
-                touched.pages = sorted(set(touched.pages) | {p for o in window for p in o.pages})
-            touched.hit_ranks.append(hit.get("rank", 0))
-            continue
-        for group in (window, [own]):
-            spans = merge_touching([tuple(s) for o in group for s in o.spans], canonical)
-            text = _text(canonical, spans)
-            cost = tokenizer.count(text)
-            if used + cost <= budget_tokens:
-                used += cost
+                touched.chunk_ids = list(dict.fromkeys(touched.chunk_ids + ids))
+                touched.pages = sorted(set(touched.pages) | pages)
+                touched.hit_ranks.append(hit.get("rank", 0))
+            else:
                 sources.append(
                     Source(
                         n=len(sources) + 1,
@@ -154,16 +148,14 @@ def build_sources(
                         title=hit.get("title"),
                         version_id=version,
                         heading_path=list(section),
-                        pages=sorted({p for o in group for p in o.pages}),
+                        pages=sorted(pages),
                         spans=spans,
                         text=text,
-                        chunk_ids=list(
-                            dict.fromkeys([hit["chunk_id"]] + [o.chunk_id for o in group])
-                        ),
+                        chunk_ids=list(dict.fromkeys(ids)),
                         hit_ranks=[hit.get("rank", 0)],
                     )
                 )
-                break
+            break
     return sources
 
 
