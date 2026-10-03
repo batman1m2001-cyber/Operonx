@@ -938,7 +938,9 @@ The refactor is clean but not free.
 5. **Pre-existing bug not fixed by this plan:**
    `providers/rerankers/config.py` declares `RerankingType.COHERE` but
    `create_reranking()` has no COHERE branch (dead enum entry). Flag
-   for follow-up PR; out of scope here.
+   for follow-up PR; out of scope here. *(Removed after 1.14.0: a type
+   the config accepts must have a factory branch, and
+   `tests/internal/providers/test_reranker_types.py` checks both lists.)*
 
 6. **Decisions now settled (were open in earlier drafts):**
    - **Two-store model** — index carries vector + id + filterable
