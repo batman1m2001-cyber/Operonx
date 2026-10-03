@@ -134,6 +134,47 @@ its blobs, which other runs may share; `store.prune_media()` removes the
 ones nothing references. `operonx.telemetry.media` (`detect_media`,
 `LocalMediaStore`) is usable by any other store.
 
+## Reading a project's own sinks
+
+A reader that is not the project — the studio, a script on another
+machine — wants the runs where the project writes them. Ask the project's
+files, without importing its code:
+
+```python
+from operonx.telemetry.runs import project_stores
+
+for src in project_stores("/srv/callbot"):
+    print(src.source, "→", src.describe() if src.readable else src.reason)
+# [tracing] → local → files at /srv/callbot/.operonx/runs
+# [tracing], [tracing.services.call] → trace_clickhouse:default → ClickHouse callbot_traces at ch.internal:8123
+# [tracing] → trace_langfuse:edupia → Langfuse at https://langfuse.example
+store = next(s for s in project_stores("/srv/callbot") if s.backend == "clickhouse").open()
+```
+
+`project_stores(root)` reads `[tracing]` in `operonx.toml` — the
+project-wide `sinks`, every `[tracing.services.<n>]` and
+`[tracing.jobs.<n>]`, and the `trace =` of any `[[serve]]` or `[[job]]`
+they do not override — and returns each sink once, as a
+`StoreSource`: its `spec` for `open_run_store`, the `levels` that name it,
+`source` in one line, and `describe()` without credentials.
+
+| Sink | Read as |
+|---|---|
+| `"local"` | `files` at `<project>/.operonx/runs` (or `OPERONX_RUNS_DIR`) |
+| `trace_local:<n>` | `files` at its `root` |
+| `trace_clickhouse:<n>` | `clickhouse` with the consumer's own fields |
+| `trace_langfuse:<n>` | `langfuse`, through its `client_resource` |
+| `run_store:<n>` | that store |
+| anything else | unreadable — `reason` says why |
+
+`${VAR}` resolves as the project's own bootstrap does it: the process
+environment, with the project's `.env` filling in what it lacks. A
+variable set in neither makes that sink unreadable, naming it. Relative
+paths anchor where the writer anchors them: a files `root` and a
+`media_dir` at the project, a sqlite `path` under the runs root. Both
+forms of a resources file work, nested (`run_store:` / `  default:`) and
+flat (`run_store:default:`). No `[tracing]` table is an empty list.
+
 ## Asking for runs
 
 The contract is five methods, on purpose — a backend implements each

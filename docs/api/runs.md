@@ -29,6 +29,11 @@ alerts](../guide/11-runs.md).
 ::: operonx.telemetry.runs.RunStoreConfig
 ::: operonx.telemetry.runs.open_run_store
 
+## A project's own stores
+
+::: operonx.telemetry.runs.project_stores
+::: operonx.telemetry.runs.StoreSource
+
 ## ClickHouse
 
 ::: operonx.telemetry.runs.clickhouse.ClickHouseRunStore

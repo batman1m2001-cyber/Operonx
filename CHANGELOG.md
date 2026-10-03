@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`operonx.telemetry.runs.project_stores(root)`: the stores a
+  project's trace sinks can be read from, from its files alone.** It reads
+  `[tracing]` in `operonx.toml` (project-wide, per service, per job, and a
+  block's own `trace =` where nothing overrides it) and `resources.yaml`
+  with `${VAR}` from the project's `.env` under the environment, and
+  returns one `StoreSource` per sink: `"local"` and `trace_local:` as
+  `files`, `trace_clickhouse:` as `clickhouse`, `trace_langfuse:` as
+  `langfuse` through its client, `run_store:` as itself; a project's own
+  consumer comes back unreadable with the reason. Relative paths anchor
+  where the writer anchors them. The studio uses it to read what a project
+  actually writes.
+- `open_run_store` and `run_store:` take `timeout` (ClickHouse's connect
+  timeout).
+- `operonx.core.registry.storage.yaml.flatten_resources`: a resources
+  file's top level as `category:name` keys, nested and flat forms alike.
+
 - **`[tracing]` in `operonx.toml`: which trace sinks are on, in one
   place.** `[tracing] sinks = ["local", "trace_langfuse:edupia"]` sends
   every run to all of them; `[tracing.services.<name>]` and

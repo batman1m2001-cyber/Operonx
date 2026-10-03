@@ -23,6 +23,7 @@
         password: ${CLICKHOUSE_PASSWORD}
         database: operonx
         media_dir: /data/operonx-media
+        timeout: 10               # connect timeout, seconds
       remote:
         backend: langfuse
         host: ${LANGFUSE_HOST}
@@ -80,6 +81,7 @@ class RunStoreConfig(YamlModel):
     batch_size: int = 10000
     flush_interval: float = 1.0
     queue_size: int = 1000
+    timeout: float = 10.0  # clickhouse: connect timeout, seconds
 
 
 def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
@@ -142,6 +144,7 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
             batch_size=int(spec.get("batch_size") or 10000),
             flush_interval=float(spec.get("flush_interval") or 1.0),
             queue_size=int(spec.get("queue_size") or 1000),
+            timeout=float(spec.get("timeout") or 10.0),
         )
     raise ValueError(f"unknown run_store backend {backend!r}; one of {', '.join(BACKENDS)}")
 
@@ -177,5 +180,6 @@ def create_run_store(cfg: RunStoreConfig) -> RunStore:
             "batch_size": cfg.batch_size,
             "flush_interval": cfg.flush_interval,
             "queue_size": cfg.queue_size,
+            "timeout": cfg.timeout,
         }
     )
