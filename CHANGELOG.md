@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Trace media in ClickHouse: `media: clickhouse` on `trace_clickhouse:`
+  and `run_store: {backend: clickhouse}`.** Blobs (audio, images, arrays)
+  go to a `media` table beside the runs instead of a local `media_dir`,
+  so a studio on another host plays the audio. They ride the writer's
+  background batches (one `media` insert per batch, before `nodes`;
+  `consume()` still only enqueues). A sha this process already wrote is
+  not written again (an LRU of 4096). A blob expires with the last run
+  that wrote it, plus a day: the table is `ReplacingMergeTree(expires_at)`,
+  so a re-put extends it. The blob bytes a batch holds are capped by
+  `media_batch_bytes` (32 MB) plus one run's. `store.media.get(sha)` reads
+  a blob back, so `project_stores(...)` → `open()` → `media.get` works
+  unchanged. The default stays `media: local`. The new store is
+  `operonx.telemetry.runs.clickhouse.ClickHouseMediaStore`.
+- `scripts/bench_clickhouse_media.py`: what media in ClickHouse costs,
+  against a media directory.
+
+### Changed
+
+- The ClickHouse schema is at version 2, which adds the `media` table. A
+  version 1 database upgrades on first use with one `CREATE TABLE IF NOT
+  EXISTS`, and older writers keep working against it.
+
 ## [1.13.0] - 2026-10-04
 
 ### Added
