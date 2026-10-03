@@ -5,21 +5,43 @@ without ``input`` is itself the input. ``"dataset:name"`` names
 ``<project>/datasets/name.jsonl``. A case may also carry ``tags``, a
 ``split`` (``dev``, ``test``…), a ``cluster`` and a reference
 ``trajectory``; :meth:`Dataset.select` picks cases by them,
-:meth:`Dataset.problems` says what is malformed.
+:meth:`Dataset.problems` says what is malformed. :meth:`Dataset.update`
+edits one case in place; a case whose ``status`` is ``archived`` stays in
+the file (its history stays readable) and is out of every run.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from collections.abc import Mapping
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 
-__all__ = ["CASE_KEYS", "Dataset", "case_id", "dataset_path", "diff_rows", "parse_rows"]
+__all__ = [
+    "CASE_KEYS",
+    "EDITABLE",
+    "STATUSES",
+    "Dataset",
+    "case_id",
+    "dataset_path",
+    "diff_rows",
+    "parse_rows",
+]
 
 #: Row keys that describe a case rather than being its input.
 CASE_KEYS = ("id", "input", "expected", "tags", "from", "note")
+
+#: What :meth:`Dataset.update` may change. Not ``id`` or ``input``: a
+#: different input is a different case.
+EDITABLE = ("expected", "tags", "split", "cluster", "trajectory", "note", "status")
+
+#: A case's ``status``: ``active`` (the default, never written) or
+#: ``archived`` (kept in the file, out of every run).
+STATUSES = ("active", "archived")
 
 
 # ── datasets ─────────────────────────────────────────────────────────────
@@ -107,15 +129,15 @@ class Dataset:
         )
 
     def all_rows(self) -> List[Dict[str, Any]]:
-        """Every case in the file, whatever the selection."""
+        """Every case in the file, archived ones too, whatever the selection."""
         if not self.path.is_file():
             return []
         with self.path.open("r", encoding="utf-8") as fh:
             return parse_rows(fh, where=str(self.path))
 
     def rows(self) -> List[Dict[str, Any]]:
-        """The selected cases, in file order."""
-        rows = self.all_rows()
+        """The selected active cases, in file order (archived ones are left out)."""
+        rows = [r for r in self.all_rows() if r.get("status") != "archived"]
         if not self.selection:
             return rows
         if self.split is not None:
@@ -163,9 +185,13 @@ class Dataset:
 
     def add(self, rows: Iterable[Mapping]) -> List[str]:
         """Append *rows* whose id is not already there; returns the ids added."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with _writing(self.path.parent):
+            return self._append(rows)
+
+    def _append(self, rows: Iterable[Mapping]) -> List[str]:
         have = {r["id"] for r in self.all_rows()}
         added: List[str] = []
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as fh:
             for row in rows:
                 row = dict(row)
@@ -181,12 +207,114 @@ class Dataset:
                 added.append(row["id"])
         return added
 
+    def update(self, case: str, changes: Mapping[str, Any]) -> Dict[str, Any]:
+        """Change one case in place and return it as it now reads.
+
+        *changes* maps keys of :data:`EDITABLE` to their new values; ``None``
+        removes the key (``"status": "active"`` too: active is the default).
+        The file is rewritten through a temporary file beside it, the
+        case's line changed and every other line kept byte for byte, so a
+        diff shows exactly the edit. A change that would make the case
+        malformed, an unknown or duplicated case, and a file another writer
+        changed meanwhile are refused with the file untouched.
+        """
+        unknown = [k for k in changes if k not in EDITABLE]
+        if unknown:
+            why = (
+                " — a different input is a different case: add it, and archive this one"
+                if "input" in unknown
+                else ""
+            )
+            raise ValueError(
+                f"cannot change {unknown[0]!r} of a case{why}; "
+                f"an edit changes {', '.join(EDITABLE)}"
+            )
+        if not changes:
+            raise ValueError(f"nothing to change in case {case!r}")
+        if not self.path.is_file():
+            raise ValueError(f"{self.path}: no such file")
+        # one writer at a time among add() and update(); a writer that is
+        # not a Dataset is caught by the size/mtime check before the replace
+        with _writing(self.path.parent):
+            before = self.path.stat()
+            with self.path.open("r", encoding="utf-8", newline="") as fh:
+                lines = fh.readlines()
+            found: List[int] = []
+            for n, line in enumerate(lines):
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue  # problems() names it; it is not the case asked for
+                if not isinstance(row, dict) or "input" not in row:
+                    row = {"input": row}
+                if case_id(row) == str(case):
+                    found.append(n)
+            if not found:
+                raise ValueError(f"no case {case!r} in {self.path}")
+            if len(found) > 1:
+                on = " and ".join(str(n + 1) for n in found)
+                raise ValueError(
+                    f"case {case!r} is on lines {on} of {self.path}: fix the file first"
+                )
+            n = found[0]
+            raw = json.loads(lines[n])
+            row = dict(raw) if isinstance(raw, dict) and "input" in raw else {"input": raw}
+            if "id" not in row:
+                row = {"id": case_id(row), **row}
+            for key, value in changes.items():
+                if value is None or (key == "status" and value == "active"):
+                    row.pop(key, None)
+                else:
+                    row[key] = value
+            bad = _row_problems(row)
+            if bad:
+                raise ValueError(f"case {case!r}: {bad[0]}")
+            end = "\n" if lines[n].endswith("\n") else ""
+            lines[n] = json.dumps(row, ensure_ascii=False, default=str) + end
+            fd, tmp = tempfile.mkstemp(
+                prefix=f".{self.path.name}.", suffix=".tmp", dir=self.path.parent
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
+                    fh.writelines(lines)
+                now = self.path.stat()
+                if (now.st_size, now.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+                    raise ValueError(
+                        f"{self.path} changed while it was being edited (another writer): "
+                        "nothing was written; read it again and repeat the edit"
+                    )
+                os.replace(tmp, self.path)
+            finally:
+                if os.path.exists(tmp):
+                    os.unlink(tmp)
+        return row
+
     def __len__(self) -> int:
         return len(self.rows())
 
     def __repr__(self) -> str:
         chosen = "".join(f", {k}={v!r}" for k, v in self.selection.items())
         return f"Dataset({str(self.path)!r}{chosen})"
+
+
+@contextmanager
+def _writing(folder: Path) -> Iterator[None]:
+    """One writer at a time in a dataset's folder, across processes: an
+    advisory lock on the folder itself (no lock file beside the datasets
+    in git). Where there are no advisory locks (Windows) it does not lock."""
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover — Windows
+        yield
+        return
+    fd = os.open(str(folder), os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)  # closing releases the lock
 
 
 def parse_rows(lines: Iterable[str], where: str = "<dataset>") -> List[Dict[str, Any]]:
@@ -214,6 +342,9 @@ def _stable(cid: str) -> str:
 
 def _row_problems(row: Mapping) -> List[str]:
     out = []
+    status = row.get("status")
+    if status is not None and status not in STATUSES:
+        out.append(f"status is 'active' or 'archived', not {status!r}")
     tags = row.get("tags")
     if tags is not None and not (isinstance(tags, list) and all(isinstance(x, str) for x in tags)):
         out.append(f"tags is a list of strings, not {tags!r}")
