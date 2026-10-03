@@ -324,3 +324,67 @@ def test_the_fingerprint_is_on_the_run_record(tmp_path):
     assert {k: v for k, v in edited.items() if k != "dataset_version"} == {
         k: v for k, v in first.items() if k != "dataset_version"
     }
+
+
+# ── a Python transform on a Ref ────────────────────────────────────────────
+
+APPLY_MOD = """
+from operonx.core import END, START, graph, op
+from operonx.core.ops import if_
+
+def shout(text):
+    return text.upper()
+
+@op(bound="sync")
+def echo(text: str = "") -> dict:
+    return {"text": text}
+
+@op(bound="sync")
+def loud(text: str = "") -> dict:
+    return {"label": "loud"}
+
+@op(bound="sync")
+def calm(text: str = "") -> dict:
+    return {"label": "calm"}
+
+@graph
+def flow(text: str = ""):
+    e = echo(text=text)
+    a, b = loud(text=e["text"].apply(shout)), calm(text=text)
+    route = if_(e["text"].apply(shout) == "HI", a).else_(b)
+    START >> e >> route
+    a >> END
+    b >> END
+
+def label_ok(output=None, expected=None):
+    return True
+"""
+
+
+def test_a_python_transform_is_hashed_by_its_name_and_body(tmp_path):
+    """`Ref.apply(fn)` used to make serialize() raise a ValueError (an
+    operonx-rs FFI rule), so the fingerprint of such a graph crashed. The
+    callable is part of the graph: hashed like an op's body."""
+    (tmp_path / "mod.py").write_text(textwrap.dedent(APPLY_MOD), encoding="utf-8")
+    (tmp_path / "cases.jsonl").write_text('{"id": "a", "input": "hi"}\n', encoding="utf-8")
+    one, two = _fp_in_a_process(tmp_path), _fp_in_a_process(tmp_path)
+    assert one == two and one["graph_hash"] and "graph_hash_error" not in one
+
+    # the transform's body is the graph's: a change to it is a new graph
+    (tmp_path / "mod.py").write_text(
+        textwrap.dedent(APPLY_MOD).replace("text.upper()", "text.lower()"), encoding="utf-8"
+    )
+    edited = _fp_in_a_process(tmp_path)
+    assert edited["graph_hash"] != one["graph_hash"]
+    assert edited["config_hash"] == one["config_hash"]
+
+
+def test_a_python_transform_serializes_as_a_callable_ref():
+    from operonx.core.states.ref import Ref
+
+    def norm(text):
+        return text.strip()
+
+    spec = Ref("src", "text").apply(norm).serialize()
+    ((name, args),) = spec["transforms"]
+    assert name == "apply" and args[0] == {"python_callable": norm}

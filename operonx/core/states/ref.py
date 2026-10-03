@@ -778,7 +778,12 @@ class Ref:
         }
 
     def _serialize_transforms(self) -> list:
-        """Serialize _transforms list, handling nested Refs in compound booleans."""
+        """Serialize _transforms list, handling nested Refs in compound booleans.
+
+        ``Ref.apply(fn)``'s function is kept as ``{"python_callable": fn}``,
+        the key an op's own body is under, so readers of a serialized graph
+        treat both alike (the eval fingerprint hashes it by name and source).
+        """
         result = []
         for op_name, args in self._transforms:
             serialized_args = []
@@ -786,14 +791,7 @@ class Ref:
                 if isinstance(arg, Ref):
                     serialized_args.append({"__ref__": arg.serialize()})
                 elif callable(arg) and op_name == "apply":
-                    func_name = getattr(arg, "__name__", getattr(arg, "__qualname__", repr(arg)))
-                    raise ValueError(
-                        f"Ref.apply() with Python callable '{func_name}' cannot be serialized "
-                        f"for the Rust backend. Python functions cannot cross the FFI boundary.\n"
-                        f"  Ref: {self!r}\n"
-                        f"Fix: Replace Ref.apply(lambda ...) with a dedicated @op(rust='...') "
-                        f"that performs the same logic, then use op['result'] in your condition."
-                    )
+                    serialized_args.append({"python_callable": arg})
                 else:
                     serialized_args.append(arg)
             result.append([op_name, serialized_args])
