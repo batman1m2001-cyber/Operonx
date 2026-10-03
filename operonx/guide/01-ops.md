@@ -207,6 +207,9 @@ asyncio.run(main())
 - `prompt` is a string (one user message) or `{"system": ..., "user": ...}`
   with `{placeholders}`; `messages=[...]` passes a ready message list.
 - `stream=True` makes it a streaming op that yields `content` deltas.
+  The last frame has `final=True`, an empty `content` and the whole
+  answer in `full_content`, so joining every frame's `content` gives the
+  answer once. Read `full_content` for the whole text, streamed or not.
 - Name template variables after what they hold (`question`, `message`).
   Never `{user}`, `{temperature}` and the like: those are model settings,
   and such a placeholder raises `PromptError` when the op is built.

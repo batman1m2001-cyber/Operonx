@@ -145,20 +145,19 @@ Measured on four yields 150 ms apart: they arrive at 185/336/487/640 ms.
 
 ## Streamed LLM frames
 
-`LLMOp(stream=True)` emits one frame per token delta and **one closing
-frame carrying the whole accumulated `content`**. Both travel the same
-channel, so joining every frame's `content` emits the answer twice.
-
-`final` separates them:
+`LLMOp(stream=True)` emits one frame per token delta and one closing
+frame. `content` is always what a frame adds, and the closing frame adds
+nothing: its `content` is `""` and the whole answer is `full_content`.
+`final` marks it:
 
 ```python
-deltas = "".join(f["content"] for f in frames if not f["final"])
-whole  = next(f["content"] for f in frames if f["final"])
-assert deltas == whole
+assert "".join(f["content"] for f in frames) == next(f["full_content"] for f in frames if f["final"])
 ```
 
-Join the deltas or read the final frame — never both. Batch (non-streaming)
-calls are always `final=True`.
+Up to 1.14 the closing frame repeated the answer under `content`, so a
+consumer that forwarded each frame's `content` sent it twice. Batch
+(non-streaming) calls are always `final=True`, with `content` and
+`full_content` both the whole answer.
 
 ## Performance notes
 
