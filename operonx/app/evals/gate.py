@@ -163,8 +163,10 @@ class Gate:
             ``{metric: floor}``. A metric under its floor fails the run —
             exactly ``Eval(threshold=…)``'s 1.9.0 rule.
         baseline: What to compare against: ``"latest"`` (this eval's last
-            finished run, fixed when the run starts) or a run id under its
-            ``record_dir``.
+            finished run, fixed when the run starts), a run id under its
+            ``record_dir``, or a commit's experiment from the score store:
+            ``"git:<ref>"`` is the one at ``git merge-base HEAD <ref>``,
+            ``"main"`` is ``"git:origin/main"``.
         tolerance: How large a drop matters, per gated metric (a number,
             or ``{metric: number}``). Required with a ``baseline``.
         metrics: The metrics compared against the baseline that can gate
@@ -200,10 +202,10 @@ class Gate:
                 raise ValueError(f"Gate: tolerance for {name!r} is a drop in [0, 1], not {t}")
         if self.baseline is not None:
             text = str(self.baseline)
-            if text in ("main",) or text.startswith("git:"):
+            if text == "git:" or not text.strip():
                 raise ValueError(
-                    f"Gate(baseline={text!r}) needs the experiment store, which does not "
-                    "exist yet; use 'latest' or a run id from this eval's record_dir"
+                    f"Gate(baseline={text!r}) names no baseline: 'latest', a run id, "
+                    "'main' or 'git:<ref>'"
                 )
             missing = [m for m in self.gated() if m not in self._tolerances]
             if missing:

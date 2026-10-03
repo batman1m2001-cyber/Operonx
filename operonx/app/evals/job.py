@@ -30,7 +30,8 @@ from ..jobs.record import (
 )
 from .dataset import Dataset, dataset_path
 from .evaluators import _name, judge_all, prepare
-from .fingerprint import case_hash, fingerprint
+from .experiments import git_ref
+from .fingerprint import case_hash, dataset_version, evaluators_version, fingerprint
 from .gate import (
     ERROR,
     FAILED,
@@ -139,6 +140,8 @@ class Eval(Job):
             to take what is queued. What it did not take is counted and
             logged; the job record still holds every verdict, and
             :func:`~operonx.app.evals.publish` sends it later.
+        variant: A free label for what this experiment tries ("prompt
+            v7"), kept on its record and its experiment row.
     """
 
     origin = "eval"
@@ -158,6 +161,7 @@ class Eval(Job):
         record_dir: Union[str, Path] = "evals",
         scores: Any = None,
         scores_timeout: float = 10.0,
+        variant: Optional[str] = None,
         **kwargs: Any,
     ):
         self.dataset = dataset if isinstance(dataset, Dataset) else Dataset(dataset_path(dataset))
@@ -191,6 +195,7 @@ class Eval(Job):
         self.root = Path(root) if root is not None else None
         self.scores = _check_scores(name, scores)
         self.scores_timeout = float(scores_timeout)
+        self.variant = str(variant) if variant else None
         self._judges = [
             _name(ev) for ev in self.evaluators if getattr(ev, "eval_kind", None) == "judge"
         ]
@@ -203,6 +208,8 @@ class Eval(Job):
         self._fingerprint: Optional[Dict[str, Any]] = None
         self._code: Optional["Future[Dict[str, Any]]"] = None
         self._baseline: Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]] = None
+        # a "main" / "git:<ref>" baseline: found before the record opens
+        self._from_git: Optional[Tuple[str, Dict[str, CaseOutcome], Dict, str]] = None
         self._complete = False
         kwargs.setdefault("on_error", "record")
         super().__init__(
@@ -244,6 +251,9 @@ class Eval(Job):
         # opened before the record: a store that cannot be named fails the
         # run before it starts, not with a record stuck at "running"
         self._store = _open_scores(self.scores) if self.scores is not None else None
+        # so is a commit's baseline: no experiment there, no run (and no cost)
+        ref = git_ref(self.gate.baseline) if self.gate is not None else None
+        self._from_git = await asyncio.to_thread(self._git_baseline, ref) if ref else None
         run: Optional[JobRun] = None
         try:
             run = await super().run(resume=resume)
@@ -267,7 +277,9 @@ class Eval(Job):
         self._verdicts, self._complete, self._baseline = [], False, None
         rows = await asyncio.to_thread(self.dataset.rows)
         self._rows = {row["id"]: row for row in rows}
-        if self.gate is not None and self.gate.baseline is not None:
+        if self._from_git is not None:
+            self._baseline = self._from_git[:3]
+        elif self.gate is not None and self.gate.baseline is not None:
             self._baseline = await asyncio.to_thread(self._load_baseline)
         self._code = _ask_git(self.root or Path.cwd())
         self._fingerprint, hashes = await asyncio.to_thread(self._identify, rows)
@@ -287,6 +299,48 @@ class Eval(Job):
             code={},
         )
         return fp, [case_hash(row) for row in rows]
+
+    def _git_baseline(self, ref: str) -> Tuple[str, Dict[str, CaseOutcome], Dict, str]:
+        """The experiment of ``git merge-base HEAD <ref>``, from the eval's
+        score store (else the project's): ``(id, outcomes, fingerprint,
+        "git:<ref> @ <sha>")``. None there is an error — nothing has run."""
+        from operonx.telemetry.scores import project_score_store
+
+        from .experiments import ExperimentData, find_baseline, merge_base, store_name
+
+        root = self.root or Path.cwd()
+        sha = merge_base(root, ref)
+        rows = self.dataset.rows()
+        _, evaluators_hash = evaluators_version({_name(ev): ev for ev in self.evaluators})
+        if self._store is not None:
+            store, owned, where = self._store, False, store_name(self._store)
+        else:
+            src = project_score_store(root)
+            store, owned, where = src.open(), True, f"{src.describe()} ({src.source})"
+        try:
+            exp = find_baseline(
+                store,
+                self.name,
+                sha,
+                dataset_version=dataset_version(rows),
+                evaluators_hash=evaluators_hash,
+            )
+            data = ExperimentData.from_store(store, exp.experiment_id) if exp else None
+        finally:
+            if owned:
+                store.close()
+        if data is None:
+            branch = ref.split("/", 1)[-1]
+            raise ValueError(
+                f"eval {self.name!r}: baseline {self.gate.baseline!r} is the experiment at "  # type: ignore[union-attr]
+                f"{sha}, the merge-base of HEAD and {ref}, and the score store ({where}) has "
+                f"no finished, clean run of this eval there. Run the eval on {branch} first "
+                f"so its experiment is stored (`operonx eval run {self.name}` in a pipeline on "
+                f"{branch}, or a scheduled one, keeps baselines warm), or compare with "
+                "baseline='latest'"
+            )
+        fp = data.fingerprint
+        return data.experiment_id, data.outcomes(), fp, f"git:{ref} @ {sha}"
 
     def _load_baseline(self) -> Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]]:
         ref = str(self.gate.baseline)  # type: ignore[union-attr]
@@ -385,6 +439,10 @@ class Eval(Job):
             "threshold": self.threshold,
             **nums,
         }
+        if self.variant:
+            summary["variant"] = self.variant
+        if self.dataset.selection:
+            summary["selection"] = self.dataset.selection
         fp = self._fingerprint
         if fp is not None and self._code is not None:
             code = self._code.result()
@@ -422,6 +480,8 @@ class Eval(Job):
                 baseline=self._baseline,
                 fingerprint=self._fingerprint,
             )
+            if self._from_git is not None and "comparison" in gate:
+                gate["comparison"]["baseline_ref"] = self._from_git[3]
             summary["gate"] = gate
             if gate["exit_code"] == 0:
                 status = RUN_OK
@@ -520,6 +580,10 @@ class Eval(Job):
         )
         if self.repeats > 1:
             out["repeats"] = self.repeats
+        if self.variant:
+            out["variant"] = self.variant
+        if self.dataset.selection:
+            out["selection"] = self.dataset.selection
         if self.cluster:
             out["cluster"] = self.cluster
         if self.gate is not None:

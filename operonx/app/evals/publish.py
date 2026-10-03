@@ -58,6 +58,8 @@ def experiment_of(run: JobRun) -> Experiment:
         config_hash=str(fp.get("config_hash") or ""),
         evaluators_hash=str(fp.get("evaluators_hash") or ""),
         operonx_version=str(fp.get("operonx_version") or ""),
+        split=(ev.get("selection") or meta.get("selection") or {}).get("split"),
+        variant=ev.get("variant") or meta.get("variant"),
         repeats=int(ev.get("repeats") or meta.get("repeats") or 1),
         baseline_id=(gate.get("comparison") or {}).get("baseline"),
         status=run.status,

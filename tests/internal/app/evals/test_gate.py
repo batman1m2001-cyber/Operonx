@@ -245,8 +245,10 @@ def test_flips_are_classed_by_stability():
 def test_a_gate_says_what_is_wrong_with_it():
     with pytest.raises(ValueError, match="needs a tolerance"):
         Gate(baseline="latest")
-    with pytest.raises(ValueError, match="experiment store"):
-        Gate(baseline="main", tolerance=0.03)
+    with pytest.raises(ValueError, match="names no baseline"):
+        Gate(baseline="git:", tolerance=0.03)
+    with pytest.raises(ValueError, match="needs a tolerance"):
+        Gate(baseline="main")
     with pytest.raises(ValueError, match="pass rate in"):
         Gate(threshold=1.5)
     with pytest.raises(ValueError, match="not metrics of this eval"):

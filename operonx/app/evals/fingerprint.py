@@ -28,7 +28,7 @@ import json
 import math
 from collections.abc import Mapping
 from pathlib import Path, PurePath
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlsplit, urlunsplit
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "dataset_version",
     "digest",
     "evaluator_version",
+    "evaluators_version",
     "fingerprint",
     "graph_spec",
 ]
@@ -263,6 +264,12 @@ def evaluator_version(ev: Any) -> str:
     return digest(state)
 
 
+def evaluators_version(evaluators: Mapping[str, Any]) -> Tuple[Dict[str, str], str]:
+    """Each evaluator's version by name, and the hash of all of them."""
+    versions = {name: evaluator_version(ev) for name, ev in evaluators.items()}
+    return versions, digest(sorted(versions.items()))
+
+
 # ── the whole fingerprint ────────────────────────────────────────────────
 
 
@@ -298,11 +305,11 @@ def fingerprint(
         out.update(graph_hash=None, config_hash=None, graph_hash_error=str(exc))
     else:
         out.update(graph_hash=digest(graph_spec(spec)), config_hash=digest(config_spec(spec)))
-    versions = {name: evaluator_version(ev) for name, ev in evaluators.items()}
+    versions, versions_hash = evaluators_version(evaluators)
     out.update(
         dataset_version=dataset_version(rows),
         evaluators=versions,
-        evaluators_hash=digest(sorted(versions.items())),
+        evaluators_hash=versions_hash,
         operonx_version=operonx.__version__,
     )
     return out
