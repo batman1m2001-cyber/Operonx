@@ -170,7 +170,11 @@ asyncio.run(main())
 
 - **Termination:** after each iteration the loop continues only if the
   back-edge fired. A back-edge source that raises does not fire, so the
-  loop stops there. It stops at 1000 iterations whatever happens.
+  loop stops there.
+- **A loop is capped at 1000 iterations.** A loop still looping at its cap
+  stops, records `LoopLimitExceeded` in `$errors` under the hidden loop
+  (`"<graph>.__loop_0__"`), and runs nothing after it. Set the cap on the
+  branch that loops back: `if_(..., max_iterations=N)` (below).
 - **Always `PARENT.declare` loop state.** An undeclared value is re-read
   from the first iteration every time, so the loop never ends.
 - **Compute the stop condition in an op** (`"done": n >= limit`) and branch
@@ -178,6 +182,39 @@ asyncio.run(main())
 - **An exit arm runs once.** In `if_(s["done"] == True, finish).else_(s)`,
   `finish` runs once, after the last iteration, and reads that iteration's
   values; ops after it (or after a subgraph holding the loop) run once too.
+
+```python
+import asyncio
+
+from operonx import END, PARENT, START, Operon, graph, op
+from operonx.core.ops import if_
+
+
+@op
+def poll(n: int) -> dict:
+    return {"n": n + 1, "ready": False}  # never ready
+
+
+@graph
+def wait_for_ready():
+    PARENT.declare(n=0)
+    p = poll(n=PARENT["n"])
+    p["n"] >> PARENT["n"]
+    START >> p >> if_(p["ready"] == True, END, max_iterations=5).else_(p)  # noqa: E712
+
+
+async def main():
+    engine = Operon(wait_for_ready)
+    out = await engine.run(inputs={})
+    assert out["n"] == [1, 2, 3, 4, 5]  # stopped at the cap
+    assert "LoopLimitExceeded" in out["$errors"][f"{engine.name}.__loop_0__"]
+
+
+asyncio.run(main())
+```
+
+`max_iterations` on a branch none of whose arms loops back is refused when
+the graph is built: there is nothing for it to cap.
 
 ### For loop
 

@@ -103,6 +103,7 @@ class TestOpCacheFile:
 
     async def test_cache_saves_to_file(self, tmp_path):
         """Cache should save entries to binary file."""
+        from operonx.core.ops._cache import FILE_MAGIC
         from operonx.core.ops.base import BaseOp
 
         cache_path = str(tmp_path / "test_cache.bin")
@@ -124,40 +125,54 @@ class TestOpCacheFile:
         assert total == 2
 
         # Verify file exists and has content
-        p = Path(cache_path)
-        assert p.exists()
-        data = p.read_bytes()
-        assert len(data) > 8  # at least header
-
-        # Parse header
-        (count,) = struct.unpack_from("<Q", data, 0)
+        data = Path(cache_path).read_bytes()
+        assert data.startswith(FILE_MAGIC)
+        (count,) = struct.unpack_from("<Q", data, len(FILE_MAGIC))
         assert count == 2
 
     async def test_cache_loads_from_file(self, tmp_path):
-        """Cache should load entries from existing binary file."""
+        """A saved cache answers a fresh process: the key is stable."""
         from operonx.core.ops.base import BaseOp
 
         cache_path = str(tmp_path / "preloaded.bin")
-
-        # Pre-create a cache file with one entry
-        entry = json.dumps({"result": 99}).encode()
-        h = BaseOp._cache_hash({"x": 42})
-        buf = struct.pack("<Q", 1)  # count=1
-        buf += struct.pack("<QI", h, len(entry))
-        buf += entry
-        Path(cache_path).write_bytes(buf)
+        calls = []
 
         @op(cache=cache_path)
         def slow(x: int):
-            return {"result": -1}  # Should NOT be called if cache hits
+            calls.append(x)
+            return {"result": x + 1}
 
-        with GraphOp(name="preloaded") as g:
+        def build():
+            with GraphOp(name="preloaded") as g:
+                step = slow(x=PARENT["x"])
+                START >> step >> END
+            return g
+
+        assert (await Operon(build()).run(inputs={"x": 42}))["result"] == 43
+        BaseOp.save_all_caches()
+        BaseOp._cache_stores.clear()  # what a new process starts with
+
+        r = await Operon(build()).run(inputs={"x": 42})
+        assert r["result"] == 43
+        assert calls == [42]  # the second run read the file
+
+    async def test_old_format_file_starts_empty(self, tmp_path, caplog):
+        """A file from the old key format is not misread as entries."""
+        cache_path = tmp_path / "old.bin"
+        entry = json.dumps({"result": 99}).encode()
+        cache_path.write_bytes(struct.pack("<Q", 1) + struct.pack("<QI", 7, len(entry)) + entry)
+
+        @op(cache=str(cache_path))
+        def slow(x: int):
+            return {"result": -1}
+
+        with GraphOp(name="old") as g:
             step = slow(x=PARENT["x"])
             START >> step >> END
 
-        engine = Operon(g)
-        r = await engine.run(inputs={"x": 42})
-        assert r["result"] == 99  # From cache, not from function
+        r = await Operon(g).run(inputs={"x": 42})
+        assert r["result"] == -1
+        assert "older operonx" in caplog.text
 
 
 class TestOpCacheDecorator:
@@ -302,3 +317,175 @@ class TestLLMLikeCache:
         # Different model → cache miss
         r3 = await engine.run(inputs={"prompt": "What is AI?", "model": "gpt-3.5"})
         assert call_count == 2
+
+
+# ============================================================================
+# Cache key: what tells two cached calls apart
+# ============================================================================
+
+
+@op(cache=True)
+def _a_impl(x: int) -> dict:
+    return {"r": f"A{x}"}
+
+
+@op(cache=True)
+def _b_impl(x: int) -> dict:
+    return {"r": f"B{x}"}
+
+
+class TestCacheKey:
+    """The key is the graph, the op's code and its inputs — not its name.
+
+    Before 1.15 the store was keyed by ``op.full_name`` alone, and the full
+    name is spelled from variable names: two different graphs built under
+    the same engine variable, each with an op bound to the same name,
+    answered each other's calls (evidence/probes/p2_interrupt_cache_ckpt.py,
+    P6: ``gb`` returned ``A7``).
+    """
+
+    async def test_cache_isolated_across_graphs_with_same_names(self):
+        from operonx import graph
+
+        @graph
+        def ga(x):
+            c = _a_impl(x=x)
+            START >> c >> END
+
+        @graph
+        def gb(x):
+            c = _b_impl(x=x)
+            START >> c >> END
+
+        engine = Operon(ga, params={"x": None})
+        r1 = (await engine.run(inputs={"x": 7}))["r"]
+        engine = Operon(gb, params={"x": None})  # a different graph, same names
+        r2 = (await engine.run(inputs={"x": 7}))["r"]
+
+        assert (r1, r2) == ("A7", "B7")
+
+    async def test_cache_key_distinguishes_objects_with_equal_str(self):
+        """Two inputs that print the same are not the same input."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class Celsius:
+            v: int
+
+            def __str__(self):
+                return "temp"
+
+        @dataclass
+        class Fahrenheit:
+            v: int
+
+            def __str__(self):
+                return "temp"
+
+        calls = []
+
+        @op(cache=True)
+        def read(t: object) -> dict:
+            calls.append(t)
+            return {"kind": type(t).__name__}
+
+        with GraphOp(name="temps") as g:
+            step = read(t=PARENT["t"])
+            START >> step >> END
+
+        engine = Operon(g)
+        assert (await engine.run(inputs={"t": Celsius(1)}))["kind"] == "Celsius"
+        assert (await engine.run(inputs={"t": Fahrenheit(1)}))["kind"] == "Fahrenheit"
+        assert (await engine.run(inputs={"t": Celsius(1)}))["kind"] == "Celsius"
+        assert len(calls) == 2  # the third call was a hit
+
+    async def test_cache_key_changes_with_the_op_code(self):
+        """Same graph name, op name, qualname and inputs; different body."""
+
+        def build(plus_one: bool):
+            if plus_one:
+
+                @op(cache=True)
+                def step(x: int) -> dict:
+                    return {"r": x + 1}
+
+            else:
+
+                @op(cache=True)
+                def step(x: int) -> dict:
+                    return {"r": x + 2}
+
+            with GraphOp(name="same") as g:
+                s = step(x=PARENT["x"])
+                START >> s >> END
+            return g
+
+        r1 = (await Operon(build(True)).run(inputs={"x": 1}))["r"]
+        r2 = (await Operon(build(False)).run(inputs={"x": 1}))["r"]
+        assert (r1, r2) == (2, 3)
+
+    async def test_unencodable_input_fails_loudly(self):
+        """An input with no exact encoding is an error, not a str() key."""
+
+        class Opaque:
+            def __str__(self):
+                return "same"
+
+        @op(cache=True)
+        def read(t: object) -> dict:
+            return {"ok": True}
+
+        with GraphOp(name="opaque") as g:
+            step = read(t=PARENT["t"])
+            START >> step >> END
+
+        out = await Operon(g).run(inputs={"t": Opaque()})
+        assert "ok" not in out
+        (err,) = out["$errors"].values()
+        assert "cache" in err and "Opaque" in err
+
+    async def test_store_is_bounded(self, monkeypatch):
+        """The least recently used entry goes once a store is full."""
+        from operonx.core.ops import _cache
+
+        monkeypatch.setattr(_cache, "CACHE_MAX_ENTRIES", 2)
+        seen = []
+
+        @op(cache=True)
+        def sq(x: int) -> dict:
+            seen.append(x)
+            return {"r": x * x}
+
+        with GraphOp(name="bounded") as g:
+            step = sq(x=PARENT["x"])
+            START >> step >> END
+
+        engine = Operon(g)
+        for x in (1, 2, 1, 3, 1, 2):
+            await engine.run(inputs={"x": x})
+        # 1 miss, 2 miss, 1 hit (1 is now newest), 3 miss evicts 2,
+        # 1 hit, 2 miss.
+        assert seen == [1, 2, 3, 2]
+
+
+class TestLLMOpCacheIdentity:
+    """An LLM op's key covers what changes its answer besides its inputs."""
+
+    def _scope(self, **kw):
+        from operonx.core.ops._cache import op_scope
+        from operonx.providers.ops import LLMOp
+
+        with GraphOp(name="g") as g:
+            llm = LLMOp(name="llm", **kw)
+            START >> llm >> END
+        g.build()
+        return op_scope(g._ops["llm"])
+
+    def test_model_fields_and_validators_are_in_the_key(self):
+        base = self._scope(resource="m1")
+        assert base == self._scope(resource="m1")
+        assert base != self._scope(resource="m2")
+        assert base != self._scope(resource="m1", fields=["x: int"])
+        assert self._scope(resource="m1", fields=["x: int"], validators=lambda d: True) != (
+            self._scope(resource="m1", fields=["x: int"], validators=lambda d: False)
+        )

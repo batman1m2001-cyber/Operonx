@@ -147,7 +147,7 @@ class VectorSearchOp(BaseOp):
         return cls(resource=resource, inputs=input_mappings or None, **init_kwargs)
 
     def serialize(self) -> dict:
-        """Serialize for the Rust backend, including resource config."""
+        """Serialize, including the resolved resource config."""
         self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource

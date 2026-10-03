@@ -127,10 +127,10 @@ class TestLLMOpIntegration:
 
         async for _, result in node.run(state):
             pass
-        # Verify accumulated content
-        assert "content" in result
-        assert len(result["content"]) > 0, "Should have accumulated content"
-        print(f"Streamed result content: {result['content']}")
+        # Verify accumulated content: the closing frame carries it whole
+        assert result["final"] is True
+        assert len(result["full_content"]) > 0, "Should have accumulated content"
+        print(f"Streamed result content: {result['full_content']}")
 
         # Verify usage is populated
         assert "usage" in result

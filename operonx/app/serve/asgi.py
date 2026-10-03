@@ -13,19 +13,54 @@ Requires the ``serve`` extra: ``pip install "operonx[serve]"``.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Dict, List, Optional
+import json
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
+from operonx.app.manifest import door_codec
 from operonx.core.loggings import LOGGER
 
 from .protocol import BoundedSession
 
 __all__ = [
     "AsgiTransport",
+    "DoorDecodeError",
     "HttpSession",
     "HttpTransport",
     "WebSocketSession",
     "WebSocketTransport",
+    "decode_payload",
 ]
+
+
+class DoorDecodeError(ValueError):
+    """What a caller sent cannot be read by the door's codec."""
+
+
+def decode_payload(raw: Union[str, bytes], codec: str, what: str = "body") -> Any:
+    """One payload — an HTTP body, a websocket text frame — as the item the
+    graph receives, the same way at every door.
+
+    ``codec="json"`` parses it; ``"text"`` passes text through. An empty
+    HTTP body is ``None``, no payload, under either codec.
+
+    Raises:
+        DoorDecodeError: the payload is not JSON (``"json"``) or not UTF-8
+            text. The door refuses it before a run is minted; it used to
+            run the graph with the raw string instead.
+    """
+    if isinstance(raw, (bytes, bytearray)):
+        if not raw:
+            return None
+        try:
+            raw = bytes(raw).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DoorDecodeError(f"{what} is not UTF-8 text: {exc}") from None
+    if codec == "text":
+        return raw
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise DoorDecodeError(f"{what} is not JSON: {exc}") from None
 
 
 class AsgiTransport:
@@ -112,11 +147,14 @@ class WebSocketSession(BoundedSession):
         websocket: Any,
         meta: Optional[Dict[str, Any]] = None,
         max_inflight: Optional[int] = None,
+        codec: str = "json",
     ):
         super().__init__(meta=meta, max_inflight=max_inflight)
         self.websocket = websocket
+        self.codec = codec
         self.sent = 0
         self.send_failures = 0
+        self.refused_frames = 0
 
     async def _send(self, item: Any) -> bool:
         try:
@@ -151,13 +189,41 @@ class WebSocketSession(BoundedSession):
                 if kind == "websocket.disconnect":
                     break
                 if message.get("text") is not None:
-                    await self.feed(message["text"])
+                    try:
+                        item = decode_payload(message["text"], self.codec, what="frame")
+                    except DoorDecodeError as exc:
+                        # One bad frame is the client's mistake, not the
+                        # end of the call: it is told, and the next frame
+                        # is read as usual.
+                        self.refused_frames += 1
+                        await self._tell({"error": str(exc)})
+                        continue
+                    await self.feed(item)
                 elif message.get("bytes") is not None:
                     await self.feed(message["bytes"])
         except Exception as exc:  # noqa: BLE001
             LOGGER.debug(f"[serve] websocket recv ended: {type(exc).__name__}: {exc}")
         finally:
             self.end_input()
+
+    async def run_failed(self) -> None:
+        """A run that failed before sending anything says so.
+
+        Without it the client of a run that died at its first op heard
+        nothing at all. A run that already answered has told the client
+        what it could; its later failures stay in the log and the trace.
+        """
+        if self.sent == 0:
+            await self._tell(
+                {"error": "the graph failed before it sent anything", "trace_id": self.trace_id}
+            )
+
+    async def _tell(self, notice: Dict[str, Any]) -> None:
+        """A frame from the door itself, not the run: not counted in `sent`."""
+        try:
+            await self.websocket.send_json(notice)
+        except Exception as exc:  # noqa: BLE001 — the peer may be gone; that is ordinary
+            LOGGER.info(f"[serve] websocket notice not delivered: {type(exc).__name__}: {exc}")
 
 
 class WebSocketTransport(AsgiTransport):
@@ -166,7 +232,10 @@ class WebSocketTransport(AsgiTransport):
     async def handle(
         self, websocket: Any, meta: Optional[Dict[str, Any]] = None
     ) -> WebSocketSession:
-        session = WebSocketSession(websocket, meta=meta, max_inflight=self.max_inflight)
+        codec = door_codec(self.spec) if self.spec is not None else "json"
+        session = WebSocketSession(
+            websocket, meta=meta, max_inflight=self.max_inflight, codec=codec
+        )
         self.offer(session)
         await session.pump_inbound()
         return session

@@ -13,15 +13,14 @@ subcommand each:
 - ``operonx guide`` — print or sync the guide for coding assistants;
 - ``operonx serve`` / ``operonx run`` — serve the application's services,
   run its jobs (:mod:`operonx.cli.serve`, :mod:`operonx.cli.run`);
-- ``operonx pack`` — serialise ``@graph`` factories to the JSON spec
-  consumed by the Rust runtime (:mod:`operonx.cli.pack`);
 - ``operonx play`` — the playground bridge: drive a service's doors
   (:mod:`operonx.app.play`).
 
-``run``, ``serve``, ``pack`` and ``play`` are each their module's own
-``main(argv)``. The ``operonx-run`` / ``-serve`` / ``-pack`` / ``-play``
-scripts are deprecated aliases of them, kept for one release
-(:mod:`operonx.cli.aliases`).
+``run``, ``serve`` and ``play`` are each their module's own
+``main(argv)``. The ``operonx-run`` / ``-serve`` / ``-play`` scripts are
+deprecated aliases of them, kept for one release
+(:mod:`operonx.cli.aliases`). ``operonx pack``, which serialised graphs
+for the dropped Rust runtime, was removed in 1.15.
 
 (An ``operonx = "operonx.cli:main"`` entry existed from the April 2026
 Hush→Operon migration through 1.1.0, pointing at a scaffolding CLI that
