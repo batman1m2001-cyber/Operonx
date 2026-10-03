@@ -94,3 +94,21 @@ different algorithm), never only against what the code printed.
   against its `latest` baseline end to end.
 - `tests/internal/app/test_evals.py`: unchanged, green.
 - `operonx/guide/07-evals.md`: an eval with repeats and a gate, run in `tests/guide/`.
+
+## 5. Log
+
+**E1 built, 2026-10-04** (`feat/evals-e1`).
+
+- Gate simulations (`test_gate.py`, Beta(4, 1) case difficulty, tolerance 2 pts): A/A over
+  1000 paired 300-case runs → 2.8% `regressed` (exact rate under the model 1.9%); a true
+  −10 pt drop on 300 cases → 82.1% `regressed` (exact 83.6%); A/A with `repeats=3` on the
+  bootstrap path → 2.75% `regressed` (and 83% `inconclusive`: a 2-pt tolerance on 100 cases
+  is below the noise, which is what `calibrate` (E4) is for).
+- Overhead (`scripts/bench_eval_overhead.py`, CPU time, 300 and 1200 cases, interleaved
+  runs of the old and new code on the same machine): per case over a plain job, before
+  **+151 / +163 µs**, after **+153 / +159 µs** (with a `Gate`: +144 / +148) — no measurable
+  change. Per run: about +5 to +15 ms (serialize, source and dataset hashes, the summary
+  statistics); git (~30 ms) is asked once per process and root, in the background.
+- Found on the way: `ItemResult.as_dict()` deep-copied every verdict (`asdict`), most of
+  the per-item record cost; the extra verdict fields made that visible (+60 µs/case) until
+  it became a shallow copy.
