@@ -736,14 +736,22 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
+    eval_keys = ("dataset", "evaluators", "threshold", "repeats", "cluster", "gate")
     if options.get("dataset") is not None:
-        # an eval: `operonx.app.evals.Eval.from_spec` reads these three
+        # an eval: `operonx.app.evals.Eval.from_spec` reads these
         if not isinstance(options.get("evaluators", []), list):
             raise ManifestError(f"{where}: {label} `evaluators` must be a list of module:attr")
+        repeats = options.get("repeats", 1)
+        if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
+            raise ManifestError(
+                f"{where}: {label} has repeats={repeats!r}; expected a positive integer"
+            )
+        if not isinstance(options.get("gate", {}), dict):
+            raise ManifestError(f"{where}: {label} `gate` must be a table ([job.gate])")
     unread = {
         k: v
         for k, v in options.items()
-        if not (options.get("dataset") is not None and k in ("dataset", "evaluators", "threshold"))
+        if not (options.get("dataset") is not None and k in eval_keys)
     }
     if unread:
         # Kept, for tools that read their own keys — but a Job ignores them,

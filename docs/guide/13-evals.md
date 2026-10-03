@@ -78,7 +78,75 @@ Without a `threshold`, the run fails when any case fails. With one, it
 fails when the pass rate is under it. `run.meta["eval"]` — and the run's
 `run.json` — hold the numbers: cases, passed, failed, errored,
 `pass_rate`, each check's own pass count, the median case time, and what
-the judge cost. Each case's item record carries its verdict.
+the judge cost. Each case's item record carries its verdict, with the
+`case`, its `repeat` and its `case_hash` (input + expected).
+
+## A run is an experiment
+
+Each run also records:
+
+- **`fingerprint`** — what produced the numbers: the git commit at the
+  project root and whether the tree was dirty (`code_version`,
+  `version_dirty`), `graph_hash` (topology, literal params, inline
+  prompts, each op's source), `config_hash` (the resolved `llm:` and other
+  resources the graph uses, with keys, tokens and passwords left out),
+  `dataset_version`, each evaluator's version and `evaluators_hash`, and
+  `operonx_version`. Two runs with the same `dataset_version` and
+  `evaluators_hash` are directly comparable; everything else that differs
+  is what the comparison measures.
+- **`metrics`** — `pass` (every check passed) and each check, as a mean
+  with a 95% interval: Wilson for one 0/1 trial per case, the CLT for
+  shares over repeats, a clustered standard error when cases share a
+  scenario (`Eval(cluster="scenario")` names the case field).
+- **`gate`** — the verdict and the exit code `operonx run` returns.
+
+## Repeats: flaky is not regressed
+
+`repeats=3` runs every case three times, as three items keyed
+`<id>#0`, `<id>#1`, `<id>#2`. `reliability` says which cases are
+`stable_pass`, `stable_fail` or `flaky`, and gives pass^k — the chance
+that k runs of a case all pass (4 passes of 5 give pass^3 = 0.4). With
+repeats, `passed` and `failed` count trials and `pass_rate` is the mean of
+each case's pass share.
+
+## The gate
+
+```python
+from operonx.app.evals import Eval, Gate, exact
+
+replies = Eval(
+    "replies",
+    graph="bot:reply_flow",
+    dataset="dataset:replies",
+    evaluators=[exact("intent")],
+    repeats=3,
+    gate=Gate(
+        threshold=0.9,           # the 1.9.0 floor, now per metric if you like
+        baseline="latest",       # this eval's last finished run, or a run id
+        tolerance=0.03,          # a drop over 3 points matters (required with a baseline)
+        must_pass_tag="critical",
+        max_error_rate=0.05,
+    ),
+)
+```
+
+Against the baseline the comparison is paired (the cases both runs share,
+unchanged): a 0/1 check gets the exact McNemar test and Newcombe's paired
+interval, shares and clustered cases a seeded paired bootstrap. Gated
+metrics (`pass` unless `Gate(metrics=[…])`) are Holm-adjusted; every other
+check is reported with Benjamini–Hochberg q-values as exploratory.
+
+| Verdict | When | Exit |
+|---|---|---|
+| `pass` | the interval rules out a drop larger than `tolerance` | 0 |
+| `inconclusive` | it cannot (too few cases, too noisy) | 0; 2 with `Gate(strict=True)` |
+| `regressed` | the drop is larger than `tolerance` and significant, or a `critical` case that passed every repeat in the baseline fails every repeat now | 1 |
+| `failed` | a threshold missed, or a `critical` case fails with no baseline | 1 |
+| `error` | over `max_error_rate` of trials errored, or the run stopped before every case | 3 |
+
+Without a `gate`, nothing changes from 1.9.0: `threshold` (or "any case
+failed") decides, and the exit code is 0 or 1. Exit 3 exists so CI can
+tell "the endpoint was down" from "the prompt got worse".
 
 ## In the manifest
 
@@ -92,6 +160,23 @@ dataset     = "dataset:replies"
 evaluators  = ["checks:polite", "checks:names_the_time"]
 threshold   = 0.9
 concurrency = 4
+```
+
+`repeats` and `cluster` are keys of the block too, and a gate is its own
+table (then `threshold` goes inside it):
+
+```toml
+[[job]]
+name       = "replies"
+graph      = "bot:reply_flow"
+dataset    = "dataset:replies"
+evaluators = ["checks:polite"]
+repeats    = 3
+
+[job.gate]
+threshold = 0.9
+baseline  = "latest"
+tolerance = 0.03
 ```
 
 `evaluators` names objects in your code, ready to call — for a helper,
@@ -108,7 +193,7 @@ async def names_the_time(output, expected):
 ```
 
 ```bash
-operonx run replies          # exits non-zero when the eval fails: a CI gate
+operonx run replies          # exits with the gate's code: 0 pass, 1 failed/regressed, 2, 3
 ```
 
 Runs carry `origin=eval` and are filed under `.operonx/runs/evals/`,

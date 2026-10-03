@@ -18,7 +18,7 @@ that is killed still says what it got through.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -85,7 +85,10 @@ class ItemResult:
     verdict: Optional[Dict[str, Any]] = None
 
     def as_dict(self) -> Dict[str, Any]:
-        out = asdict(self)
+        """The record line's fields. Shallow: the line is serialized at
+        once, and a deep copy of an eval's verdict (``asdict``) was most of
+        what writing an item cost (`scripts/bench_eval_overhead.py`)."""
+        out = {name: getattr(self, name) for name in self.__dataclass_fields__}
         if out["verdict"] is None:
             del out["verdict"]
         return out
@@ -179,7 +182,16 @@ class JobRun:
             text += f" timeout={c[ITEM_TIMEOUT]}"
         ev = self.meta.get("eval")
         if ev and ev.get("cases"):
-            text += f"  passed={ev['passed']}/{ev['cases']} ({100 * ev['pass_rate']:.1f}%)"
+            if (ev.get("repeats") or 1) > 1:
+                text += (
+                    f"  passed={ev['passed']}/{ev['trials']} trials of {ev['cases']} cases"
+                    f" x{ev['repeats']} ({100 * ev['pass_rate']:.1f}%)"
+                )
+            else:
+                text += f"  passed={ev['passed']}/{ev['cases']} ({100 * ev['pass_rate']:.1f}%)"
+            gate = ev.get("gate") or {}
+            if "gate" in gate:  # a Gate decided, not the bare threshold
+                text += f"  gate={gate['verdict']}"
         return text
 
     def __repr__(self) -> str:
