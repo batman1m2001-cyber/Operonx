@@ -49,11 +49,15 @@ from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
 from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
 from .gate import Gate
 from .job import Eval
+from .traceview import OpRow, ToolCall, TraceView
 
 __all__ = [
     "Dataset",
     "Eval",
     "Gate",
+    "OpRow",
+    "ToolCall",
+    "TraceView",
     "contains",
     "dataset_path",
     "exact",

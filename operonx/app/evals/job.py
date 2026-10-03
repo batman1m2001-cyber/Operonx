@@ -26,7 +26,7 @@ from ..jobs.record import (
     runs_of,
 )
 from .dataset import Dataset, dataset_path
-from .evaluators import _judge_one, _name
+from .evaluators import _name, judge_all, prepare
 from .fingerprint import case_hash, fingerprint
 from .gate import (
     ERROR,
@@ -43,6 +43,7 @@ from .gate import (
     trials_of_items,
 )
 from .stats import Estimate, estimate, pass_hat_k
+from .traceview import TraceView
 
 __all__ = ["Eval"]
 
@@ -146,6 +147,9 @@ class Eval(Job):
     ):
         self.dataset = dataset if isinstance(dataset, Dataset) else Dataset(dataset_path(dataset))
         self.evaluators = list(evaluators)
+        self._prepared = [prepare(ev) for ev in self.evaluators]
+        # a case's trace view is built only when some evaluator can take it
+        self._wants_trace = any(p.wants("trace") for p in self._prepared)
         if threshold is not None and not 0 <= float(threshold) <= 1:
             raise ValueError(f"eval {name!r}: threshold is a pass rate in [0, 1]")
         self.threshold = float(threshold) if threshold is not None else None
@@ -277,9 +281,10 @@ class Eval(Job):
                 "row": row,
                 "outputs": sent,
             }
-            checks = {}
-            for ev in self.evaluators:
-                checks[_name(ev)] = await _judge_one(ev, avail)
+            if self._wants_trace:
+                trace = getattr(result, "trace", None)
+                avail["trace"] = TraceView.from_trace(trace) if trace is not None else None
+            checks = await judge_all(self._prepared, avail)
             verdict = {
                 "passed": all(c["passed"] for c in checks.values()) if checks else True,
                 "checks": checks,

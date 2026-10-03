@@ -252,7 +252,7 @@ async def _attempt(
     error = _first_error(trace, handle)
     if error:
         return ItemResult(
-            key, ITEM_FAILED, error=error, trace_id=trace_id, ms=ms, sent=session.sent
+            key, ITEM_FAILED, error=error, trace_id=trace_id, ms=ms, sent=session.sent, trace=trace
         )
     if session.sink_error:
         return ItemResult(
@@ -262,6 +262,7 @@ async def _attempt(
             trace_id=trace_id,
             ms=ms,
             sent=session.sent,
+            trace=trace,
         )
 
     if doorless:
@@ -274,11 +275,16 @@ async def _attempt(
                 session.sent += 1
         except Exception as exc:  # noqa: BLE001
             return ItemResult(
-                key, ITEM_FAILED, error=f"{type(exc).__name__}: {exc}", trace_id=trace_id, ms=ms
+                key,
+                ITEM_FAILED,
+                error=f"{type(exc).__name__}: {exc}",
+                trace_id=trace_id,
+                ms=ms,
+                trace=trace,
             )
 
     status = ITEM_OK if session.sent else ITEM_EMPTY
-    return ItemResult(key, status, trace_id=trace_id, ms=ms, sent=session.sent)
+    return ItemResult(key, status, trace_id=trace_id, ms=ms, sent=session.sent, trace=trace)
 
 
 async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
@@ -340,6 +346,7 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                     LOGGER.error(
                         f"[job:{job.name}] judging {key!r} failed: {type(exc).__name__}: {exc}"
                     )
+            result.trace = None  # judged: a run holds no more traces than items in flight
             record.item(result)
             await _report(job, sink, result)
             if result.status in _RETRIABLE and policy.mode == "stop":
