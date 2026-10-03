@@ -137,12 +137,19 @@ class ExecutionHandle:
                     self._frames.append(item)
                     self._cond.notify_all()
                     self._match_waiters(op, data)
-        except Exception as exc:
+        except BaseException as exc:
+            # Cancellation included: `cancel()` stops this pump, and the
+            # None the scheduler enqueues on its way out then reaches
+            # nobody. Whoever is parked on `_cond` — `result()`,
+            # `collect()`, `async for` — has to be woken here or never.
             async with self._cond:
-                self._error = exc
-                self._done = True
-                self._resolve_all_waiters(exc)
+                if not self._done:
+                    self._error = exc
+                    self._done = True
+                self._resolve_all_waiters(self._error)
                 self._cond.notify_all()
+            if not isinstance(exc, Exception):
+                raise
 
     def _resolve_all_waiters(self, exc: BaseException | None) -> None:
         """Resolve or reject every pending future, then clear."""
@@ -369,7 +376,28 @@ class ExecutionHandle:
         return self._with_errors(out)
 
     def cancel(self) -> None:
-        """Cancel the workflow execution."""
+        """Cancel the workflow execution.
+
+        Ends the run for everyone waiting on it: ``result()``,
+        ``collect()``, ``await handle[op, var]`` and ``async for`` raise
+        ``asyncio.CancelledError`` once the frames that landed before the
+        cancel are consumed.
+
+        A run that already finished keeps its result, and its teardown —
+        trace consumers, checkpointer unsubscribe — is left to complete:
+        ``stream()`` cancels in its ``finally`` on every exit, the clean
+        one included.
+        """
+        if self._done:
+            return
+        # Marked here, not only in `_pump`'s handler: a pump cancelled
+        # before its first step never runs that handler, and a caller doing
+        # `cancel()` then `await result()` would wait on a mark nothing
+        # sets. A waiter already parked on `_cond` parked after the pump
+        # started, so the handler wakes it.
+        self._error = asyncio.CancelledError("the run was cancelled")
+        self._done = True
+        self._resolve_all_waiters(self._error)
         self._scheduler_task.cancel()
         self._pump_task.cancel()
 
@@ -787,7 +815,15 @@ class Operon:
             checkpointer=checkpointer,
         )
 
-        result = await handle.collect(unwrap=True)
+        try:
+            result = await handle.collect(unwrap=True)
+        except BaseException:
+            # `asyncio.wait_for(engine.run(...), t)` cancels this await,
+            # not the run behind it: the graph kept going after the caller
+            # had been told it timed out, and the op after the timeout
+            # still ran. The run belongs to this call, so it ends with it.
+            handle.cancel()
+            raise
         result["$state"] = handle.state
 
         return result
