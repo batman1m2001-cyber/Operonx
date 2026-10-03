@@ -1,0 +1,28 @@
+{
+ "title": "Welcome to ACME",
+ "pages": [[1, 720.0, 540.0], [2, 720.0, 540.0], [3, 720.0, 540.0]],
+ "canonical": "## Welcome to ACME\n\nOnboarding for new staff, 2026\n\n## First week\n\nOffice floor map\n\n- Collect your badge\n  - Floor 3 reception\n- Set up two-factor login\n3. Read the handbook\n\nAsk questions anytime\n\n| Day | Topic |\n| --- | --- |\n| 1 | Accounts and laptop |\n| Week 2: shadowing |  |\n\n## Liên hệ\n\nEmail: hr@acme.example\n\nPhòng nhân sự: tầng 3",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [3, 340]},
+  {"path": "0.0", "kind": "section", "level": 1, "span": [3, 50]},
+  {"path": "0.0.0", "kind": "heading", "level": 1, "span": [3, 18], "text": "Welcome to ACME", "pages": [1], "bbox": [0.07, 0.31, 0.93, 0.53]},
+  {"path": "0.0.1", "kind": "paragraph", "span": [20, 50], "text": "Onboarding for new staff, 2026", "pages": [1], "bbox": [0.15, 0.57, 0.85, 0.82]},
+  {"path": "0.1", "kind": "section", "level": 1, "span": [55, 281]},
+  {"path": "0.1.0", "kind": "heading", "level": 1, "span": [55, 65], "text": "First week", "pages": [2], "bbox": [0.05, 0.04, 0.95, 0.21]},
+  {"path": "0.1.1", "kind": "figure", "span": [67, 83], "text": "Office floor map", "pages": [2], "bbox": [0.66, 0.04, 0.87, 0.17]},
+  {"path": "0.1.2", "kind": "list", "span": [87, 153], "ordered": false},
+  {"path": "0.1.2.0", "kind": "list_item", "span": [87, 105], "text": "Collect your badge", "pages": [2], "bbox": [0.05, 0.23, 0.95, 0.89], "ordered": false},
+  {"path": "0.1.2.1", "kind": "list", "span": [110, 127], "ordered": false},
+  {"path": "0.1.2.1.0", "kind": "list_item", "span": [110, 127], "text": "Floor 3 reception", "pages": [2], "bbox": [0.05, 0.23, 0.95, 0.89], "ordered": false},
+  {"path": "0.1.2.2", "kind": "list_item", "span": [130, 153], "text": "Set up two-factor login", "pages": [2], "bbox": [0.05, 0.23, 0.95, 0.89], "ordered": false},
+  {"path": "0.1.3", "kind": "list", "span": [157, 174], "ordered": true},
+  {"path": "0.1.3.0", "kind": "list_item", "span": [157, 174], "text": "Read the handbook", "pages": [2], "bbox": [0.05, 0.23, 0.95, 0.89], "ordered": true, "marker": "3."},
+  {"path": "0.1.4", "kind": "paragraph", "span": [176, 197], "text": "Ask questions anytime", "pages": [2], "bbox": [0.05, 0.23, 0.95, 0.89]},
+  {"path": "0.1.5", "kind": "table", "span": [199, 281], "text": "| Day | Topic |\n| --- | --- |\n| 1 | Accounts and laptop |\n| Week 2: shadowing |  |", "pages": [2], "bbox": [0.05, 0.7, 0.95, 0.85], "header_rows": 1},
+  {"path": "0.2", "kind": "section", "level": 1, "span": [286, 340]},
+  {"path": "0.2.0", "kind": "heading", "level": 1, "span": [286, 293], "text": "Liên hệ", "pages": [3], "bbox": [0.05, 0.04, 0.95, 0.21]},
+  {"path": "0.2.1", "kind": "paragraph", "span": [295, 317], "text": "Email: hr@acme.example", "pages": [3], "bbox": [0.05, 0.23, 0.48, 0.31]},
+  {"path": "0.2.2", "kind": "paragraph", "span": [319, 340], "text": "Phòng nhân sự: tầng 3", "pages": [3], "bbox": [0.49, 0.23, 0.92, 0.31]},
+  {"path": "0.3", "kind": "page_footer", "layer": "furniture", "span": null, "text": "2", "pages": [2], "bbox": [0.72, 0.93, 0.95, 0.98]}
+ ]
+}

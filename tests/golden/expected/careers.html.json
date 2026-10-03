@@ -1,0 +1,28 @@
+{
+ "title": "Careers at ACME",
+ "pages": [],
+ "canonical": "# Careers at ACME\n\nWe hire engineers, designers and support staff in Hanoi and Singapore.\n\n## Benefits\n\nEvery employee gets 12 days of annual leave, private health insurance and a learning budget.\n\n- Lunch allowance of 730,000 VND per month\n- Parking or transport support\n  - 150,000 VND for parking\n- A laptop of your choice\n\n## Open positions\n\nTable 1: Open positions in October 2026\n\n| Role | Team | Location |\n| --- | --- | --- |\n| Backend engineer | Platform | Hanoi |\n| Data engineer | Knowledge |  |\n| Support specialist (night shift) |  | Singapore |\n\nTable 1 is updated every Monday.",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [2, 592]},
+  {"path": "0.0", "kind": "title", "span": [2, 17], "text": "Careers at ACME"},
+  {"path": "0.1", "kind": "paragraph", "span": [19, 89], "text": "We hire engineers, designers and support staff in Hanoi and Singapore."},
+  {"path": "0.2", "kind": "section", "level": 1, "span": [94, 325]},
+  {"path": "0.2.0", "kind": "heading", "level": 1, "span": [94, 102], "text": "Benefits"},
+  {"path": "0.2.1", "kind": "paragraph", "span": [104, 196], "text": "Every employee gets 12 days of annual leave, private health insurance and a learning budget."},
+  {"path": "0.2.2", "kind": "list", "span": [200, 325], "ordered": false},
+  {"path": "0.2.2.0", "kind": "list_item", "span": [200, 240], "text": "Lunch allowance of 730,000 VND per month", "ordered": false},
+  {"path": "0.2.2.1", "kind": "list_item", "span": [243, 271], "text": "Parking or transport support", "ordered": false},
+  {"path": "0.2.2.2", "kind": "list", "span": [276, 299], "ordered": false},
+  {"path": "0.2.2.2.0", "kind": "list_item", "span": [276, 299], "text": "150,000 VND for parking", "ordered": false},
+  {"path": "0.2.2.3", "kind": "list_item", "span": [302, 325], "text": "A laptop of your choice", "ordered": false},
+  {"path": "0.3", "kind": "section", "level": 1, "span": [330, 592]},
+  {"path": "0.3.0", "kind": "heading", "level": 1, "span": [330, 344], "text": "Open positions"},
+  {"path": "0.3.1", "kind": "caption", "span": [346, 385], "text": "Table 1: Open positions in October 2026", "caption_of": "0.3.2"},
+  {"path": "0.3.2", "kind": "table", "span": [387, 558], "text": "| Role | Team | Location |\n| --- | --- | --- |\n| Backend engineer | Platform | Hanoi |\n| Data engineer | Knowledge |  |\n| Support specialist (night shift) |  | Singapore |", "header_rows": 1},
+  {"path": "0.3.3", "kind": "paragraph", "span": [560, 592], "text": "Table 1 is updated every Monday."},
+  {"path": "0.4", "kind": "page_header", "layer": "furniture", "span": null, "text": "ACME About"},
+  {"path": "0.5", "kind": "page_header", "layer": "furniture", "span": null, "text": "Jobs"},
+  {"path": "0.6", "kind": "page_header", "layer": "furniture", "span": null, "text": "Teams"},
+  {"path": "0.7", "kind": "page_footer", "layer": "furniture", "span": null, "text": "© 2026 ACME. All rights reserved."}
+ ]
+}

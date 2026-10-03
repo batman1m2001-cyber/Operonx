@@ -36,6 +36,8 @@ dev = [
     "hypothesis>=6.100",
     "reportlab>=4.0",  # generates the golden PDFs (tests/golden/make_pdfs.py)
     "ruff>=0.6",
+    "faiss-cpu>=1.15.1",
+    "numpy>=2.2.6",
 ]
 
 [tool.uv.sources]

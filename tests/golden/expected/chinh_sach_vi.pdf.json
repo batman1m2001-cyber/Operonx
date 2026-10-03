@@ -1,0 +1,22 @@
+{
+ "title": "Chính sách nghỉ phép năm 2026",
+ "pages": [[1, 595.0, 842.0]],
+ "canonical": "# Chính sách nghỉ phép năm 2026\n\n## 1. Phạm vi áp dụng\n\nChính sách này áp dụng cho toàn bộ nhân viên chính thức của công ty. Nhân viên thử việc được hưởng chế độ theo hợp đồng thử việc.\n\n## 2. Số ngày nghỉ phép\n\nNhân viên được nghỉ phép 12 ngày làm việc mỗi năm. Cứ đủ 5 năm công tác, số ngày nghỉ phép được tăng thêm 1 ngày.\n\n1. Đăng ký nghỉ trên hệ thống trước ít nhất 3 ngày.\n2. Quản lý trực tiếp phê duyệt trong vòng 2 ngày làm việc.\n3. Phòng nhân sự cập nhật số ngày phép còn lại.\n\n## 3. Nghỉ ốm\n\nNghỉ ốm từ 2 ngày trở lên cần có giấy xác nhận của cơ sở y tế. Trường hợp đặc biệt, giám đốc nhân sự quyết định.",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [2, 614]},
+  {"path": "0.0", "kind": "title", "span": [2, 31], "text": "Chính sách nghỉ phép năm 2026", "pages": [1], "bbox": [0.09, 0.06, 0.64, 0.08]},
+  {"path": "0.1", "kind": "section", "level": 1, "span": [36, 185]},
+  {"path": "0.1.0", "kind": "heading", "level": 1, "span": [36, 54], "text": "1. Phạm vi áp dụng", "pages": [1], "bbox": [0.09, 0.11, 0.31, 0.12]},
+  {"path": "0.1.1", "kind": "paragraph", "span": [56, 185], "text": "Chính sách này áp dụng cho toàn bộ nhân viên chính thức của công ty. Nhân viên thử việc được hưởng chế độ theo hợp đồng thử việc.", "pages": [1], "bbox": [0.09, 0.13, 0.9, 0.16]},
+  {"path": "0.2", "kind": "section", "level": 1, "span": [190, 485]},
+  {"path": "0.2.0", "kind": "heading", "level": 1, "span": [190, 210], "text": "2. Số ngày nghỉ phép", "pages": [1], "bbox": [0.09, 0.17, 0.33, 0.19]},
+  {"path": "0.2.1", "kind": "paragraph", "span": [212, 325], "text": "Nhân viên được nghỉ phép 12 ngày làm việc mỗi năm. Cứ đủ 5 năm công tác, số ngày nghỉ phép được tăng thêm 1 ngày.", "pages": [1], "bbox": [0.09, 0.19, 0.86, 0.22]},
+  {"path": "0.2.2", "kind": "list", "span": [330, 485], "ordered": true},
+  {"path": "0.2.2.0", "kind": "list_item", "span": [330, 378], "text": "Đăng ký nghỉ trên hệ thống trước ít nhất 3 ngày.", "pages": [1], "bbox": [0.1, 0.23, 0.53, 0.24], "ordered": true, "marker": "1."},
+  {"path": "0.2.2.1", "kind": "list_item", "span": [382, 437], "text": "Quản lý trực tiếp phê duyệt trong vòng 2 ngày làm việc.", "pages": [1], "bbox": [0.1, 0.25, 0.59, 0.26], "ordered": true, "marker": "2."},
+  {"path": "0.2.2.2", "kind": "list_item", "span": [441, 485], "text": "Phòng nhân sự cập nhật số ngày phép còn lại.", "pages": [1], "bbox": [0.1, 0.27, 0.51, 0.28], "ordered": true, "marker": "3."},
+  {"path": "0.3", "kind": "section", "level": 1, "span": [490, 614]},
+  {"path": "0.3.0", "kind": "heading", "level": 1, "span": [490, 500], "text": "3. Nghỉ ốm", "pages": [1], "bbox": [0.09, 0.29, 0.22, 0.3]},
+  {"path": "0.3.1", "kind": "paragraph", "span": [502, 614], "text": "Nghỉ ốm từ 2 ngày trở lên cần có giấy xác nhận của cơ sở y tế. Trường hợp đặc biệt, giám đốc nhân sự quyết định.", "pages": [1], "bbox": [0.09, 0.31, 0.8, 0.34]}
+ ]
+}

@@ -2,14 +2,16 @@
 
 import json
 
+from pathlib import Path
+
 import pytest
-from conftest import GOLDEN
 
 from operonx_kb.parsing.base import ParsedDoc
 from operonx_kb.structure.build import build_version
 from operonx_kb.testing.golden import compare_or_update, tree_snapshot
 from operonx_kb.text.spans import check_elements
 
+GOLDEN = Path(__file__).parent
 FIXTURES = sorted((GOLDEN / "blocks").glob("*.json"))
 
 

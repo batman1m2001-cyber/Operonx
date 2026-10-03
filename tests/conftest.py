@@ -19,3 +19,52 @@ def pytest_addoption(parser):
 @pytest.fixture
 def update_golden(request) -> bool:
     return bool(request.config.getoption("--update-golden"))
+
+
+DOCS = GOLDEN / "docs"
+
+RESOURCES = """\
+kb_catalog:main:
+  path: {root}/catalog.db
+kb_blob:main:
+  root: {root}/blobs
+kb_index:dense: {{}}
+fake_embedding:hash:
+  dim: 32
+"""
+
+
+@pytest.fixture
+def hub(tmp_path):
+    """A fresh ResourceHub over a temporary catalog, blob store, memory index and HashEmbedder."""
+    import operonx_kb  # noqa: F401 — registers kb_* categories
+    import operonx_kb.testing.fakes  # noqa: F401 — registers fake_embedding
+    from operonx.core.registry import ResourceHub
+
+    path = tmp_path / "resources.yaml"
+    path.write_text(RESOURCES.format(root=tmp_path / "kb"), encoding="utf-8")
+    hub = ResourceHub.from_yaml(path)
+    ResourceHub.set_instance(hub)
+    yield hub
+    ResourceHub.reset_instance()
+
+
+@pytest.fixture
+def kb(hub):
+    """A KnowledgeBase with a 'docs' collection: structural chunker, HashEmbedder, memory index."""
+    from operonx_kb import ChunkerSpec, CollectionSpec, DenseIndexSpec, KnowledgeBase
+    from operonx_kb.testing import RecordingConsumer
+
+    recorder = RecordingConsumer()
+    kb = KnowledgeBase(trace=recorder)
+    kb.recorder = recorder
+    kb.create_collection(
+        "docs",
+        CollectionSpec(
+            chunker=ChunkerSpec(max_tokens=120, min_tokens=16),
+            dense=DenseIndexSpec(embedder="fake_embedding:hash", index="kb_index:dense"),
+        ),
+    )
+    kb.embedder = hub.get("fake_embedding:hash")
+    kb.index = hub.get("kb_index:dense")
+    return kb
