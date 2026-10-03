@@ -5,7 +5,8 @@ Includes:
 - Embedding providers: vLLM, TEI, HuggingFace, ONNX
 - Reranking providers: vLLM, TEI, HuggingFace, ONNX, Pinecone
 - Auth: Keycloak token provider with background refresh
-- Workflow ops: LLMOp, EmbeddingOp, RerankOp, VectorSearchOp, DocFetchOp
+- Workflow ops: LLMOp, EmbeddingOp, RerankOp, VectorSearchOp, VectorUpsertOp,
+  VectorDeleteOp, DocFetchOp
 
 Plugin registration to the core ResourceHub happens automatically on import.
 
@@ -99,6 +100,8 @@ _LAZY_BACKENDS = {
     "EmbeddingOp": "operonx.providers.ops",
     "RerankOp": "operonx.providers.ops",
     "VectorSearchOp": "operonx.providers.ops",
+    "VectorUpsertOp": "operonx.providers.ops",
+    "VectorDeleteOp": "operonx.providers.ops",
     "DocFetchOp": "operonx.providers.ops",
 }
 
@@ -121,6 +124,8 @@ __all__ = [
     "EmbeddingOp",
     "RerankOp",
     "VectorSearchOp",
+    "VectorUpsertOp",
+    "VectorDeleteOp",
     "DocFetchOp",
     # Vector stores
     "BaseVectorStore",

@@ -519,6 +519,14 @@ Add `VectorUpsertOp` when agent-memory concretely needs it — no rework,
 because the backend contract is already right. Consistent with the
 "no speculation" discipline in §3.
 
+*Shipped after 1.14.0:* the trigger came from the knowledge base, which
+keeps an index in step with its catalog and so needs deletes as much as
+writes. `BaseVectorStore.delete(ids=None, filter=None, collection=None)`
+joined the ABC (FAISS by id, pgvector and Qdrant by id or native filter),
+and `VectorUpsertOp` / `VectorDeleteOp` ship with it.
+`tests/internal/providers/test_vector_store_contract.py` runs one suite
+against every backend.
+
 ### 5.8 · `DocFetchOp` — the store of record
 
 §5.1 makes hydration unconditional, which puts it on the critical path

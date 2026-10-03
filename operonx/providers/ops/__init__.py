@@ -26,11 +26,14 @@ from operonx.providers.ops.embedding import EmbeddingOp
 from operonx.providers.ops.llm import LLMOp
 from operonx.providers.ops.rerank import RerankOp
 from operonx.providers.ops.vector_search import VectorSearchOp
+from operonx.providers.ops.vector_write import VectorDeleteOp, VectorUpsertOp
 
 __all__ = [
     "LLMOp",
     "EmbeddingOp",
     "RerankOp",
     "VectorSearchOp",
+    "VectorUpsertOp",
+    "VectorDeleteOp",
     "DocFetchOp",
 ]
