@@ -1,11 +1,12 @@
 """The ReAct turn in zones: ``build_context`` → ``model`` → ``run_tools``.
 
-``run_tools`` is a subgraph whose tool messages the loop gathers with
-``.collect()`` in the parent. A collect *inside* a subgraph hands its
-result up twice, so these tests count: every tool call is dispatched once
-and answered by exactly one tool message, over several calls per turn and
-several turns. Tool messages carry no ``id``, so ``add_messages`` would
-append a duplicate rather than upsert it — a doubled collect shows up here.
+``run_tools`` gathers its tool messages with a ``.collect()`` inside the
+subgraph, and the loop writes the list straight into ``messages``. Until
+1.12.2 such a collect handed its result up twice, so these tests count:
+every tool call is dispatched once and answered by exactly one tool
+message, over several calls per turn and several turns. Tool messages
+carry no ``id``, so ``add_messages`` would append a duplicate rather than
+upsert it — a doubled collect shows up here.
 """
 
 from __future__ import annotations
@@ -157,12 +158,9 @@ def test_an_explicit_show_keys_wins(runs):
 
 @pytest.mark.xfail(
     strict=True,
-    reason="A nested graph whose every streamed item failed yields nothing, so the "
-    "parent's .collect() never fires (GraphOp.run skips all-None items). With "
-    "dispatch inside run_tools, a turn where every call fails at the op level — "
-    "not a tool exception, which becomes an error tool message — ends the loop "
-    "with no answer. Before the zones the next turn ran (on a history with the "
-    "call unanswered).",
+    reason="A call whose dispatch failed at the op level — not a tool exception, "
+    "which becomes an error tool message — has no tool message, and nothing "
+    "answers it: the next turn runs on a history with that call unanswered.",
 )
 async def test_a_turn_whose_every_dispatch_fails_still_continues(runs):
     import asyncio
@@ -190,3 +188,6 @@ async def test_a_turn_whose_every_dispatch_fails_still_continues(runs):
     result = agent_result(handle.state, built)
     assert result["turns"] == 2
     assert result["final"]["content"] == "done"
+    answers = [m for m in result["messages"] if m.get("role") == "tool"]
+    assert [m["tool_call_id"] for m in answers] == ["w0"]
+    assert answers[0]["status"] == "error"

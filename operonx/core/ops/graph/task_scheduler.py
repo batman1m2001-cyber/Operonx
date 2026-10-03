@@ -861,7 +861,16 @@ class Scheduler:
                 for k, v in r.items():
                     merged.setdefault(k, []).append(v)
             collect_ctx = stream_ctx + ("__collect__",)
-            item_ctxs.append(collect_ctx)
+            # Listed once and seeded here, as `_advance` does for a new item.
+            # Left unseeded, the consumer's frame at this context looked like
+            # the first frame of a new item and listed it a second time, so a
+            # subgraph yielded — and stored — its collect result twice. An op
+            # after the subgraph still ran once (its ready count was spent);
+            # a reducer cell written straight from the subgraph's output got
+            # every value twice. Two collects off one stream share the ctx.
+            if collect_ctx not in ready:
+                ready[collect_ctx] = dict(g._initial_ready)
+                item_ctxs.append(collect_ctx)
             g._ops[src].store_result(state, merged, collect_ctx)
             dispatch(dst, collect_ctx)
 

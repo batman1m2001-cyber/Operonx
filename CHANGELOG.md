@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-10-03
+
+### Fixed
+
+- **A `.collect()` inside a subgraph handed its result up twice.** The
+  scheduler listed the collect's context twice among the contexts a
+  subgraph reports: once when the buffer was flushed, and again when the
+  consumer's frame arrived there, since nothing had seeded that context and
+  it looked like a new stream item. The subgraph yielded and stored the
+  same result twice. An op after the subgraph still ran once, which is why
+  a minimal nested graph looked right; a reducer cell written straight from
+  the subgraph's output (`sub["out"] >> PARENT["log"]`) got every value
+  twice, inside a loop or not. Two collects off one stream got it three
+  times. The ReAct loop's `run_tools` now gathers its tool messages with a
+  `.collect()` inside the subgraph, beside the stream it ends.
+
 ## [1.12.1] - 2026-10-02
 
 ### Changed
@@ -2330,7 +2346,10 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.2...HEAD
+[1.12.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.1...v1.12.2
+[1.12.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.0...v1.12.1
+[1.12.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.1...v1.12.0
 [1.11.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.3...v1.11.0
 [1.10.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.10.2...v1.10.3

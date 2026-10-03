@@ -364,11 +364,12 @@ def build_react_agent(
     @graph
     def run_tools(tool_calls=None):
         """Every tool the model asked for, at once: one tool message per call.
-        The loop gathers them (a subgraph is a one-EOF source for `.collect()`;
-        a collect inside the subgraph would hand its result up twice)."""
+        The collect is here, beside the stream it ends: it fires once the
+        last dispatch is done and hands the loop one list."""
         calls = each_call_of(tool_calls=tool_calls)
         disp = dispatch_one(call=calls["call"].parallel(max=8))
-        START >> calls >> disp >> END
+        gathered = gather_tool_messages(tool_messages=disp["tool_message"].collect())
+        START >> calls >> disp >> gathered >> END
 
     @graph
     def react(messages=None):
@@ -411,7 +412,6 @@ def build_react_agent(
             truncated=model["truncated"],
         )
         tools = run_tools(tool_calls=model["tool_calls"])
-        gathered = gather_tool_messages(tool_messages=tools["tool_message"].collect())
 
         # Accumulate into the shared cell. The reducer merges by id, so a
         # re-emitted message updates rather than duplicating.
@@ -422,7 +422,7 @@ def build_react_agent(
         ended["finish_reason"] >> PARENT["finish_reason"]
         assistant["messages"] >> PARENT["messages"]
         closed["messages"] >> PARENT["messages"]
-        gathered["messages"] >> PARENT["messages"]
+        tools["messages"] >> PARENT["messages"]
 
         START >> counter >> asked >> context >> model >> assistant >> router
         # `closed` runs after `assistant`, so its answers land after the
@@ -431,7 +431,7 @@ def build_react_agent(
         answer = answer_of(messages=PARENT["messages"])
         ended >> if_(router["finished"] == True, answer).else_(tools)  # noqa: E712
         answer >> END
-        tools >> gathered >> counter  # back-edge — rewritten into a loop
+        tools >> counter  # back-edge — rewritten into a loop
 
     def agent(**kwargs: Any):
         """The agent node. Its answer, `final`, is what a viewer shows for it."""
