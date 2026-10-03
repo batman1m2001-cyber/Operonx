@@ -4,7 +4,7 @@
 
     run_store:
       default:
-        backend: files            # files | sqlite | postgres | mongo | langfuse
+        backend: files            # files | sqlite | postgres | mongo | langfuse | clickhouse
         root: ""                  # files: unset → <project>/.operonx/runs
       archive:
         backend: sqlite
@@ -16,6 +16,14 @@
         backend: mongo
         uri: ${RUNS_MONGO_URI}
         database: operonx
+      events:
+        backend: clickhouse       # many runs, many writers; blobs in media_dir
+        host: ${CLICKHOUSE_HOST}
+        user: ${CLICKHOUSE_USER}
+        password: ${CLICKHOUSE_PASSWORD}
+        database: operonx
+        media_dir: /data/operonx-media
+        timeout: 10               # connect timeout, seconds
       remote:
         backend: langfuse
         host: ${LANGFUSE_HOST}
@@ -37,7 +45,7 @@ from .base import RunStore
 
 __all__ = ["BACKENDS", "RunStoreConfig", "create_run_store", "open_run_store"]
 
-BACKENDS = ("files", "sqlite", "postgres", "mongo", "langfuse")
+BACKENDS = ("files", "sqlite", "postgres", "mongo", "langfuse", "clickhouse")
 
 
 class RunStoreConfig(YamlModel):
@@ -45,7 +53,7 @@ class RunStoreConfig(YamlModel):
 
     _category: ClassVar[str] = "run_store"
 
-    backend: str = "files"
+    backend: str = "files"  # files | sqlite | postgres | mongo | langfuse | clickhouse
     # files
     root: str = ""
     layout: str = "origin"
@@ -57,12 +65,23 @@ class RunStoreConfig(YamlModel):
     # mongo
     uri: str = ""
     database: str = "operonx"
-    # postgres, mongo: where large payloads go
+    # postgres, mongo, clickhouse: where large payloads go
     media_dir: str = ""
-    # langfuse (read-only)
+    # langfuse (read-only), clickhouse
     host: str = ""
     public_key: str = ""
     secret_key: str = ""
+    # clickhouse (``database`` above too)
+    port: int = 0
+    user: str = ""
+    password: str = ""
+    secure: bool = False
+    ttl_days: Optional[float] = None
+    media_threshold: int = 1024
+    batch_size: int = 10000
+    flush_interval: float = 1.0
+    queue_size: int = 1000
+    timeout: float = 10.0  # clickhouse: connect timeout, seconds
 
 
 def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
@@ -106,7 +125,34 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
         if missing:
             raise ValueError(f"run_store backend 'langfuse' needs {', '.join(missing)}")
         return LangfuseRunStore(spec["host"], spec["public_key"], spec["secret_key"])
+    if backend == "clickhouse":
+        from .clickhouse import ClickHouseRunStore
+
+        if not spec.get("host"):
+            raise ValueError("run_store backend 'clickhouse' needs host")
+        ttl = spec.get("ttl_days")
+        return ClickHouseRunStore(
+            host=spec["host"],
+            port=int(spec.get("port") or 0),
+            user=spec.get("user") or "default",
+            password=spec.get("password") or "",
+            database=spec.get("database") or "operonx",
+            secure=_flag(spec.get("secure")),
+            ttl_days=None if ttl in (None, "") else float(ttl),
+            media_dir=spec.get("media_dir") or "",
+            media_threshold=int(spec.get("media_threshold") or 1024),
+            batch_size=int(spec.get("batch_size") or 10000),
+            flush_interval=float(spec.get("flush_interval") or 1.0),
+            queue_size=int(spec.get("queue_size") or 1000),
+            timeout=float(spec.get("timeout") or 10.0),
+        )
     raise ValueError(f"unknown run_store backend {backend!r}; one of {', '.join(BACKENDS)}")
+
+
+def _flag(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
 
 
 def create_run_store(cfg: RunStoreConfig) -> RunStore:
@@ -125,5 +171,15 @@ def create_run_store(cfg: RunStoreConfig) -> RunStore:
             "host": cfg.host,
             "public_key": cfg.public_key,
             "secret_key": cfg.secret_key,
+            "port": cfg.port,
+            "user": cfg.user,
+            "password": cfg.password,
+            "secure": cfg.secure,
+            "ttl_days": cfg.ttl_days,
+            "media_threshold": cfg.media_threshold,
+            "batch_size": cfg.batch_size,
+            "flush_interval": cfg.flush_interval,
+            "queue_size": cfg.queue_size,
+            "timeout": cfg.timeout,
         }
     )

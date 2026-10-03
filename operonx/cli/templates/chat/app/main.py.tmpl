@@ -1,0 +1,25 @@
+"""{{name}}: one HTTP service that answers with a model.
+
+POST /chat:8000 {"question": ...} ──► chat_flow ──► {answer, error}
+                                        └── llm:assistant (resources.yaml; LLM_API_KEY in .env)
+
+Every service and job of the project is declared here; operonx.toml only
+points at `APP`.
+"""
+
+from operonx.app import Application, Service, env, http
+
+from chat.graph import chat_flow
+
+APP = Application(
+    "{{name}}",
+    description="{{summary}}",
+    services=[
+        Service(
+            "chat",
+            http("POST", "/chat", port=env("PORT", 8000)),
+            graph=chat_flow,
+            description="POST {question}, get {answer, error}.",
+        )
+    ],
+)

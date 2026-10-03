@@ -482,6 +482,7 @@ class Operon:
         * ``None`` → returns ``[]`` (tracing off).
         * ``str`` → ResourceHub key, resolved to a shared Consumer
           instance (typical production wiring via ``resources.yaml``).
+          ``"local"`` is the built-in local consumer, no key needed.
         * :class:`Consumer` instance → used as-is (ad-hoc, testing,
           per-graph one-offs — no YAML round-trip needed).
         * ``list`` of any of the above — mixed is fine.
@@ -506,7 +507,14 @@ class Operon:
         items = trace if isinstance(trace, list) else [trace]
         resolved: List[Any] = []
         for item in items:
-            if isinstance(item, str):
+            if item == "local":
+                # The built-in local consumer, by the name `[tracing]` gives
+                # it: what a job records to when nothing is configured. Not a
+                # hub key, so it works without a resources.yaml.
+                from operonx.telemetry.consumers.local import LocalConsumer
+
+                resolved.append(LocalConsumer())
+            elif isinstance(item, str):
                 resolved.append(ResourceHub.instance().get(item))
             elif isinstance(item, Consumer):
                 resolved.append(item)

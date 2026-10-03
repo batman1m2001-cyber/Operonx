@@ -1,0 +1,54 @@
+"""The agent's graph with a scripted model: offline, and the same every run."""
+
+import asyncio
+
+from operonx import op
+from operonx.app.jobs import Job
+
+import assistant.graph
+from assistant.graph import assistant_flow
+from assistant.ops import word_count
+
+CALL = {
+    "id": "call_1",
+    "type": "function",
+    "function": {"name": "word_count", "arguments": '{"text": "one two three"}'},
+}
+
+
+@op
+def scripted_model(messages: list) -> dict:
+    """Turn 1 asks for the tool; turn 2 answers with what the tool said."""
+    tool_said = [m["content"] for m in messages if m.get("role") == "tool"]
+    if not tool_said:
+        return {
+            "assistant_message": [{"role": "assistant", "content": "", "tool_calls": [CALL]}],
+            "tool_calls": [CALL],
+            "done": False,
+        }
+    return {
+        "assistant_message": [{"role": "assistant", "content": f"The tool said {tool_said[-1]}"}],
+        "tool_calls": [],
+        "done": True,
+    }
+
+
+def test_word_count():
+    assert word_count(text="a b c")() == {"words": 3}  # a @tool is an op: call it to run
+
+
+def test_the_agent_calls_the_tool_and_answers(tmp_path, monkeypatch):
+    monkeypatch.setattr(assistant.graph, "MODEL", scripted_model)  # no real model
+    got = []
+    job = Job(
+        "t",
+        graph=assistant_flow,
+        source=[{"id": "q1", "question": "How many words in 'one two three'?"}],
+        sink=got,
+        record_dir=tmp_path,
+    )
+    run = asyncio.run(job.run())
+    assert run.status == "ok"
+    [answer] = got
+    assert answer["stopped_early"] is False
+    assert "3" in answer["answer"]

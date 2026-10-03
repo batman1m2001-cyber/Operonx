@@ -4,7 +4,7 @@ An eval answers one question about a graph: on these cases, does it do
 what it should? It is a dataset of cases, the graph under test, and
 **evaluators** that judge each case's output. It runs as a
 [job](10-jobs.md) — no new runtime — so it resumes, runs concurrently,
-records every case, and fails `operonx-run` when it should, which is what
+records every case, and fails `operonx run` when it should, which is what
 CI needs.
 
 ```python
@@ -108,7 +108,7 @@ async def names_the_time(output, expected):
 ```
 
 ```bash
-operonx-run replies          # exits non-zero when the eval fails: a CI gate
+operonx run replies          # exits non-zero when the eval fails: a CI gate
 ```
 
 Runs carry `origin=eval` and are filed under `.operonx/runs/evals/`,

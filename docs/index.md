@@ -21,6 +21,10 @@ built-in tracing.
 pip install operonx
 ```
 
+To start a whole project instead (layout, app, tests and an `AGENTS.md` for
+coding assistants), run `operonx init myapp`; see
+[Installation](guide/00-installation.md#start-a-project-operonx-init).
+
 ```python
 import asyncio
 from operonx.core import Operon, GraphOp, op, START, END, PARENT

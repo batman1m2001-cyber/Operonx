@@ -1,7 +1,8 @@
 # 5. Project layout and conventions
 
 A product built on operonx looks like this. The files below are a complete,
-working project.
+working project, and `operonx init` writes this layout (with a feature of
+its own) for you.
 
 ```text
 scorer/
@@ -9,6 +10,8 @@ scorer/
 ├── resources.yaml        # models, stores, tracing — by key, secrets as ${VAR}
 ├── .env                  # the secrets themselves; never committed
 ├── pyproject.toml        # operonx[extras] as a dependency; pytest's paths
+├── AGENTS.md             # for coding assistants (CLAUDE.md holds `@AGENTS.md`)
+├── .operonx/guide/       # this guide, copied by `operonx guide --sync`
 ├── app/
 │   ├── __init__.py
 │   └── main.py           # APP = Application(...): read this file first
@@ -52,11 +55,13 @@ app  = "app.main:APP"
 
 [resources]
 overlay = "resources.yaml"
+
+[tracing]                 # where every service's and job's runs are recorded
+sinks = ["local"]         # e.g. ["trace_clickhouse:default"]: a resources.yaml key
 ```
 
 ```yaml file=resources.yaml
-trace_local:
-  default: {}
+# models, stores and trace sinks by key; secrets as ${VAR} from .env
 ```
 
 ```toml file=pyproject.toml
@@ -64,7 +69,7 @@ trace_local:
 name = "scorer"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["operonx[serve]>=1.10"]
+dependencies = ["operonx[serve]>=1.13"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
@@ -118,7 +123,7 @@ def score_flow():
 """The scorer: one HTTP service and the batch job over the same graph.
 
 POST /score:8017 ──► score_flow ──► {id, words, verdict}
-operonx-run score_calls ──► score_flow per line of calls.jsonl ──► out/scored.jsonl
+operonx run score_calls ──► score_flow per line of calls.jsonl ──► out/scored.jsonl
 """
 
 from operonx.app import Application, Service, env, http
@@ -134,7 +139,6 @@ APP = Application(
             "score_calls", graph=score_flow, source="calls.jsonl", sink="out/scored.jsonl", key="id"
         )
     ],
-    trace=["trace_local:default"],
 )
 ```
 
@@ -174,8 +178,8 @@ def test_the_flow_scores_every_call():
 
 ```bash run
 python -m pytest tests -q
-operonx-serve --list
-operonx-run score_calls
+operonx serve --list
+operonx run score_calls
 ```
 
 ## Growing it
@@ -185,5 +189,5 @@ operonx-run score_calls
 - **A model** is an `llm:` entry in `resources.yaml` and an
   `LLMOp.of(resource=...)` in the feature's `graph.py`; its key goes in `.env`.
 - **An eval** is a `datasets/<name>.jsonl` and an `Eval(...)` (a kind of
-  job) in `app/main.py`; `operonx-run <eval>` gates CI.
+  job) in `app/main.py`; `operonx run <eval>` gates CI.
 - **Door hooks** (`on_session`, `on_close`) go in `app/`, beside `main.py`.

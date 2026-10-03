@@ -315,7 +315,7 @@ class Runbook:
         record_dir: Where runs are recorded: ``<record_dir>/<name>/<run>``.
         description: One line, for ``--list`` and the studio.
         schedule: When the deployment's cron should run it (a cron line);
-            declared, not acted on — ``operonx-run`` is what cron calls.
+            declared, not acted on — ``operonx run`` is what cron calls.
     """
 
     def __init__(

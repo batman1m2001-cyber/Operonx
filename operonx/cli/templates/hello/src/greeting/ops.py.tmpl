@@ -1,0 +1,10 @@
+"""The greeting feature's logic. Every op returns a dict literal: its keys
+are the op's outputs."""
+
+from operonx import op
+
+
+@op
+def greet(person: dict) -> dict:
+    name = " ".join(str(person.get("name", "")).split()).title() or "stranger"
+    return {"result": {"id": person["id"], "greeting": f"Hello, {name}!"}}

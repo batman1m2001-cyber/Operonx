@@ -1,4 +1,4 @@
-"""``operonx-pack`` — serialise ``@graph`` factories to the JSON spec
+"""``operonx pack`` — serialise ``@graph`` factories to the JSON spec
 consumed by the Rust runtime.
 
 Picks targets pytest-style: each positional argument is
@@ -16,10 +16,10 @@ the symbol name unless ``=customkey`` overrides it (see below).
 Usage::
 
     # Single target — print to stdout
-    operonx-pack examples.python.ex03_llm_chat.main::basic_chat
+    operonx pack examples.python.ex03_llm_chat.main::basic_chat
 
     # Multiple targets bundled into one file
-    operonx-pack \\
+    operonx pack \\
         examples.python.ex03_llm_chat.main::basic_chat \\
         examples.python.ex03_llm_chat.main::chain_chat \\
         examples.python.ex03_llm_chat.main::summarize_pipeline \\
@@ -30,10 +30,9 @@ provider ops can resolve ``./resources.yaml`` + ``./.env`` at build
 time. Run from inside the example directory when targeting a graph that
 needs provider resources.
 
-Ships with ``pip install operonx`` — registered via the
-``[project.scripts] operonx-pack = "operonx.cli.pack:main"`` entry
-point, and reachable as ``operonx pack`` through the umbrella
-dispatcher in :mod:`operonx.cli`.
+Ships with ``pip install operonx`` as ``operonx pack``, a subcommand of
+the ``operonx`` command (:mod:`operonx.cli.main`); the deprecated
+``operonx-pack`` script is an alias of it for one release.
 """
 
 from __future__ import annotations
@@ -155,7 +154,7 @@ def pack_one(factory: Callable[..., Any], scenario: str) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        prog="operonx-pack",
+        prog="operonx pack",
         description=(
             "Serialise @graph factories to the JSON spec the Rust runtime "
             "loads. Pass one or more `module.path::symbol` targets."

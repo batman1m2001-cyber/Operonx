@@ -39,6 +39,7 @@ run_store:
 | `trace_local` | One directory per run: `nodes.jsonl` (every execution), `view.txt` (a readable timeline), `media/` (large payloads, content-addressed) |
 | `trace_langfuse` | A Langfuse trace, one span per op, LLM generations with their model, tokens and cost (`pip install "operonx[langfuse]"`) |
 | `run_store` | A run store: the run in full plus its summary, queryable later ([Runs](11-runs.md)) |
+| `trace_clickhouse` | The ClickHouse run store, written from a background queue so a run never waits on the database; blobs stored once, typed from their bytes ([Runs → ClickHouse](11-runs.md#clickhouse); `pip install "operonx[clickhouse]"`) |
 
 ## Wiring them to a run
 
@@ -65,11 +66,75 @@ APP = Application(
 )
 ```
 
-or, in `operonx.toml`, `[project] trace = ["trace_local:default"]`. A
-service or job with its own `trace=` keeps it; `trace=[]` on one of them
-still means "trace nothing". A job with no consumers anywhere records
+A service or job with its own `trace=` keeps it; `trace=[]` on one of
+them still means "trace nothing". A job with no consumers anywhere records
 locally anyway, so its item records never point at traces that were not
-written.
+written. A service with none is not traced.
+
+## Switching sinks in `operonx.toml`
+
+The operator's switch is `[tracing]` in `operonx.toml`: the one place that
+says which sinks are on. How to reach each sink stays in `resources.yaml`.
+
+```toml
+[tracing]
+sinks = ["local", "trace_langfuse:edupia", "trace_clickhouse:default"]   # every run goes to all of them
+
+[tracing.services.call]            # one service, overridden
+sinks = ["local", "trace_langfuse:edupia"]
+
+[tracing.jobs.backfill_call_logs]  # one job, overridden
+sinks = []                         # this job is not traced
+```
+
+`"local"` is the built-in local consumer, the one a job records to when
+nothing is configured (`<project>/.operonx/runs`); it needs no entry in
+`resources.yaml`. Any other entry is a resource key, resolved through the
+hub exactly like a `trace=[...]` entry.
+
+The most specific setting wins:
+
+| Level | Where | |
+|---|---|---|
+| 1 | `[tracing.services.<name>]` / `[tracing.jobs.<name>]` | the operator, for one service or job |
+| 2 | `Service(trace=...)` / `Job(trace=...)`, or `trace =` on a `[[serve]]` / `[[job]]` block | the code, for one service or job |
+| 3 | `[tracing] sinks` | the operator, for the project |
+| 4 | `Application(trace=...)` (or `[project] trace`) | the code, for the project |
+| 5 | the built-in default | a job records locally; a service is not traced |
+
+An explicit `sinks = []` (or `trace=[]`) means "not traced" at its level;
+it does not fall through. A runbook's entry, `[tracing.jobs.<runbook>]`,
+reaches each of its jobs; a member can still be named on its own.
+
+`[project] trace` and `[tracing] sinks` cannot both be set: they sit at
+different levels (`Application(trace=...)` beats the first and loses to
+the second), so one file holding both would leave a reader guessing which
+applies. Move the list to `[tracing] sinks`.
+
+What is checked, and when:
+
+- **At load**: an unknown key in `[tracing]`, a `sinks` that is not a list,
+  an entry that is neither `"local"` nor `category:name`, a sink listed
+  twice, and a `[tracing.services.<name>]` / `[tracing.jobs.<name>]` that
+  names no service or job. Each error names the file and the key.
+- **When a service or job starts**: every sink is in `resources.yaml`. A
+  missing one stops the start, naming the key, the level that chose it and
+  who uses it — never a run that quietly goes untraced.
+
+`operonx-serve --list` and `operonx-run --list` print each service's and
+job's sinks and the level they came from, and `Application.describe()`
+carries them (`sinks`, `sinks_from`) for the studio:
+
+```text
+callbot
+  0.0.0.0:8000
+    call           websocket  /ws/call         -> pipeline.graph:call  [per_connection max_inflight=4000]
+      sinks: local, trace_langfuse:edupia  ([tracing.services.call])
+```
+
+Every sink of one run receives the same `WorkflowTrace`, so the same trace
+id — including one a caller passed as `?trace_id=` to a webhook or an http
+door.
 
 ## Every run knows where it came from
 

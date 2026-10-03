@@ -15,6 +15,8 @@ first ``pip install``.
 from __future__ import annotations
 
 import importlib
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,6 +30,7 @@ else:  # pragma: no cover - exercised on the 3.10 CI leg
     import tomli as tomllib
 
 PYPROJECT = Path(__file__).resolve().parents[3] / "pyproject.toml"
+BIN = Path(sys.executable).parent
 
 
 def _scripts() -> dict[str, str]:
@@ -55,20 +58,67 @@ def test_console_script_target_resolves(name: str, target: str):
     assert callable(fn), f"{name} = {target!r} — `{attr}` is not callable"
 
 
-def test_no_umbrella_operonx_command():
-    """Operonx is a library. The only shell surface it owes anyone is
-    handing graph specs to the Rust runtime, so `operonx-pack` is the
-    whole CLI. A dispatcher with nothing to dispatch to would be API
-    surface we owe compatibility on forever — see
-    operonx/agents/CONTRIBUTING.md, rung 2 of the Footprint Ladder.
+ALIASES = ("run", "serve", "pack", "play")
 
-    If a real second command ever lands, delete this test with the PR
-    that adds it. Do not resurrect the 1.1.0 entry, which pointed at
-    nothing.
-    """
-    assert "operonx" not in _scripts()
-    assert importlib.util.find_spec("operonx.cli") is not None
-    assert not hasattr(importlib.import_module("operonx.cli"), "main")
+
+def test_the_operonx_command_lists_every_subcommand():
+    """`operonx` came back with real work to dispatch. The 1.1.0 entry
+    pointed at a module that did not exist; this one resolves, and its
+    --help lists every subcommand."""
+    assert _scripts()["operonx"] == "operonx.cli.main:main"
+    got = subprocess.run(
+        [str(BIN / "operonx"), "--help"], capture_output=True, text=True, timeout=60
+    )
+    assert got.returncode == 0
+    for name in ("init", "guide", *ALIASES):
+        assert f"    {name} " in got.stdout, got.stdout
+
+
+@pytest.mark.parametrize("command", ALIASES)
+def test_each_old_script_is_a_deprecated_alias(command: str):
+    """`operonx-<command>` stays for one release, pointing at the alias
+    that warns and then calls the subcommand's own main."""
+    assert _scripts()[f"operonx-{command}"] == f"operonx.cli.aliases:{command}"
+
+
+@pytest.fixture(scope="module")
+def sample_project(tmp_path_factory):
+    """A project with a service and a job: what `--list` has to show."""
+    from operonx.cli.main import main
+
+    root = tmp_path_factory.mktemp("cli") / "sample"
+    assert main(["init", str(root), "--template", "hello"]) == 0
+    return root
+
+
+def _cli(argv, cwd) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "PYTHONPATH")}
+    env["OPERONX_RUNS_DIR"] = str(Path(cwd) / ".operonx" / "runs")
+    return subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+
+@pytest.mark.parametrize("command", ["run", "serve"])
+def test_list_is_the_same_both_ways(command: str, sample_project: Path):
+    new = _cli([str(BIN / "operonx"), command, "--list"], sample_project)
+    old = _cli([str(BIN / f"operonx-{command}"), "--list"], sample_project)
+    assert new.returncode == old.returncode == 0, new.stderr + old.stderr
+    assert new.stdout == old.stdout
+    assert "sample" in new.stdout and ("greet" in new.stdout)
+    assert new.stderr == ""
+
+
+@pytest.mark.parametrize("command", ALIASES)
+def test_each_alias_warns_once_and_behaves_the_same(command: str, tmp_path: Path):
+    new = _cli([str(BIN / "operonx"), command, "--help"], tmp_path)
+    old = _cli([str(BIN / f"operonx-{command}"), "--help"], tmp_path)
+    assert new.returncode == old.returncode == 0, new.stderr + old.stderr
+    assert new.stdout == old.stdout  # one parser: same usage, same flags
+    assert f"usage: operonx {command}" in new.stdout
+    warning = old.stderr.strip().splitlines()
+    assert len(warning) == 1, old.stderr
+    assert warning[0].startswith("DeprecationWarning:")
+    assert f"use `operonx {command}`" in warning[0]
+    assert new.stderr == ""
 
 
 class TestPackMovedNamespace:

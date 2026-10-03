@@ -1043,7 +1043,7 @@ async def serve_stdio(app: Any) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     from .application import Application
 
-    parser = argparse.ArgumentParser(prog="operonx-play", description=__doc__.split("\n\n")[0])
+    parser = argparse.ArgumentParser(prog="operonx play", description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", default=".", help="the project (an operonx.toml at or above it)")
     args = parser.parse_args(argv)
     app = Application.find(args.root)

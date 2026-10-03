@@ -1,0 +1,42 @@
+"""{{name}}: one job and one HTTP service over the same graph.
+
+operonx run greet_people ──► greet_flow per line of datasets/people.jsonl ──► out/greetings.jsonl
+POST /greet:8000 ──────────► greet_flow ──► {id, greeting}
+
+Every service and job of the project is declared here; operonx.toml only
+points at `APP`.
+"""
+
+from pathlib import Path
+
+from operonx.app import Application, Service, env, http
+from operonx.app.jobs import Job
+
+from greeting.graph import greet_flow
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "out"
+
+greet_people = Job(
+    "greet_people",
+    graph=greet_flow,
+    source=ROOT / "datasets" / "people.jsonl",
+    sink=OUT / "greetings.jsonl",
+    key="id",  # resumable: `operonx run greet_people --resume` skips done ids
+    record_dir=OUT / "jobs",
+    description="A greeting for every person in datasets/people.jsonl.",
+)
+
+APP = Application(
+    "{{name}}",
+    description="{{summary}}",
+    services=[
+        Service(
+            "greet",
+            http("POST", "/greet", port=env("PORT", 8000)),
+            graph=greet_flow,
+            description="POST {id, name}, get {id, greeting}.",
+        )
+    ],
+    jobs=[greet_people],
+)

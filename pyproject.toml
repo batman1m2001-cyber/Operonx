@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx"
-version = "1.12.2"
+version = "1.13.0"
 description = "High-performance workflow engine for AI applications"
 readme = "README.md"
 license = "Apache-2.0"
@@ -50,6 +50,7 @@ dependencies = [
 #
 #   Tier 3 — feature extras (additive on top of tier 1 or 2):
 #     pip install operonx[langfuse]    # Langfuse tracing
+#     pip install operonx[clickhouse]  # ClickHouse traces + run store
 #     pip install operonx[serve]       # FastAPI HTTP server
 #     pip install operonx[onnx]        # Local ONNX embedding/reranker
 #     pip install operonx[huggingface] # Local HF embedding/reranker
@@ -118,6 +119,9 @@ postgres = [
 mongo = [
     "pymongo>=4.6",
 ]
+clickhouse = [
+    "clickhouse-connect>=0.7",
+]
 qdrant = [
     "qdrant-client>=1.9",
     "httpx>=0.24",        # operonx.providers imports it eagerly (see S10)
@@ -170,6 +174,7 @@ all = [
     "psycopg-pool>=3.2",
     "qdrant-client>=1.9",
     "pymongo>=4.6",
+    "clickhouse-connect>=0.7",
     "langfuse>=2.6.0,<3.0.0",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
@@ -187,6 +192,8 @@ dev = [
     # the Mongo run store's tests run against an in-memory Mongo
     "mongomock>=4.1",
     "pymongo>=4.6",
+    # the ClickHouse run store's live tests (a throwaway container)
+    "clickhouse-connect>=0.7",
     # tests/internal/cli/ parses pyproject.toml to verify every
     # [project.scripts] target resolves; tomllib is stdlib only on 3.11+.
     "tomli>=2.0; python_version < '3.11'",
@@ -201,10 +208,11 @@ mcp = [
 ]
 
 [project.scripts]
-operonx-pack = "operonx.cli.pack:main"
-operonx-serve = "operonx.cli.serve:main"
-operonx-run = "operonx.cli.run:main"
-operonx-play = "operonx.app.play:main"
+operonx = "operonx.cli.main:main"
+operonx-pack = "operonx.cli.aliases:pack"    # deprecated: `operonx pack`
+operonx-serve = "operonx.cli.aliases:serve"  # deprecated: `operonx serve`
+operonx-run = "operonx.cli.aliases:run"      # deprecated: `operonx run`
+operonx-play = "operonx.cli.aliases:play"    # deprecated: `operonx play`
 
 [project.urls]
 Homepage = "https://github.com/batman1m2001-cyber/Operonx"

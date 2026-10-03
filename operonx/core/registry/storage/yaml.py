@@ -128,6 +128,30 @@ def _scan_unset_env_vars(data: Dict[str, Any]) -> List[Tuple[str, str]]:
     return findings
 
 
+def flatten_resources(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """A resources file's top level as ``{"category:name": config}``.
+
+    Both forms a file may use resolve to the same key::
+
+        llm:                    llm:gpt-4o:
+          gpt-4o: {...}           api_type: openai
+
+    A top-level key without a colon whose values are all mappings is a
+    category; one with any scalar value is a legacy flat config, kept
+    under its own key."""
+    flat: Dict[str, Any] = {}
+    for key, value in (raw or {}).items():
+        if isinstance(value, dict) and ":" not in key:
+            if value and all(isinstance(v, dict) for v in value.values()):
+                for name, config in value.items():
+                    flat[f"{key}:{name}"] = config
+            else:
+                flat[key] = value
+        else:
+            flat[key] = value
+    return flat
+
+
 class YamlConfigStorage(ConfigStorage):
     """Storage file YAML cho config resource.
 
@@ -205,25 +229,7 @@ class YamlConfigStorage(ConfigStorage):
         with open(self._file_path, "r") as f:
             raw = yaml.safe_load(f) or {}
 
-        # Flatten nested structure: {category: {name: config}} → {"category:name": config}
-        flat = {}
-        for key, value in raw.items():
-            if isinstance(value, dict) and ":" not in key:
-                # Check if nested: all values are dicts (category → resources)
-                # vs flat config dict (has non-dict values like strings, ints)
-                all_dicts = all(isinstance(v, dict) for v in value.values())
-                if all_dicts and value:
-                    # Nested: flatten
-                    for name, config in value.items():
-                        flat[f"{key}:{name}"] = config
-                else:
-                    # Flat config dict (legacy key without colon)
-                    flat[key] = value
-            else:
-                # Already flat key (e.g. "llm:gpt-4o")
-                flat[key] = value
-
-        return flat
+        return flatten_resources(raw)
 
     def _save_file(self, data: Dict[str, Any]):
         """Ghi dữ liệu vào file YAML."""

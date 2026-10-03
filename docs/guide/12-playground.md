@@ -8,7 +8,7 @@ on stdin and stdout. The studio's Playground is one front end for it;
 anything that can write a line and read a line is another.
 
 ```bash
-operonx-play --root path/to/project        # or: python -m operonx.app.play --root …
+operonx play --root path/to/project        # or: python -m operonx.app.play --root …
 ```
 
 Nothing here is a second way to run a service. A playground session goes

@@ -1,0 +1,24 @@
+from pathlib import Path
+
+from operonx.app import Application
+from starlette.testclient import TestClient
+
+from textstats.ops import measure, read_text
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_read_text_collapses_whitespace():
+    assert read_text(body={"text": "  a \n b  "})()["text"] == "a b"
+
+
+def test_measure():
+    assert measure(text="one three")()["result"] == {"words": 2, "chars": 9, "longest": "three"}
+
+
+def test_the_service_answers_in_process():
+    app = Application.find(ROOT)  # loads operonx.toml, then the APP it names
+    with TestClient(app.asgi()) as client:
+        reply = client.post("/stats", json={"text": "serve  this graph"})
+    assert reply.status_code == 200
+    assert reply.json() == {"words": 3, "chars": 16, "longest": "serve"}

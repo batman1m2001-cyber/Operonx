@@ -6,7 +6,7 @@ name = "ex14-streaming-tracing"
 description = "Operonx generator pipelines + tracing hooks (no API keys)."
 
 # ── the front door ──────────────────────────────────────────────────────
-# What puts work into this project. `operonx-serve` boots it; the studio
+# What puts work into this project. `operonx serve` boots it; the studio
 # draws it as the entry node feeding the graph.
 [[serve]]
 kind    = "http"

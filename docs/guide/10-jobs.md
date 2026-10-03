@@ -64,10 +64,10 @@ for item in run.failed:
 From `async` code, `await score_calls.run()`. From a shell:
 
 ```bash
-operonx-run jobs:score_calls              # a Job object, as module:attr
-operonx-run jobs:score_calls --resume     # only the keys the last run did not finish
-operonx-run jobs:score_calls --show       # what would run, and exit
-operonx-run jobs:score_calls --set day=2026-09-25 --sink out/today.jsonl
+operonx run jobs:score_calls              # a Job object, as module:attr
+operonx run jobs:score_calls --resume     # only the keys the last run did not finish
+operonx run jobs:score_calls --show       # what would run, and exit
+operonx run jobs:score_calls --set day=2026-09-25 --sink out/today.jsonl
 ```
 
 The exit status is 0 only when every item finished cleanly, so a cron
@@ -214,7 +214,7 @@ The run's result is written to the sink as the item's result.
 `[[job]]` blocks sit beside the `[[serve]]` blocks in `operonx.toml`.
 Paths are relative to the manifest; `source:`/`sink:` keys go to the
 hub; `schedule` is cron text that is listed, not executed — the
-deployment's cron calls `operonx-run`.
+deployment's cron calls `operonx run`.
 
 ```toml
 [[serve]]
@@ -238,10 +238,10 @@ description = "Score every call; one run per call, resumable by call_id."
 ```
 
 ```bash
-operonx-run --list                    # every [[job]], with its schedule
-operonx-run score_calls               # by name
-operonx-run score_calls --resume
-operonx-serve --only score            # the served form of the same graph
+operonx run --list                    # every [[job]], with its schedule
+operonx run score_calls               # by name
+operonx run score_calls --resume
+operonx serve --only score            # the served form of the same graph
 ```
 
 ## Stream mode
@@ -317,8 +317,8 @@ schedule   = "0 3 * * *"
 ```
 
 ```bash
-operonx-run nightly
-operonx-run nightly --show             # prints the wires: fetch >> [score, audit] …
+operonx run nightly
+operonx run nightly --show             # prints the wires: fetch >> [score, audit] …
 ```
 
 ## What a job is not

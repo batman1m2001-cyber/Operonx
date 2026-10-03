@@ -5,6 +5,8 @@
   workflow. See ``docs/TRACING_V3_DESIGN.md`` §4.
 * :class:`LangfuseConsumer` — batch-ship the trace to Langfuse at end
   of call. See ``docs/TRACING_V3_DESIGN.md`` §6/8.
+* ``trace_clickhouse:`` — queue the run for a ClickHouse store (see
+  :mod:`operonx.telemetry.runs.clickhouse`); the driver loads lazily.
 
 Importing this module registers both consumer types with the
 :mod:`operonx.core.registry` ``REGISTRY``, so a ``resources.yaml``
@@ -18,6 +20,10 @@ way.
 """
 
 from operonx.core.registry import REGISTRY
+from operonx.telemetry.consumers.clickhouse import (
+    ClickHouseConsumerConfig,
+    _create_clickhouse_consumer,
+)
 from operonx.telemetry.consumers.langfuse import (
     LangfuseConsumer,
     LangfuseConsumerConfig,
@@ -30,6 +36,7 @@ from operonx.telemetry.consumers.local import (
 )
 
 __all__ = [
+    "ClickHouseConsumerConfig",
     "LangfuseConsumer",
     "LangfuseConsumerConfig",
     "LocalConsumer",
@@ -42,3 +49,4 @@ __all__ = [
 # registry between runs; re-register is idempotent per config class.
 REGISTRY.register(LocalConsumerConfig, _create_local_consumer)
 REGISTRY.register(LangfuseConsumerConfig, _create_langfuse_consumer)
+REGISTRY.register(ClickHouseConsumerConfig, _create_clickhouse_consumer)

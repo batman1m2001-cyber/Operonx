@@ -230,7 +230,7 @@ def test_main_help_prints_the_module_doc(tmp_path, capsys):
     assert "Shouts every name." in capsys.readouterr().out
 
 
-# -- operonx-run reads .env before the manifest --------------------------------
+# -- operonx run reads .env before the manifest --------------------------------
 
 
 def test_cli_loads_dotenv_before_resolving_the_manifest(tmp_path, monkeypatch):

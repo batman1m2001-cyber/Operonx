@@ -44,7 +44,6 @@ from operonx.core import END, PARENT, START, GraphOp, Operon, op  # noqa: E402
 from operonx.telemetry.backends.langfuse import LangfuseClient, LangfuseConfig  # noqa: E402
 from operonx.telemetry.sinks import LangfuseSink  # noqa: E402
 
-
 # ============================================================
 # Setup — Langfuse Edupia client
 # ============================================================

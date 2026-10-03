@@ -1,11 +1,11 @@
-"""`operonx-run` — run a Job from the command line.
+"""`operonx run` — run a Job from the command line.
 
-    operonx-run score_calls                   # a job the application declares, by name
-    operonx-run score_calls --resume          # only what the last run did not finish
-    operonx-run --list                        # every job, with its schedule
-    operonx-run jobs:score_calls              # a Job object, as module:attr
-    operonx-run score_calls --show            # what would run, and exit
-    operonx-run score_calls --set day=2026-09-25 --sink out/today.jsonl
+    operonx run score_calls                   # a job the application declares, by name
+    operonx run score_calls --resume          # only what the last run did not finish
+    operonx run --list                        # every job, with its schedule
+    operonx run jobs:score_calls              # a Job object, as module:attr
+    operonx run score_calls --show            # what would run, and exit
+    operonx run score_calls --set day=2026-09-25 --sink out/today.jsonl
 
 A Job or Runbook is also its own command line — ``job.main()`` takes the
 same flags, minus the name, so ``python -m jobs.score_calls --resume``
@@ -27,6 +27,7 @@ from typing import Any, Optional, Sequence
 
 from operonx.app import Application, ManifestError
 from operonx.app.serve.registry import load_object
+from operonx.cli.serve import _sinks
 
 
 def _application(path: Optional[str]) -> Application:
@@ -48,6 +49,7 @@ def _list(app: Application) -> int:
             print(f"  {j['name']:18s} {j['session']:9s} {j['graph']:30s} {io}{when}")
         if j["description"]:
             print(f"  {'':18s} {j['description']}")
+        print(f"  {'':18s} {_sinks(j)}")
     return 0
 
 
@@ -202,7 +204,7 @@ def _load_dotenv() -> None:
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
-        prog="operonx-run",
+        prog="operonx run",
         description="Run a Job: one run per item, a record per run.",
     )
     parser.add_argument(
@@ -229,7 +231,7 @@ def main(argv=None) -> int:
         if not args.job:
             parser.error("name a job, or --list")
         if ":" in args.job:
-            # `module:attr` is relative to the project, the way `operonx-serve`
+            # `module:attr` is relative to the project, the way `operonx serve`
             # resolves a manifest's entry points.
             cwd = os.getcwd()
             if cwd not in sys.path:

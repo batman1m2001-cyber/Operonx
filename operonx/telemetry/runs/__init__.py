@@ -12,6 +12,8 @@ backend in configuration:
 * ``langfuse`` — read-only, over runs a LangfuseConsumer shipped
 
 The contract is five methods on purpose; see :mod:`.base`.
+:func:`project_stores` names the stores a project's own ``[tracing]``
+sinks can be read from, without importing the project.
 """
 
 from operonx.core.registry import REGISTRY
@@ -28,6 +30,7 @@ from .model import (
     percentile,
     summarize,
 )
+from .project import StoreSource, project_stores
 from .retention import DEFAULT_RETENTION, apply_retention
 
 __all__ = [
@@ -43,11 +46,13 @@ __all__ = [
     "RunStore",
     "RunStoreConfig",
     "RunSummary",
+    "StoreSource",
     "apply_retention",
     "combine_rollups",
     "create_run_store",
     "open_run_store",
     "percentile",
+    "project_stores",
     "summarize",
 ]
 

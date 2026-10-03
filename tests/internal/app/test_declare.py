@@ -138,6 +138,8 @@ def test_describe_names_objects_the_way_a_manifest_would():
             "sink": "[]",
             "schedule": None,
             "description": "",
+            "sinks": ["local"],  # nothing configured: a job records locally
+            "sinks_from": "default",
         }
     ]
 

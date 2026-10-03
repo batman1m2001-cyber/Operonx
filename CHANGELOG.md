@@ -7,6 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-04
+
+### Added
+
+- **`operonx.telemetry.runs.project_stores(root)`: the stores a
+  project's trace sinks can be read from, from its files alone.** It reads
+  `[tracing]` in `operonx.toml` (project-wide, per service, per job, and a
+  block's own `trace =` where nothing overrides it) and `resources.yaml`
+  with `${VAR}` from the project's `.env` under the environment, and
+  returns one `StoreSource` per sink: `"local"` and `trace_local:` as
+  `files`, `trace_clickhouse:` as `clickhouse`, `trace_langfuse:` as
+  `langfuse` through its client, `run_store:` as itself; a project's own
+  consumer comes back unreadable with the reason. Relative paths anchor
+  where the writer anchors them. The studio uses it to read what a project
+  actually writes.
+- `open_run_store` and `run_store:` take `timeout` (ClickHouse's connect
+  timeout).
+- `operonx.core.registry.storage.yaml.flatten_resources`: a resources
+  file's top level as `category:name` keys, nested and flat forms alike.
+
+- **`[tracing]` in `operonx.toml`: which trace sinks are on, in one
+  place.** `[tracing] sinks = ["local", "trace_langfuse:edupia"]` sends
+  every run to all of them; `[tracing.services.<name>]` and
+  `[tracing.jobs.<name>]` override one service or job, and `sinks = []`
+  turns tracing off there. `"local"` is the built-in local consumer (also
+  accepted by `trace=` anywhere, `Operon(trace="local")` included); any
+  other entry is a resource key, as in `trace=[...]`. Precedence, most
+  specific first: `[tracing.<services|jobs>.<name>]`, the service's or
+  job's own `trace=` (or `trace =` on its block), `[tracing] sinks`,
+  `Application(trace=...)` / `[project] trace`, then the default (a job
+  records locally; a service is not traced). A typo, a non-list, a
+  malformed sink or a name that is no service or job fails at load, naming
+  the key; a sink missing from `resources.yaml` fails when the service or
+  job starts, naming the level that chose it. `operonx-serve --list`,
+  `operonx-run --list` and `Application.describe()` (`sinks`,
+  `sinks_from`) show each service's and job's sinks and where they came
+  from. `[project] trace` and `[tracing] sinks` together is an error.
+- `ResourceHub.declares(key)`: whether a key is configured, without
+  parsing or caching it.
+
+- **A ClickHouse run store and trace consumer** (`pip install
+  "operonx[clickhouse]"`). `trace=["trace_langfuse:edupia",
+  "trace_clickhouse:default"]` records each run into ClickHouse beside
+  Langfuse, and `run_store: {backend: clickhouse}` opens the same database
+  for the studio. It passes the shared `RunStore` contract tests.
+  - **A run never waits on the database.** `consume` only queues the
+    finished trace (about 50 µs for a 4000-execution run). A background
+    thread builds the rows and inserts them in batches with `async_insert`.
+    While ClickHouse is slow or down, runs past `queue_size` are dropped and
+    counted in `store.writer.stats`, with one warning per outage. Measured on
+    a 2000-yield streaming run: no difference with gaps between runs; back to
+    back, the writer's CPU (about 46 µs per execution) shares the GIL with
+    the next run (`scripts/bench_clickhouse_consumer.py`).
+  - **A user granted only tables in an existing database works.** The
+    store creates the database only when `EXISTS DATABASE` says it is
+    missing, so a user without the `CREATE DATABASE` grant can still write
+    and read instead of failing with code 497.
+  - **Tables**: `runs`, `nodes` and `op_rollups`, as `ReplacingMergeTree`
+    (a retried batch never duplicates a run), partitioned by month and
+    ordered for the contract's queries. Every row has a TTL from
+    `expires_at`: operonx's per-origin retention, or `ttl_days`. The schema
+    is created on first use and versioned in `schema_version`.
+  - **Media**: `Media` values, and `bytes` or arrays from `media_threshold`
+    up, are stored once in `media_dir`, named by their SHA-256. The row
+    keeps `{"$media": sha, "mime", "size", "duration_s", "store"}`.
+    `prune_media()` removes blobs nothing references.
+- **`operonx.telemetry.media`**: `detect_media()` names a blob's type from
+  its magic bytes: WAV (rate, channels and duration from the header), MP3,
+  OGG/Opus, FLAC, WebM, PNG, JPEG, GIF, WebP, PDF and `.npy`. Raw PCM takes
+  the rate a `Media` declares in its mime parameters
+  (`audio/L16;rate=16000`). It also adds the `MediaStore` interface,
+  `LocalMediaStore`, `offload_to_store()` and `json_default()` (an orjson
+  hook that sanitises and offloads in one pass), all usable by any store.
+- **`operonx.telemetry.writer.BackgroundWriter`**: a bounded queue and a
+  batching thread. `submit` never blocks or raises; items past the bound
+  are dropped and counted; failed batches are retried, then dropped.
+- **`operonx init`: a new project a coding assistant can build on at once.**
+  `pip install operonx` → `operonx init myapp [--template hello|http|chat|agent]
+  [--name NAME] [--force]` writes the layout of
+  `operonx/guide/05-project-layout.md`: `operonx.toml` (it only points the
+  CLIs at `app.main:APP`, plus `[tracing] sinks = ["local"]`), `app/main.py`
+  with the `Application` declaring the template's services and jobs, one
+  feature as `src/<feature>/graph.py` + `ops.py`, `resources.yaml` and
+  `.env.example` (secrets as `${VAR}`), tests that run offline, a
+  `pyproject.toml` on `operonx>=<this version>`, `.gitignore` and a README.
+  For assistants it adds `AGENTS.md` (read the guide first, the ladder, the
+  layout rules, the commands, no `print()`), a `CLAUDE.md` holding
+  `@AGENTS.md`, and `.operonx/guide/`, a copy of the installed guide.
+  `hello` is pure compute (a job and an HTTP service), `http` a service
+  tested in-process, `chat` an `LLMOp` tested against a local fake model,
+  `agent` a ReAct agent with one `@tool` tested with a scripted model. An
+  existing file is never overwritten without `--force`, so on an existing
+  project `init` only adds what is missing, and says so when that is
+  nothing. Every template is tested end to end: its own tests pass, and
+  `operonx serve --list` / `operonx run --list` list every service and job.
+- **`operonx guide`** prints the guide's index; `--path` prints where the
+  installed guide is; `--sync [DIR]` copies it into the project's
+  `.operonx/guide/` (removing pages the installed version dropped) and
+  writes its version to `.operonx/guide/VERSION`. Run it after upgrading.
+  `operonx.guide.sync(project)` does the same from Python.
+
+### Changed
+
+- `tests/internal/cli/test_extras.py` also checks quoted install hints
+  (`pip install "operonx[postgres]"`), which it used to skip.
+- **One command: `operonx run`, `operonx serve`, `operonx pack`,
+  `operonx play`** beside `operonx init` and `operonx guide`. Each takes
+  exactly the arguments its `operonx-*` script took and is the same
+  `main(argv)` (the rest of the command line is handed over untouched, so
+  there is one parser per command); `operonx --help` lists them all. Usage
+  lines, `--list` hints, the guide, `docs/`, the README and the examples
+  now spell them `operonx <command>`.
+
+### Deprecated
+
+- **`operonx-run`, `operonx-serve`, `operonx-pack`, `operonx-play`.** They
+  still work, exactly as before, and print one line to stderr:
+  ``DeprecationWarning: `operonx-run` is deprecated and will be removed in
+  the next release; use `operonx run` ``. Deployed projects and Dockerfiles
+  call them, so they stay for this release; switch to `operonx <command>`.
+
+### Fixed
+
+- **`[[job]] trace = []` is kept.** It read as "nothing declared", so the
+  job inherited the application's consumers (or recorded locally) instead
+  of tracing nothing, unlike `Job(trace=[])`.
+
+
 ## [1.12.2] - 2026-10-03
 
 ### Fixed
@@ -2367,7 +2495,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.2...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.2...v1.13.0
 [1.12.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.1...v1.12.2
 [1.12.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.0...v1.12.1
 [1.12.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.11.1...v1.12.0

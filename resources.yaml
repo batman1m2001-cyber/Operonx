@@ -319,6 +319,31 @@ langfuse:edupia:
   enabled: true
   sample_rate: 1.0
 
+# ClickHouse traces — every run, its executions and rollups, written from a
+# background queue so a run never waits on the database (pip install
+# "operonx[clickhouse]"). Blobs go to media_dir once, typed from their bytes.
+# Use beside Langfuse: trace=["trace_langfuse:edupia", "trace_clickhouse:default"]
+#
+# trace_clickhouse:default: &clickhouse
+#   host: ${CLICKHOUSE_HOST:localhost}
+#   port: 8123                  # 8443 with secure: true
+#   user: ${CLICKHOUSE_USER:default}
+#   password: ${CLICKHOUSE_PASSWORD:}
+#   database: operonx           # created on first use
+#   secure: false
+#   ttl_days:                   # unset: per origin (services 30, jobs forever…); 0 = forever
+#   media_dir: /data/operonx-media
+#   media_threshold: 1024
+#   batch_size: 10000           # executions per insert
+#   flush_interval: 1.0         # seconds
+#   queue_size: 1000            # runs waiting; past it, dropped and counted
+#
+# The studio reads it as a run store (it looks for this nested form):
+# run_store:
+#   default:
+#     <<: *clickhouse
+#     backend: clickhouse
+
 # OpenTelemetry exporter (points to Langfuse OTLP endpoint)
 otel:default:
   endpoint: ${LANGFUSE_HOST}/api/public/otel/v1/traces

@@ -5,7 +5,7 @@ a dataset, its graph is the system under test (any graph a job can run,
 doors or not), and after each case's run the evaluators judge what came
 out. The item record carries the verdict, the runs carry ``origin=eval``
 (filed under ``.operonx/runs/evals/``), and ``run.json`` carries the pass
-rate. ``operonx-run <eval>`` exits non-zero when a case fails — or, with a
+rate. ``operonx run <eval>`` exits non-zero when a case fails — or, with a
 ``threshold``, when the pass rate is under it — so CI can gate on it::
 
     ev = Eval("replies", graph="bot:reply_flow", dataset="datasets/replies.jsonl",
@@ -493,7 +493,7 @@ class Eval(Job):
             record_dir=record_dir if record_dir.is_absolute() else root / record_dir,
             concurrency=spec.concurrency,
             item_timeout=spec.item_timeout,
-            trace=list(spec.trace) or None,
+            trace=list(spec.trace) if spec.trace is not None else None,
             inputs=dict(spec.inputs),
             item_input=spec.item_input,
             schedule=spec.schedule,

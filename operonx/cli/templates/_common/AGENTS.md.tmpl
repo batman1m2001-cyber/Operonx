@@ -1,0 +1,60 @@
+# AGENTS.md — {{name}}
+
+This is an **operonx** project (made with operonx {{version}}). The logic is
+Python functions (ops), wired into graphs, which an application runs as
+services and jobs.
+
+## Before you write code
+
+1. Read `.operonx/guide/README.md`. It is the guide for the installed
+   operonx, and every example in it is tested against that version.
+2. Before you use an operonx API, re-read the guide page that covers it:
+   `01-ops.md`, `02-composition.md`, `03-control-flow.md`, `04-gotchas.md`,
+   `05-project-layout.md`. Do not write an operonx API from memory.
+3. Read `app/main.py`. It is the map of the product.
+
+## The ladder
+
+- **op**: `@op` in `ops.py`. One step of logic; it returns a dict literal.
+- **graph**: `@graph` in `graph.py`. Wires ops with `>>`. `ingress()` and
+  `egress()` are its doors: items in, items out.
+- **Job / Runbook**: a Job runs a graph once per item of a source and
+  writes a sink. A Runbook runs jobs in order.
+- **Service**: a graph behind `http(...)`, `websocket(...)`, `webhook(...)`
+  or `schedule(...)`.
+- **Application**: `APP` in `app/main.py`. Declare every service and job
+  there.
+- **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`. Never
+  put `[[serve]]` or `[[job]]` blocks in it.
+
+## Layout
+
+- One feature is one folder: `src/<feature>/graph.py` (wiring only: no
+  logic, no I/O, no Python `if`) and `src/<feature>/ops.py` (the logic).
+  Private helpers go in `src/<feature>/_<name>.py`.
+- Imports go one way: `app/` → `graph.py` → `ops.py` → helpers. Nothing in
+  `src/` imports `app/`, and no feature imports another feature's graph.
+- Reach models and stores by their key in `resources.yaml`
+  (`LLMOp.of(resource="assistant")`). Never build a client in code.
+- Secrets live only in `.env`, as `${VAR}` in `resources.yaml`. Add every
+  new name to `.env.example`. Never commit `.env`.
+- Tests go in `tests/`. Call an op directly (`my_op(x=1)()`), run a graph
+  with `Operon` or a `Job`, and never call a real model: use a fake one.
+
+## Commands
+
+```bash
+uv run pytest                 # the tests: keep them green
+uv run operonx serve --list   # every service, and where it listens
+uv run operonx run --list     # every job
+uv run operonx serve          # serve every service
+uv run operonx run NAME       # run one job
+```
+
+## Rules
+
+- Never `print()`. Log with `from operonx.core.loggings import LOGGER`.
+- An op that raises does not raise: the run's result has `"$errors"`.
+  Check for it.
+- After upgrading operonx, run `operonx guide --sync` and re-read
+  `.operonx/guide/README.md`.
