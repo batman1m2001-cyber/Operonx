@@ -315,7 +315,7 @@ class _Resolver:
             spec["path"] = str(
                 self.anchor(path, self.runs_root) if path else self.runs_root / "runs.sqlite"
             )
-        elif backend in _MEDIA_DEFAULT:
+        elif backend in _MEDIA_DEFAULT and spec.get("media") != "clickhouse":
             media = spec.get("media_dir")
             spec["media_dir"] = str(
                 self.anchor(media) if media else self.runs_root / _MEDIA_DEFAULT[backend]

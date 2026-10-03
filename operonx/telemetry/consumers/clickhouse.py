@@ -10,6 +10,7 @@
         password: ${CLICKHOUSE_PASSWORD:}
         database: operonx
         ttl_days:                   # unset: per origin; 0 = keep forever
+        media: local                # local: blobs in media_dir; clickhouse: in the database
         media_dir: /data/operonx-media
 
     Operon(graph, trace=["trace_langfuse:edupia", "trace_clickhouse:default"])
@@ -48,6 +49,7 @@ class ClickHouseConsumerConfig(YamlModel):
     flush_interval: float = 1.0
     queue_size: int = 1000
     timeout: float = 10.0
+    media: str = "local"  # local (media_dir) | clickhouse (the media table)
 
 
 def _create_clickhouse_consumer(cfg: ClickHouseConsumerConfig) -> Any:
@@ -67,4 +69,5 @@ def _create_clickhouse_consumer(cfg: ClickHouseConsumerConfig) -> Any:
         flush_interval=cfg.flush_interval,
         queue_size=cfg.queue_size,
         timeout=cfg.timeout,
+        media=cfg.media or "local",
     )
