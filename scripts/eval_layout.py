@@ -1,10 +1,16 @@
-"""K1b gate: the ML layout (docling Heron + TableFormer) against the heuristic.
+"""Layout quality and speed against three references (see operonx_kb.testing.layout_eval).
 
-    PYTHONPATH=<operonx branch> uv run --extra layout python scripts/eval_layout.py [--threads 4] [--pages 20]
+    PYTHONPATH=<operonx branch> uv run python scripts/eval_layout.py \\
+        [--layouts heuristic,model] [--docling-tests <docling>/tests/data/pdf] [--threads 4] [--pages 20]
 
-Scores both layouts on the golden PDFs against tests/golden/truth (see
-operonx_kb.testing.layout_eval) and times them per page, CPU only, after a
-warm-up parse (model loading is excluded and reported separately).
+1. The golden PDFs against tests/golden/truth.
+2. The hand reference (tests/layout_reference/reference.json): real pages
+   annotated by hand; pages from docling's test set need ``--docling-tests``.
+3. With ``--docling-tests``: docling's 17 test PDFs against docling's own
+   (model) outputs.
+
+``model`` needs the ``layout`` extra; it is timed after a warm-up parse (model
+loading is reported separately). Times are seconds per page, wall clock, CPU.
 """
 
 from __future__ import annotations
@@ -12,13 +18,16 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import io
+import json
 import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "tests" / "golden" / "docs"
 TRUTH = ROOT / "tests" / "golden" / "truth"
+REFERENCE = ROOT / "tests" / "layout_reference" / "reference.json"
 
 
 def big_pdf(pages: int) -> bytes:
@@ -40,38 +49,92 @@ def big_pdf(pages: int) -> bytes:
     return buf.getvalue()
 
 
+class Totals:
+    """Pooled counts over many scored documents or pages."""
+
+    def __init__(self) -> None:
+        self.n = self.found = self.kind = self.cells_ok = self.cells = 0
+        self.figs = self.figs_found = self.spurious = self.pages = 0
+        self.seconds = 0.0
+
+    def add(self, s: dict, pages: int, seconds: float) -> None:
+        self.n += s["truth_blocks"]
+        self.found += s["found"]
+        self.kind += s["kind_found"]
+        self.cells_ok += s["cells_ok"]
+        self.cells += s["cells_total"]
+        self.figs += s["figures_total"]
+        self.figs_found += s["figures_found"]
+        self.spurious += s["spurious"]
+        self.pages += pages
+        self.seconds += seconds
+
+    def row(self, label: str, layout: str) -> str:
+        cells = f"{self.cells_ok / self.cells:.2f}" if self.cells else ""
+        figs = f"{self.figs_found}/{self.figs}" if self.figs else ""
+        return (
+            f"| **{label}** | {layout} | {self.pages} | {self.found / self.n:.2f} | "
+            f"{self.kind / self.n:.2f} | | {cells} | {figs} | {self.spurious} | "
+            f"{self.seconds / max(1, self.pages):.3f} |"
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--layouts", default="heuristic,model")
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--pages", type=int, default=20)
+    ap.add_argument("--reference", type=Path, default=REFERENCE)
     ap.add_argument(
         "--docling-tests",
         type=Path,
-        help="a docling checkout's tests/data/pdf: also score against its reference outputs",
+        help="a docling checkout's tests/data/pdf: its pages of the hand reference, and "
+        "its reference outputs",
     )
+    ap.add_argument("--json", type=Path, help="also write every score here")
     args = ap.parse_args()
 
-    import json
-
     from operonx_kb.pdf.layout import HeuristicLayout
-    from operonx_kb.pdf.models import HeronDetector, ModelLayout, TableFormer
     from operonx_kb.pdf.parser import PdfParser
-    from operonx_kb.testing.layout_eval import load_truth, score_layout, truth_from_docling
-
-    t0 = time.perf_counter()
-    model = ModelLayout(
-        detector=HeronDetector(num_threads=args.threads),
-        tables=TableFormer(num_threads=args.threads),
+    from operonx_kb.testing.layout_eval import (
+        load_reference,
+        load_truth,
+        page_blocks,
+        score_layout,
+        truth_from_docling,
     )
-    parsers = {"heuristic": PdfParser(layout=HeuristicLayout()), "model": PdfParser(layout=model)}
-    parsers["model"].parse((DOCS / "table_report.pdf").read_bytes())  # loads both models
-    load_s = time.perf_counter() - t0
 
-    print(
-        "| file | layout | text recall | kind acc. | heading level acc. | order | table cells | spurious | s/page |"
-    )
-    print("|---|---|---|---|---|---|---|---|---|")
-    mismatches = {}
+    parsers = {}
+    load_s = None
+    for label in args.layouts.split(","):
+        if label == "heuristic":
+            parsers[label] = PdfParser(layout=HeuristicLayout())
+            parsers[label].parse((DOCS / "table_report.pdf").read_bytes())  # warm-up (imports)
+        elif label == "model":
+            from operonx_kb.pdf.models import HeronDetector, ModelLayout, TableFormer
+
+            t0 = time.perf_counter()
+            parsers[label] = PdfParser(
+                layout=ModelLayout(
+                    detector=HeronDetector(num_threads=args.threads),
+                    tables=TableFormer(num_threads=args.threads),
+                )
+            )
+            parsers[label].parse((DOCS / "table_report.pdf").read_bytes())  # loads both models
+            load_s = time.perf_counter() - t0
+        else:
+            ap.error(f"unknown layout {label!r}: use heuristic and/or model")
+    record: dict = defaultdict(dict)
+
+    header = "| {} | layout | pages | text recall | kind acc. | order | table cells | figures | spurious | s/page |"
+    rule = "|---|---|---|---|---|---|---|---|---|---|"
+
+    def keep(s: dict) -> dict:
+        return {k: v for k, v in s.items() if k != "matches"}
+
+    print("## Golden PDFs\n")
+    print(header.format("file"))
+    print(rule)
     for truth_file in sorted(TRUTH.glob("*.json")):
         name = truth_file.name[: -len(".json")]
         data = (DOCS / name).read_bytes()
@@ -81,28 +144,43 @@ def main() -> int:
             doc = parser.parse(data)
             per_page = (time.perf_counter() - t) / len(doc.pages)
             s = score_layout(truth, doc.blocks)
-            mismatches[(name, label)] = s["mismatches"]
-            print(f"| {name} | {label} | {s['text_recall']:.2f} | {s['kind_accuracy']:.2f} | {s['level_accuracy']:.2f} | "
-                  f"{s['order']:.2f} | {s['table_cells']:.2f} | {s['spurious']} | {per_page:.3f} |")  # fmt: skip
+            record["golden"][f"{name}/{label}"] = keep(s)
+            print(f"| {name} | {label} | {len(doc.pages)} | {s['text_recall']:.2f} | {s['kind_accuracy']:.2f} | "
+                  f"{s['order']:.2f} | {s['table_cells']:.2f} | | {s['spurious']} | {per_page:.3f} |")  # fmt: skip
+
+    print("\n## Hand reference\n")
+    print(header.format("page"))
+    print(rule)
+    pages = load_reference(args.reference, args.docling_tests)
+    totals = {label: Totals() for label in parsers}
+    skipped = [p["id"] for p in pages if p["path"] is None]
+    for page in pages:
+        if page["path"] is None:
+            continue
+        data = page["path"].read_bytes()
+        for label, parser in parsers.items():
+            t = time.perf_counter()
+            doc = parser.parse(data)
+            per_page = (time.perf_counter() - t) / len(doc.pages)
+            blocks = page_blocks(doc.blocks, page["page"], page.get("scope"))
+            s = score_layout(page["blocks"], blocks)
+            totals[label].add(s, 1, per_page)
+            record["hand"][f"{page['id']}/{label}"] = keep(s)
+            figs = f"{s['figures_found']}/{s['figures_total']}" if s["figures_total"] else ""
+            cells = f"{s['table_cells']:.2f}" if s["cells_total"] else ""
+            print(f"| {page['id']} | {label} | 1 | {s['text_recall']:.2f} | {s['kind_accuracy']:.2f} | "
+                  f"{s['order']:.2f} | {cells} | {figs} | {s['spurious']} | {per_page:.3f} |")  # fmt: skip
+    for label, tot in totals.items():
+        if tot.pages:
+            print(tot.row(f"all ({tot.pages} pages)", label))
+    if skipped:
+        print(f"\nnot scored (pass --docling-tests): {', '.join(skipped)}")
+
     if args.docling_tests:
-        print(
-            "\n| docling reference | layout | pages | text recall | kind acc. | order | table cells | spurious | s/page |"
-        )
-        print("|---|---|---|---|---|---|---|---|---|")
-        totals = {
-            label: {
-                "n": 0,
-                "found": 0,
-                "kind": 0,
-                "pairs": 0.0,
-                "cells": 0.0,
-                "tables": 0,
-                "spurious": 0,
-                "pages": 0,
-                "s": 0.0,
-            }
-            for label in parsers
-        }
+        print("\n## docling's reference outputs (agreement with docling's model)\n")
+        print(header.format("file"))
+        print(rule)
+        totals = {label: Totals() for label in parsers}
         for ref in sorted((args.docling_tests / "groundtruth").glob("*.json")):
             if ref.name.endswith(".pages.meta.json"):
                 continue
@@ -115,31 +193,26 @@ def main() -> int:
                 doc = parser.parse(source.read_bytes())
                 elapsed = time.perf_counter() - t
                 s = score_layout(truth, doc.blocks)
-                n = s["truth_blocks"]
-                tot = totals[label]
-                tot["n"] += n
-                tot["found"] += round(s["text_recall"] * n)
-                tot["kind"] += round(s["kind_accuracy"] * n)
-                tot["spurious"] += s["spurious"]
-                tot["pages"] += len(doc.pages)
-                tot["s"] += elapsed
+                totals[label].add(s, len(doc.pages), elapsed)
+                record["docling"][f"{source.name}/{label}"] = keep(s)
+                figs = f"{s['figures_found']}/{s['figures_total']}" if s["figures_total"] else ""
                 print(f"| {source.name} | {label} | {len(doc.pages)} | {s['text_recall']:.2f} | {s['kind_accuracy']:.2f} | "
-                      f"{s['order']:.2f} | {s['table_cells']:.2f} | {s['spurious']} | {elapsed / max(1, len(doc.pages)):.3f} |")  # fmt: skip
+                      f"{s['order']:.2f} | {s['table_cells']:.2f} | {figs} | {s['spurious']} | {elapsed / max(1, len(doc.pages)):.3f} |")  # fmt: skip
         for label, tot in totals.items():
-            print(f"| **all ({tot['pages']} pages)** | {label} | {tot['pages']} | {tot['found'] / tot['n']:.2f} | "
-                  f"{tot['kind'] / tot['n']:.2f} | | | {tot['spurious']} | {tot['s'] / tot['pages']:.3f} |")  # fmt: skip
+            print(tot.row(f"all ({tot.pages} pages)", label))
+
+    print("\n## Speed on a generated two-column PDF\n")
     data = big_pdf(args.pages)
     for label, parser in parsers.items():
         t = time.perf_counter()
         doc = parser.parse(data)
         print(
-            f"| generated {len(doc.pages)}p | {label} | | | | | | | {(time.perf_counter() - t) / len(doc.pages):.3f} |"
+            f"- {label}: {(time.perf_counter() - t) / len(doc.pages):.3f} s/page over {len(doc.pages)} pages"
         )
-    print(f"\nmodel load + first parse: {load_s:.1f} s; threads={args.threads}")
-    print("\nmismatches (truth kind -> layout kind):")
-    for (name, label), rows in mismatches.items():
-        for row in rows:
-            print(f"- {name} / {label}: {row['truth']} -> {row['got']}: {row['text']!r}")
+    if load_s is not None:
+        print(f"\nmodel load + first parse: {load_s:.1f} s; threads={args.threads}")
+    if args.json:
+        args.json.write_text(json.dumps(record, indent=1, ensure_ascii=False), encoding="utf-8")
     return 0
 
 
