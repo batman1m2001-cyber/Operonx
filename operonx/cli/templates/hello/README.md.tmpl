@@ -1,0 +1,29 @@
+# {{name}}
+
+{{summary}} Built on [operonx](https://pypi.org/project/operonx/).
+
+`src/greeting/` is the feature: `ops.py` holds the logic, `graph.py` wires
+it. `app/main.py` declares what runs it: the `greet_people` job over
+`datasets/people.jsonl`, and the `greet` HTTP service.
+
+## Run
+
+```bash
+uv sync
+uv run pytest                     # the tests, offline
+uv run operonx run greet_people   # greet everyone in datasets/people.jsonl → out/greetings.jsonl
+```
+
+## Serve
+
+```bash
+uv run operonx serve --list       # what would listen, and where
+uv run operonx serve              # POST /greet on :8000 (PORT overrides)
+curl -s localhost:8000/greet -d '{"id": "x", "name": "grace"}'
+```
+
+## Grow it
+
+A new feature is a new folder under `src/` with its own `graph.py` and
+`ops.py`, and one more entry in `app/main.py`. Read `AGENTS.md` and
+`.operonx/guide/README.md` first.

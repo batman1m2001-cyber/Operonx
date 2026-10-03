@@ -5,21 +5,26 @@ tools* (the ``@tool``-decorated callables an LLM invokes), so the CLI
 namespace gave up the name to avoid a permanent clash with
 ``operonx.agents``.
 
-Each module here exposes a ``main()`` registered as a
-``[project.scripts]`` entry in ``pyproject.toml``, so users get an
-``operonx-<name>`` shell command after ``pip install operonx``.
+There is one command, ``operonx`` (:mod:`operonx.cli.main`), with a
+subcommand each:
 
-Currently shipping:
+- ``operonx init`` — a project laid out the way
+  ``operonx/guide/05-project-layout.md`` says (:mod:`operonx.cli.init`);
+- ``operonx guide`` — print or sync the guide for coding assistants;
+- ``operonx serve`` / ``operonx run`` — serve the application's services,
+  run its jobs (:mod:`operonx.cli.serve`, :mod:`operonx.cli.run`);
+- ``operonx pack`` — serialise ``@graph`` factories to the JSON spec
+  consumed by the Rust runtime (:mod:`operonx.cli.pack`);
+- ``operonx play`` — the playground bridge: drive a service's doors
+  (:mod:`operonx.app.play`).
 
-- ``operonx-pack`` — serialise ``@graph`` factories to the JSON spec
-  consumed by the Rust runtime. See :mod:`operonx.cli.pack`.
+``run``, ``serve``, ``pack`` and ``play`` are each their module's own
+``main(argv)``. The ``operonx-run`` / ``-serve`` / ``-pack`` / ``-play``
+scripts are deprecated aliases of them, kept for one release
+(:mod:`operonx.cli.aliases`).
 
-There is deliberately **no umbrella ``operonx`` command**. Operonx is a
-library; the only thing it needs a shell for is handing graph specs to
-the Rust runtime. A dispatcher with nothing to dispatch to is API
-surface we would owe compatibility on forever. (An ``operonx =
-"operonx.cli:main"`` script entry did exist in ``pyproject.toml`` from
-the April 2026 Hush→Operon migration through 1.1.0, pointing at a
-scaffolding CLI that was deleted in that same migration. It never
-resolved. Removed in 1.2.0.)
+(An ``operonx = "operonx.cli:main"`` entry existed from the April 2026
+Hush→Operon migration through 1.1.0, pointing at a scaffolding CLI that
+was deleted in that same migration; it never resolved and was removed in
+1.2.0. The command returned with ``init`` and ``guide``.)
 """

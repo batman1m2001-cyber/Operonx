@@ -22,7 +22,7 @@ line and ``--resume`` runs only that one. Run from this directory::
     uv sync
     uv run python main.py                          # ok=2 failed=1
     # …edit data/calls.jsonl, give call c3 a transcript…
-    uv run operonx-run main:score_calls --resume   # ok=1 skipped=2
+    uv run operonx run main:score_calls --resume   # ok=1 skipped=2
 """
 
 from __future__ import annotations
@@ -175,8 +175,8 @@ score_stream = Job(
 )
 
 # The application: the same graph behind an HTTP route and under the
-# jobs above. `operonx.toml` points here; `operonx-serve` and
-# `operonx-run` read this object.
+# jobs above. `operonx.toml` points here; `operonx serve` and
+# `operonx run` read this object.
 APP = Application(
     "ex17-jobs",
     services=[

@@ -1,0 +1,30 @@
+# {{name}}
+
+{{summary}} Built on [operonx](https://pypi.org/project/operonx/).
+
+`src/chat/` is the feature: `ops.py` holds the logic, `graph.py` wires it
+around an `LLMOp` that calls the `llm:assistant` model from
+`resources.yaml`. `app/main.py` declares the `chat` service that runs it.
+
+## Run
+
+```bash
+uv sync
+uv run pytest                 # offline: the tests answer with a local fake model
+cp .env.example .env          # then set LLM_API_KEY (and LLM_BASE_URL / LLM_MODEL if not OpenAI)
+```
+
+## Serve
+
+```bash
+uv run operonx serve --list   # what would listen, and where
+uv run operonx serve          # POST /chat on :8000 (PORT overrides)
+curl -s localhost:8000/chat -d '{"question": "What is a workflow engine?"}'
+```
+
+## Grow it
+
+A new feature is a new folder under `src/` with its own `graph.py` and
+`ops.py`, and one more `Service` (or `Job`) in `app/main.py`. A new model is
+one more `llm:` key in `resources.yaml`, its secret in `.env`. Read
+`AGENTS.md` and `.operonx/guide/README.md` first.

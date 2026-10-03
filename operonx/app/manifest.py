@@ -189,7 +189,7 @@ class JobSpec:
     The `[[serve]]` of batch work. Names the graph, where items come from
     (a ``source:`` resource key or a path relative to the manifest), where
     results go, which item field is its identity, and how the run behaves.
-    ``operonx-run <name>`` runs it; ``schedule`` is cron text for whatever
+    ``operonx run <name>`` runs it; ``schedule`` is cron text for whatever
     calls that — recorded and listed, never executed here.
 
     ::

@@ -1,0 +1,61 @@
+"""A local OpenAI-compatible model, so the tests need no key and no network.
+
+It answers every request with "Echo: <the last user message>". The session
+fixture points `llm:assistant` at it through LLM_BASE_URL before the
+resources are read.
+"""
+
+import json
+import os
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import operonx
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+class _FakeModel(BaseHTTPRequestHandler):
+    def log_message(self, *args):  # quiet
+        pass
+
+    def do_POST(self):  # noqa: N802 — http.server's naming
+        body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
+        users = [m for m in body.get("messages", []) if m.get("role") == "user"]
+        content = f"Echo: {users[-1]['content'] if users else ''}"
+        raw = json.dumps(
+            {
+                "id": "fake",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": body.get("model") or "fake",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": content},
+                    }
+                ],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+        ).encode()
+        self.send_response(200)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+
+@pytest.fixture(scope="session")
+def fake_model():
+    """The fake model's URL, with `llm:assistant` pointed at it."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeModel)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    os.environ.update({"LLM_BASE_URL": url, "LLM_API_KEY": "sk-test", "LLM_MODEL": "fake"})
+    operonx.bootstrap(resources=ROOT / "resources.yaml", env=False)
+    yield url
+    server.shutdown()

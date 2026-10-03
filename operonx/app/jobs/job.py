@@ -90,7 +90,7 @@ class Job:
             goes to the sink. Leave it unset when the graph needs no item —
             a job with no source runs such a graph once.
         schedule: Cron text. Declarative — recorded and listed, run by
-            whatever calls ``operonx-run``.
+            whatever calls ``operonx run``.
         record_dir: Where runs are recorded; ``<record_dir>/<name>/<run>``.
         description: One line, for ``--list`` and the studio.
     """
@@ -247,7 +247,7 @@ class Job:
     def main(self, argv: Optional[Sequence[str]] = None, *, doc: Optional[str] = None) -> int:
         """This job as a command line; returns the exit status.
 
-        The flags ``operonx-run`` has, minus the job name — ``--resume``,
+        The flags ``operonx run`` has, minus the job name — ``--resume``,
         ``--show``, ``--source``, ``--sink``, ``--set key=value``,
         ``--concurrency``, ``--record-dir``. *doc* (a module's
         ``__doc__``) is what ``--help`` prints.

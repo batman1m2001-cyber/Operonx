@@ -1,0 +1,26 @@
+[project]
+name = "{{dist}}"
+version = "0.1.0"
+description = "{{summary}}"
+requires-python = ">=3.10"
+dependencies = [
+    "operonx[{{extras}}]>={{version}}",
+    "python-dotenv>=1.0",  # operonx.bootstrap() reads .env with it
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.24",  # starlette's TestClient
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "."]  # the features and `app` are first-party
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

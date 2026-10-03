@@ -225,13 +225,13 @@ trace_local:
 ```
 
 ```bash run
-operonx-serve --list        # what would listen, and where
-operonx-run --list          # the jobs
-operonx-run score_calls     # run one; exits non-zero if it failed
+operonx serve --list        # what would listen, and where
+operonx run --list          # the jobs
+operonx run score_calls     # run one; exits non-zero if it failed
 ```
 
-`operonx-serve` serves every service (`--only score` for one);
-`operonx-run NAME --resume` continues a job.
+`operonx serve` serves every service (`--only score` for one);
+`operonx run NAME --resume` continues a job.
 
 Test a service in-process, without a port:
 

@@ -34,7 +34,7 @@ src  = ["src"]
 app  = "app.main:APP"
 ```
 
-`operonx-serve`, `operonx-run` and the studio find the file, then read
+`operonx serve`, `operonx run` and the studio find the file, then read
 the object.
 
 - **The graph's signature is the door's contract.** What `on_session`
@@ -86,10 +86,10 @@ schedule = "0 3 * * *"
 
 ```bash
 pip install "operonx[serve]"
-operonx-serve --list          # what would run, and where
-operonx-serve                 # every listener, each with its workers
-operonx-run --list            # every job, with its schedule
-operonx-run nightly           # what the deployment's cron calls
+operonx serve --list          # what would run, and where
+operonx serve                 # every listener, each with its workers
+operonx run --list            # every job, with its schedule
+operonx run nightly           # what the deployment's cron calls
 ```
 
 The same from Python — for a process that runs uvicorn itself, a test
@@ -135,7 +135,7 @@ ahamove   = { turn = "agents.graph:turn",          config = "agents/ahamove/prom
 
 `graph` names a **factory**: a function that takes the bound parameters
 and returns a `@graph`. A bound value that reads as `module:attr` is
-loaded, anything else is a literal. `operonx-serve` compiles one engine
+loaded, anything else is a literal. `operonx serve` compiles one engine
 per variant at boot, and `on_session` picks one per session:
 
 ```python
@@ -160,8 +160,8 @@ A project that keeps its packages under `src/` says so once, and every
 src = ["src"]        # import roots, relative to the manifest; default ["."]
 ```
 
-`Application.bootstrap()` puts each root on `sys.path`; `operonx-serve`,
-`operonx-run` and the studio all go through it.
+`Application.bootstrap()` puts each root on `sys.path`; `operonx serve`,
+`operonx run` and the studio all go through it.
 
 ## Configuration
 

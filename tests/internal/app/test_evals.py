@@ -9,7 +9,7 @@ carries the pass rate, the run fails when a case does (or when the rate is
 under a threshold), and the traces are ``origin=eval``; a broken case or
 evaluator fails its case rather than the eval; the LLM judge parses a
 structured verdict and keeps its cost; ``[[job]]`` with ``dataset`` builds
-an Eval and ``operonx-run`` gates on it; a plain job's record is unchanged.
+an Eval and ``operonx run`` gates on it; a plain job's record is unchanged.
 """
 
 from __future__ import annotations

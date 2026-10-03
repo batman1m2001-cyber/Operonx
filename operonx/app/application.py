@@ -9,8 +9,8 @@ thing production does::
     APP = Application("callbot", services=[...], jobs=[...])   # app/main.py
     app = Application.find()            # the nearest operonx.toml — or the
                                         # APP it points at with [project] app
-    app.serve(only=["call"])            # what operonx-serve does
-    app.run_sync("nightly")             # what operonx-run does
+    app.serve(only=["call"])            # what operonx serve does
+    app.run_sync("nightly")             # what operonx run does
     app.describe()                      # what --list and the studio read
 
 It is a composition root and nothing more: three lists and three

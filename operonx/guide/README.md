@@ -1,8 +1,8 @@
 # operonx — a guide for coding assistants
 
-**operonx 1.10.** Read this before writing code that uses operonx. Every
-example in these pages is a complete program, and the operonx test suite
-runs each one against this version.
+Read this before writing code that uses operonx. Every example in these
+pages is a complete program, and the operonx test suite runs each one
+against the version this guide ships with (`operonx --version`).
 
 operonx is an async graph engine. You write **ops** (Python functions), wire
 them into a **graph**, and run it with **`Operon`**. The same graph runs as
@@ -27,6 +27,18 @@ pip install "operonx[serve,openai]"   # serve: HTTP/websocket; openai: OpenAI-co
 
 Other extras: `anthropic`, `gemini`, `langfuse`, `postgres`, `mongo`,
 `mcp`, `standard` (common set), `all`.
+
+## Start a project: `operonx init`
+
+```bash run
+operonx init myapp          # the hello template; also --template http | chat | agent
+```
+
+It writes the layout of [project layout](05-project-layout.md): `operonx.toml`,
+`resources.yaml`, `.env.example`, `app/main.py` with the `Application`, one
+feature in `src/<feature>/`, its tests, and `AGENTS.md` (with `CLAUDE.md`
+pointing at it) for coding assistants. It also copies this guide into
+`myapp/.operonx/guide/`. Existing files are kept unless `--force`.
 
 ## Imports
 
@@ -68,5 +80,7 @@ from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
 It ships inside the package, so it always matches the installed version:
 
 ```bash
-python -m operonx.guide        # prints this page's path and the table of contents
+operonx guide --path           # where the installed guide is
+operonx guide --sync           # copy it into the project's .operonx/guide/ (after an upgrade)
+python -m operonx.guide        # this page's path and the table of contents
 ```

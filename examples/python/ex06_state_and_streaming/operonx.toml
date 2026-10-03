@@ -6,7 +6,7 @@ name = "ex06-state-and-streaming"
 description = "SCRATCH run-scoped state, EmitOp side channels, InterruptOp human-in-the-loop."
 
 # ── the front door ──────────────────────────────────────────────────────
-# What puts work into this project. `operonx-serve` boots it; the studio
+# What puts work into this project. `operonx serve` boots it; the studio
 # draws it as the entry node feeding the graph.
 [[serve]]
 kind    = "http"

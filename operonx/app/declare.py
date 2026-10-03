@@ -21,7 +21,7 @@ builds is checked against them at the door — and the door ops say what
 they are themselves (`@op(door="ingress")`), so a service names neither.
 
 `operonx.toml` then says only what is not code — the project's name, its
-import roots, and ``app = "app.main:APP"`` so ``operonx-serve``, the
+import roots, and ``app = "app.main:APP"`` so ``operonx serve``, the
 jobs CLI and the studio find the object. The same declarations in TOML
 keep working; :func:`Service` builds the same :class:`ServeSpec` the
 manifest parser does, so nothing downstream knows which way it came.

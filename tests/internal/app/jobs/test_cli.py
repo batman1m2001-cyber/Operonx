@@ -1,4 +1,4 @@
-"""`operonx-run`: a Job by import path, an exit status a cron can read."""
+"""`operonx run`: a Job by import path, an exit status a cron can read."""
 
 from __future__ import annotations
 

@@ -6,7 +6,7 @@ name = "ex13-graph"
 description = "Operonx @graph composition and nesting."
 
 # ── the front door ──────────────────────────────────────────────────────
-# What puts work into this project. `operonx-serve` boots it; the studio
+# What puts work into this project. `operonx serve` boots it; the studio
 # draws it as the entry node feeding the graph.
 [[serve]]
 kind    = "http"

@@ -14,7 +14,7 @@ agent, an API with one pipeline per tenant tier — used to have two bad
 options: one graph with a "which am I" input threaded through every op,
 or one `[[serve]]` per kind on separate paths. `[serve.variants]` is the
 third: the door's `graph` is a **factory**, each variant binds its
-parameters, `operonx-serve` compiles one engine per variant at boot, and
+parameters, `operonx serve` compiles one engine per variant at boot, and
 `on_session` picks with `RunRequest.variant`.
 
 ## The pieces
@@ -63,13 +63,13 @@ refused at the door — no run is minted.
 
 ```bash
 uv sync
-uv run operonx-serve --list
+uv run operonx serve --list
 #   ex18-variants
 #     0.0.0.0:8018
 #       greet          http       /greet           -> greet.graph:build  [per_request]
 #         [formal] style=greet.styles:formal sign_off=Regards
 #         [casual] style=greet.styles:casual sign_off=Cheers
-uv run operonx-serve
+uv run operonx serve
 curl -s -X POST 'localhost:8018/greet?style=formal' -d '"ada lovelace"'   # "Good day, Ada Lovelace. Regards."
 curl -s -X POST 'localhost:8018/greet?style=casual' -d '"Ada"'            # "hey ada! Cheers."
 curl -s -X POST 'localhost:8018/greet?style=shouty' -d '"Ada"'            # refused at the door
