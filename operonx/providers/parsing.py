@@ -41,6 +41,10 @@ Rules that are easy to get backwards:
   repr). Ask for a path inside it, or declare the field ``: dict``. A
   validator ``@default`` still stands in for it, as for any unrecognised
   value.
+- **A value that is not the declared type is an error**, not a guess:
+  ``"2.5"`` for ``int``, ``"maybe"`` for ``bool`` (which takes only
+  true/false/yes/no/1/0). A ``list`` field wraps a lone value. A
+  validator ``@default`` stands in here too.
 """
 
 import json
@@ -191,28 +195,68 @@ def check_output_keys(fields: List[ExtractField], reserved: Iterable[str] = ()) 
 
 
 # ---------------------------------------------------------------------------
-# Raw parsers (each strips a leading ``` fence if present).
+# Raw parsers. Each reads the first ``` fenced block if the text has one
+# anywhere, else the whole text.
 # ---------------------------------------------------------------------------
+
+#: A fenced block: an opening fence with an optional language tag on its
+#: own line, the body, and the closing fence.
+_FENCE = re.compile(r"```[^\n`]*\n(.*?)\n?[ \t]*```", re.DOTALL)
 
 
 def _strip_fence(text: str) -> str:
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1]) if len(lines) > 2 else text
-    return text
+    """The first fenced block's body, or the stripped text if there is none.
+
+    Models wrap answers in prose: "Here it is:", a fence, "Hope this
+    helps". Only a fence at the very start used to be recognised, and its
+    last line was dropped whatever it was — trailing prose kept the
+    closing fence in the payload.
+    """
+    match = _FENCE.search(text)
+    return match.group(1).strip() if match else text.strip()
 
 
 def parse_json(text: str) -> Dict[str, Any]:
-    """Parse a JSON payload, tolerating a leading ``` fence."""
-    return json.loads(_strip_fence(text))
+    """Parse a JSON payload out of a model's answer.
+
+    In order: the first fenced block, else the whole text, else the first
+    balanced object (``{...}``) in it, else the first balanced array.
+    Objects come before arrays because a field path reads an object, and
+    prose such as "see note [1]:" holds a valid array.
+
+    Raises:
+        json.JSONDecodeError: nothing in the text parses; the error is the
+            one for the whole text.
+    """
+    body = _strip_fence(text)
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as whole_error:
+        decoder = json.JSONDecoder()
+        for opener in "{[":
+            start = body.find(opener)
+            while start != -1:
+                try:
+                    value, _ = decoder.raw_decode(body, start)
+                    return value
+                except json.JSONDecodeError:
+                    start = body.find(opener, start + 1)
+        raise whole_error
+
+
+#: An ``&`` that does not start an entity or character reference.
+_BARE_AMP = re.compile(r"&(?![A-Za-z][A-Za-z0-9]*;|#[0-9]+;|#x[0-9A-Fa-f]+;)")
 
 
 def parse_xml(text: str) -> Dict[str, Any]:
-    """Parse an XML payload into a nested dict, tolerating a leading ``` fence.
+    """Parse an XML payload into a nested dict.
 
-    Supports both single-root and multi-root inputs. Multi-root wraps in a
-    ``<root>`` element and returns the flattened children.
+    Reads the first fenced block if there is one. Supports both
+    single-root and multi-root inputs: multi-root (or text around the
+    elements) is wrapped in a ``<root>`` element and returns the
+    flattened children. A bare ``&`` — "Q&A", "R&D" — is not well-formed
+    XML, and models write it all the time, so a document that fails to
+    parse is tried once more with each bare ``&`` escaped.
     """
 
     def xml_to_dict(element):
@@ -231,18 +275,25 @@ def parse_xml(text: str) -> Dict[str, Any]:
                 result[child.tag] = value
         return result
 
-    text = _strip_fence(text)
+    def parse(body: str) -> Dict[str, Any]:
+        try:
+            root = ET.fromstring(body)
+            return {root.tag: xml_to_dict(root)} if len(root) > 0 else {root.tag: root.text}
+        except ET.ParseError:
+            return xml_to_dict(ET.fromstring(f"<root>{body}</root>"))
+
+    body = _strip_fence(text)
     try:
-        root = ET.fromstring(text)
-        return {root.tag: xml_to_dict(root)} if len(root) > 0 else {root.tag: root.text}
+        return parse(body)
     except ET.ParseError:
-        wrapped = f"<root>{text}</root>"
-        root = ET.fromstring(wrapped)
-        return xml_to_dict(root)
+        escaped = _BARE_AMP.sub("&amp;", body)
+        if escaped == body:
+            raise
+        return parse(escaped)
 
 
 def parse_yaml(text: str) -> Dict[str, Any]:
-    """Parse a YAML payload, tolerating a leading ``` fence."""
+    """Parse a YAML payload, reading the first fenced block if there is one."""
     return yaml.safe_load(_strip_fence(text))
 
 
@@ -345,52 +396,99 @@ def _resolve_field(
     return value
 
 
+#: The only spellings a ``bool`` field accepts, compared case-insensitively.
+_TRUE = frozenset({"true", "yes", "1"})
+_FALSE = frozenset({"false", "no", "0"})
+
+#: Hints that name a list: a lone value under one becomes a one-item list.
+_LIST_HINTS = frozenset({"list", "array"})
+
+
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in _TRUE:
+            return True
+        if word in _FALSE:
+            return False
+    raise ValueError(f"{value!r} is not a bool (accepted: true/false/yes/no/1/0)")
+
+
+def _to_int(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{value!r} is a bool, not an int")
+    if isinstance(value, float):
+        if value.is_integer():
+            return int(value)
+        raise ValueError(f"{value!r} is not a whole number")
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        pass
+    # "2.0" is a whole number written as a float; "2.5" is not an int.
+    try:
+        number = float(value)
+    except (ValueError, TypeError):
+        raise ValueError(f"{value!r} is not an int") from None
+    if number.is_integer():
+        return int(number)
+    raise ValueError(f"{value!r} is not a whole number")
+
+
+def _to_float(value: Any) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{value!r} is a bool, not a number")
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        raise ValueError(f"{value!r} is not a number") from None
+
+
 def convert_type(value: Any, type_hint: str) -> Any:
-    """Coerce ``value`` to ``type_hint`` (str / int / float / bool / …).
+    """Coerce ``value`` to ``type_hint`` (str / int / float / bool / list / …).
 
-    A **list** is coerced element-wise. Repeated XML siblings now build a
-    list, and applying a scalar hint to the list object made the output
-    type depend on the data: one ``<item>`` gave ``"a"``, two gave the
-    string ``"['a', 'b']"``. With ``: int`` the whole list passed through
-    untouched, so a field declared ``int`` held a list. Both silent.
+    Raises ``ValueError`` when a value cannot be the declared type:
+    ``"high"`` or ``"2.5"`` for ``int``, ``"nah"`` for ``bool``. These used
+    to pass through unchanged (``bool`` made anything truthy True), so a
+    field declared ``int`` held a string with ``error: None`` and nothing
+    retried. :func:`parse_and_extract` reports the raise as a field error.
 
-    Unknown type hints and unconvertible values pass through unchanged.
-    Booleans handle string forms (``"true"`` / ``"1"`` / ``"yes"``).
-    ``None`` stays ``None`` except for ``bool``/``string`` which normalise.
+    - ``bool`` accepts only true/false/yes/no/1/0, in any case, and the
+      numbers 0 and 1.
+    - ``int`` accepts an integer, an integer string, or a float with no
+      fractional part — never a bool, never a truncated ``2.5``.
+    - ``list`` wraps a lone value: one ``<tag>`` and two repeated ones
+      both give a list, rather than a string and a list.
+    - A **list** under a scalar hint is coerced element-wise: repeated XML
+      siblings build a list, and applying the hint to the list object made
+      the output type depend on the data.
+    - ``None`` stays ``None``. Unknown hints pass the value through.
     """
     type_hint = type_hint.lower().strip()
+
+    if type_hint in _LIST_HINTS:
+        if value is None or isinstance(value, list):
+            return value
+        return [value]
 
     if isinstance(value, list):
         return [convert_type(v, type_hint) for v in value]
 
-    if type_hint in ("bool", "boolean"):
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            v = value.lower().strip()
-            if v in ("true", "1", "yes"):
-                return True
-            if v in ("false", "0", "no", ""):
-                return False
-        return bool(value)
-
     if value is None:
         return None
 
+    if type_hint in ("bool", "boolean"):
+        return _to_bool(value)
     if type_hint == "int":
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return value
+        return _to_int(value)
     if type_hint in ("float", "number"):
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return value
+        return _to_float(value)
     if type_hint in ("str", "string"):
-        return str(value).strip() if value is not None else ""
+        return str(value).strip()
     return value
 
 
@@ -510,6 +608,8 @@ def parse_and_extract(
     absent: List[str] = []
     # output_key -> the structure found where a single value was declared.
     misshapen: Dict[str, Any] = {}
+    # output_key -> (the value, why it is not the declared type).
+    uncoerced: Dict[str, tuple] = {}
     for field in fields:
         raw = _resolve_field(parsed_data, field.chain_path, parser, field.type_hint)
         if raw is MISSING:
@@ -527,7 +627,13 @@ def parse_and_extract(
             misshapen[field.output_key] = raw
             result[field.output_key] = raw
             continue
-        result[field.output_key] = convert_type(raw, field.type_hint)
+        try:
+            result[field.output_key] = convert_type(raw, field.type_hint)
+        except ValueError as e:
+            # Kept raw, like a misshapen value, so a validator's
+            # ``@default`` can stand in for it; an error below otherwise.
+            uncoerced[field.output_key] = (raw, str(e))
+            result[field.output_key] = raw
 
     if validators:
         err = apply_validators(result, validators, absent=absent)
@@ -559,6 +665,17 @@ def parse_and_extract(
                 f"or declare it ': dict'."
             ),
         }
+
+    wrong_type = [key for key, (raw, _) in uncoerced.items() if result.get(key) is raw]
+    if wrong_type:
+        for key in wrong_type:
+            result[key] = None
+        hints = {f.output_key: f for f in fields}
+        described = "; ".join(
+            f"'{key}' is declared {hints[key].type_hint}, but {uncoerced[key][1]}"
+            for key in wrong_type
+        )
+        return {**result, "error": f"Wrong type in {parser} output: {described}."}
 
     if missing:
         # Well-formed output with the wrong keys is a semantic failure, and
