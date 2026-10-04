@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **K7: provider contract for `operonx-agents`.**
+  - `LLMOp`'s `tool_calls` output is one shape whichever provider answered:
+    `{"id", "name", "args"}`, with `args` a dict, or the model's text when it
+    is not a JSON object. `normalize_tool_call` / `openai_tool_call` in
+    `operonx.providers.llms.base` convert; the backends send it back in their
+    own wire form. Before, it was OpenAI's wire object, and the compaction
+    summary read each call's `name` as `None`.
+  - `timeout:` on an `llm:` resource bounds every network wait of a request
+    (connect, send, each read). Before, a silent gateway held a call for the
+    shared client's 120 s read timeout, and the key was ignored.
+  - `structured_output: native | tool | prompted` on an `llm:` resource
+    (default `prompted`) declares how it gives schema-shaped answers.
+    `native` is refused on an `anthropic` resource.
+  - Streamed answers carry `extras["logprobs"]` (they were always `None`);
+    Azure sends `logprobs`/`top_logprobs` (they were filtered out).
+
 - **`@op(retry=Retry(...), timeout=Timeout(run=, idle=))`** (R1, F13). A
   failed op runs again after a growing, jittered pause when the error is
   worth another try (`TRANSIENT`: a timeout, a connection error, HTTP 429 or
@@ -197,6 +213,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The Anthropic backend no longer drops `response_format`.** A
+  `json_schema` request came back unconstrained with no error; it now
+  raises `ValueError` naming the alternative (`structured_output: tool`).
+
 - **`-> dict` under `from __future__ import annotations`.** PEP 563 hands
   the return annotation over as the string `"dict"`, which was read as "not
   a mapping": an op returning a dict it did not build as a literal
@@ -276,6 +296,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by name and source.
 
 ### Changed
+
+- **`LLMOp.tool_calls` is `{"id", "name", "args"}`, not OpenAI's wire
+  object.** Code reading `call["function"]["name"]` or parsing
+  `call["function"]["arguments"]` reads `call["name"]` and `call["args"]`.
+  Messages that echo the calls back need no change.
 
 - **A step that failed inside a retried attempt is not the run's failure**
   (R2): `WorkflowTrace.status`, `summarize` and the run stores skip the

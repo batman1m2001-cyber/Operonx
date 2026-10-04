@@ -79,7 +79,9 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             sa_info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
         )
 
-        self.http_client = create_http_client(verify=False, read_timeout=30.0, max_connections=50)
+        self.http_client = create_http_client(
+            verify=False, read_timeout=30.0, max_connections=50, timeout=config.timeout
+        )
 
         # OpenAI client
         base_url = (

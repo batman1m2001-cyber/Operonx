@@ -223,6 +223,13 @@ asyncio.run(main())
   check values that arrive at run time in an op after the LLM.
 - `cost_usd` is `None` unless the resource sets `cost_per_input_token`
   and `cost_per_output_token`.
+- `tool_calls` is a list of `{"id", "name", "args"}` whichever provider
+  answered; `args` is a dict, or the model's text when it is not a JSON
+  object. Put them back in an assistant message as they are.
+- An `llm:` resource takes `timeout:` (seconds for each network wait of a
+  request; without it a silent gateway holds a call for 120 s) and
+  `structured_output: native | tool | prompted` (how the layer above asks
+  it for schema-shaped answers; default `prompted`).
 
 ## Agents — a model that calls tools
 

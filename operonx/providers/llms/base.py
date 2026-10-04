@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import mimetypes
 import sys
 from abc import ABC, abstractmethod
@@ -145,6 +146,69 @@ OPENAI_MESSAGE_KEYS: Dict[str, frozenset] = {
 }
 
 
+def normalize_tool_call(call: Any) -> Dict[str, Any]:
+    """A tool call in the one shape ``LLMOp`` returns: ``{"id", "name", "args"}``.
+
+    Reads OpenAI's wire form (``function.name``, ``function.arguments``
+    as JSON text), Anthropic's ``tool_use`` block (``input``) and this
+    shape itself. ``args`` is a dict, or — when the model's arguments do
+    not parse as a JSON object — the text it wrote, unchanged. Never a
+    silent ``{}``: a caller must be able to tell the model its arguments
+    were not JSON, which an empty dict would hide. Empty text is ``{}``,
+    which is what a tool with no parameters is called with.
+    """
+    if not isinstance(call, dict):
+        call = call.model_dump() if hasattr(call, "model_dump") else dict(call)
+    fn = call.get("function") if isinstance(call.get("function"), dict) else {}
+    if "args" in call:
+        args = call["args"]
+    elif "input" in call:
+        args = call["input"]
+    else:
+        args = fn.get("arguments", call.get("arguments"))
+    if args is None:
+        args = {}
+    elif isinstance(args, str):
+        text = args
+        try:
+            parsed = json.loads(text) if text.strip() else {}
+        except json.JSONDecodeError:
+            parsed = None
+        args = parsed if isinstance(parsed, dict) else text
+    return {
+        "id": call.get("id") or call.get("tool_call_id") or "",
+        "name": call.get("name") or fn.get("name") or "",
+        "args": args,
+    }
+
+
+def openai_tool_call(call: Any) -> Dict[str, Any]:
+    """A tool call in OpenAI's wire form, from any shape
+    :func:`normalize_tool_call` reads: what an assistant message carries
+    when it is sent to a provider again. Raw-text ``args`` go back as the
+    model wrote them."""
+    norm = normalize_tool_call(call)
+    args = norm["args"]
+    return {
+        "id": norm["id"],
+        "type": "function",
+        "function": {
+            "name": norm["name"],
+            "arguments": args if isinstance(args, str) else json.dumps(args, ensure_ascii=False),
+        },
+    }
+
+
+def _is_wire_tool_call(call: Any) -> bool:
+    """Already OpenAI's form, so it is sent as given."""
+    return (
+        isinstance(call, dict)
+        and "args" not in call
+        and isinstance(call.get("function"), dict)
+        and isinstance(call["function"].get("arguments"), str)
+    )
+
+
 def openai_message(message: Any) -> Any:
     """Keep only the keys Chat Completions defines for the message's role.
 
@@ -157,15 +221,23 @@ def openai_message(message: Any) -> Any:
     OpenAI-shaped request passes each message through here. This
     subsumes :func:`strip_cache_control`; content-part markers are left
     alone, as there. A role the schema does not define passes through
-    untouched: it is provider-specific, and so are its keys. The caller's
-    message is not mutated.
+    untouched: it is provider-specific, and so are its keys.
+
+    An assistant message's ``tool_calls`` go out in the wire form
+    (:func:`openai_tool_call`), whatever shape they are in: ``LLMOp``
+    returns ``{"id", "name", "args"}``, and a turn sent back carries it.
+    The caller's message is not mutated.
     """
     if not isinstance(message, dict):
         return message
-    allowed = OPENAI_MESSAGE_KEYS.get(message.get("role"))
-    if allowed is None or message.keys() <= allowed:
-        return message
-    return {k: v for k, v in message.items() if k in allowed}
+    role = message.get("role")
+    allowed = OPENAI_MESSAGE_KEYS.get(role)
+    if allowed is not None and not message.keys() <= allowed:
+        message = {k: v for k, v in message.items() if k in allowed}
+    calls = message.get("tool_calls") if role == "assistant" else None
+    if isinstance(calls, list) and not all(_is_wire_tool_call(c) for c in calls):
+        message = {**message, "tool_calls": [openai_tool_call(c) for c in calls]}
+    return message
 
 
 def cache_metrics(completion: ChatCompletion) -> Dict[str, int]:

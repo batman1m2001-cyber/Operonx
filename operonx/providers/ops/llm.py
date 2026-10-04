@@ -21,6 +21,7 @@ from operonx.core.policy import mark_retried
 from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
+from operonx.providers.llms.base import normalize_tool_call
 from operonx.providers.ops._utils import resolve_hub
 from operonx.providers.parsing import (
     ExtractField,
@@ -199,7 +200,10 @@ class LLMOp(BaseOp):
         role (str): Message role (usually ``"assistant"``).
         finish_reason (str): Stop reason (``"stop"``, ``"tool_calls"``, ...).
         model_used (str): Actual model that served the request.
-        tool_calls (list): Tool-call objects (empty list when absent).
+        tool_calls (list): One ``{"id", "name", "args"}`` dict per call (empty list when
+            absent), whichever provider answered. ``args`` is a dict, or the model's text when
+            it is not a JSON object. Sent back in an assistant message, the backends turn it
+            into their own wire form.
         usage (dict): Flat token-cost metrics.
         extras (dict): Bag of uncommon fields (``thinking_content``, ``refusal``, ``logprobs``,
             ``citations`` — a provider's native citations as spans of ``content``;
@@ -1175,13 +1179,13 @@ class LLMOp(BaseOp):
             "full_content": acc["response"],
             "finish_reason": acc["finish_reason"],
             "model_used": resource,
-            "tool_calls": acc["tool_calls"],
+            "tool_calls": [normalize_tool_call(tc) for tc in acc["tool_calls"]],
             "usage": usage,
             "cost_usd": self._cost_usd(resource, usage),
             "extras": self._build_extras(
                 thinking_content=acc["thinking_content"] or None,
                 refusal=acc["refusal"],
-                logprobs=None,
+                logprobs={"content": acc["logprobs"]} if acc["logprobs"] else None,
                 citations=acc["citations"],
             ),
         }
@@ -1260,9 +1264,7 @@ class LLMOp(BaseOp):
 
         usage_raw = completion.usage.model_dump() if completion.usage else {}
 
-        tool_calls = []
-        if message.tool_calls:
-            tool_calls = [tc.model_dump() for tc in message.tool_calls]
+        tool_calls = [normalize_tool_call(tc) for tc in message.tool_calls or ()]
 
         refusal = getattr(message, "refusal", None)
 
@@ -1468,6 +1470,14 @@ class LLMOp(BaseOp):
         if hasattr(choice.delta, "refusal") and choice.delta.refusal:
             acc["refusal"] = (acc["refusal"] or "") + choice.delta.refusal
 
+        # Each chunk carries the logprobs of its own tokens; the answer's
+        # are all of them, in order — the shape a non-streamed answer has.
+        tokens = getattr(getattr(choice, "logprobs", None), "content", None)
+        if tokens:
+            acc["logprobs"].extend(
+                t.model_dump() if hasattr(t, "model_dump") else t for t in tokens
+            )
+
         # Anthropic sends the whole list once, on the last chunk.
         if getattr(choice.delta, "citations", None):
             acc["citations"] = choice.delta.citations
@@ -1541,6 +1551,8 @@ class LLMOp(BaseOp):
             "_tool_call_index": {},
             "refusal": None,
             "citations": None,
+            # Token logprobs, when the request asked for them.
+            "logprobs": [],
         }
 
     # =========================================================================
