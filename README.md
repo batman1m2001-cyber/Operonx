@@ -427,7 +427,7 @@ interleaved with main, 3 rounds, runner p50 at 5 concurrent — 1 call: main 1.3
 a5 1.27–1.30 ms; 3 calls: main 2.03–2.07 / a5 2.02–2.09 ms. No change; the 3-call row is over
 2 ms on this machine today for main as well (A4 recorded the same drift).
 
-**Core (operonx #—, feat/a5):** K8 SSE framing and `Service(resume=)`; `Session.stream`;
+**Core (operonx #91, `2c5feb9`; studio #17, `d080bc8`):** K8 SSE framing and `Service(resume=)`; `Session.stream`;
 a door's resume graph in `graph_refs`; the `operonx.agents` deprecation and MIGRATION.md;
 `init --template agent`; guide page 09. **Also here:** `Model` re-resolves its backend when
 the ResourceHub changes (a module-level agent tested under two hubs used the first one's
