@@ -1,6 +1,7 @@
 # Agents v2: `operonx-agents`
 
-**Status:** plan. Phase A0, the evidence spike, is done (2026-10-04). D1 is waiting on your decision.
+**Status:** plan. Phase A0, the evidence spike, is done (2026-10-04). A1 is done and its gate passes
+(§4, "A1 gate"). D1 is waiting on your decision.
 
 **Design source:** `docs/roadmap/track3_agents.md` §4 and `docs/roadmap/ROADMAP.md` §4. This doc
 does not repeat the design. It records what A0 measured, what that changes, and the phases.
@@ -203,6 +204,72 @@ with track3 §5 Phase 1's tests. The agent track adds one test: a timed-out op e
 `on_timeout` outputs and its downstream runs.
 
 **K5.** Cancel while a reducer write is pending: no write reaches a checkpointer.
+
+#### A1 gate (2026-10-04)
+
+R2 (#83, `e571106`) shipped K0, K1, K2 and the live-trace consumers; R1 shipped K3/K4/K6. A1 audited
+every test listed above against them, added the missing ones, and fixed one core bug the spike
+re-run hit.
+
+**Each bullet and its test** (`new` = added in A1). The new K3 and K5 tests pass on main as they
+stand: they pin behaviour R1 and R2 already ship. K5's control proves its recorder sees the merge
+when nothing cancels.
+
+| item | test | |
+|---|---|---|
+| K0 spy | `tests/internal/agents/test_dispatch.py::TestDispatchCallsTheFunction::test_dispatch_builds_no_op` | R2 |
+| K0 < 0.2 ms/call | `…::test_dispatch_costs_under_a_fifth_of_a_millisecond` | new; 1.73 ms/call on `e571106^` |
+| K1 nesting, order, inputs/outputs | `tests/internal/core/test_child_executions.py::test_child_nesting` | R2 |
+| K1 error recorded and re-raised | `…::test_child_error_is_recorded_and_reraised` | R2 |
+| K1 cancel → `cancelled` | `…::test_cancelled_child_is_marked_cancelled` | R2 |
+| K1 untraced is a no-op | `…::test_child_outside_a_run_records_nothing` | R2 |
+| K1 `.` / `[` rejected | `…::test_child_name_rejected` | R2 |
+| K1 generator → yield record | `…::test_child_in_generator_hangs_under_yield_record` (+ `…_transient_generator_hangs_under_its_summary`) | R2 |
+| K1 `.parallel()` ctx | `…::test_child_in_parallel_fan_out` | R2 |
+| K1 `exclude=` | `…::test_child_exclude_honoured` | R2 |
+| K1/K2 Local, ClickHouse round-trip | `tests/internal/telemetry/test_trace_format.py::test_children_and_attrs_round_trip[files,sqlite,mongo,postgres,clickhouse]` | R2; ClickHouse and Postgres need a throwaway server (`_stores.py`), both run here |
+| K1/K2 Langfuse round-trip | `…::test_children_and_attrs_round_trip_langfuse` | R2 |
+| K1 studio tree API nested | operonx-studio `tests/studio/test_runs.py::test_a_real_runs_child_executions_come_back_nested` | new (studio #15); `KeyError: 'attrs'` before studio #14 |
+| K3 timed-out op degrades, downstream runs | `tests/internal/core/ops/test_policy_retry_timeout.py::test_timed_out_op_degrades_to_its_fallback_and_downstream_runs[record,raise]` | new |
+| K5 no write after cancel | `tests/internal/checkpoint/test_cancel_writes_nothing.py` (async op, `bound="cpu"` thread, between two yields, retry backoff, and a control) | new |
+
+- **K3 shape.** track3 wrote `@op(timeout=, on_timeout=outputs)`. R1 shipped the degrade path as an
+  error edge instead (`slow.on_error(fallback)`; the handler's `error` reads
+  `"TimeoutError: … Timeout(run=0.2) …"`), so the K3 test uses that. `llm_step(on_timeout=)` in A2
+  is an `operonx-agents` factory argument and needs nothing more from core.
+- **K5 needed no fix.** An op writes its outputs in its own task right after its body returns, so a
+  cancel that lands first leaves nothing to write, and an abandoned `bound="cpu"` thread's return
+  value is dropped with the cancelled await.
+
+**Root cause fixed: `-> dict` under `from __future__ import annotations`.** PEP 563 hands
+`inspect.signature` the string `"dict"`. `_returns_scalar` (`core/ops/transform/func_op.py`) read it
+as "not a mapping", so an op whose body returns a dict it did not build as a literal
+(`return scripted_reply(...)`) got one scalar output, `value`. Graph validation refused every reader
+of its real keys and, unvalidated, the op failed at run time with
+`KeyError: '(flow.s, a) not found in schema'`. It predates R2 and broke the spike's back-edge agent
+on main. The return annotation is now evaluated in the function's globals; a name that does not
+resolve counts as unannotated. Test: `tests/internal/core/ops/transform/test_func_op_string_annotations.py`.
+
+**The spike re-run** (spike copy with one import changed, `operonx.core.child` → `operonx.child`;
+same machine and settings as §2a, 200 runs per cell after 20 warm-ups):
+
+| loop | calls/turn | CPU ms/turn | latency ms/turn at 5 concurrent, p50 / p95 | event-loop lag p99 at 5 |
+|---|---|---|---|---|
+| floor (no engine) | 1 | 0.22 | 1.08 / 1.17 | 1.3 ms |
+| back-edge, main | 1 | 2.15 | 10.39 / 12.01 | 4.1 ms |
+| **in-op + child executions, main's `execute`** | 1 | **0.20** | **1.01 / 1.06** | **1.4 ms** |
+| floor (no engine) | 3 | 0.32 | 1.57 / 1.66 | 2.0 ms |
+| back-edge, main | 3 | 2.95 | 14.20 / 15.89 | 19.7 ms |
+| **in-op + child executions, main's `execute`** | 3 | **0.29** | **1.41 / 1.46** | **1.8 ms** |
+
+- **Gate: in-op + children < 2 ms/turn at 5 concurrent.** Passes: 1.01 ms (1 call), 1.41 ms (3
+  calls). Through main's `execute` it now matches the A0 "direct tool call" row (1.39 ms at 3
+  calls), because K0 made `execute` the direct call.
+- **Gate: tree 15 rows / 1 root.** Passes. The 4-turn × 2-tool run records 15 executions (1 agent,
+  4 turn, 4 llm, 6 tool) and `build_tree` draws them as 15 rows under 1 root. The back-edge run
+  on the same build: 90 records, 126 rows, 8 roots.
+- Suites on the branch: operonx `3627 passed, 50 skipped` (ClickHouse and Postgres throwaways set);
+  callbot `refactor/operonx-studio` `303 passed, 2 skipped`; operonx-studio `650 passed, 4 skipped`.
 
 ### A2: Tools, Model, `llm_step`
 
