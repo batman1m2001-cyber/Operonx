@@ -24,8 +24,9 @@ from typing import (
 from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
 from operonx.core.ops import _cache
-from operonx.core.ops._events import Interrupt
+from operonx.core.ops._events import Failure, Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
+from operonx.core.policy import _Deadline, fail_fast, op_policy
 from operonx.core.states.cell import DEFAULT_CONTEXT
 
 #: Output name for an op whose function returns a bare value rather than
@@ -41,6 +42,7 @@ from operonx.core.workflow_trace import (
     STATUS_CANCELLED,
     STATUS_ERROR,
     STATUS_OK,
+    STATUS_RETRIED,
     OpExecution,
     UpstreamRef,
     _current_op_ctx,
@@ -64,6 +66,9 @@ from operonx.core.ops._shortcuts import (  # noqa: F401, E402
 from operonx.core.ops._utils import _set_wildcard_outputs  # noqa: F401, E402
 
 _OBS_KEY_WILDCARD = "*"
+
+# "Not set yet" for a local that may legitimately hold None.
+_MISSING = object()
 _OBS_VALID_CHANNELS = frozenset({"trace", "checkpoint", _OBS_KEY_WILDCARD})
 
 
@@ -313,6 +318,13 @@ class BaseOp(ABC):
         # known before it runs (a function returning dict literals), else
         # None. Graph validation checks every Ref to the op against it.
         "_static_outputs",
+        # OpPolicy(retry, timeout), or None for an op that sets neither —
+        # the common case, which then runs exactly the path it always did.
+        "_policy",
+        # True when the op has error edges (`op.on_error(handler)`): its
+        # failure is then yielded as a `Failure` for the scheduler to route.
+        # Stamped by the parent graph's build.
+        "_error_routes",
     ]
 
     # The kind's show keys, used when an instance declares none. A
@@ -359,6 +371,8 @@ class BaseOp(ABC):
         show_keys: Union[str, Sequence[str], None] = None,
         name_hint: Optional[str] = None,
         door: Optional[str] = None,
+        retry=None,
+        timeout=None,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -372,6 +386,10 @@ class BaseOp(ABC):
         self._cache_scope = None  # (full_name, scope, store id), on the first cached call
         self._static_outputs = None  # unknown unless a subclass knows better
         self.delay = delay
+        # retry=Retry(...) / timeout=Timeout(...); checked against the op's
+        # core in _set_core, once its bound is known.
+        self._policy = op_policy(retry, timeout)
+        self._error_routes = False
         self.transient = transient
         self._transient_vars = None  # stamped post-compile by StateSchema
         # Show keys: `show_keys="text"` or `show_keys=["a", "b"]` on the instance,
@@ -660,6 +678,56 @@ class BaseOp(ABC):
             return self
         return NotImplemented
 
+    def on_error(self, handler: "BaseOp") -> "BaseOp":
+        """Error edge: *handler* runs when this op fails, and only then.
+
+        ::
+
+            @op
+            def apologise(error: str, op: str, inputs: dict) -> dict:
+                return {"reply": "Sorry, try again later."}
+
+            look = lookup(order=order)
+            sorry = apologise()
+            look.on_error(sorry)          # sorry runs once if look failed
+            [look, sorry] >> reply        # reply merges the two by itself
+
+        The handler runs once per failed invocation of this op — after its
+        last attempt when it has ``retry=`` — and waits for its other
+        predecessors like any op. Its parameters named ``error`` (the error
+        as ``"TypeName: message"``), ``op`` (this op's full name) and
+        ``inputs`` (what this op was called with) receive the failure,
+        unless they are wired to something else. The failure is still
+        recorded in ``"$errors"``; ``Operon(g, errors="raise")`` does not
+        end the run for it.
+
+        Returns *handler*, so ``look.on_error(sorry) >> reply`` reads on.
+        """
+        if self.type == "dummy" or getattr(handler, "type", None) == "dummy":
+            raise TypeError(
+                "on_error() connects two ops; START, END and PARENT are sentinels. "
+                "Call it on the op that may fail, with the op that handles it."
+            )
+        if not isinstance(handler, BaseOp):
+            raise TypeError(f"on_error() takes an op, got {type(handler).__name__}")
+        if self.type == "branch":
+            raise TypeError(
+                f"on_error() on branch '{self.name}': a branch only routes; put the "
+                f"error edge on the op whose failure you mean."
+            )
+        add_edge = getattr(self.parent, "add_edge", None)
+        if add_edge is None:
+            raise RuntimeError(
+                f"on_error() on '{self.name}' wires an edge: call it inside the graph body."
+            )
+        if handler.parent is not self.parent:
+            raise ValueError(
+                f"on_error(): '{handler.name}' is not in the same graph as '{self.name}'. "
+                f"Build the handler in the graph body where '{self.name}' is."
+            )
+        add_edge(self.name, handler.name, "error")
+        return handler
+
     # =========================================================================
     # 3. EXECUTE — run the op, read inputs, store outputs
     # =========================================================================
@@ -802,37 +870,30 @@ class BaseOp(ABC):
     def normalize_trace_io(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> tuple:
         """Produce a trace-time view of this op's I/O.
 
-        Called by ``_extract_trace_io`` before media extraction. Subclasses
-        override when their I/O carries media in a non-``Media`` shape (e.g.
-        LLMOp wraps OpenAI chat-format ``image_url`` blocks into ``Media``
-        instances). The real state value is untouched — this returns copies
-        used only for trace capture.
+        Called on the trace's own copies — already filtered by
+        ``@op(exclude=/include=)`` — each time an ``OpExecution`` is built
+        (:meth:`_trace_inputs`, :meth:`_trace_outputs`). Subclasses
+        override to add what the trace should show and the raw I/O does
+        not: LLMOp adds the rendered request (``messages``) and wraps
+        OpenAI chat-format ``image_url`` blocks as ``Media``. The real state
+        value is untouched — return new dicts, never edit these in place.
+
+        Built from the filtered copy, so a value hidden from the trace
+        cannot come back through something derived from it.
 
         Default is identity: most ops never override.
         """
         return inputs, outputs
 
-    def _extract_trace_io(self, side_dict: Dict[str, Any], *, root: str) -> tuple:
-        """Compute trace-time view of one I/O side: normalize + extract media.
+    def _trace_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """The trace's copy of an execution's inputs: filtered, then normalized."""
+        normed, _ = self.normalize_trace_io(self._filter_for_trace(inputs), {})
+        return normed
 
-        Returns ``(stripped, media_refs)`` where ``stripped`` is a copy of
-        ``side_dict`` with each ``Media`` instance replaced by a
-        ``"<media:N>"`` placeholder, and ``media_refs`` is the parallel
-        ``list[MediaRef]`` carrying blobs + field paths. Empty list when no
-        Media was found.
-
-        ``root`` must be ``"inputs"`` or ``"outputs"`` — used as the field
-        path prefix so the exporter knows which side to substitute into.
-        """
-        from operonx.core.media import extract_media
-
-        if not side_dict:
-            return side_dict, []
-        if root == "inputs":
-            normed, _ = self.normalize_trace_io(side_dict, {})
-        else:
-            _, normed = self.normalize_trace_io({}, side_dict)
-        return extract_media(normed, root)
+    def _trace_outputs(self, outputs: Dict[str, Any]) -> Dict[str, Any]:
+        """The trace's copy of an execution's outputs: filtered, then normalized."""
+        _, normed = self.normalize_trace_io({}, self._filter_for_trace(outputs))
+        return normed
 
     def _scalar_output_name(self) -> str:
         """Output name to store a non-dict result under.
@@ -984,6 +1045,87 @@ class BaseOp(ABC):
         if self.bound is None and fn is not None:
             is_async = inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn)
             self.bound = "io" if is_async else "sync"
+        if self._policy is not None and self._policy.timeout is not None:
+            self._check_timeout(self._policy.timeout)
+
+    def _check_timeout(self, timeout) -> None:
+        """Refuse a ``Timeout`` this op cannot honour, naming the fix."""
+        if self.bound == "sync":
+            raise ValueError(
+                f"Op '{self.name}': a timeout cannot stop a plain `def` op, which runs on "
+                f'the event loop itself. Make it `async def`, or add bound="cpu" to run it '
+                f"in a thread the timeout can abandon."
+            )
+        if timeout.idle is not None and not self.is_gen:
+            raise ValueError(
+                f"Op '{self.name}': Timeout(idle=...) is the time between a generator's "
+                f"yields, and this op is not a generator. Use Timeout(run=...)."
+            )
+
+    async def _exec_with_policy(
+        self,
+        inputs: Dict[str, Any],
+        attempt_box: List[int],
+        state: "MemoryState",
+        wf_trace: Any,
+        upstreams: List[UpstreamRef],
+        ctx: tuple,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """``_exec_core`` under this op's ``retry=`` and ``timeout=``.
+
+        One attempt is one pass over ``_exec_core``. A failed attempt is
+        retried when the policy says so and nothing has been yielded yet —
+        a generator's items have already been handed on, and a second
+        attempt would hand them on again. ``attempt_box[0]`` is the attempt
+        running, for the trace node ``run`` writes; each attempt that is
+        retried gets a node of its own here (``_record_retry``).
+
+        Every deadline is entered and left around one ``__anext__``, never
+        across a ``yield``: a deadline still armed while the consumer holds
+        the item would cancel whatever the consumer's task awaits next.
+        """
+        retry, timeout = self._policy
+        attempts = retry.max_attempts if retry is not None else 1
+        run_s = timeout.run if timeout is not None else None
+        idle_s = timeout.idle if timeout is not None else None
+        loop = asyncio.get_running_loop()
+        attempt = 1
+        while True:
+            attempt_box[0] = attempt
+            started = perf_counter()
+            run_at = loop.time() + run_s if run_s is not None else None
+            source = self._exec_core(inputs)
+            yielded = False
+            try:
+                while True:
+                    if timeout is None:
+                        result = await source.__anext__()
+                    else:
+                        at, which = run_at, "run"
+                        if idle_s is not None:
+                            idle_at = loop.time() + idle_s
+                            if at is None or idle_at < at:
+                                at, which = idle_at, "idle"
+                        which = f"Timeout({which}={getattr(timeout, which):g})"
+                        async with _Deadline(
+                            at, f"{self.full_name} ran past {which} and was cancelled"
+                        ):
+                            result = await source.__anext__()
+                    yielded = True
+                    yield result
+            except StopAsyncIteration:
+                return
+            except Exception as error:
+                if yielded or attempt >= attempts or not retry.retries(error):
+                    raise
+                delay = retry.delay(attempt)
+                self._record_retry(
+                    state, wf_trace, upstreams, ctx, inputs, attempt, error, started, delay
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+            finally:
+                await source.aclose()
 
     async def _exec_core(self, inputs: Dict[str, Any]) -> AsyncGenerator[Dict[str, Any], None]:
         """Unified dispatch — yields one result for normal ops, N for generators.
@@ -1116,6 +1258,59 @@ class BaseOp(ABC):
             )
         return out
 
+    def _record_retry(
+        self,
+        state: "MemoryState",
+        wf_trace: Any,
+        upstreams: List[UpstreamRef],
+        ctx: tuple,
+        inputs: Dict[str, Any],
+        attempt: int,
+        error: BaseException,
+        started: float,
+        delay: float,
+    ) -> None:
+        """Log and trace one failed attempt that ``retry=`` is about to repeat.
+
+        Its trace node is the attempt's own: ``attempt=n``, an ``op_id`` of
+        ``"<op_id>@<n>"`` — so the attempt that finally answers keeps the
+        ``op_id`` the next op's upstream points at — and ``status="retried"``
+        with the error kept: an attempt that was run again is not a failure
+        of the run. The last attempt of an op that never succeeds is the
+        ordinary ``error`` node.
+        """
+        retry = self._policy.retry
+        LOGGER.warning(
+            format_event(
+                "op_retry",
+                request_id=state.request_id or "unknown",
+                full_name=self.full_name,
+                attempt=str(attempt),
+                attempts=str(retry.max_attempts),
+                delay=f"{delay:.2f}",
+                error=f"{type(error).__name__}: {error}",
+            )
+        )
+        if wf_trace is None:
+            return
+        wf_trace.nodes.append(
+            OpExecution(
+                op_id=f"{make_op_id(self.full_name, ctx)}@{attempt}",
+                op_name=self.name,
+                op_full_name=self.full_name,
+                ctx=ctx,
+                start_time=started,
+                end_time=perf_counter(),
+                inputs=self._trace_inputs(inputs),
+                outputs={},
+                upstreams=upstreams,
+                status=STATUS_RETRIED,
+                error="".join(traceback.format_exception(type(error), error, error.__traceback__)),
+                op_type=str(self.type),
+                attempt=attempt,
+            )
+        )
+
     async def run(
         self,
         state: "MemoryState",
@@ -1159,7 +1354,9 @@ class BaseOp(ABC):
         _outputs = {}
         error_msg = None
 
-        op_ctx_token = None
+        # The value `_current_op_ctx` had before this op set it; _MISSING
+        # until it does. See the restore in `finally`.
+        prev_op_ctx = _MISSING
         idx = 0
         op_started = False
         op_cancelled = False
@@ -1177,6 +1374,10 @@ class BaseOp(ABC):
         # of one per yield; these carry the count to that span.
         _transient_yields = 0
         _transient_last_ctx = None
+        # A generator's trace inputs, built at its first yield (see there).
+        _trace_in = None
+        # The attempt running, 1 unless `retry=` started another one.
+        _attempt = [1]
 
         try:
             if self.delay > 0:
@@ -1198,7 +1399,8 @@ class BaseOp(ABC):
             # V3 tracing: expose this op invocation's ctx via ContextVar
             # so overlap_classifier + any other reader can access the
             # scheduler's ctx tuple without threading it through inputs.
-            op_ctx_token = _current_op_ctx.set(ctx_for_end)
+            prev_op_ctx = _current_op_ctx.get()
+            _current_op_ctx.set(ctx_for_end)
 
             # Cache check
             if self.cache is not None:
@@ -1212,7 +1414,13 @@ class BaseOp(ABC):
 
             base_ctx = context_id if context_id is not None else DEFAULT_CONTEXT
             _yield_start = perf_counter()
-            async for result in self._exec_core(_inputs):
+            if self._policy is None:
+                _source = self._exec_core(_inputs)
+            else:
+                _source = self._exec_with_policy(
+                    _inputs, _attempt, state, _wf_trace, _v3_upstreams, ctx_for_end
+                )
+            async for result in _source:
                 ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
                 # Interrupt is a scheduler control event, not a result dict.
                 # Forward it untouched — _pump puts it on the queue as-is.
@@ -1255,6 +1463,8 @@ class BaseOp(ABC):
                     _transient_yields += 1
                     _transient_last_ctx = ctx
                 elif _wf_trace is not None and self.is_gen:
+                    if _trace_in is None:
+                        _trace_in = self._trace_inputs(_inputs)
                     _wf_trace.nodes.append(
                         OpExecution(
                             op_id=make_op_id(self.full_name, ctx),
@@ -1267,15 +1477,19 @@ class BaseOp(ABC):
                             # with @op(exclude=/include=) applied. Every
                             # trace consumer reads these, so filtering at
                             # the source is what makes the filter mean
-                            # anything at all.
-                            inputs=self._filter_for_trace(_inputs),
-                            outputs=self._filter_for_trace(result)
+                            # anything at all. The inputs are one per
+                            # invocation: every yield shares them, and an
+                            # LLM stream renders its request once, not
+                            # once per frame.
+                            inputs=_trace_in,
+                            outputs=self._trace_outputs(result)
                             if isinstance(result, dict)
                             else {"_": result},
                             upstreams=_v3_upstreams,
                             status=STATUS_OK,
                             op_type=str(self.type),
                             is_yield=True,
+                            attempt=_attempt[0],
                         )
                     )
                 yield ctx, result
@@ -1314,7 +1528,22 @@ class BaseOp(ABC):
                     error=error_msg.rstrip(),
                 ),
             )
-            state.record_op_error(self.full_name, error_msg)
+            state.record_op_error(self.full_name, sys.exc_info()[1], ctx_for_end)
+            # Recorded first, so "$errors" and the trace show it either way.
+            # Then an error edge handles it — `errors="raise"` leaves a
+            # handled failure alone — or a fail-fast run ends here.
+            if self._error_routes:
+                failed = sys.exc_info()[1]
+                yield (
+                    ctx_for_end,
+                    Failure(
+                        self.name, ctx_for_end, f"{type(failed).__name__}: {failed}", dict(_inputs)
+                    ),
+                )
+            else:
+                run_policy = state._run_policy
+                if run_policy is not None and run_policy.fail_fast:
+                    raise fail_fast(state, self.full_name, sys.exc_info()[1])
 
         finally:
             if self.is_gen or not _tracing:
@@ -1386,7 +1615,7 @@ class BaseOp(ABC):
                                 ctx=ctx_for_end,
                                 start_time=perf_start,
                                 end_time=perf_start + duration_ms / 1000.0,
-                                inputs=self._filter_for_trace(_inputs),
+                                inputs=_trace_in or self._trace_inputs(_inputs),
                                 outputs={
                                     "_transient_stream": True,
                                     "items": _transient_yields,
@@ -1396,6 +1625,7 @@ class BaseOp(ABC):
                                 status=v3_status,
                                 error=error_msg,
                                 op_type=str(self.type),
+                                attempt=_attempt[0],
                             )
                         )
                     # A transient op in a stream emits no per-item node on
@@ -1416,18 +1646,28 @@ class BaseOp(ABC):
                                 ctx=ctx_for_end,
                                 start_time=perf_start,
                                 end_time=perf_start + duration_ms / 1000.0,
-                                inputs=self._filter_for_trace(_inputs),
-                                outputs=self._filter_for_trace(_outputs)
+                                inputs=_trace_in or self._trace_inputs(_inputs),
+                                outputs=self._trace_outputs(_outputs)
                                 if isinstance(_outputs, dict)
                                 else {},
                                 upstreams=_v3_upstreams,
                                 status=v3_status,
                                 error=error_msg,
                                 op_type=str(self.type),
+                                attempt=_attempt[0],
                             )
                         )
-            if op_ctx_token is not None:
-                _current_op_ctx.reset(op_ctx_token)
+            # Restored by value, not with `ContextVar.reset(token)`: this
+            # `finally` does not always run in the context that set it. A
+            # generator abandoned by a cancelled pump is closed later by the
+            # event loop's async-generator finalizer, in a task of its own,
+            # and `reset` refuses a token from another context — the
+            # ValueError ended this block there and reached the loop's
+            # exception handler on every such cancellation. Setting the
+            # previous value reads the same in the right context and is
+            # harmless in the finalizer's throwaway one.
+            if prev_op_ctx is not _MISSING:
+                _current_op_ctx.set(prev_op_ctx)
 
             if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(

@@ -8,6 +8,7 @@ Package layout::
     validation.py    Graph validation rules and error types
 """
 
+import asyncio
 import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from typing import Any, AsyncGenerator, Dict, List, NamedTuple, Optional, Tuple
 from operonx.core.configs.edge_config import EdgeConfig, EdgeType
 from operonx.core.configs.op_config import OpType
 from operonx.core.loggings import LOGGER
+from operonx.core.ops._events import ERROR_EDGE_VARS, Failure
 from operonx.core.ops.base import END, PARENT, START, BaseOp
 from operonx.core.ops.graph.task_scheduler import (
     LoopConfig,
@@ -32,10 +34,16 @@ from operonx.core.ops.graph.validation import (  # noqa: E402, F401
     ValidationResult,
     validate_graph,
 )
+from operonx.core.policy import _Deadline, fail_fast
 from operonx.core.states import MemoryState, Ref
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.utils.common import Param
 from operonx.core.utils.context import _current_graph
+
+# The two arms of an op with error edges (`op.on_error(handler)`), as seen
+# by `_arm_signatures`. Tuples, so they never equal a branch arm (an op name).
+_OK_ARM = ("ok",)
+_ERROR_ARM = ("error",)
 
 
 class Link(NamedTuple):
@@ -84,7 +92,9 @@ class GraphOp(BaseOp):
         "_loop_config",
         "_shared_vars",
         "_reducer_vars",
+        "_race_vars",
         "_adj",
+        "_err_adj",
         "_initial_ready",
         "_stream_initial_ready",
         "_scheduler",
@@ -114,6 +124,8 @@ class GraphOp(BaseOp):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        if self._policy is not None:
+            self._check_graph_policy(*self._policy)
         self._token = None
         self._is_building = True
         self._ops: Dict[str, BaseOp] = {}
@@ -126,7 +138,13 @@ class GraphOp(BaseOp):
         self._loop_config = None
         self._shared_vars = {}  # {var_name: initial_value} — set by PARENT.shared() or PARENT.declare()
         self._reducer_vars = {}  # {var_name: reducer_fn} — set by PARENT.declare(reducers=...)
+        # Declared vars whose writers may race: PARENT.declare(..., allow_race=True).
+        self._race_vars: set = set()
         self._adj = {}  # {op_name: [Link(dst, soft), ...]}
+        # {op_name: ((handler, vars), ...)} — error edges, `op.on_error(h)`:
+        # followed only when op fails; `vars` are the handler's unwired
+        # `error` / `op` / `inputs` parameters the failure is written into.
+        self._err_adj: Dict[str, tuple] = {}
         self._initial_ready = {}  # {op_name: ready_count}
         self._stream_initial_ready = {}  # {gen_name: {op_name: ready_count_for_stream_ctx}}
         self._scheduler = None  # set by build()
@@ -147,6 +165,25 @@ class GraphOp(BaseOp):
         # exits — and only if u took that edge in the final iteration.
         self._exit_edges: list = []
         self._rewritten_from = None  # audit dict populated by rewrite_cycles_to_loops
+
+    def _check_graph_policy(self, retry, timeout) -> None:
+        """A graph used as an op takes ``timeout=Timeout(run=...)``, and nothing else.
+
+        ``retry=`` would never fire: an op inside the graph that raises is
+        recorded by that op and the graph ends without raising. ``idle`` is
+        the time between a generator's yields, and a graph is not one.
+        """
+        if retry is not None:
+            raise TypeError(
+                f"Graph '{self.name}': retry= applies to an op, not to a graph — the ops "
+                f"inside record their own failures, so the graph has nothing to retry. "
+                f"Put retry=Retry(...) on the op inside that can fail."
+            )
+        if timeout.idle is not None:
+            raise ValueError(
+                f"Graph '{self.name}': Timeout(idle=...) is the time between a generator's "
+                f"yields; a graph takes Timeout(run=...)."
+            )
 
     def __enter__(self):
         """Enter context manager mode — ops created inside are auto-registered."""
@@ -324,11 +361,102 @@ class GraphOp(BaseOp):
         # Auto-detect bound from children, with user override.
         # If user explicitly set bound on the graph, respect it.
         # Otherwise: all children sync → graph is sync (inline); any io/cpu → task.
+        # A policy — the graph's own timeout, a child's retry — needs a task:
+        # inline, nothing could interrupt it or wait between attempts.
         if self.bound is None:
-            if all(getattr(op, "bound", None) == "sync" for op in self._ops.values()):
+            if self._policy is None and all(
+                getattr(op, "bound", None) == "sync" and getattr(op, "_policy", None) is None
+                for op in self._ops.values()
+            ):
                 self.bound = "sync"
             else:
                 self.bound = "io"
+
+    def _arm_signatures(self):
+        """``sig(op, merge) -> {decider: {arm, ...}}``, or None without deciders.
+
+        A *decider* is an op whose successors do not all run: a branch, which
+        takes one of its edges, and an op with error edges
+        (``op.on_error(handler)``), which takes its normal edges when it
+        succeeds and its error edges when it fails. ``sig(p, m)`` says
+        through which arm of each decider ``p`` is reached; two ops whose
+        arms of one decider are disjoint never both run. Used by
+        :meth:`_auto_soften_edges` and the concurrent-writer check.
+
+        A branch's arms are its successors. An op with error edges has two:
+        everything after its normal edges, and everything after its error
+        edges.
+        """
+        is_branch: Dict[str, bool] = {}
+        for name, op in self._ops.items():
+            if op.type == "branch":
+                is_branch[name] = True
+            elif any(
+                self._edges[(name, dst)].type == "error"
+                for dst in self.nexts.get(name, [])
+                if (name, dst) in self._edges
+            ):
+                is_branch[name] = False
+        if not is_branch:
+            return None
+
+        def arm(decider: str, succ: str):
+            edge = self._edges.get((decider, succ))
+            if edge is not None and edge.type == "error":
+                return _ERROR_ARM
+            return succ if is_branch[decider] else _OK_ARM
+
+        # successor_reachable[decider][successor] = set of ops reachable from successor
+        successor_reachable: Dict[str, Dict[str, set]] = {}
+        for b in is_branch:
+            successor_reachable[b] = {}
+            for succ in self.nexts.get(b, []):
+                seen = {succ}
+                stack = [succ]
+                while stack:
+                    n = stack.pop()
+                    for nxt in self.nexts.get(n, []):
+                        if nxt not in seen:
+                            seen.add(nxt)
+                            stack.append(nxt)
+                successor_reachable[b][succ] = seen
+
+        def branch_sig(target_op: str, merge_name: Optional[str] = None) -> Dict[str, set]:
+            """{decider: {arm of the decider that can reach target_op}}.
+
+            The forward walk answers "which arm of B did this predecessor
+            come through?", which needs the predecessor to be *downstream*
+            of B. One predecessor is not: the branch itself, when it feeds
+            the merge directly.
+
+                B ──[cond]──> gate → ... → P ──┐
+                  └─[else]─────────────────────┴──> M
+
+            `P` reports arm `gate`. `B` reports nothing — reaching `B` from
+            its own successors would need a cycle — so the pair shares no
+            branch, is never found exclusive, and `M` deadlocks waiting for
+            an arm that did not run. That is the shape of every "gate that
+            can skip a step", so it is worth naming rather than leaving to
+            a manual `~`.
+
+            `B`'s edge into `M` does have an arm: it is `M`. Zero hops, but
+            an arm all the same, and recording it makes the two signatures
+            disjoint exactly when they should be.
+            """
+            sig: Dict[str, set] = {}
+            for b, succ_reach in successor_reachable.items():
+                arms = {arm(b, succ) for succ, reach in succ_reach.items() if target_op in reach}
+                if arms:
+                    sig[b] = arms
+            if (
+                merge_name is not None
+                and target_op in successor_reachable
+                and merge_name in self.nexts.get(target_op, [])
+            ):
+                sig.setdefault(target_op, set()).add(arm(target_op, merge_name))
+            return sig
+
+        return branch_sig
 
     def _auto_soften_edges(self):
         """Auto-soften edges from mutually-exclusive branch predecessors.
@@ -370,58 +498,12 @@ class GraphOp(BaseOp):
         if not self._auto_soft:
             return
 
-        # For each branch op B, precompute the set of ops each of B's direct
-        # successors can reach (forward via all edges). This gives us, for any
-        # op p, the set of B's first-hop children through which p is reachable.
-        branch_names = [n for n, op in self._ops.items() if op.type == "branch"]
-        if not branch_names:
+        # For each decider B — a branch, or an op with error edges, whose
+        # handler and normal successors never both run — the arms of B
+        # through which each op is reachable. See `_arm_signatures`.
+        branch_sig = self._arm_signatures()
+        if branch_sig is None:
             return
-
-        # successor_reachable[branch][successor] = set of ops reachable from successor
-        successor_reachable: Dict[str, Dict[str, set]] = {}
-        for b in branch_names:
-            successor_reachable[b] = {}
-            for succ in self.nexts.get(b, []):
-                seen = {succ}
-                stack = [succ]
-                while stack:
-                    n = stack.pop()
-                    for nxt in self.nexts.get(n, []):
-                        if nxt not in seen:
-                            seen.add(nxt)
-                            stack.append(nxt)
-                successor_reachable[b][succ] = seen
-
-        def branch_sig(target_op: str, merge_name: str) -> Dict[str, set]:
-            """{branch_name: {first_hop_child_of_branch that can reach target_op}}.
-
-            The forward walk answers "which arm of B did this predecessor
-            come through?", which needs the predecessor to be *downstream*
-            of B. One predecessor is not: the branch itself, when it feeds
-            the merge directly.
-
-                B ──[cond]──> gate → ... → P ──┐
-                  └─[else]─────────────────────┴──> M
-
-            `P` reports arm `gate`. `B` reports nothing — reaching `B` from
-            its own successors would need a cycle — so the pair shares no
-            branch, is never found exclusive, and `M` deadlocks waiting for
-            an arm that did not run. That is the shape of every "gate that
-            can skip a step", so it is worth naming rather than leaving to
-            a manual `~`.
-
-            `B`'s edge into `M` does have an arm: it is `M`. Zero hops, but
-            an arm all the same, and recording it makes the two signatures
-            disjoint exactly when they should be.
-            """
-            sig: Dict[str, set] = {}
-            for b, succ_reach in successor_reachable.items():
-                first_hops = {succ for succ, reach in succ_reach.items() if target_op in reach}
-                if first_hops:
-                    sig[b] = first_hops
-            if target_op in successor_reachable and merge_name in self.nexts.get(target_op, []):
-                sig.setdefault(target_op, set()).add(merge_name)
-            return sig
 
         audit_log = []
 
@@ -435,7 +517,8 @@ class GraphOp(BaseOp):
 
             for p in preds:
                 edge = self._edges.get((p, merge_name))
-                if edge is None or edge.soft or edge.pinned_hard:
+                # An error edge is its handler's trigger, never a merge arm.
+                if edge is None or edge.soft or edge.pinned_hard or edge.type == "error":
                     continue
                 witness = None
                 for q in preds:
@@ -481,8 +564,21 @@ class GraphOp(BaseOp):
         adj = {name: [] for name in self._ops}
         ready = {name: 0 for name in self._ops}
         has_soft: Dict[str, bool] = {}
+        err_adj: Dict[str, list] = {}
 
         for (src, dst), edge in self._edges.items():
+            if edge.type == "error":
+                # Followed only on a failure, so not in `adj`, which every
+                # frame walks; a hard predecessor of the handler all the same.
+                handler = self._ops[dst]
+                fed = tuple(
+                    var
+                    for var in ERROR_EDGE_VARS
+                    if var in handler.inputs and handler.inputs[var].value is None
+                )
+                err_adj.setdefault(src, []).append((dst, fed))
+                ready[dst] += 1
+                continue
             adj[src].append(Link(dst=dst, soft=edge.soft))
             if edge.soft:
                 if not has_soft.get(dst, False):  # first soft pred: count once
@@ -493,6 +589,9 @@ class GraphOp(BaseOp):
 
         self._adj = adj
         self._initial_ready = ready
+        self._err_adj = {src: tuple(routes) for src, routes in err_adj.items()}
+        for name, child in self._ops.items():
+            child._error_routes = name in err_adj
 
         # ── Phase 2: stream-context ready counts per generator ────────────────────
         # When generator G emits frame [0], downstream ops run in a new stream ctx.
@@ -513,6 +612,8 @@ class GraphOp(BaseOp):
                 gen_reachable.add(node)
                 for lnk in self._adj.get(node, []):
                     stack.append(lnk.dst)
+                for dst, _fed in err_adj.get(node, ()):
+                    stack.append(dst)
 
             ri = {}
             has_predecrement = False
@@ -802,7 +903,20 @@ class GraphOp(BaseOp):
             if self._is_building:
                 self.build()
 
-            _outputs, stream_ctxs, _interrupted = await self._scheduler.run(state, context_id)
+            if self._policy is None:
+                _outputs, stream_ctxs, _interrupted = await self._scheduler.run(state, context_id)
+            else:
+                # The deadline cancels the nested scheduler, whose `finally`
+                # cancels the op tasks it started; the TimeoutError is then
+                # this graph's failure, recorded below like any other.
+                run_s = self._policy.timeout.run
+                async with _Deadline(
+                    asyncio.get_running_loop().time() + run_s,
+                    f"{self.full_name} ran past Timeout(run={run_s:g}) and was cancelled",
+                ):
+                    _outputs, stream_ctxs, _interrupted = await self._scheduler.run(
+                        state, context_id
+                    )
 
             _has_generators = any(op.is_gen for op in self._ops.values())
             if _interrupted:
@@ -831,7 +945,12 @@ class GraphOp(BaseOp):
                         # A synthetic loop is not an op its author wrote;
                         # the graph around it reports the failure.
                         error_msg = self._subgraph_error(failed)
-                        state.record_op_error(self.full_name, error_msg)
+                        state.record_op_error(self.full_name, error_msg, context_id)
+                        if self._error_routes:
+                            yield (
+                                context_id,
+                                Failure(self.name, context_id, error_msg, dict(_inputs)),
+                            )
                 else:
                     self.store_result(state, _outputs, context_id)
                     yield context_id, _outputs
@@ -858,7 +977,19 @@ class GraphOp(BaseOp):
             )
             # A child's failure is caught in the child's own `BaseOp.run`;
             # this is the subgraph failing around its children. Same record.
-            state.record_op_error(self.full_name, error_msg)
+            state.record_op_error(self.full_name, sys.exc_info()[1], context_id)
+            if self._error_routes:
+                failed = sys.exc_info()[1]
+                yield (
+                    context_id,
+                    Failure(
+                        self.name, context_id, f"{type(failed).__name__}: {failed}", dict(_inputs)
+                    ),
+                )
+            else:
+                run_policy = state._run_policy
+                if run_policy is not None and run_policy.fail_fast:
+                    raise fail_fast(state, self.full_name, sys.exc_info()[1])
 
         finally:
             end_time = datetime.now(timezone.utc)
@@ -923,8 +1054,11 @@ class GraphOp(BaseOp):
         base.update(
             {
                 "ops": {name: op.serialize() for name, op in self._ops.items()},
+                # An error edge says so; no other edge changes, and neither
+                # does any fingerprint hashed from a graph without one.
                 "edges": [
                     {"from": src, "to": dst, "soft": edge.soft}
+                    | ({"kind": "error"} if edge.type == "error" else {})
                     for (src, dst), edge in self._edges.items()
                 ],
                 "entries": list(self.entries),
@@ -993,6 +1127,8 @@ class GraphOp(BaseOp):
             ancestor_names=ancestor_names,
             descendant_names=descendant_names,
             sibling_names=sibling_names,
+            graph=self,
+            arm_sig=self._arm_signatures(),
         )
 
     def show(self, indent=0):

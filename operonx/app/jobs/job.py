@@ -71,7 +71,9 @@ class Job:
         max_inflight: Items buffered ahead of the graph (stream).
         on_error: ``"skip"``, ``"stop"``, ``"retry:N"`` or ``"record"`` (a
             failed item is recorded and sunk but does not fail the run). A
-            timed-out item counts as failed for the policy.
+            timed-out item counts as failed for the policy. ``retry:N``
+            waits between attempts: 0.5 s, 1 s, 2 s … (jittered, at most
+            30 s), the default ``Retry`` backoff.
         item_timeout: Seconds one item's run may take. Past it the run is
             cancelled and the item recorded ``timeout``. A batch with no
             deadline is the post-mortem everyone has read.
@@ -177,6 +179,11 @@ class Job:
                 params = {p: None for p in inspect.signature(g).parameters}
             except (TypeError, ValueError):
                 params = {}
+            if getattr(g, "_operonx_graph", False):
+                # The run is named after the graph, explicitly: built inside
+                # `Operon(...)` it took a name from the code around this
+                # call, and every job run was called `params`.
+                g = g(name=g.__name__, **params)
             self._engine = Operon(g, params=params or None, trace=self.trace)
         else:
             raise TypeError(

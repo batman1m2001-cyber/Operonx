@@ -453,11 +453,9 @@ class Branch:
             )
 
         # Name resolution: explicit > the variable it is assigned to > a
-        # per-graph counter, ``route_1``. The variable is read from the
-        # bytecode only: inline (``source >> if_(...).else_(...)``) there is
-        # none, and guessing from nearby source lines named branches after a
-        # kwarg above them (``role="agent",``).
-        lhs = auto_name(source_fallback=False)
+        # per-graph counter, ``route_1``. Inline
+        # (``source >> if_(...).else_(...)``) there is no variable.
+        lhs = auto_name()
         # A predicate built inline as an argument runs BEFORE the branch, so
         # on `inner = if_(is_small(...), a).else_(b)` it is the predicate that
         # auto_name hands `inner` to. The reader's `inner` means the branch;

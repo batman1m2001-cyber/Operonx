@@ -527,3 +527,40 @@ def test_the_stdio_bridge_keeps_its_stream_clean(project):
         "words": 2,
     }
     assert "scoring c1" in proc.stderr and "scoring" not in proc.stdout
+
+
+def test_a_session_whose_only_failure_is_a_record_is_an_error():
+    """A structured LLM step that returned `error` leaves its node `ok`;
+    the run's record (`trace.errors`, C12) still makes the session fail,
+    and names the cause."""
+    from operonx.app.play import _status
+    from operonx.core.workflow_trace import OpExecution, WorkflowTrace
+
+    node = OpExecution(
+        op_id="g.ex#main",
+        op_name="ex",
+        op_full_name="g.ex",
+        ctx=("main",),
+        start_time=1.0,
+        end_time=1.1,
+        inputs={},
+        outputs={"error": "Parse error"},
+    )
+    trace = WorkflowTrace(
+        trace_id="t",
+        workflow_name="g",
+        started_at=1.0,
+        ended_at=1.1,
+        nodes=[node],
+        errors={
+            "g.ex": {
+                "type": "ParserError",
+                "count": 1,
+                "first_ctx": "main",
+                "message": "ParserError: Parse error (json): x",
+            }
+        },
+    )
+    assert _status(trace) == ("error", "ex: ParserError: Parse error (json): x")
+    trace.errors = {}
+    assert _status(trace) == ("ok", None)

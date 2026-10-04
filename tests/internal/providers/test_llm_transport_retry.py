@@ -322,3 +322,67 @@ class TestPrepareParamsStripping:
         params = self._prep(temperature=0.0, top_p=0.1, thinking=None, seed=42)
         assert "thinking" not in params
         assert params["seed"] == 42
+
+
+# ---------------------------------------------------------------------------
+# With an op-level retry=Retry(...) around it
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+class TestComposesWithOpRetry:
+    """The transport retry and ``@op(retry=...)`` never both retry one error.
+
+    Both retry a connection failure. Stacked, a resource with
+    ``max_retries=2`` under ``Retry(max_attempts=4)`` made 3 x 4 = 12 calls
+    for one error that had already had three chances.
+    """
+
+    @staticmethod
+    async def _run(max_retries, calls):
+        from operonx import END, START, Operon, Retry, graph, op
+
+        async def down(**kw):
+            calls.append(1)
+            raise openai.APIConnectionError(request=httpx.Request("POST", "http://localhost"))
+
+        llm = _llm(_config(max_retries=max_retries))
+
+        @op(retry=Retry(max_attempts=4, initial=0.001, jitter=False))
+        async def ask(q: str) -> dict:
+            return {"a": await _Op()._call_with_retry(down, llm=llm)}
+
+        @graph
+        def g(q):
+            a = ask(q=q)
+            START >> a >> END
+
+        return await Operon(g, params={"q": None}).run({"q": "hi"})
+
+    @pytest.mark.asyncio
+    async def test_transport_retry_not_doubled(self):
+        calls = []
+        out = await self._run(2, calls)
+        assert len(calls) == 3  # 1 + the resource's 2 retries; the op adds none
+        assert "APIConnectionError" in str(out["$errors"])
+
+    @pytest.mark.asyncio
+    async def test_op_retries_when_the_resource_does_not(self):
+        calls = []
+        await self._run(0, calls)
+        assert len(calls) == 4  # max_retries=0: the op's Retry is the only one
+
+    @pytest.mark.asyncio
+    async def test_exhausted_error_is_marked(self):
+        from operonx import Retry
+
+        async def fn(**kw):
+            raise _status_error(503)
+
+        with pytest.raises(openai.APIStatusError) as caught:
+            await _Op()._call_with_retry(fn, llm=_llm(_config(max_retries=1)))
+        assert not Retry().retries(caught.value)
+
+        with pytest.raises(openai.APIStatusError) as caught:
+            await _Op()._call_with_retry(fn, llm=_llm(_config(max_retries=0)))
+        assert Retry().retries(caught.value)  # nothing retried it yet

@@ -4,7 +4,7 @@ import difflib
 from collections import defaultdict
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Set
 
 from operonx.core.loggings import LOGGER
 from operonx.core.states.ref import Ref
@@ -137,6 +137,8 @@ def validate_graph(
     ancestor_names: set = None,
     descendant_names: set = None,
     sibling_names: set = None,
+    graph: "BaseOp" = None,
+    arm_sig: Optional[Callable[[str], Dict[str, set]]] = None,
 ) -> ValidationResult:
     """Run all validations on a graph and return result.
 
@@ -154,6 +156,9 @@ def validate_graph(
             siblings that stayed at the outer level (BUG 2 / E3 multi-exit-
             via-branch): the branch's ``__branch_target__`` is re-routed at
             the outer level through the loop's outgoing edges.
+        graph: the graph itself, for the checks that read its declared
+            cells (concurrent writers). ``arm_sig`` is its
+            ``_arm_signatures()``: which ops never both run.
     """
     ancestor_names = ancestor_names or set()
     descendant_names = descendant_names or set()
@@ -164,6 +169,9 @@ def validate_graph(
     result.issues.extend(_validate_reachability(ops, nexts, prevs, entries, exits))
     result.issues.extend(_validate_refs(ops, name, ancestor_names, descendant_names, sibling_names))
     result.issues.extend(_validate_output_keys(ops))
+    if graph is not None:
+        result.issues.extend(_validate_concurrent_writers(graph, ops, nexts, arm_sig))
+        result.issues.extend(_validate_ordered_reads(graph, ops, prevs))
 
     for issue in result.warnings:
         LOGGER.warning("Graph '%s': %s", name, issue.message)
@@ -262,13 +270,32 @@ def _validate_reachability(
     issues = []
 
     for op_name, child in ops.items():
-        if (
+        unwired = (
             not prevs[op_name]
             and not nexts[op_name]
             and not child.start
             and not child.end
             and op_name != BaseOp.INNER_PROCESS
-        ):
+        )
+        if unwired and op_name in entries:
+            # A graph with no `START >>` takes every op without a predecessor
+            # as an entry, so an op with no edges at all does run — at once,
+            # beside every other entry, with nothing waiting for it. Saying
+            # it would never run was false, and hid exactly that race.
+            issues.append(
+                ValidationIssue(
+                    level=ValidationLevel.WARNING,
+                    category="Unwired op",
+                    message=(
+                        f"Op '{op_name}' has no edges: it runs as an entry of the graph, "
+                        f"at the same time as every other entry, and nothing waits for "
+                        f"it. Wire it: START >> {op_name} >> ..."
+                    ),
+                    op_name=op_name,
+                    suggestions=[f"START >> {op_name} >> next_op"],
+                )
+            )
+        elif unwired:
             issues.append(
                 ValidationIssue(
                     level=ValidationLevel.WARNING,
@@ -445,3 +472,164 @@ def _callable_name(op: "BaseOp") -> str:
     """A function op's function name, else the op's class name."""
     fn = getattr(op, "code_fn", None)
     return getattr(fn, "__name__", None) or type(op).__name__
+
+
+def _validate_concurrent_writers(
+    graph: "BaseOp",
+    ops: Dict[str, "BaseOp"],
+    nexts: dict,
+    arm_sig: Optional[Callable[[str], Dict[str, set]]],
+) -> List[ValidationIssue]:
+    """Two ops that may run at once both write a declared cell with no reducer.
+
+    The cell keeps whichever value lands last, and which lands last is a
+    matter of timing: probe P2 of the roadmap read ``slow`` in one run and
+    ``fast`` in the next, with no error. Two writers are fine when one runs
+    after the other (a path between them, along any edge), when they never
+    both run (two arms of one branch, an op and its error handler), when
+    the cell has a reducer, or when ``PARENT.declare(..., allow_race=True)``
+    says last-write-wins is what the author wants.
+
+    A writer is a child of the graph whose outputs push into the cell; a
+    hidden loop writes what the ops in its body write.
+    """
+    shared = getattr(graph, "_shared_vars", None) or {}
+    reducers = getattr(graph, "_reducer_vars", None) or {}
+    racy_ok = getattr(graph, "_race_vars", None) or set()
+    checked = {v for v in shared if v not in reducers and v not in racy_ok}
+    if not checked:
+        return []
+
+    # var -> {child name: label shown in the message}
+    writers: Dict[str, Dict[str, str]] = defaultdict(dict)
+    for name, child in ops.items():
+        for var, label in _writes_into(graph, child, checked):
+            writers[var].setdefault(name, label)
+
+    reach_cache: Dict[str, Set[str]] = {}
+
+    def reach(name: str) -> Set[str]:
+        if name not in reach_cache:
+            reach_cache[name] = reachable([name], nexts)
+        return reach_cache[name]
+
+    def exclusive(p: str, q: str) -> bool:
+        if arm_sig is None:
+            return False
+        sp, sq = arm_sig(p), arm_sig(q)
+        return any(b in sq and sp[b].isdisjoint(sq[b]) for b in sp)
+
+    issues = []
+    for var in sorted(writers):
+        units = sorted(writers[var])
+        for i, p in enumerate(units):
+            for q in units[i + 1 :]:
+                if q in reach(p) or p in reach(q) or exclusive(p, q):
+                    continue
+                lp, lq = writers[var][p], writers[var][q]
+                issues.append(
+                    ValidationIssue(
+                        level=ValidationLevel.ERROR,
+                        category="Concurrent writers",
+                        message=(
+                            f"cell '{var}' of graph '{graph.name}' has concurrent writers "
+                            f"{lp} and {lq}: nothing orders them, so whichever finishes "
+                            f"last wins. Order them ({p} >> {q}), give the cell a reducer "
+                            f"(PARENT.declare({var}=..., reducers={{'{var}': fn}})), or "
+                            f"declare that last-write-wins is intended "
+                            f"(PARENT.declare({var}=..., allow_race=True))."
+                        ),
+                        op_name=p,
+                        target_name=q,
+                    )
+                )
+    return issues
+
+
+def _writes_into(graph: "BaseOp", child: "BaseOp", vars_: Set[str]):
+    """``(var, label)`` for each cell in *vars_* of *graph* that *child* pushes to.
+
+    A hidden loop's body ops keep their pushes to the graph they were
+    written in, so the loop writes what they write.
+    """
+    for out, param in (child.outputs or {}).items():
+        ref = getattr(param, "value", None)
+        if isinstance(ref, Ref) and ref.raw_source is graph and ref.var in vars_:
+            yield ref.var, f"'{child.name}'"
+    if getattr(child, "_synthetic", False):
+        for body_op in child._ops.values():
+            for var, label in _writes_into(graph, body_op, vars_):
+                yield var, f"{label} (in a loop)"
+
+
+def _validate_ordered_reads(
+    graph: "BaseOp", ops: Dict[str, "BaseOp"], prevs: dict
+) -> List[ValidationIssue]:
+    """An op reads another op's output, and nothing makes the producer run first.
+
+    ``s = slow(y=f["y"])`` reads ``f`` but orders nothing: without a path
+    ``f >> ... >> s``, both may start together and ``s`` gets ``f``'s output
+    or not depending on timing — a missing argument, or ``None`` into a
+    parameter default. Reads of ``PARENT[...]`` (graph inputs and declared
+    cells) and ``SCRATCH[...]`` order nothing by design and are not checked;
+    a read of another op is, along every edge kind (hard, soft, error).
+
+    A hidden loop's body ops count as the loop op, which is what the graph's
+    edges connect.
+    """
+    owner: Dict[int, str] = {}
+    for name, child in ops.items():
+        owner[id(child)] = name
+        if getattr(child, "_synthetic", False):
+            stack = list(child._ops.values())
+            while stack:
+                body = stack.pop()
+                owner[id(body)] = name
+                if getattr(body, "_synthetic", False):
+                    stack.extend(body._ops.values())
+
+    ancestors_cache: Dict[str, Set[str]] = {}
+
+    def ancestors(name: str) -> Set[str]:
+        if name not in ancestors_cache:
+            ancestors_cache[name] = reachable([name], prevs)
+        return ancestors_cache[name]
+
+    def check(reader: str, producer_op, var: str, how: str):
+        producer = owner.get(id(producer_op))
+        if producer is None or producer == reader or producer in ancestors(reader):
+            return None
+        return ValidationIssue(
+            level=ValidationLevel.ERROR,
+            category="Unordered read",
+            message=(
+                f"op '{reader}' {how} '{producer}'['{var}'] in graph '{graph.name}', but "
+                f"nothing makes '{producer}' run first: both may start together, and "
+                f"'{reader}' gets the value or not depending on timing. A read orders "
+                f"nothing; draw the edge ({producer} >> {reader}, or "
+                f"START >> {producer} >> {reader}). To read whatever value is there "
+                f"at the time, share it through a declared cell: "
+                f"PARENT.declare({var}=None), {producer}['{var}'] >> PARENT['{var}'], "
+                f"and read PARENT['{var}']."
+            ),
+            op_name=reader,
+            target_name=producer,
+        )
+
+    issues = []
+    for name, child in ops.items():
+        for param in (child.inputs or {}).values():
+            if isinstance(param.value, Ref):
+                for ref in param.value.get_all_refs():
+                    issue = check(name, ref.raw_source, ref.var, "reads")
+                    if issue is not None:
+                        issues.append(issue)
+        # The push form, producer["out"] >> consumer["in"], wires the same read.
+        for out, param in (child.outputs or {}).items():
+            ref = getattr(param, "value", None)
+            consumer = owner.get(id(ref.raw_source)) if isinstance(ref, Ref) else None
+            if consumer is not None:
+                issue = check(consumer, child, out, "is fed")
+                if issue is not None:
+                    issues.append(issue)
+    return issues

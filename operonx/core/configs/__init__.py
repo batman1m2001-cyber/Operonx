@@ -2,7 +2,7 @@
 
 - ``OpType``     — enum of op categories (func, branch, graph, llm, ...)
 - ``EdgeConfig`` — config for edges between ops
-- ``EdgeType``   — edge kinds (normal, lookback, condition)
+- ``EdgeType``   — edge kinds (normal, lookback, condition, error)
 """
 
 from .edge_config import EdgeConfig, EdgeType

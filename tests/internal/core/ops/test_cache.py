@@ -442,7 +442,7 @@ class TestCacheKey:
         out = await Operon(g).run(inputs={"t": Opaque()})
         assert "ok" not in out
         (err,) = out["$errors"].values()
-        assert "cache" in err and "Opaque" in err
+        assert "cache" in err["message"] and "Opaque" in err["message"]
 
     async def test_store_is_bounded(self, monkeypatch):
         """The least recently used entry goes once a store is full."""

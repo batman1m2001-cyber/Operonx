@@ -6,74 +6,11 @@ from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.ops.transform.func_op import FuncOp, op
 from operonx.core.utils.auto_name import (
     _name_from_bytecode,
-    _parse_assignment,
     _skip_code_objects,
     auto_name,
     register_skip,
     unique_name,
 )
-
-
-class TestParseAssignment:
-    """Unit tests for _parse_assignment() pure function."""
-
-    def test_simple_assignment(self):
-        assert _parse_assignment("x = foo()") == "x"
-
-    def test_underscore_name(self):
-        assert _parse_assignment("my_var = bar()") == "my_var"
-
-    def test_annotated_assignment(self):
-        assert _parse_assignment("x: int = foo()") == "x"
-
-    def test_annotated_no_value_rejected(self):
-        """Annotation without value (x: int) should not match."""
-        assert _parse_assignment("x: int") is None
-
-    def test_comparison_equals_rejected(self):
-        assert _parse_assignment("x == 5") is None
-
-    def test_comparison_gte_rejected(self):
-        assert _parse_assignment("x >= 5") is None
-
-    def test_comparison_ne_rejected(self):
-        assert _parse_assignment("x != 5") is None
-
-    def test_augmented_assignment_rejected(self):
-        assert _parse_assignment("x += 1") is None
-
-    def test_multi_target_rejected(self):
-        """a = b = foo() has 2 targets, should be rejected."""
-        assert _parse_assignment("a = b = foo()") is None
-
-    def test_tuple_unpack_rejected(self):
-        """a, b = foo() has tuple target, not Name."""
-        assert _parse_assignment("a, b = foo()") is None
-
-    def test_attribute_assignment_rejected(self):
-        """self.x = foo() should not return 'self'."""
-        assert _parse_assignment("self.x = foo()") is None
-
-    def test_subscript_assignment_rejected(self):
-        """d['x'] = foo() should not return anything."""
-        assert _parse_assignment("d['x'] = foo()") is None
-
-    def test_multiline_regex_fallback(self):
-        """Incomplete line like 'x = (' triggers SyntaxError, falls back to regex."""
-        assert _parse_assignment("x = (") == "x"
-
-    def test_keyword_argument_line_rejected(self):
-        """`role="agent",` parses as `role = ("agent",)`; it is an argument."""
-        assert _parse_assignment('role="agent",') is None
-
-    def test_empty_line(self):
-        assert _parse_assignment("") is None
-
-    def test_function_call_only(self):
-        assert _parse_assignment("foo()") is None
-
-    def test_expression_statement(self):
-        assert _parse_assignment("print(x)") is None
 
 
 class TestRegisterSkip:

@@ -52,7 +52,9 @@ async def test_loop_cap_reports_error():
 
     errors = _loop_errors(out)
     assert list(errors) == [f"{engine.name}.__loop_0__"]
-    message = errors[f"{engine.name}.__loop_0__"]
+    record = errors[f"{engine.name}.__loop_0__"]
+    assert record["type"] == "LoopLimitExceeded"
+    message = record["message"]
     assert message.startswith("LoopLimitExceeded: ")
     assert "1000 iterations" in message
     assert "max_iterations" in message  # says how to change it
@@ -72,7 +74,7 @@ async def test_max_iterations_sets_the_cap():
     out = await engine.run(inputs={})
 
     assert out["$state"].get(engine.name, "n") == 5
-    assert "5 iterations" in _loop_errors(out)[f"{engine.name}.__loop_0__"]
+    assert "5 iterations" in _loop_errors(out)[f"{engine.name}.__loop_0__"]["message"]
 
 
 @graph
@@ -108,7 +110,7 @@ async def test_the_ops_after_a_capped_loop_do_not_run():
     out = await engine.run(inputs={})
 
     assert "final" not in out
-    assert "LoopLimitExceeded" in out["$errors"][f"{engine.name}.__loop_0__"]
+    assert out["$errors"][f"{engine.name}.__loop_0__"]["type"] == "LoopLimitExceeded"
 
 
 @graph
@@ -137,7 +139,7 @@ async def test_a_capped_loop_inside_a_subgraph_is_reported_under_its_path():
     out = await engine.run(inputs={})
 
     errors = out["$errors"]
-    assert "LoopLimitExceeded" in errors[f"{engine.name}.s.__loop_0__"]
+    assert errors[f"{engine.name}.s.__loop_0__"]["type"] == "LoopLimitExceeded"
 
 
 def test_max_iterations_on_a_branch_that_closes_no_loop_is_refused():

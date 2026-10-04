@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-EdgeType = Literal["normal", "lookback", "condition"]
+EdgeType = Literal["normal", "lookback", "condition", "error"]
 
 
 class EdgeConfig(BaseModel):
@@ -13,7 +13,8 @@ class EdgeConfig(BaseModel):
     Attributes:
         from_node: Tên node nguồn
         to_node: Tên node đích
-        type: Loại edge (normal, lookback, condition)
+        type: Loại edge (normal, lookback, condition, error). ``error`` is
+              ``op.on_error(handler)``: taken only when the op fails.
         soft: Nếu True, edge này không được tính vào ready_count.
               Dùng cho các đầu ra nhánh khi chỉ một nhánh được thực thi.
               Được tạo bằng toán tử > thay vì >>

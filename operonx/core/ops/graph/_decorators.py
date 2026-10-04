@@ -118,7 +118,10 @@ def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
             if graph_strict_dag and "strict_dag" not in init_kwargs:
                 init_kwargs["strict_dag"] = True
 
-            g = GraphOp(inputs=input_mappings or None, **init_kwargs)
+            # Not assigned to a variable (`self._engine = Operon(flow)`,
+            # `out = await Operon(flow).run()`), a graph is named after its
+            # function rather than a random id.
+            g = GraphOp(inputs=input_mappings or None, name_hint=fn.__name__, **init_kwargs)
             with g:
                 fn_args = _build_fn_args(input_mappings, param_names)
                 fn(**fn_args)

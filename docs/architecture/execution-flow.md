@@ -199,8 +199,9 @@ are pluggable; see [`operonx.telemetry`](../api/telemetry.md).
 | Phase | What can fail | Surfaced as |
 |---|---|---|
 | Construction | Bad PARENT/op ref | `BuildError` at `with` exit |
+| Construction | A read of another op's output that no edge orders; two unordered writers of a reducer-less declared cell | `GraphValidationError` at build |
 | Engine init | Missing resource | Branch-(1)…(5) error from [`ResourceHub.get`](resource-hub.md#errors-five-disambiguated-branches) |
-| Run | Op raises — any `Exception`, `OpError` subclasses such as `ParserError` included | **Not raised.** Reported in the result as `"$errors"` and on the handle as `handle.errors` — see below |
+| Run | Op raises — any `Exception`, `OpError` subclasses such as `ParserError` included | **Not raised** (the default, `errors="record"`). Reported in the result as `"$errors"` and on the handle as `handle.errors` — see below. With `Operon(g, errors="raise")`: `OpFailed`, the run cancelled |
 | Run | Circuit breaker — `ObserveBudgetExceeded` (a `BaseException`) | Raised to the caller |
 | Run | Misdirected `Interrupt` — `InterruptTargetError` | Raised to the caller |
 | Run | The framework failing around an op, not the op body | Raised to the caller |
@@ -214,7 +215,10 @@ that landed before it.
 
 The run does not raise. One failing op must not end a run that is serving
 someone — a live call keeps going when one turn's op fails — so the
-failure is reported instead of propagated.
+failure is reported instead of propagated. An op can first try again
+(`@op(retry=Retry(...))`) or hand its failure to a handler op
+(`op.on_error(handler)`); a job, a test or a batch script that wants the
+failure itself builds its engine with `errors="raise"` (below).
 
 The op's own `BaseOp.run` catches the exception; it is the only handler
 that does. It logs it with the traceback, writes the text to the op's
@@ -226,25 +230,56 @@ What the caller sees:
 
 ```python
 out = await engine.run(inputs={"x": "not a number"})
-out["$errors"]   # {"engine.parse": "Traceback ... ValueError: invalid literal ..."}
+out["$errors"]   # {"engine.parse": {"type": "ValueError", "count": 1, "first_ctx": "main",
+                 #                   "message": "Traceback ...\nValueError: invalid literal ..."}}
 "n" in out       # False: the failed op's outputs are simply missing
 ```
 
-- `"$errors"` is `{op_name_in_state: error_text}`: the key is
-  `"<graph>.<op>"` (a nested op by its full path), the value the same text
-  as its `error` cell. An op that fails more than once — on several stream
-  items — keeps its first error; the per-item texts stay in the cell.
+- `"$errors"` is `{op_name_in_state: record}`: the key is
+  `"<graph>.<op>"` (a nested op by its full path), the record
+  `{type, message, count, first_ctx}`. `message` is the first failure's
+  traceback trimmed to the user's frames — operonx's own `BaseOp.run` /
+  `_exec_core` frames are the same for every failure and are dropped; an
+  exception raised by operonx itself is its last line alone. `count` is
+  how many times the op failed: an op that fails on several stream items
+  is one entry with `count` > 1. `first_ctx` is where the first failure
+  ran, so the failed trace node is `f"{op}#{first_ctx}"`. The full
+  traceback, operonx frames included, stays in the trace node and the
+  per-context `error` cell.
+- A structured `LLMOp` (`fields=`) that fails returns `error` instead of
+  raising, so its node is `ok`; it records itself in `"$errors"` all the
+  same (`type` `"ParserError"`, or the exception's class under
+  `on_failure="error"`). Otherwise only the next step's `PromptError` on
+  the `None` fields would show.
+- The trace carries the same records (`trace.errors`), and
+  `trace.status` is `"error"` when a node failed or a record exists; the
+  local consumer writes both into `meta.json` (`status`, `errors`).
 - An op raising **inside a subgraph** stops the ops after the subgraph,
   as it would flat: a subgraph run in which an op under it raised and
   none of its outputs were written yields nothing. `"$errors"` then has
   an entry for the subgraph too, `"<graph>.<sub>"`, naming the op that
-  raised (`"SubgraphError: 'g.sub.parse' raised, …"`). A subgraph that
+  raised (`type` `"SubgraphError"`, `message`
+  `"SubgraphError: 'g.sub.parse' raised, …"`). A subgraph that
   wrote some of its outputs still yields them.
 - It is present **only when an op failed**, so a clean run's keys are
   unchanged. `collect()` and `result()` carry it the same way;
   `handle.errors` is the same dict (`{}` when none), readable while the
   run is still going.
 - Tracebacks stay server-side. The serve layer answers a failed HTTP run
-  with `500 {"error": "the graph produced no output"}` and never sends
-  `"$errors"`; a job marks the item `failed` and writes nothing to its
+  with `500 {"error": "the graph produced no output", "endpoint": …,
+  "trace_id": …}` (the id is also the `x-operonx-trace-id` header) and
+  never sends `"$errors"`; a job marks the item `failed` and writes nothing to its
   sink.
+
+### `errors="raise"`
+
+`Operon(g, errors="raise")` ends the run at the first op failure that no
+error edge handles. The failure is recorded first, exactly as above, so
+`handle.errors` and the trace still show it. Then `BaseOp.run` raises an
+internal `BaseException` carrier: it passes the `except Exception` of every
+enclosing subgraph — which would otherwise record it as the subgraph's own
+failure — and reaches each scheduler's `fatal` path, whose `finally`
+cancels the ops still running. The engine hands the caller `OpFailed(op,
+error)`, with the op's exception as `__cause__`, from `run()`, `result()`,
+`collect()`, iteration and every `stream()` mode. A loop that reaches its
+cap raises it too.

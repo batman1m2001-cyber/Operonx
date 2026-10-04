@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@op(retry=Retry(...), timeout=Timeout(run=, idle=))`** (R1, F13). A
+  failed op runs again after a growing, jittered pause when the error is
+  worth another try (`TRANSIENT`: a timeout, a connection error, HTTP 429 or
+  5xx); a generator only before its first yield. An attempt past its
+  deadline fails with `TimeoutError`, recorded like any failure, and a
+  `bound="cpu"` op abandons its thread. Each attempt has its own trace node
+  (`OpExecution.attempt`). `my_op(x=..., retry=..., timeout=...)` overrides
+  either for one use; a subgraph takes `timeout=Timeout(run=)`. An error
+  `LLMOp`'s transport retry already retried is not retried again by the op.
+- **`Operon(g, errors="raise")`** (R1). The first op failure no error edge
+  handles ends the run: the ops still running are cancelled and `run()`,
+  `result()`, `collect()`, iteration and `stream()` raise `OpFailed(op,
+  error)`. It is still recorded in `handle.errors` and the trace. A loop at
+  its cap raises too. The default stays `errors="record"`.
+- **Error edges: `op.on_error(handler)`** (R1). The handler runs once when
+  the op fails (after its last attempt), with its `error`, `op` and `inputs`
+  parameters fed the failure. The failure stays in `"$errors"`, and
+  `errors="raise"` leaves a handled failure alone. An op and its handler
+  merge by themselves, like branch arms (`[look, sorry] >> reply`).
+  Serialized edges carry `"kind": "error"`; no other edge changes.
+- **`Operon(g, max_concurrency=N)`** (R1). One cap on the ops of a run that
+  are running at once, shared by every nested graph. A graph's own
+  `concurrency=` caps only that graph, so nested graphs multiplied (2 × 2
+  ran 4). Subgraphs hold no slot, and a producer parked on a full bounded
+  edge gives its slot back, so `N=1` does not deadlock.
+- **Concurrent writers fail the build** (R1). Two ops that may run at once,
+  both writing a `PARENT.declare(...)` cell without a reducer, raise
+  `GraphValidationError`: the cell kept whichever write landed last (probe
+  P2 read `slow` in one run, `fast` in the next). Ordered writers, branch
+  arms and an op with its error handler are fine;
+  `PARENT.declare(..., allow_race=True)` (or a list of names) opts out.
+  Checked against every graph in the repo and in callbot: no false positive.
+- **A read nothing orders fails the build.** `s = use(y=f["y"])` with no
+  path `f >> ... >> s` raised nothing: both started together and `s` got
+  `f`'s value or a missing argument depending on timing. It is now a
+  `GraphValidationError` naming the edge to draw (`START >> f >> s`); the
+  push form `f["y"] >> s["y"]` is checked too. `PARENT[...]` and
+  `SCRATCH[...]` reads are not. The only unordered reads in the repo,
+  operonx's tests and callbot were the guide snippet demonstrating the bug.
 - **`engine.stream(mode="interrupts")`, and `InterruptEvent.resume(value)`.**
   When an `InterruptOp` pauses, `mode="updates"` now yields its
   `InterruptEvent` after the updates that landed before it, and
@@ -47,6 +86,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A retried attempt no longer fails the run.** An op that failed once and
+  then succeeded under `retry=` left an `error` trace node: the result was
+  clean and `handle.errors` empty, but `trace.status` was `"error"`, a job
+  marked the item `failed`, and run stores counted an error. A superseded
+  attempt now has `status="retried"` (`STATUS_RETRIED`), keeping its error
+  text; `trace.status`, the job runner, run-store summaries and `meta.json`
+  ignore it, `roots()`/`leaves()` skip it, and Langfuse shows it as a
+  warning. The last attempt of an op that never succeeds stays `error`.
+- **`operonx init`'s `AGENTS.md` names guide page 6** (failures).
+- **An op with no edges is no longer reported as never running.** In a
+  graph without `START >>` it runs as an entry, beside every other entry;
+  the build warning now says so.
+- **A job's `retry:N` waits between attempts** (F33): the default `Retry`
+  backoff, 0.5 s, 1 s, 2 s … jittered. It retried back to back, three
+  attempts inside a few milliseconds. **A timed-out item keeps its
+  `trace_id`** (it was `None`), so the run that hung can be looked up;
+  `RunTimeout.trace_id` carries it.
 - **An op failing inside a subgraph stops the ops after the subgraph**, as
   it does flat. The subgraph yielded its all-`None` outputs, so the next op
   ran on `None` and an HTTP door answered `200 null` (now `500`).
@@ -123,6 +179,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now resolve in a script that has not imported their modules.
 - `BaseVectorStore` has a new abstract `_delete()`: a custom backend must
   implement it.
+
+- **Breaking: `$errors` entries are records, not text (C12).** Each
+  `"$errors"` / `handle.errors` value is `{type, message, count,
+  first_ctx}`: the exception's class name; the first failure's traceback
+  trimmed to the user's frames (operonx's own `BaseOp.run` / `_exec_core`
+  frames dropped; an exception raised inside operonx is its last line
+  alone); how many times the op failed in the run (two stream items
+  failing used to read as one); and the ctx the first one ran in, so the
+  failed trace node is `f"{op}#{first_ctx}"`. The full traceback stays in
+  the trace node and the op's `error` cell. Read `record["message"]` where
+  you read the text; `"X" in out["$errors"][op]` now tests the record's
+  keys. A structured `LLMOp` step that fails (it returns `error` rather
+  than raising) is recorded too, as `ParserError` — or its exception's
+  class under `on_failure="error"`. The trace carries the same records
+  (`trace.errors`) and a `status`; the local consumer's `meta.json` gets
+  `status` and `errors`, and run summaries count a run whose only failure
+  is such a record as `error`.
+
+- **Runs are named after their graph (C13).** A job's runs were all
+  called `params` and a service's `engine`, and `out = await
+  Operon(flow).run()` was `out`: when the bytecode showed no assignment,
+  `auto_name` guessed from source lines up to six lines *above* the call.
+  That guess is gone. A `@graph` not assigned to a plain variable is named
+  after its function, and `Job` and the serve layer build a `@graph` with
+  `name=<its function's name>`. `engine = Operon(flow)` in a script is
+  still `engine`. `auto_name()` no longer takes `source_fallback`.
+
+- **A script inside a project can trace into the project (C14).**
+  `trace="local"` writes to `<project>/.operonx/runs` when an
+  `operonx.toml` is at or above the working directory; it wrote to
+  `/tmp/operonx_traces` unless an `Application` had set the root (new
+  `operonx.core.workflow_trace.active_project()`). New
+  `Operon(flow, trace="project")` uses the project's own sinks —
+  `[tracing] sinks`, else `[project] trace`, else local — chosen the way
+  its services and jobs are, each key checked against the hub; outside a
+  project it raises. `Operon()` without `trace=` still records nothing.
+- **A run started inside an op of a running engine calls no trace
+  consumer.** It is part of that op's run and keeps its own
+  `handle.trace`; a helper graph a service op runs per call no longer
+  files a second root trace per call when its engine has consumers.
+
+- **A failed HTTP run's 500 body carries its `trace_id`**, the same id as
+  the `x-operonx-trace-id` header, for a client that keeps only the body.
+
+- **An LLM execution's trace records the request it sent (C15).**
+  `inputs["messages"]` holds the conversation the model received — a
+  template rendered with the recorded variables, or the `messages=` it was
+  given — beside the variables and the template, with image and audio
+  blocks as `Media`. `normalize_trace_io` had no caller, so it never
+  reached a trace. It honours `exclude=`/`include=`: `messages` can be
+  hidden on its own, and a template whose variable is hidden is not
+  rendered. Every record's I/O now goes through the op's
+  `normalize_trace_io`, on the filtered copy; the uncalled
+  `BaseOp._extract_trace_io` is gone. A batch call's trace grows by the
+  rendered prompt once (15.2 → 27.1 KB on a 12 KB RAG prompt).
 
 ### Removed
 

@@ -96,7 +96,12 @@ def test_an_op_that_raises_answers_500_without_its_error_text():
     with TestClient(app) as client:
         response = client.post("/fail", json="hello")
     assert response.status_code == 500
-    assert response.json() == {"error": "the graph produced no output", "endpoint": "f"}
+    body = response.json()
+    assert body == {
+        "error": "the graph produced no output",
+        "endpoint": "f",
+        "trace_id": response.headers["x-operonx-trace-id"],
+    }
     assert "sk-live-123" not in response.text and "Traceback" not in response.text
 
 

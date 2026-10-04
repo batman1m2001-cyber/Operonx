@@ -164,6 +164,57 @@ def test_summaries_count_time_errors_cost_and_tokens():
     assert by["tts"].errors == 1 and by["reply"].unpriced == 1 and by["reply"].cost_usd is None
 
 
+def test_a_run_whose_only_failure_is_its_errors_record_is_an_error():
+    """A structured LLM step that returned `error`, a subgraph failing
+    around its children: no node failed, `meta.json` knows (C12)."""
+    t = _trace("s", wall=NOW, nodes=[_exec("ex", 100.0, 20)])
+    errors = {
+        "flow.ex": {
+            "type": "ParserError",
+            "message": "ParserError: Parse error (json): Expecting value",
+            "count": 1,
+            "first_ctx": "main",
+        }
+    }
+    s, _ = summarize("s", [_row(n) for n in t.nodes], {"status": "error", "errors": errors})
+    assert s.status == "error"
+    assert s.errors == 0  # still the count of failed executions
+    assert s.first_error == "ex: ParserError: Parse error (json): Expecting value"
+
+    clean, _ = summarize("c", [_row(n) for n in t.nodes], {"status": "ok", "errors": {}})
+    assert clean.status == "ok" and clean.first_error is None
+
+
+def test_the_first_recorded_error_is_named_over_the_failure_it_caused():
+    """p1 edge C: `ex` failed to parse (its node is ok), so `dr` raised
+    `PromptError`. The run's first error is the cause."""
+    t = _trace(
+        "c",
+        wall=NOW,
+        nodes=[
+            _exec("ex", 100.0, 20),
+            _exec("dr", 100.1, 5, status=STATUS_ERROR, error="Traceback…\nPromptError: missing"),
+        ],
+    )
+    errors = {
+        "flow.ex": {
+            "type": "ParserError",
+            "message": "ParserError: Parse error (json): x",
+            "count": 1,
+            "first_ctx": "main",
+        },
+        "flow.dr": {
+            "type": "PromptError",
+            "message": "PromptError: missing",
+            "count": 1,
+            "first_ctx": "main",
+        },
+    }
+    s, _ = summarize("c", [_row(n) for n in t.nodes], {"status": "error", "errors": errors})
+    assert s.first_error == "ex: ParserError: Parse error (json): x"
+    assert s.errors == 1
+
+
 def test_a_declared_zero_is_a_price_and_unpriced_is_not():
     t = _trace("z", wall=NOW, nodes=[_llm(100.0, 10, 0.0), _llm(100.1, 10, None)])
     s, _ = summarize("z", [_row(n) for n in t.nodes], {"metadata": {}})

@@ -12,7 +12,8 @@ from time import perf_counter
 from typing import Dict, List, Tuple
 
 from operonx.core.loggings import LOGGER
-from operonx.core.ops._events import EOF, SELF_CTX, Frame, Interrupt
+from operonx.core.ops._events import EOF, SELF_CTX, Failure, Frame, Interrupt
+from operonx.core.policy import fail_fast
 from operonx.core.states._scratch_var import _reset_state, _set_state
 from operonx.core.states.ref import Ref
 
@@ -177,6 +178,8 @@ class Scheduler:
         "_route_policy",
         "_wait_bounds",
         "_drop_bounds",
+        "_task_ops",
+        "_graph_ops",
         "_loop_ops",
         "_loop_watch",
         "_collect_gens",
@@ -212,6 +215,21 @@ class Scheduler:
                     )
                 else:
                     self._drop_bounds[(src, link.dst)] = cap
+
+        # Plain `def` ops that still get a task: a producer on a bounded edge
+        # (it has to wait for the main loop to drain the edge) and an op with
+        # `retry=` (its backoff must not stall the main loop). Empty for most
+        # graphs; `dispatch` tests that first.
+        self._task_ops: frozenset = frozenset(self._wait_bounds) | frozenset(
+            name
+            for name, child in graph._ops.items()
+            if getattr(child, "_policy", None) is not None
+        )
+        # Children that are graphs: they take no slot of the run's shared
+        # limiter (see `_pump`).
+        self._graph_ops: frozenset = frozenset(
+            name for name, child in graph._ops.items() if hasattr(child, "_scheduler")
+        )
 
         # Child ops that are synthetic loops -> the successors their exit
         # routing may reach. A loop op's frames are per iteration, so they
@@ -465,6 +483,8 @@ class Scheduler:
         #   bp_waiters[src]  = futures of src's pumps parked on a full edge
         wait_bounds = self._wait_bounds
         drop_bounds = self._drop_bounds
+        task_ops = self._task_ops
+        err_adj = g._err_adj
         bp_unrouted: Dict[str, int] = {}
         bp_waiters: Dict[str, list] = {}
 
@@ -499,6 +519,12 @@ class Scheduler:
         # Concurrency gate: limits how many async _pump tasks run simultaneously.
         # Prevents thundering herd when many stream items dispatch at once.
         _sem = asyncio.Semaphore(g.concurrency)
+        # `Operon(max_concurrency=N)`: one semaphore for the whole run, shared
+        # by this scheduler and every nested one. Taken by leaf ops only — a
+        # subgraph holding a slot while its ops wait for one deadlocks at N=1.
+        run_policy = state._run_policy
+        limiter = run_policy.limiter if run_policy is not None else None
+        graph_ops = self._graph_ops
 
         # tasks_by_ctx[ctx][op_name] = live _pump Task. Used by _sweep_ctx()
         # to cancel the right tasks when an Interrupt event arrives. Keyed
@@ -512,9 +538,8 @@ class Scheduler:
             # A producer on a bounded edge always gets a task, even a plain
             # `def` one: an inline op is iterated by the main loop itself,
             # so it has no way to wait for the main loop to drain its edge.
-            if getattr(op, "bound", None) == "sync" and not (
-                wait_bounds and op_name in wait_bounds
-            ):
+            # Nor to sleep between retries without stalling the loop.
+            if getattr(op, "bound", None) == "sync" and not (task_ops and op_name in task_ops):
                 inline_pending.append((op_name, ctx))
             else:
                 inflight += 1
@@ -545,7 +570,12 @@ class Scheduler:
             # this pump owns a slot to release when it ends.
             await _sem.acquire()
             held = True
+            shared = limiter if limiter is not None and op_name not in graph_ops else None
+            shared_held = False
             try:
+                if shared is not None:
+                    await shared.acquire()
+                    shared_held = True
                 async for item_ctx, result in op.run(state, ctx):
                     if isinstance(result, Interrupt):
                         # Validated before stamping. Raising from inside
@@ -573,6 +603,11 @@ class Scheduler:
                         # SELF resolves to `item_ctx`, the ctx of the
                         # yield that actually emitted the interrupt.
                         queue.put_nowait(result)
+                    elif isinstance(result, Failure):
+                        # The op failed and has error edges; the main loop
+                        # routes it along them (`_on_failure`).
+                        queue.put_nowait(result)
+                        _note_event(result.ctx, 1)
                     else:
                         queue.put_nowait(Frame(op_name, item_ctx, result))
                         _note_event(item_ctx, 1)
@@ -585,9 +620,15 @@ class Scheduler:
                     if bp is not None and _bp_full(op_name):
                         _sem.release()
                         held = False
+                        if shared_held:
+                            shared.release()
+                            shared_held = False
                         await _bp_wait(op_name)
                         await _sem.acquire()
                         held = True
+                        if shared is not None:
+                            await shared.acquire()
+                            shared_held = True
                 queue.put_nowait(EOF(op_name, ctx))
                 _note_event(ctx, 1)
                 inflight += 1
@@ -625,6 +666,8 @@ class Scheduler:
                         _release_if_done(ctx)
                 if held:
                     _sem.release()
+                if shared_held:
+                    shared.release()
 
         def _bp_full(src: str) -> bool:
             """Has any of src's waiting edges reached its ``max_pending``?"""
@@ -748,6 +791,8 @@ class Scheduler:
                                 break
                             await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
                             _report_interrupt(result, ctx)
+                        elif isinstance(result, Failure):
+                            _on_failure(result)
                         else:
                             _on_frame(Frame(op_name, item_ctx, result))
                     _on_eof(EOF(op_name, ctx))
@@ -800,6 +845,30 @@ class Scheduler:
                 # `_on_eof` routes the loop op once, when it exits.
                 return
             _advance(event.op, event.ctx, event.result)
+
+        def _on_failure(event: Failure) -> None:
+            """Route a failed op along its error edges (``op.on_error(handler)``).
+
+            The handler's ``error`` / ``op`` / ``inputs`` parameters get the
+            failure, written into its own input cells at the failing context
+            (as ``_flush_collect`` writes a collect's lists); then the error
+            edge counts as an arrival, like any hard edge.
+            """
+            rc = ready.get(event.ctx)
+            if rc is None:
+                return  # the context was swept
+            src_op = g._ops[event.op]
+            payload = {"error": event.error, "op": src_op.full_name, "inputs": event.inputs}
+            schema = state.schema
+            for dst, fed in err_adj.get(event.op, ()):
+                if dst not in rc:
+                    continue
+                dst_name = g._ops[dst].full_name
+                for var in fed:
+                    state._write_cell(schema.get_index(dst_name, var), event.ctx, payload[var])
+                rc[dst] -= 1
+                if rc[dst] == 0:
+                    _route(event.op, dst, event.ctx, {})
 
         def _advance(src: str, ctx: tuple, result: dict, only=None) -> None:
             """Count src's arrival at ctx on each successor; route those now ready.
@@ -1079,6 +1148,8 @@ class Scheduler:
                 if err_idx >= 0:
                     # Where an enclosing subgraph looks for its ops' failures.
                     state._write_cell(err_idx, base, error)
+                if run_policy is not None and run_policy.fail_fast:
+                    raise fail_fast(state, op.full_name, None)
                 return
             # Successors run at the loop's own context — where the ops that
             # joined it before the loop ran, and where a branch finishing
@@ -1304,6 +1375,8 @@ class Scheduler:
                 elif isinstance(event, Interrupt):
                     await _sweep_ctx(event.ctx_to_cancel, exclude=(event.op, event.ctx))
                     _report_interrupt(event, event.ctx)
+                elif isinstance(event, Failure):
+                    _on_failure(event)
                 else:
                     _on_eof(event)
                 # Drain any inline ops triggered by the queue event.

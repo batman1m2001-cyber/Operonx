@@ -90,6 +90,13 @@ Every test answered all approvals identically, so the shared write was
 invisible. `PARENT` is for values that *should* merge across contexts. A
 per-branch decision is not one of them — it belongs in separate inputs.
 
+The same shape between two *ops* is now a build error: two writers of a
+declared cell with no reducer, with nothing ordering them and not on
+exclusive arms, fail `GraphOp.build()` (`allow_race=True` when
+last-write-wins is meant). Probe P2 of the Q4 roadmap read `slow` in one
+run and `fast` in the next from the same graph. One op racing itself across
+`.parallel()` items is not caught.
+
 ## 7 · The right default depends on what the author meant
 
 "A missing field is an error" is correct for a schema describing one

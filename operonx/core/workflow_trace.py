@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = [
@@ -32,11 +33,13 @@ __all__ = [
     "STATUS_OK",
     "STATUS_ERROR",
     "STATUS_CANCELLED",
+    "STATUS_RETRIED",
     # What every run in this process carries (the code's version, ...).
     "set_run_metadata",
     "run_metadata",
     "set_project_root",
     "project_root",
+    "active_project",
     # Engine-internal ContextVars — not for author use.
     "_current_trace",
     "_current_op_ctx",
@@ -46,6 +49,9 @@ __all__ = [
 STATUS_OK = "ok"
 STATUS_ERROR = "error"
 STATUS_CANCELLED = "cancelled"
+#: An attempt that failed and was run again by the op's `retry=`. Not a
+#: failure of the run: the attempt after it decides. Its `error` is kept.
+STATUS_RETRIED = "retried"
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +143,9 @@ class OpExecution:
         upstreams:    Data-flow edges INTO this op — list not a single
                       parent, so multi-upstream aggregators are captured
                       losslessly.
-        status:       One of `STATUS_OK` / `STATUS_ERROR` / `STATUS_CANCELLED`.
+        status:       One of `STATUS_OK` / `STATUS_ERROR` / `STATUS_CANCELLED`
+                      / `STATUS_RETRIED` (an attempt `retry=` ran again; the
+                      run's status ignores it).
         error:        Formatted traceback string when `status ==
                       STATUS_ERROR`; `None` otherwise.
     """
@@ -161,6 +169,10 @@ class OpExecution:
     # the ctx it dispatched, which makes it the container of everything
     # that ran for that item; a batch op in the same ctx is not.
     is_yield: bool = False
+    # 1-based attempt of an op with `retry=`. Each failed attempt that was
+    # retried has a record of its own, `op_id` suffixed `@<attempt>`; the
+    # attempt that ends the op keeps the plain `op_id`.
+    attempt: int = 1
 
     @property
     def duration_ms(self) -> float:
@@ -184,6 +196,13 @@ class WorkflowTrace:
         nodes:         `OpExecution` records in append (start-time) order.
         metadata:      Free-form dict — `request_id`, `user_id`,
                        `session_id`, custom tags.
+        errors:        The run's ``"$errors"``: ``{op_full_name: {type,
+                       message, count, first_ctx}}``, the same records
+                       ``handle.errors`` returns (see
+                       ``MemoryState.record_op_error``). It knows failures
+                       no node shows: a subgraph whose child raised, a loop
+                       stopped at its cap, a structured ``LLMOp`` step that
+                       returned ``error``.
     """
 
     trace_id: str
@@ -196,10 +215,23 @@ class WorkflowTrace:
     # perf timestamp in the run converts through it, so records keep
     # their cheap monotonic clock and a consumer still gets real dates.
     wall_started_at: float = 0.0
+    errors: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     @property
     def duration_ms(self) -> float:
         return (self.ended_at - self.started_at) * 1000.0
+
+    @property
+    def status(self) -> str:
+        """``"error"`` when anything in the run failed, else ``"ok"``.
+
+        A failed node or an ``errors`` record: either alone is a failed
+        run. The record is the one that catches a structured ``LLMOp``
+        step whose node is ``ok`` but whose ``error`` output is set.
+        """
+        if self.errors or any(n.status == STATUS_ERROR for n in self.nodes):
+            return "error"
+        return "ok"
 
     @property
     def run_id(self) -> str:
@@ -222,8 +254,12 @@ class WorkflowTrace:
         return [n for n in self.nodes if n.op_name == op_name]
 
     def roots(self) -> List[OpExecution]:
-        """Executions with no upstream — graph entry points."""
-        return [n for n in self.nodes if not n.upstreams]
+        """Executions with no upstream — graph entry points.
+
+        An attempt that ``retry=`` ran again is not one: the attempt after
+        it is. The same holds for :meth:`leaves`.
+        """
+        return [n for n in self.nodes if not n.upstreams and n.status != STATUS_RETRIED]
 
     def leaves(self) -> List[OpExecution]:
         """Executions no other node consumed — graph terminals.
@@ -232,7 +268,7 @@ class WorkflowTrace:
         `from_op_id` in some `UpstreamRef` is NOT a leaf.
         """
         producers = {u.from_op_id for n in self.nodes for u in n.upstreams}
-        return [n for n in self.nodes if n.op_id not in producers]
+        return [n for n in self.nodes if n.op_id not in producers and n.status != STATUS_RETRIED]
 
 
 def all_edges(
@@ -309,3 +345,25 @@ def set_project_root(path: Any) -> None:
 def project_root() -> Any:
     """The project root set by `set_project_root`, or ``None``."""
     return _PROJECT_ROOT[0]
+
+
+#: The file that makes a directory a project (see ``operonx.app.manifest``).
+PROJECT_FILE = "operonx.toml"
+
+
+def active_project() -> Optional[Path]:
+    """The project this process runs in, or ``None`` outside one.
+
+    The root an ``Application`` set (:func:`set_project_root`); else the
+    nearest directory at or above the working directory holding an
+    ``operonx.toml`` — so a script run from anywhere inside a project
+    belongs to it as a served run does. Looked up on each call: the working
+    directory can change.
+    """
+    if _PROJECT_ROOT[0] is not None:
+        return Path(_PROJECT_ROOT[0])
+    cwd = Path.cwd()
+    for candidate in (cwd, *cwd.parents):
+        if (candidate / PROJECT_FILE).is_file():
+            return candidate
+    return None

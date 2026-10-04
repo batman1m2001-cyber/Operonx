@@ -160,9 +160,9 @@ sequenceDiagram
     H-->>U: result() / collect() / stream()
 ```
 
-### The three event types
+### The four event types
 
-Everything the scheduler moves is one of three dataclasses from
+Everything the scheduler moves is one of four dataclasses from
 `ops/_events.py`. User code never constructs them.
 
 ```mermaid
@@ -184,6 +184,7 @@ flowchart LR
 | `Frame` | `_pump`, per yield | `op`, `ctx`, `result` | write cells, decrement successors |
 | `EOF` | `_pump`, on exhaustion | `op`, `ctx` | release sequential queue, maybe finish |
 | `Interrupt` | user op body | `op`, `ctx`, `ctx_to_cancel`, `reason` | sweep a context subtree |
+| `Failure` | `BaseOp.run`, when an op with error edges fails | `op`, `ctx`, `error`, `inputs` | feed the handler, follow the error edges |
 
 `Interrupt.SELF` is a sentinel that is **deliberately not a tuple**. The
 empty tuple used to be the default, and it is a prefix of every context —

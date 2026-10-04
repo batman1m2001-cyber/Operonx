@@ -102,6 +102,12 @@ def compile_graph(
     if trace:
         kwargs["trace"] = list(trace) if isinstance(trace, (list, tuple)) else [str(trace)]
 
+    if getattr(graph_fn, "_operonx_graph", False):
+        # Named after the graph, explicitly: built inside `Operon(...)` it
+        # took the name of the local below, and every service run was
+        # called `engine`.
+        graph_fn = graph_fn(name=graph_fn.__name__, **params)
+        kwargs.pop("params", None)
     engine = Operon(graph_fn, **kwargs)
     if concurrency:
         engine.graph.concurrency = int(concurrency)
@@ -354,13 +360,14 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
             # looks like from out here — and for one caller waiting on one
             # request, nothing is a failure. The error text stays in the
             # log and the trace: it is a traceback, and it goes nowhere
-            # near a client.
+            # near a client. The run's id does: it is how the client's
+            # report finds the trace (also in `x-operonx-trace-id`, for a
+            # client that keeps only the body).
             LOGGER.error(f"[serve:{spec.name}] run produced no output; answering 500")
-            return JSONResponse(
-                {"error": "the graph produced no output", "endpoint": spec.name},
-                status_code=500,
-                headers=headers,
-            )
+            body = {"error": "the graph produced no output", "endpoint": spec.name}
+            if session.trace_id:
+                body["trace_id"] = session.trace_id
+            return JSONResponse(body, status_code=500, headers=headers)
         return JSONResponse(session.reply, headers=headers)
 
     return endpoint

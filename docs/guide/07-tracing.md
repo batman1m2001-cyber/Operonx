@@ -52,7 +52,28 @@ bootstrap(resources="resources.yaml")
 engine = Operon(graph, trace=["trace_local:default", "trace_langfuse:default"])
 ```
 
-A key, a consumer object, or a list of both. `trace=[]` records nothing.
+A key, a consumer object, or a list of both. `trace=[]` records nothing,
+and so does leaving `trace=` out.
+
+| `trace=` | What a run records to |
+|---|---|
+| unset, or `[]` | nothing |
+| `"local"` | the built-in local consumer: `<project>/.operonx/runs` inside a project (an `operonx.toml` at or above the working directory), else `/tmp/operonx_traces` |
+| `"project"` | the project's own sinks: `[tracing] sinks`, else `[project] trace`, else `"local"`; `sinks = []` records nothing. Outside a project it raises |
+| `"trace_langfuse:default"` | a resource key, through the hub (`operonx.bootstrap()` first) |
+| a `Consumer` | that object |
+
+A script run from anywhere inside a project, with `trace="project"`,
+goes where the project's services and jobs go, and the studio lists it
+under **Ad hoc**, named after its graph. `"project"` reads
+`operonx.toml`, not an `Application(trace=...)` written in Python: it
+would have to import the application. Every resource key it names is
+checked when the engine is built.
+
+A run started inside an op of a running engine — a helper graph a
+service op runs per call — is part of that op's run. It records into its
+own `handle.trace`, and its consumers are not called, so it files no
+second trace.
 
 For a whole application, name them once. Every service and job that does
 not name its own inherits them:
@@ -169,7 +190,8 @@ says which code produced it.
 
 The root is `root:` when set (a relative one resolves against the
 project), else `$OPERONX_RUNS_DIR`, else `<project>/.operonx/runs`, else
-`/tmp/operonx_traces`. Days are UTC. `layout: flat` keeps the pre-1.9
+`/tmp/operonx_traces`. The project is the one an `Application` bootstrapped,
+else the nearest `operonx.toml` at or above the working directory. Days are UTC. `layout: flat` keeps the pre-1.9
 shape, `<root>/<run>/`; any other string is a template over `{origin}`,
 `{name}`, `{group}`, `{day}`, `{trace_id}` and the run's metadata keys.
 

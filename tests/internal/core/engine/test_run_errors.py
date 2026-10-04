@@ -46,11 +46,15 @@ class TestErrorsKey:
         out = await engine.run(inputs={"x": "not a number"})
 
         state = out["$state"]
-        assert out["$errors"] == {
-            f"{engine.name}.p": state[f"{engine.name}.p", "error"],
-            f"{engine.name}.a": state[f"{engine.name}.a", "error"],
-        }
-        assert "ValueError" in out["$errors"][f"{engine.name}.p"]
+        assert set(out["$errors"]) == {f"{engine.name}.p", f"{engine.name}.a"}
+        for name in out["$errors"]:
+            record = out["$errors"][name]
+            assert record["type"] == "ValueError" and record["count"] == 1
+            # The cell keeps the whole traceback; the record the same
+            # failure, trimmed to the user's frames — so the cell ends with
+            # the record's last line.
+            last = record["message"].rstrip().splitlines()[-1]
+            assert state[name, "error"].rstrip().endswith(last)
         # Outputs of a failed op are still simply missing.
         assert "n" not in out and "m" not in out
 
@@ -95,7 +99,7 @@ class TestErrorsKey:
         out = await engine.run(inputs={"x": "hi"})
         assert out["echo"] == "hi"
         assert list(out["$errors"]) == [f"{engine.name}.b"]
-        assert "RuntimeError: down" in out["$errors"][f"{engine.name}.b"]
+        assert "RuntimeError: down" in out["$errors"][f"{engine.name}.b"]["message"]
 
     async def test_nested_op_is_keyed_by_its_full_path(self):
         with GraphOp(name="outer") as g:
@@ -109,8 +113,10 @@ class TestErrorsKey:
         # The subgraph that produced nothing because of it has an entry
         # too, naming the op (see test_subgraph_failure_stops_successors).
         assert list(out["$errors"]) == ["outer.inner.p", "outer.inner"]
-        assert out["$errors"]["outer.inner.p"] == out["$state"]["outer.inner.p", "error"]
-        assert "'outer.inner.p' raised" in out["$errors"]["outer.inner"]
+        record = out["$errors"]["outer.inner.p"]
+        last = record["message"].rstrip().splitlines()[-1]
+        assert out["$state"]["outer.inner.p", "error"].rstrip().endswith(last)
+        assert "'outer.inner.p' raised" in out["$errors"]["outer.inner"]["message"]
 
     async def test_a_subgraph_failing_itself_is_reported(self, monkeypatch):
         """`GraphOp.run` has its own handler, for what fails around the
@@ -134,10 +140,16 @@ class TestErrorsKey:
         monkeypatch.setattr(_GraphOp, "get_inputs", failing)
         out = await engine.run(inputs={"x": "hi"})
         assert list(out["$errors"]) == ["outer.inner"]
-        assert "LookupError: subgraph inputs unreadable" in out["$errors"]["outer.inner"]
-        assert out["$errors"]["outer.inner"] == out["$state"]["outer.inner", "error"]
+        record = out["$errors"]["outer.inner"]
+        assert record["type"] == "LookupError"
+        assert "LookupError: subgraph inputs unreadable" in record["message"]
+        assert (
+            out["$state"]["outer.inner", "error"]
+            .rstrip()
+            .endswith("LookupError: subgraph inputs unreadable")
+        )
 
-    async def test_an_op_failing_on_several_items_keeps_its_first_error(self):
+    async def test_an_op_failing_on_several_items_keeps_its_first_error_and_counts(self):
         @op
         def items(n: int):
             for i in range(n):
@@ -157,7 +169,8 @@ class TestErrorsKey:
 
         out = await engine.run(inputs={"n": 3})
         assert list(out["$errors"]) == [f"{engine.name}.p"]
-        assert "item 1" in out["$errors"][f"{engine.name}.p"]
+        record = out["$errors"][f"{engine.name}.p"]
+        assert "item 1" in record["message"] and record["count"] == 2
 
 
 class TestWhatStillRaises:

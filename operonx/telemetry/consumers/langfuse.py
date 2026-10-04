@@ -54,11 +54,16 @@ from operonx.core.loggings import LOGGER
 from operonx.core.utils.yaml_model import YamlModel
 from operonx.core.workflow_trace import (
     STATUS_ERROR,
+    STATUS_RETRIED,
     OpExecution,
     WorkflowTrace,
     format_ctx,
 )
 from operonx.telemetry.consumer import Consumer
+
+# A node's status as a Langfuse observation level. An attempt `retry=` ran
+# again is a warning, not an error: the run did not fail because of it.
+_LEVELS = {STATUS_ERROR: "ERROR", STATUS_RETRIED: "WARNING"}
 
 __all__ = ["LangfuseConsumer", "build_tree"]
 
@@ -243,7 +248,7 @@ class LangfuseConsumer(Consumer):
                 body["output"] = self.offload_media(
                     self.sanitize(rec.outputs), media_dir, cfg["media_threshold"]
                 )
-                body["level"] = "ERROR" if rec.status == STATUS_ERROR else "DEFAULT"
+                body["level"] = _LEVELS.get(rec.status, "DEFAULT")
                 body["statusMessage"] = rec.error
                 body["metadata"].update(
                     {

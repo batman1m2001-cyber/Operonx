@@ -5,6 +5,7 @@ used by Op.of() classmethods and the @graph decorator.
 """
 
 from operonx.core.loggings import LOGGER
+from operonx.core.policy import Retry, Timeout
 from operonx.core.states.ref import Ref
 from operonx.core.utils.auto_name import register_skip
 
@@ -44,6 +45,12 @@ _BASE_INIT_KEYS = frozenset(
     }
 )
 
+# `retry=` and `timeout=` reach the op's constructor only as a `Retry` /
+# `Timeout`. They are not in `_BASE_INIT_KEYS`: plenty of functions take a
+# `timeout` of their own, and every one of them would be warned about and
+# lose the argument.
+_POLICY_KEYS = {"retry": Retry, "timeout": Timeout}
+
 
 def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
     """Split flat kwargs into (inputs, init_kwargs).
@@ -77,6 +84,16 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
     init_kwargs = {}
 
     for key, value in kwargs.items():
+        policy_type = _POLICY_KEYS.get(key)
+        if policy_type is not None and key not in init_keys:
+            # By type, not by name: `fetch(url=u, timeout=10)` is the
+            # function's own argument, `fetch(url=u, timeout=Timeout(run=10))`
+            # is the op's deadline.
+            if isinstance(value, policy_type):
+                init_kwargs[key] = value
+            else:
+                inputs[key] = value
+            continue
         if key in init_keys and not isinstance(value, Ref):
             init_kwargs[key] = value
         else:
