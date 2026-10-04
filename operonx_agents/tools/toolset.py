@@ -19,7 +19,8 @@ class Toolset:
 
     A plain function is accepted and made a tool with ``@tool``'s
     defaults, so ``Toolset([lookup_order, refund])`` works whether or not
-    the functions were decorated.
+    the functions were decorated. A toolset (an ``MCPToolset``, say) is
+    accepted as its tools.
 
     Raises:
         ValueError: on two tools with one name — the model could not say
@@ -28,14 +29,13 @@ class Toolset:
 
     __slots__ = ("_tools", "_definitions")
 
-    def __init__(self, tools: Iterable[Union[Tool, Callable[..., Any]]] = ()) -> None:
+    def __init__(self, tools: Iterable[Union[Tool, "Toolset", Callable[..., Any]]] = ()) -> None:
         self._tools: Dict[str, Tool] = {}
-        for item in tools:
-            t = item if isinstance(item, Tool) else tool(item)
+        for t in _flat(tools):
             if t.name in self._tools:
                 raise ValueError(
                     f"Toolset has two tools named {t.name!r}. The model calls a tool by name, so "
-                    "rename one: @tool(name=...)."
+                    "rename one: @tool(name=...), or MCPToolset(prefix=...)."
                 )
             self._tools[t.name] = t
         self._definitions = [t.spec.definition() for t in self._tools.values()]
@@ -62,4 +62,12 @@ class Toolset:
         return name in self._tools
 
     def __repr__(self) -> str:
-        return f"Toolset({self.names})"
+        return f"{type(self).__name__}({self.names})"
+
+
+def _flat(items: Iterable[Any]) -> Iterator[Tool]:
+    for item in items:
+        if isinstance(item, Toolset):
+            yield from item
+        else:
+            yield item if isinstance(item, Tool) else tool(item)

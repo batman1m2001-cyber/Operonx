@@ -22,6 +22,8 @@ dependencies = [
 [project.optional-dependencies]
 # RedisSession / RedisStateStore (a Redis or a Redis Cluster).
 redis = ["redis>=5.0"]
+# MCPToolset: tools on MCP servers, over stdio and streamable HTTP.
+mcp = ["mcp>=2.0"]
 
 [project.scripts]
 operonx-agents = "operonx_agents.cli:main"
@@ -35,6 +37,7 @@ dev = [
     "pyyaml>=6.0",
     "hypothesis>=6.100",
     "redis>=5.0",
+    "mcp>=2.0",
 ]
 
 [tool.uv.sources]
