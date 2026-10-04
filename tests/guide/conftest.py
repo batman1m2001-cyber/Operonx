@@ -2,8 +2,10 @@
 
 The guide shows the real ``resources.yaml`` shape (``api_type: openai``,
 ``base_url``); the test points ``base_url`` here through ``LLM_BASE_URL``.
-Its answers are deterministic: a prompt asking for an ``<intent>`` gets
-one, anything else is echoed back, and ``stream=true`` is honoured.
+Its answers are deterministic: a judge prompt gets a verdict (``PASS``
+when the output says ``refund``; a pairwise one, ``TIE``), a prompt asking
+for an ``<intent>`` gets one, anything else is echoed back, and
+``stream=true`` is honoured.
 """
 
 from __future__ import annotations
@@ -16,7 +18,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 
+def _judge(messages: list):
+    """A judge prompt (it asks for a ``<verdict>``): a pairwise one is a
+    tie; a binary one passes when the output under ``Output:`` says
+    ``refund``."""
+    system = " ".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
+    if "<verdict>" not in system:
+        return None
+    if "A|B|TIE" in system:
+        return "<reason>both answers say the same</reason><verdict>TIE</verdict>"
+    user = " ".join(str(m.get("content") or "") for m in messages if m.get("role") == "user")
+    output = user.split("Output:", 1)[-1].split("Expected", 1)[0]
+    verdict = "PASS" if "refund" in output else "FAIL"
+    return f"<reason>the output says {output.strip()[:40]}</reason><verdict>{verdict}</verdict>"
+
+
 def _answer(messages: list) -> str:
+    judged = _judge(messages)
+    if judged is not None:
+        return judged
     text = " ".join(str(m.get("content") or "") for m in messages)
     if "<intent>" in text or "intent" in text.lower():
         word = "refund" if "money back" in text.lower() or "refund" in text.lower() else "other"

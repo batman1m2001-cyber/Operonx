@@ -37,9 +37,9 @@ must-pass under a gate.
 An evaluator is a function that takes any of `input`, `output`,
 `expected`, `row`, `outputs`, `trace` by name and returns a bool, a score
 in [0, 1], or `{"passed", "score", "reason"}`. Built-ins: `exact`,
-`contains`, `fuzzy`, `json_match`, `llm_judge`, and over the run:
-`trajectory.ops`, `trajectory.tool_calls`, `trajectory.op_output`,
-`budget`.
+`contains`, `fuzzy`, `json_match`, a model as a judge (`judge`, below),
+and over the run: `trajectory.ops`, `trajectory.tool_calls`,
+`trajectory.op_output`, `budget`.
 
 ## Run it: repeats, metrics, the fingerprint
 
@@ -411,3 +411,158 @@ pytest -p operonx.app.evals.pytest_plugin test_labels.py -q --operonx-eval-name 
   `evals/<--operonx-eval-name>/<run_id>`, with the gate and its reports
   (`--operonx-eval-report md,json,junit`); `--operonx-eval-baseline` and
   `--operonx-eval-tolerance` compare it like an eval.
+
+## Judges: a model grades one criterion
+
+`judge()` is an evaluator that asks a model whether the output meets one
+criterion: `PASS` or `FAIL`, with its reason kept. It is an operonx graph,
+so each call is its own traced run (`origin=eval`, `role=judge`,
+`judged_trace` = the case's run), its cost is kept apart from the
+system's, and with a score store it is cached: an output it has already
+judged, with the same rubric and model, costs no call.
+
+```yaml file=resources.yaml
+llm:judge:
+  api_type: openai
+  api_key: ${LLM_API_KEY}
+  base_url: ${LLM_BASE_URL}
+  model: gpt-4o-mini
+```
+
+```python
+import operonx
+from operonx.app.evals import Eval, judge
+from operonx.telemetry.runs import open_run_store
+from operonx.telemetry.scores import open_score_store
+
+from labels import flow
+
+operonx.bootstrap(resources="resources.yaml")  # the judge's model is a resource
+store = open_score_store({"backend": "files"})  # experiments, scores — and the judge cache
+runs = open_run_store({"backend": "files"})
+
+refund = judge(
+    "llm:judge",
+    "The label is 'refund' exactly when the message asks for money back.",
+    name="refund_label",  # the check is judge:refund_label; a rubric file names itself
+)
+
+
+def make():
+    return Eval(
+        "judged",
+        graph=flow,
+        item_input="text",
+        dataset="dataset:labels",
+        evaluators=[refund],
+        scores=store,
+        trace=[runs],
+    )
+
+
+run = make().run_sync()
+s = run.meta["eval"]
+hello = next(i for i in run.items if i.key == "hello")
+check = hello.verdict["checks"]["judge:refund_label"]
+print(check["label"], check["reason"])  # FAIL, and why: the rationale is kept
+judged = runs.get_run(check["judge_trace_id"]).meta["metadata"]  # the judge's own run
+assert judged["role"] == "judge" and judged["judged_trace"] == hello.trace_id
+print(s["judges"]["judge:refund_label"])  # version, model, calls, cached, cost, alignment
+print(s["gate"]["warnings"])  # UNVALIDATED JUDGE …: nothing shows it agrees with people yet
+
+again = make().run_sync()  # the same outputs, the same judge: answered from the cache
+assert again.meta["eval"]["judges"]["judge:refund_label"]["calls"] == 0
+assert again.meta["eval"]["judges"]["judge:refund_label"]["cached"] == 3
+```
+
+- One judge checks one criterion and answers with one label. `labels=`
+  and `pass_labels=` make it categorical (`("warm", "neutral", "cold")`);
+  there is no 1–10 scale.
+- `reference="auto"` shows the case's `expected` when it has one;
+  `examples=[{input, output, verdict, reason}]` are few-shot;
+  `include_trace=True` shows the case's run (a trajectory judge).
+- The version (in the fingerprint) is the rubric, examples, labels,
+  temperature, the model `llm:judge` resolves to, and the judge's code:
+  editing any of them is a new judge and a cache miss. `Eval(judge_cache=
+  False)` / `operonx eval run --no-cache` asks again (to see a judge's own
+  noise).
+- Any `@graph` you pass as an evaluator is a judge the same way: its
+  inputs are named `input`, `output`, `expected`, `row`, `outputs` or
+  `trace_summary`, and it returns `{passed, reason}`.
+- A judge whose model is also the system's own gets a self-preference
+  warning. Judges are never rescored.
+
+## Is the judge right? Align it with people
+
+A judge can gate, but until it is measured against human labels every
+report says `UNVALIDATED JUDGE`. Human labels are scores with
+`source="human"` on the same runs (Studio's review writes them); `align`
+counts where the two agree.
+
+```python
+from operonx.app.evals import Eval, judge
+from operonx.app.evals.align import align, record_alignment
+from operonx.app.evals.experiments import experiments_of
+from operonx.telemetry.scores import Score, open_score_store
+
+store = open_score_store({"backend": "files"})
+latest = experiments_of("judged", store=store)[0]
+human = {"refund-1": True, "refund-2": True, "hello": False}  # what a person said
+store.put_scores(
+    [
+        Score(
+            score_name="judge:refund_label",
+            source="human",
+            target="trace",
+            trace_id=item["trace_id"],
+            passed=human[item["case"]],
+            author="reviewer@example.com",
+        )
+        for item in latest.items
+    ]
+)
+got = align(store, "judge:refund_label")
+print(got.summary())  # κ, TPR, TNR, accuracy, n, the 2×2 table
+assert (got.tp, got.tn, got.n) == (2, 1, 3) and got.kappa == 1.0
+record_alignment(store, got)  # kept for this judge version: reports read it
+```
+
+```bash run
+operonx eval align judge:refund_label
+```
+
+- κ (Cohen's kappa) is agreement beyond chance: ≥ 0.6 counts as aligned;
+  under it, or with no record for the judge's current version, a gating
+  judge is reported as `UNVALIDATED JUDGE` (the verdict is not changed).
+- TPR: the judge says PASS when people do. TNR: it says FAIL when people
+  do — the failures it catches. Three cases prove little: label a
+  hundred.
+- `align` exits 0 aligned, 1 not, 2 when nothing could be paired.
+
+## Which answer is better? Pairwise
+
+`pairwise()` asks which of two experiments' answers to a case is better,
+in both orders at once (two branches of one judge run). When the orders
+disagree the case is a `tie` marked `inconsistent`: the choice followed the
+position, not the answer.
+
+```python
+import asyncio
+
+import operonx
+from operonx.app.evals import compare_pairwise, pairwise
+from operonx.app.evals.experiments import experiments_of
+from operonx.telemetry.scores import open_score_store
+
+operonx.bootstrap(resources="resources.yaml")
+store = open_score_store({"backend": "files"})
+newer, older = experiments_of("judged", store=store)[:2]
+better = pairwise("llm:judge", "Which label fits the message better?", name="better_label")
+got = asyncio.run(compare_pairwise(older, newer, [better], scores=store))
+j = got["judges"]["pairwise:better_label"]
+print(j["wins_a"], j["wins_b"], j["ties"], j["inconsistency_rate"], j["preference"])
+assert j["ties"] == 3  # the same labels both times: neither is better
+```
+
+`operonx eval compare A B --pairwise judges:better` adds the same table to
+the comparison.
