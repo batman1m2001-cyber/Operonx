@@ -112,6 +112,14 @@ async def serve_session(
     return handle
 
 
+def _note_trace_id(session: Session, handle: Any) -> None:
+    """Record the run's trace id on the session that minted it, where the
+    transport can hand it to its peer (`BoundedSession.trace_id`)."""
+    trace = getattr(handle, "trace", None)
+    if trace is not None and hasattr(session, "trace_id"):
+        session.trace_id = trace.trace_id
+
+
 class ServeRunner:
     """Drives one `[[serve]]` entry: a transport, a graph, and its runs.
 
@@ -237,21 +245,43 @@ class ServeRunner:
             await session.close()
             return
         handle = None
+        failed = False
         metadata = self._origin(request)
         served = self._recorded(session, metadata) if self.spec.options.get("replay") else session
         try:
             handle = await serve_session(
-                self._engine_for(request), served, request, metadata=metadata
+                self._engine_for(request),
+                served,
+                request,
+                metadata=metadata,
+                on_start=lambda h: _note_trace_id(session, h),
             )
+            failed = bool(handle.errors)
         except Exception as exc:  # noqa: BLE001
             # One session failing is not the server failing. It is logged
             # here rather than swallowed, because a transport that loses
             # runs quietly is the failure nobody finds in production.
+            failed = True
             LOGGER.error(
                 f"[serve:{self.spec.name}] session run failed: {type(exc).__name__}: {exc}"
             )
         finally:
+            if failed:
+                await self._report_failure(session)
             await self._close_one(session, handle)
+
+    async def _report_failure(self, session: Session) -> None:
+        """Let the session tell its peer the run failed (`run_failed`).
+
+        Optional on a project's own session; its failure is contained, like
+        `on_close`'s, so the accounting after it still runs."""
+        hook = getattr(session, "run_failed", None)
+        if hook is None:
+            return
+        try:
+            await hook()
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"[serve:{self.spec.name}] run_failed failed: {type(exc).__name__}: {exc}")
 
     def _recorded(self, session: Session, metadata: Dict[str, Any]) -> Session:
         """``Service(replay=True)``: what the client sends is written down

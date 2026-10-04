@@ -6,10 +6,9 @@
     operonx guide --sync [DIR]      # copy it into DIR/.operonx/guide/
     operonx run ...                 # run a job or runbook   (operonx.cli.run)
     operonx serve ...               # serve the services     (operonx.cli.serve)
-    operonx pack ...                # graphs → Rust JSON spec (operonx.cli.pack)
     operonx play ...                # drive a served door    (operonx.app.play)
 
-``run``, ``serve``, ``pack`` and ``play`` are handed the rest of the
+``run``, ``serve`` and ``play`` are handed the rest of the
 command line untouched: each is its module's own ``main(argv)``, the one
 the deprecated ``operonx-<name>`` alias calls too, so there is one parser
 per command and the two spellings cannot differ.
@@ -31,7 +30,6 @@ __all__ = ["main", "TEMPLATES", "DELEGATED"]
 DELEGATED = {
     "run": ("operonx.cli.run", "run a job or runbook the application declares"),
     "serve": ("operonx.cli.serve", "serve the application's services"),
-    "pack": ("operonx.cli.pack", "serialise @graph factories to the Rust runtime's JSON spec"),
     "play": ("operonx.app.play", "the playground bridge: drive a service's doors over JSON lines"),
 }
 

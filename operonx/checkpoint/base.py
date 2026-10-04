@@ -25,7 +25,7 @@ Design invariants (see docs/design/STATE_LOOP_REFACTOR_PLAN.md §Phase 2):
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 __all__ = [
     "Checkpointer",
@@ -100,6 +100,9 @@ class StepEvent:
 class InterruptEvent:
     """An :class:`~operonx.InterruptOp` suspended and is awaiting resume.
 
+    Answer it with :meth:`resume`. A ``stream()`` consumer holds no handle,
+    so the event has to carry the way back to the run that asked.
+
     Attributes:
         step_id: step at which the suspension happened
         op: full name of the InterruptOp
@@ -113,6 +116,28 @@ class InterruptEvent:
     ctx: Tuple[str, ...]
     payload: Any
     interrupt_id: str
+    # The run's `resume_interrupt`. Not data: left out of equality and repr.
+    _resume: Optional[Callable[[str, Any], bool]] = field(default=None, repr=False, compare=False)
+
+    def resume(self, value: Any) -> bool:
+        """Answer the suspended op with ``value``; it returns ``{"response": value}``.
+
+        Returns True when the op was still waiting, False when it was not —
+        already answered, timed out, or its run is over. Worth checking: a
+        human who answered a stale prompt otherwise believes they decided
+        something that never ran.
+
+        Raises:
+            RuntimeError: the event is not attached to a run (it was
+                constructed by hand rather than received from one).
+        """
+        if self._resume is None:
+            raise RuntimeError(
+                f"InterruptEvent {self.interrupt_id!r} is not attached to a run: it "
+                f"was built by hand. Events from engine.stream() or "
+                f"bind_interrupt_bus() can be resumed."
+            )
+        return self._resume(self.interrupt_id, value)
 
 
 @dataclass(frozen=True)

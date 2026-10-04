@@ -134,5 +134,6 @@ frames downstream as they appear, which is what enables streaming
 (see [Streaming](streaming.md)).
 
 State within a graph is per-frame. When a generator op yields three
-values, downstream ops see three independent state slices, run in
-parallel by default.
+values, downstream ops see three independent state slices, one at a time
+in yield order by default; `.parallel()` on the consumer's input runs
+them at once.

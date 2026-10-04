@@ -30,10 +30,16 @@ llm = LLMOp.of(resource="gpt-4o", messages=PARENT["messages"], stream=True)
 With streaming on, `llm["content"]` is a stream of token chunks rather
 than a single string. Downstream ops see one frame per chunk.
 
-The **last** frame repeats the whole accumulated `content` rather than a
-tail, so joining every frame emits the answer twice. `final` separates
-them — join the `final=False` deltas, or read the one `final=True` frame,
-never both. The two always agree.
+`content` is always what a frame adds, so joining every frame's
+`content` gives the answer exactly once. The **last** frame has
+`final=True`, an empty `content`, and the whole answer as
+`full_content` (plus `finish_reason`, `usage`, `cost_usd`). The two
+always agree. A batch call's one frame has both `content` and
+`full_content` set to the answer.
+
+Up to 1.14 the last frame repeated the whole answer under `content`, so
+a consumer that forwarded every frame sent it twice; read
+`full_content` where you read that frame's `content`.
 
 ### Fallback while streaming
 

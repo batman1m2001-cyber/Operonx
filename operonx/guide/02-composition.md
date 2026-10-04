@@ -165,9 +165,15 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
 ```
 
 - `http(...)`: the JSON body is the one ingress item; the reply is the
-  egress item(s), sent when the run ends.
+  egress item(s), sent when the run ends, with the run's
+  `x-operonx-trace-id` header. A body that is not JSON is answered `400`
+  and starts no run; an empty body is the item `None`.
 - `websocket(path, port=...)` needs `max_inflight=N`: every frame is an
-  item, every egress item is sent at once.
+  item, every egress item is sent at once. Text frames are JSON, decoded
+  the same way as an HTTP body (bytes frames stay bytes); a frame that is
+  not JSON gets `{"error": ...}` back and never reaches the graph.
+- `codec="text"` on `http`, `websocket` or `webhook` passes text through
+  instead of decoding JSON. `codec="json"` is the default.
 - `webhook(path, port=...)`: for events nobody waits on (a new email, a
   Slack message). The POST is answered `202 {"accepted": true, "run_id": ...}`
   at once and the run goes on in the background, traced. `max_inflight=N`

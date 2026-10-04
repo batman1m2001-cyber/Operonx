@@ -2,9 +2,8 @@
 
 Visible graph node that suspends its own execution, emits an
 ``InterruptEvent`` to the caller via ``MemoryState._notify_interrupt``,
-and awaits a resume value posted by the caller via
-``state._interrupt_responses[interrupt_id] = value`` (typically arranged
-by an ``engine.stream()`` consumer's ``run.resume(value)`` call).
+and awaits the value the caller answers it with: ``event.resume(value)``
+(the same as ``state.resume_interrupt(event.interrupt_id, value)``).
 
 Chosen shape (see docs/design/STATE_LOOP_REFACTOR_PLAN.md §Rejected #10):
     - a **visible graph node**, not a hidden ``interrupt(...)`` callable
@@ -21,11 +20,14 @@ Example::
         do_it   = execute(plan=approve["response"])
         START >> call >> approve >> do_it >> END
 
-    # Caller side:
+    # Caller side — mode="updates" yields the event among the updates,
+    # mode="interrupts" yields only events:
     async for evt in engine.stream(inputs, mode="updates"):
         if isinstance(evt, InterruptEvent):
-            answer = ask_human(evt.payload)
-            run.resume(answer)
+            evt.resume(ask_human(evt.payload))
+
+    # Or on a started run: bind_interrupt_bus(handle.state, sink=...)
+    # hands the sink the same events.
 """
 
 import asyncio
@@ -58,10 +60,10 @@ class InterruptOp(BaseOp):
         - Also exposes ``timed_out`` (bool) and ``interrupt_id`` (str) outputs.
 
     Design note:
-        This op piggybacks on the state's interrupt bus. Full scheduler
-        integration (Phase 2b3) wires ``engine.stream()`` to auto-subscribe
-        a listener that hands out ``interrupt_id`` → ``asyncio.Future``
-        pairs and lets ``run.resume(value)`` resolve them.
+        This op piggybacks on the state's interrupt bus.
+        ``engine.stream(mode="updates" | "interrupts")`` subscribes to it
+        and yields each event; the event's ``resume(value)`` resolves the
+        future this op awaits.
     """
 
     type: OpType = "interrupt"

@@ -12,7 +12,7 @@ import traceback
 from collections import defaultdict
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Any, AsyncGenerator, Dict, NamedTuple, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, NamedTuple, Optional, Tuple
 
 from operonx.core.configs.edge_config import EdgeConfig, EdgeType
 from operonx.core.configs.op_config import OpType
@@ -66,7 +66,7 @@ class GraphOp(BaseOp):
                          → yields (ctx, outputs) per batch or per stream frame
                          → loop iteration handled inside scheduler EOF handler
 
-        4. EXPORT        serialize()  config dict for Rust backend
+        4. EXPORT        serialize()  the graph as a config dict
                          validate()   graph structure validation
                          show()       debug display
     """
@@ -298,9 +298,10 @@ class GraphOp(BaseOp):
         """
         # Phase 3: rewrite user-authored back-edges into hidden loop nodes
         # BEFORE building children (so the hidden loop children get built too).
-        from operonx.core.ops.graph.cycle_rewrite import rewrite_cycles_to_loops
+        from operonx.core.ops.graph.cycle_rewrite import check_loop_caps, rewrite_cycles_to_loops
 
         rewrite_cycles_to_loops(self)
+        check_loop_caps(self)
 
         for child in self._ops.values():
             if hasattr(child, "build"):
@@ -716,6 +717,43 @@ class GraphOp(BaseOp):
             if value is not None:
                 state._write_cell(idx, context_id, value)
 
+    def _failed_descendants(self, state: "MemoryState", context_id: tuple) -> List[str]:
+        """Full names of the ops under this graph that raised in this run.
+
+        Read from each op's ``error`` cell at ``context_id`` or a context
+        below it (a loop iteration, a stream item), so a second run of
+        the same graph — the next item of a stream — sees its own
+        failures. ``$errors`` keeps only the first failure of each op and
+        cannot answer that. Only called when every output is ``None``,
+        which a run that succeeded rarely produces, so the walk costs
+        nothing on the path that matters.
+        """
+        schema = state.schema
+        cells = state._cells
+        n = len(context_id)
+        failed: List[str] = []
+        stack = list(self._ops.values())
+        while stack:
+            child = stack.pop()
+            stack.extend(getattr(child, "_ops", {}).values())
+            idx = schema.get_index(child.full_name, "error")
+            if idx < 0:
+                continue
+            for ctx, err in cells[idx].items():
+                if err is not None and ctx[:n] == context_id:
+                    failed.append(child.full_name)
+                    break
+        return sorted(failed)
+
+    @staticmethod
+    def _subgraph_error(failed: List[str]) -> str:
+        """The ``$errors`` text of a subgraph whose ops raised."""
+        names = ", ".join(repr(name) for name in failed)
+        return (
+            f"SubgraphError: {names} raised, so this subgraph produced no output "
+            f"and the ops after it did not run. The error is under that name."
+        )
+
     def store_result(self, state: "MemoryState", result: Dict[str, Any], context_id: str) -> None:
         """Store the graph's outputs — except its declared cells.
 
@@ -776,8 +814,27 @@ class GraphOp(BaseOp):
                 # this is the batch equivalent.
                 _outputs = {}
             elif not stream_ctxs and not _has_generators:
-                self.store_result(state, _outputs, context_id)
-                yield context_id, _outputs
+                failed = (
+                    self._failed_descendants(state, context_id)
+                    if all(v is None for v in _outputs.values())
+                    else ()
+                )
+                if failed:
+                    # An op under this graph raised and nothing was written:
+                    # this run failed. Yielding the all-`None` outputs ran
+                    # the next op on them, where flat the failing op's
+                    # successor never runs — and a door answered `200 null`.
+                    # Not yielding is the flat rule; the streaming branch
+                    # below already skips all-`None` items.
+                    _outputs = {}
+                    if not getattr(self, "_synthetic", False):
+                        # A synthetic loop is not an op its author wrote;
+                        # the graph around it reports the failure.
+                        error_msg = self._subgraph_error(failed)
+                        state.record_op_error(self.full_name, error_msg)
+                else:
+                    self.store_result(state, _outputs, context_id)
+                    yield context_id, _outputs
             else:
                 for sctx in stream_ctxs:
                     item = self.get_outputs(state, context_id=sctx)
@@ -822,11 +879,13 @@ class GraphOp(BaseOp):
     # ═══════════════════════════════════════════════════════════════════
 
     def serialize(self) -> dict:
-        """Serialize full graph to config dict for the Rust backend.
+        """The whole graph as a config dict: ops, edges, entries and exits.
 
-        Note: the key ``"initial_ready_count"`` is kept as-is for Rust backend
-        compatibility even though the internal Python attribute was renamed to
-        ``_initial_ready`` during the scheduler rewrite.
+        A graph's canonical description; an eval's fingerprint hashes it.
+        It was written for the dropped Rust runtime, and some keys are
+        still that runtime's (``initial_ready_count``, ``compiled_adj``,
+        ``stream_initial_ready``): kept so the output, and every hash
+        taken of it, stays the same.
         """
         # Phase 3: synthetic hidden loops can't serialize as classic
         # loop_config because their termination is scheduler-side (back-edge

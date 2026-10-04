@@ -115,32 +115,32 @@ external claim cites its URL in §21. Nothing in either repo was modified.
 
 | System / idea | What it is (late 2026) | Take | Refuse |
 |---|---|---|---|
-| **OpenKB** (VectifyAI, Apache-2.0, v0.4.x) [1] | Compiles docs into a Markdown wiki of summaries, concept and entity pages with `[[wikilinks]]`, PageIndex for long PDFs, `add/watch/remove/lint/recompile`, query and chat with citations, skill export | *Compiled knowledge* as an **optional derived artifact** (wiki and skill export, phase 7). The CLI verbs. `lint` as KB health checks. | Markdown files as the store of record, which loses bbox and span provenance. LiteLLM; we have operonx providers. |
-| **PageIndex** (vectorless tree RAG) [2][3] | An LLM builds a ToC tree (title, page range, summary) and does reasoning-based tree search; vendor-reported 98.7% on FinanceBench | A **tree index derived from our element tree**, with an LLM summary per node; tree search as a bounded beam loop (§9.5). | Treating vectorless as a replacement. It is one retriever among several, chosen by a router and measured against hybrid on our data. Vendor numbers are not evidence for our corpus. |
-| **Docling** (MIT code; weights Apache/CDLA/MIT; Linux Foundation AAIF 2026; Granite-Docling-258M VLM) [4][5][6][7] | `DoclingDocument`: texts, tables, pictures and kv items; body vs furniture trees; JSON-pointer parent/children; provenance (page, bbox, charspan); `HybridChunker` (tokenizer-aware, heading-contextualized, merges peers) | **Primary high-quality parser.** Our Element model mirrors its shape (body/furniture, groups, prov with bbox and charspan), so the adapter is thin. The structural chunker borrows HybridChunker's algorithm. | Making `DoclingDocument` our core type. Parser-specific types stay at the adapter edge so MinerU, Marker, VLMs and cloud parsers fit the same model. |
-| **MinerU 2.5 / 2.5-Pro** [8][9] | Top OmniDocBench scores (90.67; Pro 95.69 on v1.6). License: custom Apache-based code with revenue and MAU thresholds; some VLM weights AGPL-3.0 | Opt-in `parser:mineru` adapter for hard layouts and scans. | A default or core dependency, because of the license (§13.3). |
-| **Marker 2 / Chandra 2** (Datalab) [10][9] | Code moved to Apache-2.0 (2026-07); Surya weights under modified OpenRAIL-M with $5M thresholds; JSON with bboxes | Opt-in adapter. | A default (weights license). |
-| **Unstructured** [11] | Typed elements, `parent_id` hierarchy, deterministic element ids (hash of text, position, page, file), `chunk_by_title` | **Deterministic content-derived ids** (§6). Element-type vocabulary. | Its SDK as a dependency. A cloud-API adapter is fine later. |
-| **LlamaParse v2** [12] | Tiers (fast/cost-effective/agentic/agentic-plus), **dated, pinned parser versions**, layout extraction add-on | **Pin parser versions into the fingerprint** (§6.3), so a parser upgrade is a visible reindex and never silent drift. A cloud adapter later. | |
-| **Evidence Units** (arXiv 2604.00500) [13] | Grouping figures and tables with their context text makes retrieval parser-independent; Recall@1 0.15→0.51 on OmniDocBench | The structural chunker **attaches captions and referring paragraphs to tables and figures** ("evidence unit" chunks). | |
-| **Contextual Retrieval** (Anthropic) [14] | Prepend a 50-100-token LLM context to each chunk before embedding and BM25. Failure rate -35% (embeddings), -49% (+BM25), -67% (+rerank); about $1.02/M doc tokens with caching | A `contextual` enricher (phase 4), **section-scoped by default** so incremental updates stay cheap (§11.4). It feeds both dense and BM25. | Making it a default before it beats the baseline on our eval set. |
-| **Late chunking** (Jina, arXiv 2409.04701) [15] | Embed the whole document's tokens and mean-pool per chunk span; +2.7-3.6% nDCG@10 on BEIR, no LLM cost | A `LateChunkingEmbedder` for local HF/ONNX models that expose token embeddings (`embeddings/config.py` documents `output_name` for BGE-M3 token embeddings). Later. | |
-| **Hybrid BM25 + dense + RRF + rerank** [16][17] | Standard. Qdrant Query API fuses server-side (RRF and DBSF) and supports sparse and ColBERT multivectors in one collection | **The default retrieval mode.** RRF is a pure op (score-scale free). Qdrant server-side fusion is an optimization behind the same contract. | Linear score blending as the default; the scales differ. |
-| **RAPTOR** (arXiv 2401.18059) [18] | Recursive cluster-and-summarize tree; collapsed-tree retrieval | Summary nodes are just **Chunks with `level>0` and children**, so collapsed-tree retrieval is plain dense search with no new index. Later. | |
-| **GraphRAG / LazyGraphRAG** (Microsoft) [19][20] | Full GraphRAG has costly LLM indexing plus community reports, and 1.0 added an `update` delta. LazyGraphRAG builds a noun-phrase co-occurrence graph (indexing cost about vector RAG, 0.1% of GraphRAG) and defers LLM work to query time | **The lazy (no-LLM) concept graph as the first graph build**, because it is incremental and cheap. The LLM entity graph is opt-in. | Index-time community summarization as a default (cost, and non-incremental). |
-| **LightRAG** [21] | Entity and relation extraction; dual-level (low/high keyword) retrieval; incremental union of graphs | Dual-level query keywords via `LLMOp(fields=)`. Incremental graph merges keyed by normalized entity. | Its storage abstraction (we have the catalog). |
-| **HippoRAG 2** (ICML 2025) [22] | Personalized PageRank over a passage-entity graph; +7% associative memory | **PPR over the entity-chunk bipartite graph** as the graph retriever's scorer. | |
-| **ColPali / ColQwen, ViDoRe v3** [23][24][25] | Page images as multivector late interaction. ViDoRe v3: visual beats text retrievers at equal size, text rerankers help much more (+13.2 vs +0.2 NDCG@10), **hybrid text+image is best end-to-end** | A page-image index (phase 5) fused with text via RRF, with a text reranker on top. | Vision-only retrieval as the default. |
-| **MUVERA** [26] | Fixed-dimensional encodings reduce multivector search to single-vector MIPS | An FDE prefetch option, so pgvector users get page retrieval without Qdrant. Later. | |
-| **LlamaIndex IngestionPipeline** [27] | A docstore of `doc_id → hash`, with UPSERTS / DUPLICATES_ONLY / UPSERTS_AND_DELETE strategies and a node+transformation cache | Per-transformation content caches; delete-on-missing for "full sync" sources. | |
-| **LangChain indexing API** [28] | A RecordManager with cleanup modes `None/incremental/full/scoped_full` keyed by source id and hash | `SyncMode` on connectors with these exact semantics (§11.5). | |
-| **Haystack 2** [29] | DocumentWriter with `DuplicatePolicy` NONE/OVERWRITE/SKIP/FAIL | Explicit duplicate policy on `add()`. | |
-| **pgvector 0.8 / ParadeDB** [30] | Iterative index scans for filtered HNSW, `halfvec`, `sparsevec`; BM25 in Postgres via ParadeDB | pgvector with `hnsw.iterative_scan` on for filtered search; `halfvec` for dimensions above 2000. ParadeDB as a lexical backend later. | |
-| **LanceDB** [31] | Lance format, versioned tables, FTS, multivector, hybrid with RRF | A later embedded backend for dense, lexical and multivector in one local file. | |
-| **ClickHouse vector** [32] | HNSW (usearch) vector similarity index, 25.8+ | Later candidate for very large or analytical corpora; the team already runs ClickHouse. | Being first: no transactional join with the catalog. |
-| **Anthropic Citations** [33] | `char_location`, `page_location`, `content_block_location` and `search_result_location` citations; the cited text equals the referenced blocks | Our `Citation` shape is a superset (spans, pages, bboxes) so native citations map in once U3 lands. | |
-| **Chroma chunking eval** [34] | Token-level recall, precision and IoU against relevant excerpts | **Span-based eval labels** (§15.3) that are independent of the chunker. | |
-| **RAG eval practice** [35] | Recall@k for first stage; nDCG/MRR for rerank; synthetic fact→question generation with adversarial distractors; error analysis on traces first | The metrics set and the synthetic generator (§15.3). | Reference-free LLM metrics as the only gate. |
+| **OpenKB** (VectifyAI, Apache-2.0, v0.4.x) \[1\] | Compiles docs into a Markdown wiki of summaries, concept and entity pages with `[[wikilinks]]`, PageIndex for long PDFs, `add/watch/remove/lint/recompile`, query and chat with citations, skill export | *Compiled knowledge* as an **optional derived artifact** (wiki and skill export, phase 7). The CLI verbs. `lint` as KB health checks. | Markdown files as the store of record, which loses bbox and span provenance. LiteLLM; we have operonx providers. |
+| **PageIndex** (vectorless tree RAG) \[2\]\[3\] | An LLM builds a ToC tree (title, page range, summary) and does reasoning-based tree search; vendor-reported 98.7% on FinanceBench | A **tree index derived from our element tree**, with an LLM summary per node; tree search as a bounded beam loop (§9.5). | Treating vectorless as a replacement. It is one retriever among several, chosen by a router and measured against hybrid on our data. Vendor numbers are not evidence for our corpus. |
+| **Docling** (MIT code; weights Apache/CDLA/MIT; Linux Foundation AAIF 2026; Granite-Docling-258M VLM) \[4\]\[5\]\[6\]\[7\] | `DoclingDocument`: texts, tables, pictures and kv items; body vs furniture trees; JSON-pointer parent/children; provenance (page, bbox, charspan); `HybridChunker` (tokenizer-aware, heading-contextualized, merges peers) | **Primary high-quality parser.** Our Element model mirrors its shape (body/furniture, groups, prov with bbox and charspan), so the adapter is thin. The structural chunker borrows HybridChunker's algorithm. | Making `DoclingDocument` our core type. Parser-specific types stay at the adapter edge so MinerU, Marker, VLMs and cloud parsers fit the same model. |
+| **MinerU 2.5 / 2.5-Pro** \[8\]\[9\] | Top OmniDocBench scores (90.67; Pro 95.69 on v1.6). License: custom Apache-based code with revenue and MAU thresholds; some VLM weights AGPL-3.0 | Opt-in `parser:mineru` adapter for hard layouts and scans. | A default or core dependency, because of the license (§13.3). |
+| **Marker 2 / Chandra 2** (Datalab) \[10\]\[9\] | Code moved to Apache-2.0 (2026-07); Surya weights under modified OpenRAIL-M with $5M thresholds; JSON with bboxes | Opt-in adapter. | A default (weights license). |
+| **Unstructured** \[11\] | Typed elements, `parent_id` hierarchy, deterministic element ids (hash of text, position, page, file), `chunk_by_title` | **Deterministic content-derived ids** (§6). Element-type vocabulary. | Its SDK as a dependency. A cloud-API adapter is fine later. |
+| **LlamaParse v2** \[12\] | Tiers (fast/cost-effective/agentic/agentic-plus), **dated, pinned parser versions**, layout extraction add-on | **Pin parser versions into the fingerprint** (§6.3), so a parser upgrade is a visible reindex and never silent drift. A cloud adapter later. | |
+| **Evidence Units** (arXiv 2604.00500) \[13\] | Grouping figures and tables with their context text makes retrieval parser-independent; Recall@1 0.15→0.51 on OmniDocBench | The structural chunker **attaches captions and referring paragraphs to tables and figures** ("evidence unit" chunks). | |
+| **Contextual Retrieval** (Anthropic) \[14\] | Prepend a 50-100-token LLM context to each chunk before embedding and BM25. Failure rate -35% (embeddings), -49% (+BM25), -67% (+rerank); about $1.02/M doc tokens with caching | A `contextual` enricher (phase 4), **section-scoped by default** so incremental updates stay cheap (§11.4). It feeds both dense and BM25. | Making it a default before it beats the baseline on our eval set. |
+| **Late chunking** (Jina, arXiv 2409.04701) \[15\] | Embed the whole document's tokens and mean-pool per chunk span; +2.7-3.6% nDCG@10 on BEIR, no LLM cost | A `LateChunkingEmbedder` for local HF/ONNX models that expose token embeddings (`embeddings/config.py` documents `output_name` for BGE-M3 token embeddings). Later. | |
+| **Hybrid BM25 + dense + RRF + rerank** \[16\]\[17\] | Standard. Qdrant Query API fuses server-side (RRF and DBSF) and supports sparse and ColBERT multivectors in one collection | **The default retrieval mode.** RRF is a pure op (score-scale free). Qdrant server-side fusion is an optimization behind the same contract. | Linear score blending as the default; the scales differ. |
+| **RAPTOR** (arXiv 2401.18059) \[18\] | Recursive cluster-and-summarize tree; collapsed-tree retrieval | Summary nodes are just **Chunks with `level>0` and children**, so collapsed-tree retrieval is plain dense search with no new index. Later. | |
+| **GraphRAG / LazyGraphRAG** (Microsoft) \[19\]\[20\] | Full GraphRAG has costly LLM indexing plus community reports, and 1.0 added an `update` delta. LazyGraphRAG builds a noun-phrase co-occurrence graph (indexing cost about vector RAG, 0.1% of GraphRAG) and defers LLM work to query time | **The lazy (no-LLM) concept graph as the first graph build**, because it is incremental and cheap. The LLM entity graph is opt-in. | Index-time community summarization as a default (cost, and non-incremental). |
+| **LightRAG** \[21\] | Entity and relation extraction; dual-level (low/high keyword) retrieval; incremental union of graphs | Dual-level query keywords via `LLMOp(fields=)`. Incremental graph merges keyed by normalized entity. | Its storage abstraction (we have the catalog). |
+| **HippoRAG 2** (ICML 2025) \[22\] | Personalized PageRank over a passage-entity graph; +7% associative memory | **PPR over the entity-chunk bipartite graph** as the graph retriever's scorer. | |
+| **ColPali / ColQwen, ViDoRe v3** \[23\]\[24\]\[25\] | Page images as multivector late interaction. ViDoRe v3: visual beats text retrievers at equal size, text rerankers help much more (+13.2 vs +0.2 NDCG@10), **hybrid text+image is best end-to-end** | A page-image index (phase 5) fused with text via RRF, with a text reranker on top. | Vision-only retrieval as the default. |
+| **MUVERA** \[26\] | Fixed-dimensional encodings reduce multivector search to single-vector MIPS | An FDE prefetch option, so pgvector users get page retrieval without Qdrant. Later. | |
+| **LlamaIndex IngestionPipeline** \[27\] | A docstore of `doc_id → hash`, with UPSERTS / DUPLICATES_ONLY / UPSERTS_AND_DELETE strategies and a node+transformation cache | Per-transformation content caches; delete-on-missing for "full sync" sources. | |
+| **LangChain indexing API** \[28\] | A RecordManager with cleanup modes `None/incremental/full/scoped_full` keyed by source id and hash | `SyncMode` on connectors with these exact semantics (§11.5). | |
+| **Haystack 2** \[29\] | DocumentWriter with `DuplicatePolicy` NONE/OVERWRITE/SKIP/FAIL | Explicit duplicate policy on `add()`. | |
+| **pgvector 0.8 / ParadeDB** \[30\] | Iterative index scans for filtered HNSW, `halfvec`, `sparsevec`; BM25 in Postgres via ParadeDB | pgvector with `hnsw.iterative_scan` on for filtered search; `halfvec` for dimensions above 2000. ParadeDB as a lexical backend later. | |
+| **LanceDB** \[31\] | Lance format, versioned tables, FTS, multivector, hybrid with RRF | A later embedded backend for dense, lexical and multivector in one local file. | |
+| **ClickHouse vector** \[32\] | HNSW (usearch) vector similarity index, 25.8+ | Later candidate for very large or analytical corpora; the team already runs ClickHouse. | Being first: no transactional join with the catalog. |
+| **Anthropic Citations** \[33\] | `char_location`, `page_location`, `content_block_location` and `search_result_location` citations; the cited text equals the referenced blocks | Our `Citation` shape is a superset (spans, pages, bboxes) so native citations map in once U3 lands. | |
+| **Chroma chunking eval** \[34\] | Token-level recall, precision and IoU against relevant excerpts | **Span-based eval labels** (§15.3) that are independent of the chunker. | |
+| **RAG eval practice** \[35\] | Recall@k for first stage; nDCG/MRR for rerank; synthetic fact→question generation with adversarial distractors; error analysis on traces first | The metrics set and the synthetic generator (§15.3). | Reference-free LLM metrics as the only gate. |
 
 ---
 
@@ -360,7 +360,7 @@ class Answer(BaseModel):
 
 ### 6.2 IDs
 
-- These are deterministic and content-derived, as in Unstructured's element ids [11]. Re-running ingestion is
+- These are deterministic and content-derived, as in Unstructured's element ids \[11\]. Re-running ingestion is
   idempotent by construction.
 - They are 128-bit truncated hex with a typed prefix (`doc_`, `ver_`, `el_`, `ch_`, `ent_`) for readability in
   traces and Studio.
@@ -375,7 +375,7 @@ config incl. `model`, `dimensions`, `output_name`), embed-text template, analyze
 - A changed `pipeline_fp` means new versions on next sync. `operonx-kb plan` shows how many docs would reparse.
 - A changed `IndexSpec.fp` means a new **index generation**, built beside the old one and switched after an
   eval gate (§11.6).
-- Remote parsers pin a dated version (the LlamaParse-style pin [12]), which goes into the fingerprint.
+- Remote parsers pin a dated version (the LlamaParse-style pin \[12\]), which goes into the fingerprint.
 
 ---
 
@@ -434,8 +434,8 @@ Built-ins:
 - `structural`: the default. HybridChunker-like: walk sections, keep a tokenizer budget, split oversize
   elements at sentence boundaries, merge undersized same-heading peers, and keep tables whole or split by row
   groups with the header repeated.
-- `evidence_unit`: figure or table plus caption plus referring paragraphs [13].
-- `recursive`: a character or token splitter, as a baseline (Chroma showed it is strong when tuned [34]).
+- `evidence_unit`: figure or table plus caption plus referring paragraphs \[13\].
+- `recursive`: a character or token splitter, as a baseline (Chroma showed it is strong when tuned \[34\]).
 - `page`: one chunk per page (visual and tree hybrids).
 - `sentence_window`: small chunks whose hydration expands to neighbors.
 
@@ -682,9 +682,9 @@ Backends:
 
 ### 9.4 Hybrid, fusion and rerank
 
-- RRF with `k=60` is the default (rank-based, no score calibration [16][17]). DBSF is optional.
+- RRF with `k=60` is the default (rank-based, no score calibration \[16\]\[17\]). DBSF is optional.
 - Rerank with a cross-encoder through `RerankOp`. The ViDoRe v3 finding that text rerankers add far more than
-  visual ones [25] is one more reason the reranker always runs on **text**, including for page hits (via the
+  visual ones \[25\] is one more reason the reranker always runs on **text**, including for page hits (via the
   page's text).
 - Qdrant server-side fusion (prefetch dense and sparse, then fuse) is an *optimization* the `hybrid_retriever`
   factory can choose when both indexes are the same Qdrant collection. The output contract is identical.
@@ -693,7 +693,7 @@ Backends:
 
 **Index.** The section tree comes from headings (Element `level`). Where a document has no usable headings
 (scans, slides), we **synthesize** structure with an LLM ToC pass over page-level text (the PageIndex approach
-[3]). Each node holds `{node_id, title, level, page_range, span, summary}`, and summaries are generated
+\[3\]). Each node holds `{node_id, title, level, page_range, span, summary}`, and summaries are generated
 bottom-up by the `section_summary` enricher (cached by `input_sha`). Doc-level summaries also go into a small
 dense sub-index for **document selection**.
 
@@ -726,15 +726,15 @@ because its cost is unbounded.
 
 **Build.** Default `entities_lazy`: noun-phrase or keyword extraction (language-aware, and for Vietnamese
 segmenter n-grams), then co-occurrence edges within chunks and sections. No LLM, so it is incremental by
-construction, in the spirit of LazyGraphRAG [20]. Opt-in `entities_llm` extracts typed entities and relations
-with descriptions (LightRAG-style [21]). Entity resolution: normalized name plus embedding similarity above a
+construction, in the spirit of LazyGraphRAG \[20\]. Opt-in `entities_llm` extracts typed entities and relations
+with descriptions (LightRAG-style \[21\]). Entity resolution: normalized name plus embedding similarity above a
 threshold. Every relation stores `evidence_chunk_ids`.
 
 **Query.**
-1. `LLMOp(fields=["entities: list", "themes: list"])` extracts low- and high-level keywords [21].
+1. `LLMOp(fields=["entities: list", "themes: list"])` extracts low- and high-level keywords \[21\].
 2. Match seed entities via an entity-name dense index.
 3. **Personalized PageRank** over the entity-chunk bipartite graph, seeded by the matched entities (HippoRAG 2
-   [22]), using `scipy.sparse` power iteration on a cached CSR adjacency per collection generation.
+   \[22\]), using `scipy.sparse` power iteration on a cached CSR adjacency per collection generation.
 4. Chunks ranked by PPR mass become Hits. Relation descriptions can be added to the context as "graph facts",
    each citing its evidence chunks.
 
@@ -744,10 +744,10 @@ GraphRAG global community reports: **avoid** by default (§17).
 
 - `render_pages` (PNG at 144 dpi).
 - `PageEmbedder` (ColQwen-family) produces multivector page embeddings into `MultiVectorIndex` (Qdrant
-  multivector MaxSim first; LanceDB later; MUVERA FDE [26] single-vector prefetch for pgvector users).
+  multivector MaxSim first; LanceDB later; MUVERA FDE \[26\] single-vector prefetch for pgvector users).
 - A page hit becomes `Hit(kind="page")`. The catalog maps the page to its elements, so the reranker and the
   synthesizer get the page's text, and citations can cite the page bbox or narrow to elements.
-- Fused with text retrievers by RRF, since hybrid is best end-to-end on ViDoRe v3 [25].
+- Fused with text retrievers by RRF, since hybrid is best end-to-end on ViDoRe v3 \[25\].
 - For figure-heavy answers, `build_context` can attach page images to the answer call, because vision input
   is already supported through `LLMOp` (`llms/base.py:374`).
 
@@ -779,7 +779,7 @@ The default is `hybrid`. The router's decision is a traced output, so its errors
      dropped.
 4. **Resolve.** span → `VersionChunk` → elements → `Region`s (page, bbox), so a click in Studio highlights the
    exact box on the page image.
-5. **Native citations** (Anthropic `search_result` / `char_location` [33]) are a later *alternative path*,
+5. **Native citations** (Anthropic `search_result` / `char_location` \[33\]) are a later *alternative path*,
    once operonx carries `citations` through `LLMOp` (U3; today they are dropped at
    `providers/llms/anthropic.py:232-235`). Mapping them in is direct: a search-result block is one source
    chunk, and a block index is a sentence or element.
@@ -834,7 +834,7 @@ whole document. Document scope is available, and cost-estimated by `operonx-kb p
 
 ### 11.5 Sources and deletes
 
-`SyncMode` follows LangChain's record-manager semantics [28]:
+`SyncMode` follows LangChain's record-manager semantics \[28\]:
 - `none`: add and update only.
 - `incremental`: delete documents of seen sources that vanished from the listing.
 - `full`: delete everything not seen this run.
@@ -976,7 +976,7 @@ operonx-kb/                               (sibling of Operon; own git; github.co
 |---|---|---|
 | (core) | `operonx>=1.14`, `pydantic`, `numpy`, `tiktoken`, `pypdfium2` (Apache/BSD), `selectolax`, `regex` | Library-first: text, HTML, Markdown and PDF text layer; SQLite, FAISS-less brute force for tiny sets |
 | `office` | `python-docx`, `python-pptx`, `openpyxl` | Office formats |
-| `docling` | `docling` (MIT; permissive weights [7]) | ML layout and tables, about 1 GB of models |
+| `docling` | `docling` (MIT; permissive weights \[7\]) | ML layout and tables, about 1 GB of models |
 | `faiss` / `pgvector` / `qdrant` | via `operonx[faiss]` / `operonx[pgvector]` / `operonx[qdrant]` | Reuse operonx extras |
 | `postgres` | `psycopg[binary]`, `psycopg-pool` | Catalog |
 | `vi` | `pyvi` or `underthesea` | Vietnamese analyzer |
@@ -989,10 +989,10 @@ operonx-kb/                               (sibling of Operon; own git; github.co
 
 ### 13.3 License policy
 
-Defaults stay MIT/Apache/BSD. MinerU (revenue and MAU thresholds, AGPL VLM weights [9]) and Marker (OpenRAIL-M
-weights with $5M thresholds [9]) are installable only through their extras. The adapters log a one-time
+Defaults stay MIT/Apache/BSD. MinerU (revenue and MAU thresholds, AGPL VLM weights \[9\]) and Marker (OpenRAIL-M
+weights with $5M thresholds \[9\]) are installable only through their extras. The adapters log a one-time
 license notice, and `operonx-kb doctor` lists the licenses of installed parsers. These license facts come from
-a 2026 comparison post [9] and **must be re-verified against upstream LICENSE files at adoption time**.
+a 2026 comparison post \[9\] and **must be re-verified against upstream LICENSE files at adoption time**.
 
 ---
 
@@ -1111,12 +1111,12 @@ No network in unit or graph tests.
 
 **Labels are quote- or span-anchored, not chunk ids.** At eval time a quote is resolved to the span in the
 current active version. Chunker and parser changes therefore don't invalidate the set, and token-level IoU
-works [34].
+works \[34\].
 
 **Metrics** (as operonx evaluators returning `{passed, score, reason}`, `app/evals.py:24-31`):
 - First stage: Recall@k (k = 5, 10, 20).
 - After rerank: MRR and nDCG@10.
-- Token-level precision, recall and IoU [34].
+- Token-level precision, recall and IoU \[34\].
 - Answer: correctness via `llm_judge` (`app/evals.py:276`), **citation precision** (verified/total) and
   **citation recall** (gold quotes covered).
 - Unsupported-sentence rate.
@@ -1124,10 +1124,10 @@ works [34].
 
 **Sources of cases:**
 1. Small redistributable public subsets: BEIR SciFact or FiQA (dense, hybrid), a FinanceBench sample (tree),
-   ViDoRe v3 public tasks (visual) [24][25], MuSiQue or 2Wiki (graph, multi-hop).
+   ViDoRe v3 public tasks (visual) \[24\]\[25\], MuSiQue or 2Wiki (graph, multi-hop).
 2. A **Vietnamese internal set** from the team's own documents.
 3. **Synthetic generation** (`operonx-kb eval synth`): sample spans, have the LLM write a question answerable
-   only from that span, plus adversarial near-miss questions [35]. Human spot-check before admission.
+   only from that span, plus adversarial near-miss questions \[35\]. Human spot-check before admission.
 4. **Production promotion**: Studio's existing review → dataset flow (`/api/p/{pid}/review/run/{run}/dataset`,
    studio `app.py:2471`) turns real queries plus a reviewer's relevance marks into cases.
 
@@ -1243,14 +1243,14 @@ width after every change.
 - **An open portable filter DSL.** Use the closed `KBFilter` with conformance tests, and AND native filters
   onto it.
 - **Re-index-the-document as the update strategy**; whole-document-scoped contextual enrichment as the default.
-- **GraphRAG index-time community summarization** as a default (cost, non-incremental [19][20]).
+- **GraphRAG index-time community summarization** as a default (cost, non-incremental \[19\]\[20\]).
 - **Neo4j or any graph DB dependency** before catalog tables plus scipy are proven insufficient by a
   benchmark.
 - **`DoclingDocument` (or any parser type) as the core model**; parser types stay at adapter edges.
-- **Non-permissive parsers or weights in defaults** (MinerU, Marker) [9].
+- **Non-permissive parsers or weights in defaults** (MinerU, Marker) \[9\].
 - **Building our own OCR, layout or embedding models**; fine-tuning embedders inside the package.
 - **Pickle-based caches**; the operonx op cache for embeddings; operonx `checkpoint` as durable ingest state.
-- **Vision-only or vectorless-only defaults** without eval evidence [25].
+- **Vision-only or vectorless-only defaults** without eval evidence \[25\].
 - **Studio importing the KB package**; the HTTP contract only.
 - **`print()`**: use operonx `LOGGER`.
 - Rust (operonx-rs is dropped).

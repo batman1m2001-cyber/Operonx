@@ -1,19 +1,15 @@
-"""Parametrized driver for shared spec fixtures.
+"""Parametrized driver for the spec fixtures (see ``README.md``).
 
 Each fixture folder under `tests/spec/<area>/<name>/` contains:
 
-- ``graph.json``   — Rust reads this; Python diff-asserts against it
+- ``builder.py``   — ``build_graph() -> GraphOp``; it makes the folder a fixture
 - ``inputs.json``  — inputs passed to the engine
 - ``expected.json``— expected outputs (timing keys stripped before compare)
-- ``builder.py``   — ``build_graph() -> GraphOp`` — Python-side constructor
 - ``scratch.json`` — optional; values seeded into ``engine.run(scratch=...)``
 
-The driver discovers every fixture by globbing for ``graph.json``, imports
-the adjacent ``builder.py`` via ``importlib``, builds the ``GraphOp``,
-runs it through ``Operon``, and compares outputs.
-
-A fixture without a ``builder.py`` is skipped with a clear message — useful
-for Rust-only fixtures still awaiting a Python port.
+The driver discovers every fixture by globbing for ``builder.py``, imports
+it via ``importlib``, builds the ``GraphOp``, runs it through ``Operon``,
+and compares outputs.
 """
 
 from __future__ import annotations
@@ -45,8 +41,8 @@ def _fixture_id(fx: Path) -> str:
 
 
 def _iter_fixtures():
-    for graph_path in SPEC_ROOT.rglob("graph.json"):
-        fx = graph_path.parent
+    for builder_path in sorted(SPEC_ROOT.rglob("builder.py")):
+        fx = builder_path.parent
         reason = KNOWN_OP_FAILURES.get(_fixture_id(fx))
         if reason is None:
             yield fx
@@ -64,8 +60,6 @@ def _strip_timing(obj: Any) -> Any:
 
 def _load_builder(fx: Path):
     builder_path = fx / "builder.py"
-    if not builder_path.exists():
-        return None
     spec = importlib.util.spec_from_file_location(f"spec_builder_{fx.name}", builder_path)
     module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(module)  # type: ignore[union-attr]
@@ -75,8 +69,6 @@ def _load_builder(fx: Path):
 @pytest.mark.parametrize("fx", list(_iter_fixtures()), ids=_fixture_id)
 async def test_fixture(fx: Path):
     builder = _load_builder(fx)
-    if builder is None:
-        pytest.skip(f"{fx.name}: no builder.py (Rust-only fixture)")
 
     inputs: Dict[str, Any] = json.loads((fx / "inputs.json").read_text())
     expected: Any = json.loads((fx / "expected.json").read_text())
@@ -90,8 +82,8 @@ async def test_fixture(fx: Path):
     result = await engine.run(inputs=inputs, scratch=scratch)
 
     # A golden that matches a run in which an op raised describes the
-    # failure, not the graph. The goldens are shared with the Rust runtime
-    # and hold outputs only, so the check is here rather than in them.
+    # failure, not the graph. The goldens hold outputs only, so the check
+    # is here rather than in them.
     errors = result.get("$errors") or {}
     assert not errors, f"fixture '{_fixture_id(fx)}': an op raised:\n" + "\n".join(
         f"  {op_name}: {text.strip().splitlines()[-1]}" for op_name, text in errors.items()

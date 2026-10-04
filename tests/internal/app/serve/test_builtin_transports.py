@@ -106,7 +106,7 @@ def test_websocket_connection_is_one_long_lived_run():
     with TestClient(app) as client:
         with client.websocket_connect("/ws") as ws:
             for word in ("a", "b", "c"):
-                ws.send_text(word)
+                ws.send_json(word)  # a text frame is JSON, as an HTTP body is
             assert [ws.receive_text() for _ in range(3)] == ["A", "B", "C"]
 
 

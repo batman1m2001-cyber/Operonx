@@ -345,6 +345,51 @@ def rewrite_cycles_to_loops(graph: "GraphOp") -> bool:
     return bool(audit)
 
 
+def loop_cap(graph: "GraphOp", back_edges: List[Tuple[str, str]]) -> int:
+    """The iteration cap of the loop that ``back_edges`` close.
+
+    Set by ``if_(..., max_iterations=N)`` on the branch whose arm loops
+    back; the default when none does. Two branches closing the same loop
+    with different caps are refused rather than one silently winning.
+    """
+    from operonx.core.ops.graph.task_scheduler import LoopConfig
+
+    caps = {}
+    for u, _v in back_edges:
+        cap = getattr(graph._ops.get(u), "max_iterations", None)
+        if cap is not None:
+            caps[u] = cap
+    if len(set(caps.values())) > 1:
+        raise ValueError(
+            f"Graph '{graph.name}': one loop has two caps, {caps}. Each of these "
+            f"branches loops back into the same loop; set max_iterations on one of them."
+        )
+    return next(iter(caps.values()), LoopConfig.max_iterations)
+
+
+def check_loop_caps(graph: "GraphOp") -> None:
+    """Refuse ``max_iterations`` on a branch that closes no loop.
+
+    Run on every graph after the rewrite. A branch that closes a loop has
+    been moved into the loop it closes, as one of its back-edge sources;
+    a branch still carrying a cap anywhere else caps nothing, and a cap
+    that silently does nothing is the failure this setting exists to end.
+    """
+    closing = set()
+    if getattr(graph, "_synthetic", False):
+        closing = {u for u, _v in graph._back_edges}
+    for name, child in graph._ops.items():
+        if getattr(child, "type", None) != "branch" or name in closing:
+            continue
+        if getattr(child, "max_iterations", None) is not None:
+            raise ValueError(
+                f"Graph '{graph.name}': branch '{name}' sets max_iterations="
+                f"{child.max_iterations} but closes no loop: none of its arms routes "
+                f"back to an op before it, so there is nothing to cap. Remove "
+                f"max_iterations, or set it on the branch whose arm loops back."
+            )
+
+
 def _fresh_loop_name(graph: "GraphOp", idx: int) -> str:
     """Pick a unique hidden-loop op name inside ``graph._ops``."""
     base = f"__loop_{idx}__"
@@ -404,7 +449,7 @@ def _synthesize_loop(
     hidden._exit_edges = [(u, dst) for (u, dst) in exits if dst != "__END__"]
     from operonx.core.ops.graph.task_scheduler import LoopConfig
 
-    hidden._loop_config = LoopConfig(max_iterations=1000)
+    hidden._loop_config = LoopConfig(max_iterations=loop_cap(outer, scc_back_edges))
 
     # --- Move SCC ops into hidden ------------------------------------------------
     # Iterate over scc_seq (list) not scc (set) so hidden._ops insertion is

@@ -9,9 +9,7 @@ Operonx is a high-performance workflow engine that runs anything as a workflow �
 
 ## Repository Structure
 
-Single Python package. The Rust execution backend lives in a sibling repo,
-[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs); this repo
-is Python-only.
+Single Python package; the Python scheduler is the only runtime.
 
 ```
 Operonx/
@@ -39,7 +37,7 @@ Operonx/
 ├── examples/python/               # Runnable examples (ex01..ex18)
 ├── tests/
 │   ├── internal/                  # Backend-specific unit tests
-│   └── spec/                      # JSON-fixture tests (mirrored in operonx-rs)
+│   └── spec/                      # Golden-output fixture tests (builder.py + expected.json)
 ├── docs/                          # mkdocs site
 ├── pyproject.toml                 # Python package definition
 ├── mkdocs.yml                     # Material theme + mkdocstrings
@@ -103,10 +101,6 @@ operonx.providers         (depends on operonx.core)
 operonx.telemetry         (depends on operonx.core)
 ```
 
-Rust runtime code lives in the sibling repo
-[operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) and is not
-touched from this repo.
-
 ## When to Modify Which Area
 
 | Task | Location |
@@ -116,7 +110,6 @@ touched from this repo.
 | New tracing consumer | [operonx/telemetry/consumers/](operonx/telemetry/consumers/) |
 | Agents, tools, MCP | [operonx/agents/](operonx/agents/) — read its `CONTRIBUTING.md` first |
 | Jobs, services, `operonx.toml`, serving | [operonx/app/](operonx/app/) (`operonx[serve]` for HTTP/websocket doors) |
-| Rust runtime work | [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) (separate repo) |
 | Documentation | [docs/](docs/) — guide + architecture + api |
 | Examples | [examples/python/](examples/python/) |
 | Usage guide (every snippet runs in `tests/guide/`) | [operonx/guide/](operonx/guide/) |
