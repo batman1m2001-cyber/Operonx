@@ -1,9 +1,80 @@
 # Migrating operonx
 
+- [`operonx.agents` → `operonx-agents`](#migrating-from-operonxagents-to-operonx-agents) —
+  `operonx.agents` is deprecated; it warns on import and is removed one
+  release after operonx-agents 1.0
 - [To 1.2.0](#migrating-to-operonx-120) — `OnnxOp` and `TritonOp` removed;
   `operonx.tools` → `operonx.cli`
 - [To 1.0.0](#migrating-to-operonx-100) — `PARENT.shared`, `GraphOp.loop`,
   `@graph(until=)`, `ParserOp`, `ask()` removed
+
+---
+
+# Migrating from `operonx.agents` to `operonx-agents`
+
+Agents moved out of operonx into their own distribution, `operonx-agents`
+(`import operonx_agents`; design: `docs/roadmap/track3_agents.md` §4, plan:
+`docs/AGENTS_V2_PLAN.md`). `operonx.agents` keeps working, unchanged, and
+warns once when it is imported (`DeprecationWarning`). It is removed one
+release after operonx-agents 1.0. Nothing else in operonx imports it, so a
+project that never imports it sees no warning.
+
+The new package runs the agent loop as plain async code inside one op —
+not as a back-edge graph — and records every turn, model call and tool
+call as a child execution, so the trace reads `agent → turn[i] →
+model, <tool>`. Approvals are data a run stops on (`status="interrupted"`)
+and `Runner.resume` answers them in any process, after a restart.
+
+```python
+# Before
+from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
+from operonx.agents.ops.model_ops import make_llm_caller
+
+@tool(name="add", description="Add two numbers.", readonly=True,
+      schema={"type": "object", "properties": {"a": {"type": "number"},
+              "b": {"type": "number"}}, "required": ["a", "b"]})
+def add(a: float, b: float) -> dict:
+    return {"sum": a + b}
+
+agent = build_react_agent(call_model=make_llm_caller("assistant", tools=get_tool_definitions()),
+                          max_turns=8)(messages=None)
+out = await Operon(agent).run(inputs={"messages": [{"role": "user", "content": "2 + 3?"}]})
+answer = agent_result(out, agent)["final"]
+
+# After
+from operonx_agents import Agent, Model, Runner, UsageLimits, tool
+
+@tool(readonly=True)
+def add(a: float, b: float) -> dict:
+    """Add two numbers."""          # the schema comes from the signature
+    return {"sum": a + b}
+
+agent = Agent(name="calc", model=Model("assistant"), tools=[add],
+              limits=UsageLimits(turns=8))
+res = await Runner.run(agent, "2 + 3?")
+answer = res.output                 # res.status: completed | limit | interrupted | blocked | failed
+```
+
+| `operonx.agents` | `operonx_agents` |
+|---|---|
+| `@tool(name=, description=, schema=)`, `TOOL_REGISTRY`, `get_tool_definitions` | `@tool` (schema and validation from the signature and docstring); each `Agent` owns its tools — there is no registry |
+| `build_react_agent(call_model=...)`, `agent_result` | `Agent(...)` + `Runner.run` / `Runner.stream`; in a graph, `agent.as_op()` |
+| `make_llm_caller("x", tools=...)` | `Model("x")` (fallback, a deadline over the chain, normalised `Usage`) |
+| `build_dispatch` | `operonx_agents.dispatch` (one tool message per call) |
+| `ToolPolicy` | `ToolPolicy` (same rules) |
+| `destructive=True` + `InterruptOp`, `AgentSession.send(on_approval=)` | `@tool(approval=...)` → `res.status == "interrupted"`; `Runner.resume(agent, res.run_id, store=..., approvals={i.id: Approve()})` |
+| `AgentSession` (history) | `Runner.run(..., session=InMemorySession() / RedisSession / SQLiteSession)` |
+| `plan_compaction`, `apply_compaction`, `count_tokens` | `Agent(context=ContextPolicy(...))`: compaction triggered by real usage, the summary persisted |
+| `assemble_api_messages`, `apply_cache_control`, `build_system_prompt` | inside the runner (a byte-stable system prefix, cache breakpoints) |
+| `make_delegate_tool`, `describe_delegation` | `agent.as_tool(name=...)` (its approvals surface on the parent) |
+| `Redactor` | `Redactor`; `Agent(redact=...)` scrubs exported traces by default |
+| `MCPServer`, `connect_mcp`, `register_mcp_tools` | `MCPServer`, `await MCPToolset.connect(server, allow=[...])`, in `Agent(tools=[...])` |
+| `Heartbeat` | the serve layer's `schedule` trigger |
+| `MemoryProvider`, `LocalMarkdownMemory`, skills | not ported yet (track3 §4.6 "Later") |
+| an agent behind HTTP: `ingress → build_react_agent → egress` | `agent_service(agent, http("POST", "/ask"), store=...)`: JSON or server-sent events, approvals on `POST /ask/resume`; or a websocket |
+
+`operonx-agents` is not on PyPI yet; until it is, install it from its
+repository.
 
 ---
 

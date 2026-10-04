@@ -7,7 +7,9 @@ snippet that does not run is a bug. Each page is a scratch project:
   file=operonx.toml …) is written into the page's directory, in order;
 * a plain ```python fence is run as a script there, in its own process
   (the resource hub and other process state never leak between snippets);
-* a ```bash fence tagged ``run`` has each line run there as a command.
+* a ```bash fence tagged ``run`` has each line run there as a command;
+* a page marked ``<!-- requires: <module> -->`` runs only where that module
+  is installed (the agents page needs ``operonx_agents``).
 
 A page that talks to a model gets a local OpenAI-compatible stand-in, so
 nothing here needs a key or the network.
@@ -50,8 +52,15 @@ def _run(cmd, cwd: Path, env: dict, where: str, timeout: float = 120) -> None:
         )
 
 
+#: ``<!-- requires: operonx_agents -->`` on a page: its snippets import a
+#: package operonx does not depend on, and run where it is installed.
+REQUIRES = re.compile(r"<!--\s*requires:\s*([\w.]+)\s*-->")
+
+
 @pytest.mark.parametrize("page", PAGES, ids=[p.name for p in PAGES])
 def test_every_snippet_on_the_page_runs(page: Path, tmp_path: Path, fake_llm):
+    for module in REQUIRES.findall(page.read_text(encoding="utf-8")):
+        pytest.importorskip(module, reason=f"{page.name} needs {module}")
     env = {
         **os.environ,
         "PYTHONPATH": str(tmp_path),

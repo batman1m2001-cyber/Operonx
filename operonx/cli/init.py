@@ -5,8 +5,9 @@ The templates are package data under ``operonx/cli/templates/``:
 template adds or replaces. A file there is ``<path>.tmpl``; a leading
 ``dot-`` in a path part becomes ``.`` (``dot-gitignore.tmpl`` →
 ``.gitignore``), so no dotfile has to survive packaging. ``{{name}}``,
-``{{dist}}``, ``{{version}}``, ``{{extras}}`` and ``{{summary}}`` are
-filled in; nothing else is, so Python braces need no escaping.
+``{{dist}}``, ``{{version}}``, ``{{extras}}``, ``{{requires}}`` and
+``{{summary}}`` are filled in; nothing else is, so Python braces need
+no escaping.
 
 The project also gets ``.operonx/guide/``, the installed guide, so an
 assistant reads it beside the code (what ``operonx guide --sync`` writes).
@@ -34,6 +35,9 @@ class Template:
     extras: str
     #: The commands after `cd` — what the user runs next, in order.
     next_steps: tuple
+    #: Packages the template's code needs besides operonx (requirement
+    #: strings), added to the generated pyproject's dependencies.
+    requires: tuple = ()
 
 
 TEMPLATES: Dict[str, Template] = {
@@ -63,13 +67,15 @@ TEMPLATES: Dict[str, Template] = {
         ),
         Template(
             "agent",
-            "A ReAct agent with one tool, served over HTTP.",
+            "An agent with one tool (operonx-agents), served over HTTP.",
             "serve,openai",
             (
                 "uv run pytest",
                 "cp .env.example .env   # then set LLM_API_KEY",
                 "uv run operonx serve",
             ),
+            # operonx cannot depend on operonx-agents; the project does
+            requires=("operonx-agents>=0.1.0.dev0",),
         ),
     )
 }
@@ -119,6 +125,7 @@ def plan(template: str, name: str) -> Dict[str, bytes]:
         "version": __version__,
         "extras": t.extras,
         "summary": t.summary,
+        "requires": "".join(f'\n    "{r}",' for r in t.requires),
     }
     files: Dict[str, bytes] = {}
     for layer in (COMMON, template):

@@ -1,27 +1,19 @@
-"""The assistant feature's wiring: no logic here, only ops and edges.
+"""The assistant: who it is, what it thinks with, and which tools it owns.
 
-`MODEL` is the agent's `call_model`: `llm:assistant` from resources.yaml.
-The graph reads it when it is built, so a test swaps in a scripted model
-with `monkeypatch.setattr(assistant.graph, "MODEL", ...)`.
+`ASSISTANT` is a spec — data, not a class to subclass. `app/main.py` serves
+it. Its loop runs inside one op, and every turn, model call and tool call
+is recorded under that op: a run's trace reads agent → turn → model,
+word_count.
 """
 
-from operonx import END, START, graph
-from operonx.agents import build_react_agent, get_tool_definitions
-from operonx.agents.ops.model_ops import make_llm_caller
-from operonx.app.serve import egress, ingress
+from operonx_agents import Agent, Model, UsageLimits
 
-from assistant.ops import ask, reply
+from assistant.ops import word_count
 
-TOOLS = ["word_count"]  # the @tool names in ops.py the model may call
-MODEL = make_llm_caller("assistant", tools=get_tool_definitions(TOOLS))
-
-
-@graph
-def assistant_flow():
-    src = ingress()  # an http door: the JSON body is the one item
-    a = ask(body=src["item"])
-    # model -> tools -> model until it answers, at most 6 turns
-    agent = build_react_agent(call_model=MODEL, max_turns=6)(messages=a["messages"])
-    r = reply(final=agent["final"], stopped_early=agent["stopped_early"])
-    out = egress(item=r["reply"])
-    START >> src >> a >> agent >> r >> out >> END
+ASSISTANT = Agent(
+    name="assistant",
+    model=Model("assistant", deadline=60),  # llm:assistant in resources.yaml
+    instructions="You are a helpful assistant. Use the tools when they help.",
+    tools=[word_count],
+    limits=UsageLimits(turns=6, tool_calls=12),
+)

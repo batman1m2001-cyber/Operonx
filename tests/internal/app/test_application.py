@@ -162,6 +162,7 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "on_session": None,
         "on_close": None,
         "app": None,
+        "resume": None,
         "description": "",
         "key_ops": [],
         "playground": None,

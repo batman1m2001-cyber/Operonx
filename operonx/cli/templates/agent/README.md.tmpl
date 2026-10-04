@@ -1,12 +1,13 @@
 # {{name}}
 
-{{summary}} Built on [operonx](https://pypi.org/project/operonx/).
+{{summary}} Built on [operonx](https://pypi.org/project/operonx/) and
+`operonx-agents`.
 
 `src/assistant/` is the feature: `ops.py` holds the agent's `word_count`
-tool and the ops around it, `graph.py` wires a ReAct agent (model → tools →
-model) on the `llm:assistant` model from `resources.yaml`. `app/main.py`
-declares the `assistant` service that runs it, with a webhook example. The
-tests swap `MODEL` in `graph.py` for a scripted model.
+tool, `graph.py` the agent itself (`ASSISTANT`: its model, `llm:assistant`
+from `resources.yaml`, its instructions, tools and limits). `app/main.py`
+serves it with `agent_service`. The tests run it on a scripted model
+(`operonx_agents.testing`).
 
 ## Run
 
@@ -16,20 +17,29 @@ uv run pytest                 # offline: the tests drive the agent with a script
 cp .env.example .env          # then set LLM_API_KEY (and LLM_BASE_URL / LLM_MODEL if not OpenAI)
 ```
 
+`operonx-agents` is a separate package; until it is on PyPI, install it
+from its repository (`uv add <path or git URL>`).
+
 ## Serve
 
 ```bash
 uv run operonx serve --list   # what would listen, and where
 uv run operonx serve          # POST /ask on :8000 (PORT overrides)
-curl -s localhost:8000/ask -d '{"question": "How many words are in: to be or not to be?"}'
+curl -s localhost:8000/ask -d '{"input": "How many words are in: to be or not to be?"}'
+curl -sN localhost:8000/ask -H 'accept: text/event-stream' -d '{"input": "hi"}'   # its events
 ```
 
-The model must support tool calling (an OpenAI-compatible endpoint that
-honours `tools`).
+A reply has `status` (`completed`, `interrupted`, `limit`, `blocked`,
+`failed`), `output` and `run_id`. A run that waits for a human ends
+`interrupted` with its `interruptions`; answer them with
+`POST /ask/resume {"run_id": ..., "approvals": {"<id>": "approve"}}`
+(or `"deny"`, or `{"deny": "<reason>"}`). The model must support tool
+calling (an OpenAI-compatible endpoint that honours `tools`).
 
 ## Grow it
 
-A new tool is one more `@tool` in `ops.py` and its name in `TOOLS` in
-`graph.py`. A new feature is a new folder under `src/` with its own
-`graph.py` and `ops.py`, and one more `Service` (or `Job`) in `app/main.py`.
-Read `AGENTS.md` and `.operonx/guide/README.md` first.
+A new tool is one more `@tool` in `ops.py` and one more entry in the
+agent's `tools`. A new feature is a new folder under `src/` with its own
+`graph.py` and `ops.py`, and one more `Service` (or `Job`) in
+`app/main.py`. Read `AGENTS.md` and `.operonx/guide/README.md` (agents:
+`09-agents.md`) first.

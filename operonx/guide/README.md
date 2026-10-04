@@ -11,8 +11,8 @@ websocket, and an **Application** bundles a product's jobs and services.
 
 ## Read in this order
 
-1. [Op types](01-ops.md): `@op`, generators, `@graph`, `LLMOp`, agents,
-   flow and retrieval ops.
+1. [Op types](01-ops.md): `@op`, generators, `@graph`, `LLMOp`, flow and
+   retrieval ops.
 2. [The composition ladder](02-composition.md): op → operon → Job /
    Runbook / Service → Application → `operonx.toml` and the CLIs.
 3. [Control flow](03-control-flow.md): streaming, loops, if/else, `~`.
@@ -24,6 +24,8 @@ websocket, and an **Application** bundles a product's jobs and services.
    `operonx eval`, reports, calibrate, the pytest plugin.
 8. [Inside a run](08-runs.md): `run_context()`, `child()`, several stream
    modes at once and `tasks`, live traces.
+9. [Agents](09-agents.md): operonx-agents — `Agent`, `Runner`, approvals,
+   `agent_service` (HTTP, server-sent events, websocket), trajectory evals.
 
 ## Install
 
@@ -52,8 +54,6 @@ pointing at it) for coding assistants. It also copies this guide into
 from operonx import END, PARENT, SCRATCH, START, EmitOp, InterruptOp, Operon, bootstrap, graph, op
 from operonx import OpFailed, Retry, Timeout  # failure policies (page 6)
 from operonx import TaskFailed, TaskFinished, TaskStarted, child, run_context  # page 8
-from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
-from operonx.agents.ops.model_ops import make_llm_caller
 from operonx.app import Application, Eval, Service, asgi, env, http, schedule, webhook, websocket
 from operonx.app.jobs import Job, Runbook
 from operonx.app.serve import RunRequest, egress, ingress

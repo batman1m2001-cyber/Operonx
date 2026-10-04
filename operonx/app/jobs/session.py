@@ -28,6 +28,9 @@ class JobSession(BoundedSession):
     item failed from it.
     """
 
+    #: A sink keeps one result per item, not a stream of them.
+    stream = False
+
     def __init__(
         self,
         sink: Sink,

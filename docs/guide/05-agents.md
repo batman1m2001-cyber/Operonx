@@ -1,5 +1,12 @@
 # Agents
 
+> **Deprecated.** `operonx.agents` moved to the **operonx-agents** package
+> (`import operonx_agents`): an `Agent` spec, `Runner`, approvals that
+> survive a restart, `agent_service`, trajectory evals. This page
+> describes the old API, which warns on import and is removed one release
+> after operonx-agents 1.0. Start at `operonx/guide/09-agents.md`;
+> `MIGRATION.md` maps each name below to its replacement.
+
 An agent is a loop: the model asks for tools, your ops run them, the
 results go back, repeat until it answers. `operonx.agents` gives you the
 loop, the tool registry, a permission gate and a turn budget, so what you
