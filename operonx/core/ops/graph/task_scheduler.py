@@ -184,6 +184,8 @@ class Scheduler:
         "_loop_watch",
         "_collect_gens",
         "_collect_groups",
+        "_reach",
+        "_join_edges",
     )
 
     def __init__(self, graph):
@@ -296,6 +298,31 @@ class Scheduler:
             if groups:
                 self._collect_groups[name] = tuple(groups)
 
+        # Contexts below the one an op ran in — a generator's items, a
+        # collect's context, the contexts a subgraph hands back — run the ops
+        # downstream of the op that opened them, its origin. Such an op may
+        # also wait for one that is not downstream of the origin and so runs
+        # in the parent context: that arrival has to count below too (see
+        # `_seed` and `_forward` in `run`).
+        #   _reach[origin] = origin and every op downstream of it
+        #   _join_edges   = the edges (src, dst) some origin's contexts need
+        #                   from their parent: dst below the origin, src not.
+        # Empty for a graph where no stream meets an outside op, and the hot
+        # path tests that first.
+        origins = {
+            name
+            for name, child in graph._ops.items()
+            if getattr(child, "is_gen", False) or name in self._graph_ops
+        } | {src for (src, _dst), (collect, _limit) in self._route_policy.items() if collect}
+        self._reach: Dict[str, frozenset] = {}
+        joins = set()
+        for origin in origins:
+            reach = self._reachable(origin)
+            for (src, dst), edge in graph._edges.items():
+                if edge.type != "error" and dst in reach and dst != origin and src not in reach:
+                    joins.add((src, dst))
+        self._join_edges: frozenset = frozenset(joins)
+
         # When THIS graph is a synthetic loop: the ops whose frames decide
         # how an iteration ended. op -> (back-edge targets, exit targets,
         # is_branch). A frame from a plain op takes all its edges; a
@@ -312,6 +339,19 @@ class Scheduler:
                 if u in graph._ops:
                     is_branch = getattr(graph._ops[u], "type", None) == "branch"
                     self._loop_watch[u] = (frozenset(back), frozenset(exits), is_branch)
+
+    def _reachable(self, origin: str) -> frozenset:
+        """``origin`` and every op downstream of it (normal and soft edges)."""
+        found = self._reach.get(origin)
+        if found is None:
+            seen, stack = {origin}, [origin]
+            while stack:
+                for link in self.graph._adj.get(stack.pop(), ()):
+                    if link.dst not in seen:
+                        seen.add(link.dst)
+                        stack.append(link.dst)
+            found = self._reach[origin] = frozenset(seen)
+        return found
 
     async def run(
         self,
@@ -444,8 +484,16 @@ class Scheduler:
         # one of op_name's soft edges has arrived at ctx — later soft arrivals
         # are ignored. It lives in the same dict so a sweep that drops the
         # context drops it too.
-        # Root context seeded from _initial_ready; item contexts seeded in _advance().
+        # Root context seeded from _initial_ready; contexts below it by `_seed`.
         ready: Dict[tuple, Dict[str, int]] = {context_id: dict(g._initial_ready)}
+        # For the edges in `_join_edges` only: arrivals[ctx] = the arrivals
+        # (src, dst, soft) counted at ctx, and below[ctx] = the contexts
+        # seeded under ctx with their origin op. A context seeded later
+        # counts the arrivals already in; one seeded earlier gets each new
+        # arrival forwarded (`_forward`).
+        join_edges = self._join_edges
+        arrivals: Dict[tuple, List[Tuple[str, str, bool]]] = {}
+        below: Dict[tuple, List[Tuple[tuple, str]]] = {}
 
         # The stream gate. Keyed by the edge (src, dst) alone, not by the
         # generator context: "sequential" means one item at a time through
@@ -870,6 +918,62 @@ class Scheduler:
                 if rc[dst] == 0:
                     _route(event.op, dst, event.ctx, {})
 
+        def _count(rc: Dict[str, int], dst: str, soft: bool) -> bool:
+            """Count one arrival on dst at a context; True when dst is now ready.
+
+            The soft edges into an op count as ONE arrival between them
+            (`_build` gave the whole group a single slot), so only the first
+            one decrements. Decrementing on each let two soft arrivals stand
+            in for a hard edge that had not landed yet, and the op ran with
+            its input missing.
+            """
+            if soft:
+                soft_mark = (dst,)
+                if soft_mark in rc:
+                    return False
+                rc[soft_mark] = 1
+            rc[dst] -= 1
+            return rc[dst] == 0
+
+        def _seed(ctx: tuple, origin: str) -> Dict[str, int]:
+            """Ready counts for a context opened below another by ``origin``.
+
+            Its parent is the nearest context above it that the scheduler
+            knows. The ops it runs are those downstream of the origin; an
+            arrival at the parent from an op that is not downstream of it
+            counts here as well — now for those already in, by `_forward`
+            for those still to come — so an op joining the two runs once
+            both have landed, whichever lands first.
+            """
+            rc = dict(g._initial_ready)
+            ready[ctx] = rc
+            if not join_edges:
+                return rc
+            parent = next((ctx[:i] for i in range(len(ctx) - 1, 0, -1) if ctx[:i] in ready), None)
+            if parent is None:
+                return rc
+            below.setdefault(parent, []).append((ctx, origin))
+            reach = self._reachable(origin)
+            for src, dst, soft in arrivals.get(parent, ()):
+                if dst in reach and dst != origin and src not in reach and dst in rc:
+                    # Never ready here: dst also waits for an op below the origin.
+                    _count(rc, dst, soft)
+                    arrivals.setdefault(ctx, []).append((src, dst, soft))
+            return rc
+
+        def _forward(src: str, dst: str, soft: bool, ctx: tuple, result: dict) -> None:
+            """Count an arrival at ctx in the contexts below it that wait for it."""
+            arrivals.setdefault(ctx, []).append((src, dst, soft))
+            for child, origin in below.get(ctx, ()):
+                rc = ready.get(child)
+                if rc is None or dst not in rc:
+                    continue  # swept, or not an op of that context
+                reach = self._reachable(origin)
+                if dst in reach and dst != origin and src not in reach:
+                    if _count(rc, dst, soft):
+                        _route(src, dst, child, result)
+                    _forward(src, dst, soft, child, result)
+
         def _advance(src: str, ctx: tuple, result: dict, only=None) -> None:
             """Count src's arrival at ctx on each successor; route those now ready.
 
@@ -878,9 +982,10 @@ class Scheduler:
             nonlocal loop_fired
             rc = ready.get(ctx)
             if rc is None:
-                # Seed ready counts for a new item context (first frame from a generator).
+                # A new context below this one: a generator's item, or a
+                # context a subgraph handed back.
                 item_ctxs.append(ctx)
-                rc = ready[ctx] = dict(g._stream_initial_ready.get(src, g._initial_ready))
+                rc = _seed(ctx, src)
                 if collect_gens and src in collect_gens:
                     stream_ctx = ctx[:-1]
                     if stream_minter.setdefault(stream_ctx, src) == src:
@@ -920,21 +1025,11 @@ class Scheduler:
                     continue
                 if dst not in rc:
                     continue
-                if edge.soft:
-                    # The soft edges into an op count as ONE arrival between
-                    # them (`_build` gave the whole group a single slot), so
-                    # only the first one decrements. Decrementing on each
-                    # let two soft arrivals stand in for a hard edge that
-                    # had not landed yet, and the op ran with its input
-                    # missing.
-                    soft_mark = (dst,)
-                    if soft_mark in rc:
-                        continue
-                    rc[soft_mark] = 1
-                # All predecessors satisfied — dispatch downstream op.
-                rc[dst] -= 1
-                if rc[dst] == 0:
+                if _count(rc, dst, edge.soft):
+                    # All predecessors satisfied — dispatch downstream op.
                     _route(src, dst, ctx, result)
+                if join_edges and (src, dst) in join_edges:
+                    _forward(src, dst, edge.soft, ctx, result)
 
         def _route(src: str, dst: str, ctx: tuple, result: dict) -> None:
             """Dispatch dst using the correct stream policy (seq/parallel/collect)."""
@@ -979,6 +1074,11 @@ class Scheduler:
             """Hand one collect group to its consumer as lists, in yield order."""
             stream_ctx, src, dst = key
             buf = collect_bufs.pop(key)
+            # The op whose stream this collect ends: the generator, the one
+            # that minted the items src ran in, or src when there is no stream.
+            origin = (
+                src if getattr(g._ops[src], "is_gen", False) else stream_minter.get(stream_ctx, src)
+            )
             if key in deferred:
                 deferred.discard(key)
                 # Items finish in any order under `.parallel()`; give the
@@ -1002,7 +1102,7 @@ class Scheduler:
             # a reducer cell written straight from the subgraph's output got
             # every value twice. Two collects off one stream share the ctx.
             if collect_ctx not in ready:
-                ready[collect_ctx] = dict(g._initial_ready)
+                _seed(collect_ctx, origin)
                 item_ctxs.append(collect_ctx)
             # Written straight into src's cells, where dst's pull finds
             # them — not through `store_result`, which also pushes. The
