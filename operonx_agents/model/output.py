@@ -37,7 +37,18 @@ from operonx_agents.model.model import Model, ModelResponse, ModelSettings
 from operonx_agents.model.usage import Usage
 from operonx_agents.tools.tool import model_schema
 
-__all__ = ["Choice", "OutputResult", "Shape", "ask", "shape_for", "STRATEGIES"]
+__all__ = [
+    "Choice",
+    "OutputResult",
+    "Shape",
+    "STRATEGIES",
+    "ask",
+    "final_tool",
+    "native_format",
+    "read_answer",
+    "shape_for",
+    "validation_errors",
+]
 
 STRATEGIES = ("native", "tool", "prompted")
 FINAL_TOOL = "final_result"
@@ -225,12 +236,12 @@ async def ask(
             usage = usage + reply.usage
             if shape.kind == "text":
                 return OutputResult(reply.content, reply, usage, None, attempt + 1, strategy)
-            raw, error = _read(reply, strategy)
+            raw, error = read_answer(reply, strategy)
             if error is None:
                 try:
                     validated = shape.model.model_validate(raw)
                 except pydantic.ValidationError as exc:
-                    error = _errors(exc)
+                    error = validation_errors(exc)
                 else:
                     value = shape.value(validated)
                     confidence = _confidence(reply, value) if shape.kind == "choice" else None
@@ -261,28 +272,14 @@ def _declared(model: Model) -> str:
 def _request(shape: Shape, strategy: str, convo: List[Dict[str, Any]]) -> Dict[str, Any]:
     if shape.kind == "text":
         return {}
-    schema = shape.schema()
     if strategy == "native":
-        return {
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {"name": shape.name, "schema": schema, "strict": _strict(schema)},
-            }
-        }
+        return {"response_format": native_format(shape)}
     if strategy == "tool":
         return {
-            "tools": [
-                {
-                    "type": "function",
-                    "function": {
-                        "name": FINAL_TOOL,
-                        "description": "Give the final answer.",
-                        "parameters": schema,
-                    },
-                }
-            ],
+            "tools": [final_tool(shape)],
             "tool_choice": {"type": "function", "function": {"name": FINAL_TOOL}},
         }
+    schema = shape.schema()
     # prompted: the schema goes in the conversation, on the last user turn.
     note = (
         "\n\nAnswer with one JSON object that matches this JSON Schema, and nothing else:\n"
@@ -297,6 +294,24 @@ def _request(shape: Shape, strategy: str, convo: List[Dict[str, Any]]) -> Dict[s
     return {}
 
 
+def native_format(shape: Shape) -> Dict[str, Any]:
+    """The ``response_format`` asking for ``shape`` (the ``native`` strategy)."""
+    schema = shape.schema()
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": shape.name, "schema": schema, "strict": _strict(schema)},
+    }
+
+
+def final_tool(shape: Shape, description: str = "Give the final answer.") -> Dict[str, Any]:
+    """The ``final_result`` tool whose arguments are ``shape`` (the ``tool``
+    strategy)."""
+    return {
+        "type": "function",
+        "function": {"name": FINAL_TOOL, "description": description, "parameters": shape.schema()},
+    }
+
+
 def _strict(schema: Dict[str, Any]) -> bool:
     """OpenAI's strict mode needs every property required; say so only
     when it holds, rather than send a schema strict mode would reject."""
@@ -304,8 +319,10 @@ def _strict(schema: Dict[str, Any]) -> bool:
     return set(schema.get("required") or ()) == set(props) and "$defs" not in schema
 
 
-def _read(reply: ModelResponse, strategy: str) -> Tuple[Any, Optional[str]]:
-    """``(object, None)`` or ``(None, why it could not be read)``."""
+def read_answer(reply: ModelResponse, strategy: str) -> Tuple[Any, Optional[str]]:
+    """``(object, None)`` or ``(None, why it could not be read)``: the
+    ``final_result`` call's arguments for ``tool``, else the first JSON
+    object of the text."""
     if strategy == "tool":
         for call in reply.tool_calls:
             if call["name"] == FINAL_TOOL:
@@ -343,7 +360,8 @@ def _first_json_object(text: str) -> Optional[dict]:
     return None
 
 
-def _errors(exc: pydantic.ValidationError) -> str:
+def validation_errors(exc: pydantic.ValidationError) -> str:
+    """``field: message; ...`` — each bad field by name."""
     parts = []
     for err in exc.errors(include_url=False):
         where = ".".join(str(p) for p in err["loc"]) or "(answer)"

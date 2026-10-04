@@ -222,3 +222,48 @@ class TestRequest:
         ok = calls[1]
         assert ok.attrs["gen_ai.operation.name"] == "chat" and ok.attrs["operonx.resource"] == "b"
         assert "cost_usd" in ok.outputs, "the key the run store counts LLM calls by"
+
+    async def test_a_stream_records_each_resource_tried_and_its_consumer_stays_outside(self, hub):
+        """The stream's record stays open across its yields; the consumer's
+        own steps between the yields are its siblings, not its children."""
+        from operonx import child
+
+        hub(
+            a=ScriptedLLM(stream_script=[ConnectionError("refused")]),
+            b=ScriptedLLM(completion("Monday then Tuesday.")),
+        )
+        model = Model("a", fallback=["b"])
+
+        @op
+        async def step(q: str) -> dict:
+            text = ""
+            async for piece in model.stream([{"role": "user", "content": q}]):
+                if isinstance(piece, str):
+                    async with child("speak", inputs={"text": piece}):
+                        text += piece
+            return {"text": text}
+
+        @graph
+        def flow(q):
+            s = step(q=q)
+            START >> s >> END
+
+        handle = Operon(flow, params={"q": None}).start({"q": "hi"})
+        assert (await handle.result())["text"] == "Monday then Tuesday."
+        nodes = handle.trace.nodes
+        calls = [n for n in nodes if n.op_type == "llm"]
+        assert [(n.op_name, n.status) for n in calls] == [("model", "error"), ("model", "ok")]
+        assert calls[1].outputs["content"] == "Monday then Tuesday."
+        assert calls[1].outputs["usage"]["requests"] == 1
+        assert calls[1].attrs["operonx.resource"] == "b"
+        speaks = [n for n in nodes if n.op_name == "speak"]
+        assert [n.ctx for n in speaks] == [("main", "speak[0]"), ("main", "speak[1]")]
+
+    async def test_reasoning_streams_apart_from_the_answer(self, hub):
+        from operonx_agents import Reasoning
+
+        hub(a=ScriptedLLM(completion("42", reasoning="six times seven")))
+        plain = [p async for p in Model("a").stream(MSGS)]
+        assert plain[:-1] == ["4", "2"] and plain[-1].content == "42"
+        pieces = [p async for p in Model("a").stream(MSGS, reasoning=True)]
+        assert pieces[0] == Reasoning("six times seven") and pieces[-1].content == "42"

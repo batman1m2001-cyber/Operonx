@@ -28,6 +28,7 @@ def completion(
     completion_tokens: int = 3,
     logprobs: Optional[List[tuple]] = None,
     refusal: Optional[str] = None,
+    reasoning: Optional[str] = None,
 ) -> ChatCompletion:
     """A completion as the SDK builds one from a live body: constructed,
     not validated, since gateways send values outside the SDK's Literals
@@ -63,6 +64,7 @@ def completion(
                     "content": content,
                     "tool_calls": calls or None,
                     "refusal": refusal,
+                    **({"reasoning_content": reasoning} if reasoning else {}),
                 },
                 "finish_reason": finish_reason,
                 "logprobs": lp,
@@ -89,6 +91,62 @@ def chunk(
             ChunkChoice(index=0, delta=ChoiceDelta(content=content), finish_reason=finish_reason)
         ],
     )
+
+
+def chunks_of(reply: ChatCompletion, pieces: int = 2) -> List[ChatCompletionChunk]:
+    """A completion as a gateway streams it: the text in ``pieces`` parts,
+    reasoning first (``reasoning_content``, as Qwen sends it), each tool
+    call as one delta, the stop reason, then a usage-only chunk."""
+    choice = reply.choices[0]
+    message = choice.message
+    out: List[ChatCompletionChunk] = []
+
+    def piece(**delta: Any) -> ChatCompletionChunk:
+        return ChatCompletionChunk.construct(
+            id="c",
+            created=0,
+            model="m",
+            object="chat.completion.chunk",
+            choices=[ChunkChoice.construct(index=0, delta=ChoiceDelta.construct(**delta))],
+        )
+
+    thought = getattr(message, "reasoning_content", None)
+    if thought:
+        out.append(piece(reasoning_content=thought))
+    text = message.content or ""
+    if text:
+        step = max(1, -(-len(text) // pieces))
+        out.extend(piece(content=text[i : i + step]) for i in range(0, len(text), step))
+    for index, call in enumerate(message.tool_calls or ()):
+        data = call if isinstance(call, dict) else call.model_dump()
+        out.append(piece(tool_calls=[{**data, "index": index}]))
+    out.append(
+        ChatCompletionChunk.construct(
+            id="c",
+            created=0,
+            model="m",
+            object="chat.completion.chunk",
+            choices=[
+                ChunkChoice.construct(
+                    index=0,
+                    delta=ChoiceDelta.construct(),
+                    finish_reason=choice.finish_reason,
+                    logprobs=choice.logprobs,
+                )
+            ],
+        )
+    )
+    out.append(
+        ChatCompletionChunk.construct(
+            id="c",
+            created=0,
+            model="m",
+            object="chat.completion.chunk",
+            choices=[],
+            usage=reply.usage,
+        )
+    )
+    return out
 
 
 class ScriptedLLM:
@@ -133,9 +191,20 @@ class ScriptedLLM:
         return item
 
     async def stream(self, messages, **params):
+        """``stream_script`` when given; else the next ``script`` item,
+        streamed: what an agent's runner calls."""
         self.calls += 1
-        self.requests.append({"messages": list(messages), **params})
-        for item in self.stream_script:
+        self.requests.append({"messages": list(messages), **params, "t": time.perf_counter()})
+        if self.stream_script:
+            items = self.stream_script
+        else:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            item = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+            if callable(item) and not isinstance(item, ChatCompletion):
+                item = item(messages, params)
+            items = [item] if isinstance(item, BaseException) else chunks_of(item)
+        for item in items:
             if isinstance(item, BaseException):
                 raise item
             await asyncio.sleep(0)
