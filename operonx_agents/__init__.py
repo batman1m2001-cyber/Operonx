@@ -90,6 +90,22 @@ from operonx_agents.tools import (
 
 __version__ = "0.1.0.dev0"
 
+
+def __getattr__(name: str):
+    """``agent_service`` and the evaluators load on first use: an agent
+    that is never served or evaluated does not import operonx's serve and
+    eval layers (track3 §4.1, cheap when unused)."""
+    if name == "agent_service":
+        from operonx_agents.serve import agent_service
+
+        return agent_service
+    if name in ("evals",):
+        import importlib
+
+        return importlib.import_module(f"operonx_agents.{name}")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "Agent",
     "AgentOp",
@@ -154,6 +170,7 @@ __all__ = [
     "Usage",
     "UsageLimits",
     "agent_op",
+    "agent_service",
     "agent_tool",
     "ask",
     "dispatch",
