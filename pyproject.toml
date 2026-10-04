@@ -24,6 +24,8 @@ dependencies = [
 redis = ["redis>=5.0"]
 # MCPToolset: tools on MCP servers, over stdio and streamable HTTP.
 mcp = ["mcp>=2.0"]
+# agent_service behind `operonx serve`: HTTP (server-sent events) and websocket.
+serve = ["operonx[serve]"]
 
 [project.scripts]
 operonx-agents = "operonx_agents.cli:main"
@@ -38,6 +40,7 @@ dev = [
     "hypothesis>=6.100",
     "redis>=5.0",
     "mcp>=2.0",
+    "websockets>=11.0",   # the live agent_service websocket test's client
 ]
 
 [tool.uv.sources]

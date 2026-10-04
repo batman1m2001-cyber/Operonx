@@ -13,9 +13,12 @@ Two front doors over one model layer:
 
 Phase A2 shipped tools, the model layer, `llm_step` and
 `operonx-agents probe`; phase A3 the `Runner`, `RunState`, `UsageLimits`,
-the event stream, sessions, state stores and compaction; phase A4 (this
-state) approvals as interruptions, `as_tool` / `as_op`, hooks, redaction
-and MCP over stdio and streamable HTTP.
+the event stream, sessions, state stores and compaction; phase A4
+approvals as interruptions, `as_tool` / `as_op`, hooks, redaction and MCP
+over stdio and streamable HTTP; phase A5 (this state) `agent_service`
+(HTTP JSON / server-sent events / websocket, approvals on `/resume`),
+trajectory evaluators, `dataset_from_runs` and `operonx_agents.testing`.
+The guide page with tested snippets is operonx's `operonx/guide/09-agents.md`.
 
 ```python
 from operonx_agents import Choice, Model, ModelSettings, llm_step
@@ -103,6 +106,20 @@ res = await Runner.resume(
 )
 ```
 
+```python
+from operonx.app import Application, http, websocket
+from operonx_agents import agent_service
+
+APP = Application("shop", services=[
+    agent_service(support, http("POST", "/support"), store=store),   # + POST /support/resume
+    agent_service(support, websocket("/support/ws"), store=store, max_inflight=64,
+                  name="support_ws"),
+])
+# POST /support {"input": "..."}            -> {"status", "output", "run_id", "interruptions", ...}
+#   Accept: text/event-stream               -> one SSE frame per event, the last RunFinished
+# POST /support/resume {"run_id", "approvals": {"<id>": "approve" | "deny" | {"deny": "why"}}}
+```
+
 ## Layout
 
 | module | what |
@@ -128,6 +145,9 @@ res = await Runner.resume(
 | `safety/redact.py` | `Redactor` (ported), `RunRedaction` (a run's records' export-time `redact`), `RedactToolOutput` |
 | `compose.py` | `Agent.as_tool` (a child run per call) and `Agent.as_op` (`AgentOp`) |
 | `tools/mcp.py` | `MCPServer`, `MCPClient`, `MCPToolset`: stdio and streamable HTTP (ported) |
+| `serve.py` | `agent_service`: an agent as an operonx `Service` (http: JSON or SSE, `POST <path>/resume`; websocket) |
+| `evals.py` | `tool_called`, `tool_not_called`, `no_tool_errors`, `turns_at_most`, `output_valid`, `cost_at_most`, `dataset_from_runs` |
+| `testing.py` | `ScriptedLLM`, `asks`, `says`, `scripted(...)`: a project's own offline tests |
 
 ## Structured output is declared, never guessed
 
@@ -369,3 +389,57 @@ throwaway servers set); callbot refactor: 303 passed, 2 skipped.
 **Not done here:** handoffs (track3 lists them for phase 4; AGENTS_V2_PLAN A4 does not, and
 no second conversational agent asks for them yet); guardrails as a named layer (they are
 hooks); MCP elicitation/sampling/resources (track3 "Later").
+
+## A5 gate (2026-10-04)
+
+**The gate (AGENTS_V2_PLAN §4 / §A5): HTTP and WS end to end with an approval round
+trip; a 20-case eval; Workflow-view screenshots (§2b).** All hold.
+
+| plan bullet (AGENTS_V2_PLAN §A5) | test / evidence |
+|---|---|
+| `agent_service` over HTTP, approval round trip | `tests/test_serve.py::TestHttpJson::test_an_approval_round_trip` (refund 900 parks, nothing ran; `POST /cashier/resume` approves; it runs once, the parked turn is not asked again), `test_deny_tells_the_model_why`, invalid bodies answered `status: invalid` and run nothing (6 shapes), unknown approval ids refused, `session_id` continues a conversation |
+| SSE (K8) | `tests/test_serve.py::TestHttpEventStream::test_every_event_then_the_result_and_a_streamed_resume`; core: `operonx tests/internal/app/serve/test_stream_and_resume.py` (frames sent as the run sends them, over a real uvicorn server; a run that sends nothing is still a 500) |
+| `/resume` via K8 | core `Service(resume=)` → `POST <path>/resume` (`test_stream_and_resume.py::TestResumeRoute`: mounted, streams too, filed under `<name>.resume`, toml `resume =`, refused on a websocket / with variants); `agent_service` sets it |
+| websocket, approval round trip | `tests/test_serve.py::TestWebSocket` (one connection: run, `ApprovalRequired`, resume frame, `RunStarted(resumed)` … `completed`; two requests on one connection run in turn) |
+| the service run's trace is agent → turn → model/tool | `tests/test_serve.py::TestTheServiceRun::test_the_trace_is_agent_turn_model_and_tool` |
+| **live**: HTTP and WS on qwen3.7-plus | `tests/live/test_live_serve.py` (real uvicorn on a free local port; httpx SSE + `websockets`): `results/live_a5.txt` — HTTP parked in 5.1 s (`RunStarted, TurnStarted, ToolCallStarted, ToolCallFinished, TurnFinished, TurnStarted, ApprovalRequired, RunFinished`), resumed → completed, "Refunded 900 … R-0001" (3 turns, 1663 + 107 tokens); WS the same on one connection (refund 700) |
+| trajectory evaluators | `tests/test_evals.py`: `tool_called` (name, args subset, `times`), `tool_not_called`, `no_tool_errors` (exceptions, unknown tool, bad args), `turns_at_most`, `output_valid` (status + pydantic type), `cost_at_most` (priced; unpriced = unknown fails), `agent=` per agent (an `as_tool` sub-agent's steps are its own) |
+| `dataset_from_runs` | `tests/test_evals.py::TestDatasetFromRuns`: recorded `agent_service` runs → cases (input from the first turn's record, the calls as the reference trajectory, the answer as `expected`) → an `Eval` of the same service graph passes 2/2; a resumed run is not a case; `agent=` filter. The runner now records the run's input on its first turn (`tests/test_redact.py::…the_first_turn_says_what_the_run_was_asked_scrubbed_on_export`) |
+| **a 20-case eval** | `evals/` (20 support cases, a rule model, through `agent_service`'s graph; the trajectory evaluators + core `trajectory.tool_calls`): `pytest evals -p operonx.app.evals.pytest_plugin --operonx-eval-name support --operonx-eval-dir results/eval_a5` → **20/20, gate pass (exit 0)**, `results/eval_a5.txt`, record `results/eval_a5/support/20261004T162511-650606`. **Run locally, not in CI**: this repo has no GitHub repo/CI yet. Control: raising the approval threshold to 1000 fails exactly the two cases it should (18/20, gate failed, exit 1) |
+| `operonx init --template agent` on the new API | core `tests/internal/cli/test_init.py::test_the_agent_template_is_built_on_operonx_agents` (declares `operonx-agents`, no `operonx.agents`), and the generated project's own tests, CLIs and ruff (`TestTheGeneratedProject[agent]`, run where operonx-agents is installed: 52/52) |
+| a guide page with tested snippets | core `operonx/guide/09-agents.md` (6 snippets: a run, approvals + resume, `agent_service` JSON/SSE/resume, `as_op`, a trajectory eval, a scripted model), run by core `tests/guide` where `operonx_agents` is installed (`<!-- requires: operonx_agents -->`; the stand-in model now calls tools) |
+| shims for `operonx.agents` (D3) | core `tests/internal/agents/test_deprecation.py`: one `DeprecationWarning` on import naming operonx-agents and `MIGRATION.md`; everything still works (the 22 `operonx.agents` test files pass); `import operonx` alone does not warn. Callbot (`refactor/operonx-studio`, which does not import it): 303 passed |
+| Studio: `graphForRun` on root records | studio `tests/studio/test_runs.py::test_a_run_names_the_ops_it_ran_at_its_root` (`root_ops`, `child` on tree rows), `tests/js/agentsteps.test.mjs` (`rootOps`). The live run's IR graph has 3 ops; 7 op names ran (+ turn, model, order_status, refund): the old score 3/7 < 0.5 drew "isn't drawn here" |
+| Studio: the canvas opens an agent op into turn → model/tool | `tests/js/agentsteps.test.mjs` (turns chain, a model call fans out to its tools, ids unique across executions, the Flow tab's graph untouched); screenshots below |
+| Studio: child-row icons from `op_type` | tree rows with `child` use the step's type (◎ agent, ↻ turn, ✧ model call, ⚒ tool call), never an IR node of the same name; IR nodes carry `op_type` (`tests/project/test_extract.py::…op_type`) |
+| Studio: flat `{id,name,args}` tool calls | already rendered since studio #12 (`io.js` `toolCallOf`, `tests/js/io.test.mjs`); seen in `desktop_tree_model.png` (`order_status()` `{"order_id": "A1B2C3D4"}`). Long call ids now shorten instead of wrapping the message head |
+
+**Screenshots** (`results/shots_a5/`, a live qwen3.7-plus run of the `cashier` service:
+"Please refund 300 on order A1B2C3D4." → 3 turns): `desktop_tree.png` / `phone_tree.png`
+(agent → turn → model, order_status / refund with values), `*_tree_model.png` (a model call:
+system/user/assistant messages, the tool call and its arguments, the tool's answer),
+`*_workflow.png` (the Workflow view lands on the opened agent: `cashier · agent · 3 turns` →
+`turn[0]` → `model[0]` → `order_status[0]`, `turn[1]` …), `*_workflow_tool.png` (a tool call
+picked on the canvas opens the same execution panel as the Tree).
+
+**Overhead** (`results/overhead_a5.{log,json}`; `Model.llm` now checks the hub per call):
+interleaved with main, 3 rounds, runner p50 at 5 concurrent — 1 call: main 1.30–1.34 /
+a5 1.27–1.30 ms; 3 calls: main 2.03–2.07 / a5 2.02–2.09 ms. No change; the 3-call row is over
+2 ms on this machine today for main as well (A4 recorded the same drift).
+
+**Core (operonx #—, feat/a5):** K8 SSE framing and `Service(resume=)`; `Session.stream`;
+a door's resume graph in `graph_refs`; the `operonx.agents` deprecation and MIGRATION.md;
+`init --template agent`; guide page 09. **Also here:** `Model` re-resolves its backend when
+the ResourceHub changes (a module-level agent tested under two hubs used the first one's
+model: `tests/test_model.py::TestTheHubItReads`); `operonx_agents.testing` (moved from
+`tests/fakes.py`).
+
+**Suites:** operonx-agents `-m "not live"` with `REDIS_URL` (throwaway `redis:7-alpine`): 562
+passed; live A5: 2 passed. operonx feat/a5: 3607 passed, 128 skipped; in a venv with
+operonx-agents installed, `tests/guide` 11/11 and `test_init.py` 52/52. Studio: 657 passed,
+4 skipped; node 88/88. Callbot refactor: 303 passed, 2 skipped.
+
+**Not done here:** operonx-agents on PyPI (the template declares
+`operonx-agents>=0.1.0.dev0`, which `uv sync` cannot fetch until it is published); a
+websocket "resume" route (it resumes on its connection); collapsing the per-event egress rows
+a streamed run leaves under the agent op in the Tree view.

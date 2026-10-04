@@ -1,0 +1,65 @@
+{
+ "python": "3.11.15",
+ "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+ "operonx_file": "/home/thanglq/operonx-wt/a5/operonx/__init__.py",
+ "redact": "on",
+ "trace_records_per_run": {
+  "1": 30,
+  "3": 48
+ },
+ "idle_lag_ms": {
+  "p50": 0.28286704421043396,
+  "p99": 0.3697240501642227,
+  "max": 0.8406463786959648
+ },
+ "rows": [
+  {
+   "variant": "runner",
+   "calls": 1,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 1.302247541025281,
+   "turn_p95_ms": 1.44095066934824,
+   "cpu_per_turn_ms": 0.26626147399656475,
+   "lag_p99_ms": 3.1613648645579815,
+   "lag_max_ms": 3.22884663566947
+  },
+  {
+   "variant": "stream",
+   "calls": 1,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 1.5558060491457582,
+   "turn_p95_ms": 1.7891179770231247,
+   "cpu_per_turn_ms": 0.3233006172813475,
+   "lag_p99_ms": 4.784543696790934,
+   "lag_max_ms": 5.290456745773554
+  },
+  {
+   "variant": "runner",
+   "calls": 3,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 2.0880928030237556,
+   "turn_p95_ms": 2.307358803227544,
+   "cpu_per_turn_ms": 0.43743076804094017,
+   "lag_p99_ms": 1.92544299736619,
+   "lag_max_ms": 38.79208180680871
+  },
+  {
+   "variant": "stream",
+   "calls": 3,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 2.1427228348329663,
+   "turn_p95_ms": 2.2336894180625677,
+   "cpu_per_turn_ms": 0.4484645694028586,
+   "lag_p99_ms": 2.00137372687459,
+   "lag_max_ms": 38.34714803472161
+  }
+ ]
+}
