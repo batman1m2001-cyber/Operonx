@@ -5,7 +5,7 @@
  "elements": [
   {"path": "0", "kind": "document", "span": [2, 3827]},
   {"path": "0.0", "kind": "title", "span": [2, 43], "text": "Structured Chunking for Enterprise Search", "pages": [1], "bbox": [0.09, 0.08, 0.91, 0.1]},
-  {"path": "0.1", "kind": "paragraph", "span": [45, 221], "text": "Abstract. We study how the layout of business documents affects retrieval. Our pipeline keeps every character of a document addressable, so answers cite the exact page and box.", "pages": [1], "bbox": [0.09, 0.12, 0.89, 0.13]},
+  {"path": "0.1", "kind": "paragraph", "span": [45, 221], "text": "Abstract. We study how the layout of business documents affects retrieval. Our pipeline keeps every character of a document addressable, so answers cite the exact page and box.", "pages": [1], "bbox": [0.09, 0.12, 0.89, 0.14]},
   {"path": "0.2", "kind": "section", "level": 1, "span": [226, 879]},
   {"path": "0.2.0", "kind": "heading", "level": 1, "span": [226, 240], "text": "1 Introduction", "pages": [1], "bbox": [0.09, 0.19, 0.26, 0.2]},
   {"path": "0.2.1", "kind": "paragraph", "span": [242, 701], "text": "Retrieval quality depends on how documents are split. Chunks that respect the structure of the source keep headings, lists and tables together, so a passage that answers a question is found as one unit instead of three fragments. Retrieval quality depends on how documents are split. Chunks that respect the structure of the source keep headings, lists and tables together, so a passage that answers a question is found as one unit instead of three fragments.", "pages": [1], "bbox": [0.09, 0.21, 0.48, 0.37]},

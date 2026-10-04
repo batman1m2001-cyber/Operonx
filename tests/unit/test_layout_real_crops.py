@@ -76,3 +76,47 @@ def test_side_by_side_form_header_labels_are_not_a_table():
     blocks = _layout("w9_header")
     tables = [str(b.rows) for b in blocks if b.kind == "table"]
     assert not any("Give form to the" in t for t in tables)
+
+
+def test_newspaper_paragraphs_survive_ink_measured_fonts_and_loose_leading():
+    """newspaper-00 p1: word boxes follow the ink (4.5 to 8.3 pt in one face) and
+    the lines sit 0.53 box heights apart; both used to cut every paragraph."""
+    blocks = _layout("newspaper_columns")
+    texts = _texts(blocks, "paragraph")
+    first = [t for t in texts if t.startswith("Heute lest ihr")]
+    assert len(first) == 1 and first[0].endswith("Danke für eure Treue!")
+    assert not [b for b in blocks if b.kind == "heading" and b.text.startswith("gabe der")]
+
+
+def test_a_justified_line_with_wide_spaces_stays_one_line():
+    """elsevier-00 p2: 'strategies  may  significantly  enhance ...' was cut into words."""
+    blocks = _layout("justified_wide_spaces")
+    para = [t for t in _texts(blocks) if t.startswith("2020). These attributes")]
+    assert len(para) == 1
+    assert (
+        "strategies may significantly enhance both their scientific and socio-economic" in para[0]
+    )
+
+
+def test_paragraphs_of_a_column_and_a_caption_cut_by_a_tab():
+    """2203.01017 p4: indented first lines start paragraphs even when the block's
+    own first line is indented; 'Table 1:   Both ...' is one caption."""
+    blocks = _layout("indent_and_cut_caption")
+    texts = _texts(blocks)
+    assert any(t.startswith("As it is illustrated in Fig. 2") for t in texts)
+    assert any(t.startswith("Motivated by those observations") for t in texts)
+    captions = _texts(blocks, "caption")
+    assert len(captions) == 1 and captions[0].startswith('Table 1: Both "Combined-Tabnet"')
+
+
+def test_a_whole_italic_line_does_not_run_into_the_paragraph_below():
+    """amt_handbook p1: the italic subheading 'Boots Self-Locking Nut'."""
+    blocks = _layout("italic_heading")
+    assert "Boots Self-Locking Nut" in _texts(blocks)
+
+
+def test_side_by_side_labels_of_a_form_header_are_separate_blocks():
+    """IRS W-9 p1: the header's three boxes share text lines."""
+    blocks = _layout("w9_header")
+    assert "Give form to the requester. Do not send to the IRS." in _texts(blocks)
+    assert "Under penalties of perjury, I certify that:" in _texts(blocks)

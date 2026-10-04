@@ -94,11 +94,9 @@ def test_model_layout_runs_through_the_pdf_parser_with_page_images():
     layout = ModelLayout(detector=FakeDetector(regions), tables=FakeTables())
     doc = PdfParser(layout=layout).parse((DOCS / "table_report.pdf").read_bytes())
     kinds = [b.kind for b in doc.blocks]
-    assert kinds[:3] == [
-        "title",
-        "paragraph",
-        "caption",
-    ]  # orphan words become paragraphs, in order
+    # Orphan words become one paragraph per line (docling's orphan clusters),
+    # read in order between the title and the caption above its table.
+    assert kinds[:5] == ["title", "paragraph", "paragraph", "caption", "table"]
     table = next(b for b in doc.blocks if b.kind == "table")
     assert table.attrs["rows"][0][0] == "cells" and int(table.attrs["rows"][0][1]) > 10
     assert (

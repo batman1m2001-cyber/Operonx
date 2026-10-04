@@ -44,6 +44,7 @@ from operonx_kb.model.ids import fingerprint
 from operonx_kb.pdf.assemble import split_list_marker
 from operonx_kb.pdf.backend import BBox, PageRenderer, PdfPage, Word
 from operonx_kb.pdf.layout import HeuristicLayout, LayoutBlock, _cluster, set_style
+from operonx_kb.pdf.reading_order import reading_order
 
 __all__ = [
     "Detection",
@@ -501,8 +502,17 @@ class ModelLayout(HeuristicLayout):
         body_words = [w for w in page.words if id(w) not in furniture_words]
         gutters = self.gutters(self.segments(page, body_words), body) if body_words else []
         out = list(furniture)
-        for block, column in self.order(flow, gutters):
-            block.column = column
+        flow.sort(key=lambda it: (round(it[0][1], 1), it[0][0]))
+        order = reading_order(
+            [bb for bb, _ in flow],
+            page.width,
+            page.height,
+            graphic=[b.kind in ("table", "figure") for _, b in flow],
+            row_height=3 * body,
+        )
+        for i in order:
+            bb, block = flow[i]
+            block.column = (0, self._column(bb, gutters))
             out.append(block)
         return out
 

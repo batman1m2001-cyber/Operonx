@@ -16,22 +16,28 @@ table structure → page assemble → reading order), with rules instead of mode
 3. **Tables.** Ruling lines that connect into a grid (≥ 2 horizontal and ≥ 2
    vertical) are a table; words go to the grid cell holding their centre. Without
    rules, ≥ 3 consecutive lines whose segments line up in the same ≥ 3 columns
-   (or 2 columns of short cells) are a table.
-4. **Columns and reading order.** A gutter is an x-range that few segments cross
-   with text mass on both sides. Segments crossing a gutter span the page and cut
-   it into zones; inside a zone the columns are read left to right, each top to
-   bottom. This is the column-major order docling's rule-based reading order
-   (``reading_order_rb.py``) arrives at through its up/down graph.
-5. **Blocks.** Consecutive segments of one column join a block unless the
-   vertical gap exceeds ``paragraph_gap`` em, the font size or weight changes, a
-   list marker starts the line, or the line is indented (a first-line indent).
+   (or 2 columns of short cells) are a table, unless a column wraps like prose.
+   A grid with one used row or column only frames its text; a grid over
+   bitmaps or miniature text is a figure.
+4. **Blocks.** Segments are grouped by geometry: a segment continues the
+   block right above it when each is the other's only neighbour across the
+   line gap and the style, list-marker and first-line-indent rules agree; the
+   gap allowed is the page's usual leading for that size plus ``paragraph_gap``
+   em. Lines are cut only at gaps that leave a channel in the neighbouring
+   lines (a justified line's wide spaces do not), and a font whose word boxes
+   follow the ink gets one size per face.
+5. **Reading order.** docling's rule-based reading order
+   (``reading_order_rb.py``, see :mod:`operonx_kb.pdf.reading_order`) over the
+   blocks, tables and figures of a page: columns come out one after the other.
+   Gutters (an x-range few segments cross) only scope borderless tables.
 6. **Labels.** Monospace → code; "Figure 2:" → caption; a list marker → list
    item (depth from indentation); larger or bold short blocks → headings, level
    from numbering ("2.1" → 2) else from docling's style key (size cluster,
    weight); the largest heading at the top of page 1 → title; small text low on
    the page starting with a mark → footnote.
-7. **Merges.** A paragraph that ends mid-sentence and continues in the next
-   column or page is joined to its continuation (docling's predict_merges).
+7. **Merges.** A paragraph that ends mid-sentence at the bottom of a column
+   and continues at the top of the next column or page is joined to its
+   continuation (docling's predict_merges).
 """
 
 from __future__ import annotations
@@ -40,7 +46,7 @@ import re
 import statistics
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx_kb.model.ids import fingerprint
@@ -52,6 +58,7 @@ from operonx_kb.pdf.assemble import (
     split_list_marker,
 )
 from operonx_kb.pdf.backend import BBox, PageRenderer, PdfPage, Rule, Word
+from operonx_kb.pdf.reading_order import reading_order
 
 __all__ = ["Segment", "LayoutBlock", "LayoutModel", "HeuristicLayout"]
 
@@ -184,6 +191,59 @@ def set_style(block: "LayoutBlock", segments: List[Segment]) -> None:
     block.mono = sum(len(w.text) for w in words if w.mono) / chars
 
 
+_X_HEIGHT_ONLY = re.compile(r"^[acemnorsuvwxz]{2,}$")
+_ASCENDERS_ONLY = re.compile(r"^(?=.*[bdfhklt])[a-z]{2,}$")
+_DESCENDERS = re.compile(r"[gjpqy]")
+
+
+def font_sizes(pages: Sequence[PdfPage]) -> Dict[int, float]:
+    """A font size for every word that does not depend on its letters: ``id(word) -> size``.
+
+    docling-parse measures a word by its font's ascent and descent when the
+    font declares them, so all words of one face and size are equally tall.
+    Some fonts (the newspaper's) give ink boxes instead: "unseren" is 4.5 pt,
+    "Minuten" 6.5, "gelesen" 8.3, in one 7 pt face, enough to split lines and
+    to make a line with a "g" look like a heading. A font is ink-measured when
+    its x-height-only words ("an", "unseren") are clearly shorter than its
+    ascender words ("die", "hat"). For those fonts each word takes the most
+    common height around its own (between 0.6 and 1.4 times it, the span of
+    x-height to descender), picked from the most frequent height down; other
+    fonts keep their heights.
+    """
+    by_font: Dict[str, List[Word]] = defaultdict(list)
+    for page in pages:
+        for w in page.words:
+            by_font[w.font].append(w)
+    out: Dict[int, float] = {}
+    for words in by_font.values():
+        low = [w.size for w in words if _X_HEIGHT_ONLY.match(w.text)]
+        high = [
+            w.size
+            for w in words
+            if _ASCENDERS_ONLY.match(w.text) and not _DESCENDERS.search(w.text)
+        ]
+        ink = (
+            len(low) >= 5
+            and len(high) >= 5
+            and statistics.median(low) < 0.85 * statistics.median(high)
+        )
+        if not ink:
+            out.update((id(w), w.size) for w in words)
+            continue
+        left = list(words)
+        while left:
+            counts = Counter(round(w.size, 1) for w in left)
+            mode = counts.most_common(1)[0][0]
+            taken = [w for w in left if 0.6 * mode <= w.size <= 1.4 * mode]
+            out.update((id(w), mode) for w in taken)
+            left = [w for w in left if not 0.6 * mode <= w.size <= 1.4 * mode]
+    return out
+
+
+def _size_key(size: float) -> float:
+    return round(size * 2) / 2
+
+
 def _crosses(x0: float, x1: float, gutters: List[Tuple[float, float]]) -> bool:
     """Whether ``[x0, x1]`` reaches across a gutter (a ragged line ending inside one does not)."""
     return any(x0 < g0 + 1.0 and x1 > g1 - 1.0 for g0, g1 in gutters)
@@ -237,7 +297,9 @@ class HeuristicLayout(LayoutModel):
     Args:
         margin_band: Height of the header/footer bands, as a fraction of the page.
         segment_gap: Word gap, in em, that splits a line into segments.
-        paragraph_gap: Vertical gap, in em, that starts a new block.
+        paragraph_gap: Vertical gap, in em, beyond a page's usual gap between
+            the lines of one paragraph, that starts a new block (the whole
+            gap, when the page has too few lines of that size to tell).
         heading_ratio: Font-size ratio to the body size that makes a heading.
         gutter_coverage: A gutter is crossed by at most this share of the
             densest x-position's segments.
@@ -284,18 +346,61 @@ class HeuristicLayout(LayoutModel):
             else:
                 lines.append([word])
         lines.sort(key=lambda ln: min(w.y0 for w in ln))
+        for line in lines:
+            line.sort(key=lambda w: w.x0)
         out: List[Segment] = []
         for index, line in enumerate(lines):
-            line.sort(key=lambda w: w.x0)
             current = [line[0]]
             for prev, word in zip(line, line[1:]):
                 em = max(min(prev.size, word.size), 1.0)
-                if word.x0 - prev.x1 > self.segment_gap * em:
+                if word.x0 - prev.x1 > self.segment_gap * em and self._channel(
+                    lines, index, prev.x1, word.x0, em
+                ):
                     out.append(Segment(current, page.page_no, index))
                     current = []
                 current.append(word)
             out.append(Segment(current, page.page_no, index))
         return out
+
+    @staticmethod
+    def _channel(lines: List[List[Word]], index: int, a: float, b: float, em: float) -> bool:
+        """Whether the gap ``(a, b)`` on line ``index`` is a column or cell boundary.
+
+        A justified line stretches its spaces past the cut width ("strategies
+        may significantly enhance ..."); a boundary between columns or table
+        cells leaves the neighbouring lines blank beside it too. The gap cuts
+        the line when a neighbouring line (at most a line height away) has no text
+        in the 1.5 em before the gap's end (where the next column or cell
+        starts) or after its start (where a cell ends), or a 1.5 em gap of its
+        own inside this one (a centred grid), or when the line has no near
+        neighbour.
+        """
+        line = lines[index]
+        y0, y1 = min(w.y0 for w in line), max(w.y1 for w in line)
+        height = max(y1 - y0, 1.0)
+        reach = min(1.5 * em, b - a)
+        zones = ((b - reach, b), (a, a + reach))
+        near = False
+        for j in (index - 1, index + 1):
+            if not 0 <= j < len(lines):
+                continue
+            other = lines[j]
+            oy0, oy1 = min(w.y0 for w in other), max(w.y1 for w in other)
+            if max(oy0 - y1, y0 - oy1) > height:
+                continue
+            near = True
+            for z0, z1 in zones:
+                if not any(_overlap(w.x0, w.x1, z0, z1) > 0.1 for w in other):
+                    return True
+            # A centred grid (author blocks) shifts its channel from line to line:
+            # the neighbour then has a gap of its own inside this one.
+            inside = sorted((max(w.x0, a), min(w.x1, b)) for w in other if w.x1 > a and w.x0 < b)
+            edge = a
+            for x0, x1 in inside:
+                if x0 - edge >= reach and edge > a:
+                    return True
+                edge = max(edge, x1)
+        return not near
 
     # -- 1b. rotated text ------------------------------------------------------
 
@@ -574,36 +679,6 @@ class HeuristicLayout(LayoutModel):
     def _extent(segs: List[Segment]) -> float:
         return max(s.y1 for s in segs) - min(s.y0 for s in segs)
 
-    @staticmethod
-    def order(
-        items: List[Tuple[BBox, Any]], gutters: List[Tuple[float, float]]
-    ) -> List[Tuple[Any, Tuple[int, int]]]:
-        """Column-major order; each item gets its (zone, column)."""
-
-        def crosses(b: BBox) -> bool:
-            return _crosses(b[0], b[2], gutters)
-
-        def column(b: BBox) -> int:
-            cx = (b[0] + b[2]) / 2
-            return sum(1 for g0, g1 in gutters if cx >= g1 - 1)
-
-        spanning = sorted((i for i in items if crosses(i[0])), key=lambda i: (i[0][1], i[0][0]))
-        flowing = [i for i in items if not crosses(i[0])]
-        out: List[Tuple[Any, Tuple[int, int]]] = []
-        bounds = [s[0][1] for s in spanning] + [float("inf")]
-        prev = float("-inf")
-        for zone, bound in enumerate(bounds):
-            inside = [i for i in flowing if prev <= (i[0][1] + i[0][3]) / 2 < bound]
-            for col in range(len(gutters) + 1):
-                members = sorted(
-                    (i for i in inside if column(i[0]) == col), key=lambda i: (i[0][1], i[0][0])
-                )
-                out.extend((i[1], (zone, col)) for i in members)
-            if zone < len(spanning):
-                out.append((spanning[zone][1], (zone, -1)))
-                prev = bound
-        return out
-
     # -- 5-7. blocks, labels, merges -------------------------------------------
 
     def layout(
@@ -611,6 +686,7 @@ class HeuristicLayout(LayoutModel):
     ) -> List[LayoutBlock]:
         segs: Dict[int, List[Segment]] = {}
         rotated: Dict[int, List[Word]] = {}
+        sized = font_sizes(pages)
         for page in pages:
             big = [
                 b
@@ -618,7 +694,7 @@ class HeuristicLayout(LayoutModel):
                 if (b[2] - b[0]) * (b[3] - b[1]) > 0.5 * page.width * page.height
             ]
             words = [
-                w
+                replace(w, size=sized[id(w)])
                 for w in page.words
                 if not any(
                     b[0] <= (w.x0 + w.x1) / 2 <= b[2] and b[1] <= (w.y0 + w.y1) / 2 <= b[3]
@@ -738,47 +814,143 @@ class HeuristicLayout(LayoutModel):
                         ),
                     )
                 )
-        items.extend((s.bbox, s) for s in flow)
+        items.extend((b.regions[0][1], b) for b in self.text_blocks(flow))
         items.extend((b.regions[0][1], b) for b in side_blocks if b.kind != "page_header")
-
-        current: Optional[LayoutBlock] = None
-        last: Optional[Segment] = None
-        members: Dict[int, List[Segment]] = {}
-        for item, column in self.order(items, gutters):
-            if isinstance(item, LayoutBlock):
-                item.column = column
-                out.append(item)
-                current, last = None, None
-                continue
-            s = item
-            if (
-                current is not None
-                and last is not None
-                and current.column == column
-                and self._continues_block(last, s, current)
-            ):
-                if s.line == last.line:
-                    current.lines[-1] += " " + s.text
-                else:
-                    current.lines.append(s.text)
-                self._grow(current, s)
-                members[id(current)].append(s)
-            else:
-                current = LayoutBlock(
-                    kind="paragraph",
-                    page_no=page.page_no,
-                    lines=[s.text],
-                    regions=[(page.page_no, s.bbox)],
-                    x0=s.x0,
-                    column=column,
-                )
-                members[id(current)] = [s]
-                out.append(current)
-            last = s
-        for block in out:
-            if id(block) in members:
-                set_style(block, members[id(block)])
+        items.sort(key=lambda it: (round(it[0][1], 1), it[0][0]))
+        order = reading_order(
+            [box for box, _ in items],
+            page.width,
+            page.height,
+            graphic=[b.kind in ("table", "figure") for _, b in items],
+            row_height=3 * body,
+        )
+        for i in order:
+            box, block = items[i]
+            block.column = (0, self._column(box, gutters))
+            out.append(block)
         return out
+
+    @staticmethod
+    def _column(box: BBox, gutters: List[Tuple[float, float]]) -> int:
+        cx = (box[0] + box[2]) / 2
+        return sum(1 for g0, g1 in gutters if cx >= g1 - 1)
+
+    def text_blocks(self, segs: List[Segment]) -> List[LayoutBlock]:
+        """Group segments into blocks by geometry, not by column.
+
+        Segments are visited top to bottom. A segment continues the block right
+        above it when that block is the only one within a paragraph gap whose
+        extent it overlaps, the segment is the only one on its line under that
+        block (or the block's last line spans all of them: a line cut by a wide
+        gap), and :meth:`_continues_block` agrees (size, weight, list marker,
+        indent). Otherwise it starts a block. Segments of one line join only in
+        that wide-line case: the gap that cut them is a column or cell boundary
+        (author grids, form labels, columns without a detectable gutter).
+        """
+        ordered = sorted(segs, key=lambda s: (s.y0, s.x0))
+        leading = self._leading(ordered)
+        by_line: Dict[int, List[Segment]] = defaultdict(list)
+        for s in ordered:
+            by_line[s.line].append(s)
+        members: Dict[int, List[Segment]] = {}
+        extent: Dict[int, Tuple[float, float]] = {}
+        out: List[LayoutBlock] = []
+        open_blocks: List[LayoutBlock] = []
+        for s in ordered:
+            size = max(s.size, 1.0)
+            limit = 1.5 * size  # the final word is _continues_block's
+            cands = []
+            for b in open_blocks:
+                last = members[id(b)][-1]
+                x0, x1 = extent[id(b)]
+                if last.line == s.line:
+                    prev = [m for m in members[id(b)] if m.line != s.line]
+                    if 0 <= s.x0 - last.x1 <= 3 * size and prev and s.x1 <= prev[-1].x1 + size:
+                        cands.append(b)  # the next part of a cut line under a wide one
+                    continue
+                if -0.5 * size <= s.y0 - last.y1 <= limit and _overlap(x0, x1, s.x0, s.x1) > 0:
+                    cands.append(b)
+            target: Optional[LayoutBlock] = None
+            if len(cands) > 1 and self._joins_cut_line(cands, members, s):
+                # A one-line label cut from its text by a wide gap ("Table 1:   Both
+                # ...") over a full line: the parts are one line of one block.
+                cands.sort(key=lambda b: members[id(b)][0].x0)
+                head = cands[0]
+                for b in cands[1:]:
+                    head.lines[-1] += " " + b.lines[-1]
+                    for m in members[id(b)]:
+                        self._grow(head, m)
+                    members[id(head)].extend(members[id(b)])
+                    x0, x1 = extent[id(head)]
+                    bx0, bx1 = extent[id(b)]
+                    extent[id(head)] = (min(x0, bx0), max(x1, bx1))
+                    out.remove(b)
+                    open_blocks.remove(b)
+                cands = [head]
+            if len(cands) == 1:
+                b = cands[0]
+                last = members[id(b)][-1]
+                x0, x1 = extent[id(b)]
+                if last.line == s.line:
+                    prev = [m for m in members[id(b)] if m.line != s.line]
+                    if prev and self._spans(prev[-1], by_line[s.line], (x0, x1)):
+                        target = b
+                else:
+                    under = [t for t in by_line[s.line] if _overlap(x0, x1, t.x0, t.x1) > 0]
+                    if (len(under) == 1 or self._spans(last, under, (x0, x1))) and (
+                        self._continues_block(last, s, b, leading)
+                    ):
+                        target = b
+            if target is None:
+                target = LayoutBlock(
+                    kind="paragraph",
+                    page_no=s.page_no,
+                    lines=[s.text],
+                    regions=[(s.page_no, s.bbox)],
+                    x0=s.x0,
+                )
+                members[id(target)] = [s]
+                extent[id(target)] = (s.x0, s.x1)
+                out.append(target)
+                open_blocks.append(target)
+            else:
+                last = members[id(target)][-1]
+                if s.line == last.line:
+                    target.lines[-1] += " " + s.text
+                else:
+                    target.lines.append(s.text)
+                self._grow(target, s)
+                members[id(target)].append(s)
+                x0, x1 = extent[id(target)]
+                extent[id(target)] = (min(x0, s.x0), max(x1, s.x1))
+            # Blocks whose last line is far above can take nothing more.
+            open_blocks = [b for b in open_blocks if s.y0 - members[id(b)][-1].y1 <= 3 * size]
+        for block in out:
+            set_style(block, members[id(block)])
+        return out
+
+    @staticmethod
+    def _joins_cut_line(
+        cands: List[LayoutBlock], members: Dict[int, List[Segment]], s: Segment
+    ) -> bool:
+        """Whether ``cands`` are one-line blocks of one line that ``s`` runs under."""
+        lines = [members[id(b)] for b in cands]
+        if any(len({m.line for m in ms}) != 1 for ms in lines):
+            return False
+        if len({ms[0].line for ms in lines}) != 1 or s.line == lines[0][0].line:
+            return False
+        em = max(s.size, 1.0)
+        x0 = min(m.x0 for ms in lines for m in ms)
+        x1 = max(m.x1 for ms in lines for m in ms)
+        return abs(s.x0 - x0) <= em and s.x1 >= x1 - em
+
+    @staticmethod
+    def _spans(wide: Segment, parts: List[Segment], extent: Tuple[float, float]) -> bool:
+        """Whether the cut line ``parts`` lies under the block line ``wide``."""
+        em = max(wide.size, 1.0)
+        return all(
+            p.x0 >= extent[0] - em and p.x1 <= max(extent[1], wide.x1) + em for p in parts
+        ) and (len(parts) > 1)
 
     def _by_column(
         self, flow: List[Segment], gutters: List[Tuple[float, float]]
@@ -792,38 +964,86 @@ class HeuristicLayout(LayoutModel):
                 groups[sum(1 for g0, g1 in gutters if cx >= g1 - 1)].append(s)
         return list(groups.values())
 
-    def _continues_block(self, last: Segment, s: Segment, block: LayoutBlock) -> bool:
+    def _leading(self, ordered: List[Segment]) -> Dict[float, float]:
+        """The usual gap between the lines of a paragraph, per font size.
+
+        Gaps are measured between a segment and the next one below that it
+        overlaps, at the same size; the most common gap (to 0.25 pt) of a size
+        with at least five such pairs is its leading. Line spacing differs from
+        face to face (and box heights from font to font), so a fixed share of
+        the size cannot tell a line break from a paragraph break everywhere.
+        """
+        gaps: Dict[float, List[float]] = defaultdict(list)
+        for k, u in enumerate(ordered):
+            size = max(u.size, 1.0)
+            for s in ordered[k + 1 :]:
+                if s.y0 - u.y1 > 1.5 * size:
+                    break
+                if s.line == u.line or _overlap(u.x0, u.x1, s.x0, s.x1) <= 0:
+                    continue
+                if abs(s.size - u.size) <= 0.1 * size and s.y0 - u.y1 >= -0.5 * size:
+                    gaps[_size_key(size)].append(round((s.y0 - u.y1) * 4) / 4)
+                break
+        return {
+            key: Counter(values).most_common(1)[0][0]
+            for key, values in gaps.items()
+            if len(values) >= 5
+        }
+
+    def _continues_block(
+        self,
+        last: Segment,
+        s: Segment,
+        block: LayoutBlock,
+        leading: Optional[Dict[float, float]] = None,
+    ) -> bool:
         if s.line == last.line:
             return True
         size = max(last.size, s.size, 1.0)
         gap = s.y0 - last.y1
-        if gap < -0.5 * size or gap > self.paragraph_gap * size:
+        usual = (leading or {}).get(_size_key(size))
+        limit = (
+            max(usual, 0.0) + self.paragraph_gap * size
+            if usual is not None
+            else self.paragraph_gap * size
+        )
+        if gap < -0.5 * size or gap > limit:
             return False
         if abs(s.size - last.size) > 0.1 * size:
             return False
         if s.share("mono") >= 0.9 and last.share("mono") >= 0.9:
             return True  # code: indentation and markers are content, not structure
-        if (s.share("bold") >= 0.5) != (last.share("bold") >= 0.5):
-            return False
-        if split_list_marker(s.text) is not None and not self._full(last, block):
+        for style in ("bold", "italic"):
+            a, b = last.share(style), s.share(style)
+            if (a >= 0.9 and b < 0.5) or (a < 0.5 and b >= 0.9):
+                # A whole bold or italic line next to a plain one: a heading or a
+                # caption meets body text. A line that is only partly bold (a
+                # run-in heading, "Graph Neural networks: Graph ...") never breaks.
+                return False
+        if split_list_marker(s.text) is not None and not self._full(last, block, s):
             # A marker-like start ("826. For …") right after a line that runs to
             # the block's edge is wrapped text, not a new list item.
             return False
         if split_list_marker(block.lines[0]) is not None:
             return s.x0 > block.x0 + 0.3 * size  # a list item's wrapped lines hang under its text
-        if s.x0 > block.x0 + 0.8 * size and s.x0 - last.x0 > 0.8 * size:
+        left = min(block.x0, block.regions[-1][1][0])  # the first line may be indented
+        if s.x0 > left + 0.8 * size and s.x0 - last.x0 > 0.8 * size:
             return False  # first-line indent of a new paragraph
         return True
 
     @staticmethod
-    def _full(last: Segment, block: LayoutBlock) -> bool:
-        """Whether ``last`` (the block's latest line) runs to the block's right edge."""
-        right = max(r[1][2] for r in block.regions)
-        return (
-            len(block.lines) >= 1
-            and last.x1 >= right - 2 * max(last.size, 1.0)
-            and last.x0 <= block.x0 + 1.0
-        )
+    def _full(last: Segment, block: LayoutBlock, s: Segment) -> bool:
+        """Whether ``last`` (the block's latest line) was wrapped before ``s``.
+
+        It was when it starts at the block's left edge and the first word of
+        ``s`` would not have fitted after it within the block (or within ``s``):
+        the typesetter had to break there. Ragged-right text breaks well short
+        of the edge, so a fixed margin is not enough.
+        """
+        right = max(max(r[1][2] for r in block.regions), s.x1)
+        first = s.words[0]
+        space = 0.3 * max(last.size, 1.0)
+        return last.x0 <= block.x0 + 1.0 and last.x1 + space + (first.x1 - first.x0) > right
 
     @staticmethod
     def _grow(block: LayoutBlock, s: Segment) -> None:
@@ -918,16 +1138,48 @@ class HeuristicLayout(LayoutModel):
                     h.level = max(1, h.level - shift)
 
     def _merge(self, blocks: List[LayoutBlock]) -> List[LayoutBlock]:
-        out: List[LayoutBlock] = []
+        """Join a paragraph to its continuation in the next column or on the next page.
+
+        docling's predict_merges: the next paragraph in reading order (past
+        furniture, tables, figures, captions and footnotes) is on a later page
+        or strictly to the right, the first ends open (lower case, comma,
+        hyphen) and the second starts with a letter. docling also lets two
+        blocks side by side on one row merge (author blocks of a title page);
+        here the first must end its column and the second must open one: no
+        block of about their width below the first or above the second.
+        """
         skip = {"page_header", "page_footer", "table", "figure", "caption", "footnote"}
+        flow = [b for b in blocks if b.kind not in skip]
+        by_page: Dict[int, List[BBox]] = defaultdict(list)
+        for b in flow:
+            for page, box in b.regions:
+                by_page[page].append(box)
+
+        def alone(page: int, box: BBox, side: str) -> bool:
+            width = box[2] - box[0]
+            for other in by_page[page]:
+                if other is box or _overlap(other[0], other[2], box[0], box[2]) <= 0:
+                    continue
+                if other[2] - other[0] > 1.5 * width:
+                    continue  # a block spanning columns (a title, an abstract) bounds a zone
+
+                if side == "below" and other[1] >= box[3] - 1.0:
+                    return False
+                if side == "above" and other[3] <= box[1] + 1.0:
+                    return False
+            return True
+
+        out: List[LayoutBlock] = []
         pending: Optional[LayoutBlock] = None  # a paragraph that may continue
         for b in blocks:
-            if (
-                b.kind == "paragraph"
-                and pending is not None
-                and (b.page_no != pending.page_no or b.column != pending.column)
-            ):
-                if continues(pending.text, b.text):
+            if b.kind == "paragraph" and pending is not None:
+                (p_page, p_box), (b_page, b_box) = pending.regions[-1], b.regions[0]
+                if (
+                    (b_page != p_page or p_box[2] < b_box[0])
+                    and alone(p_page, p_box, "below")
+                    and alone(b_page, b_box, "above")
+                    and continues(pending.text, b.text)
+                ):
                     pending.lines = [join_continued(pending.text, b.text)]
                     pending.regions.extend(b.regions)
                     continue
