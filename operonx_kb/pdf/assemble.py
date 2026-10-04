@@ -23,6 +23,7 @@ __all__ = [
     "join_lines",
     "fix_ligatures",
     "split_list_marker",
+    "is_bullet",
     "is_caption",
     "continues",
     "join_continued",
@@ -72,14 +73,24 @@ def join_lines(lines: List[str]) -> str:
 
 _BULLET = r"[-*+•·‣⁃◦▪▫■□●○►▶▸➤➢✓✔✗✘–—]"
 _ENUM = (
-    r"\d+(?:\.\d+)+\.?"  # 1.2 / 1.2.3.
-    r"|\d+[.)]"  # 1. 1)
+    r"\d{1,2}(?:\.\d{1,3})+\.?"  # 1.2 / 1.2.3. (not a date: 2020.3.30.)
+    r"|\d{1,3}[.)]"  # 1. 1)
     r"|\(\d+\)|\[\d+\]"  # (1) [1]
     r"|\(?[ivxlcdm]+[.)]"  # i. ii) (iv)
     r"|\(?[IVXLCDM]+[.)]"
     r"|\(?[a-z][.)]|\(?[A-Z][.)]"  # a. b) (c) A.
 )
 _MARKER = re.compile(rf"^\s*({_BULLET}|{_ENUM})\s+(\S.*)$", re.S)
+_BULLET_ONLY = re.compile(r"^\s*[•·‣⁃◦▪▫■□●○►▶▸➤➢✓✔]\s*$")
+
+
+def is_bullet(text: str) -> bool:
+    """Whether ``text`` is a bullet glyph alone ("•", "▪").
+
+    Dashes and numbers are left out: alone in a table column "-" or "73." is a
+    cell, and "(1)" an equation number or a citation more often than a marker.
+    """
+    return bool(_BULLET_ONLY.match(text))
 
 
 def split_list_marker(text: str) -> Optional[Tuple[str, bool, str]]:

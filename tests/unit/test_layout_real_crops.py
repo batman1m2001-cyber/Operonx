@@ -120,3 +120,41 @@ def test_side_by_side_labels_of_a_form_header_are_separate_blocks():
     blocks = _layout("w9_header")
     assert "Give form to the requester. Do not send to the IRS." in _texts(blocks)
     assert "Under penalties of perjury, I certify that:" in _texts(blocks)
+
+
+def test_korean_brief_dates_footnotes_and_title():
+    """normal_4pages p1: '2020.3.30. 0시 ...' is a date, not a list marker; small
+    '1) ...' notes low on the page are footnotes; the 35 pt line below a masthead
+    issue number is the title."""
+    blocks = _layout("korean_brief")
+    assert [b.text for b in blocks if b.kind == "title"] == [
+        "코로나-19 관련 보험약관상 재해보험금 지급문제 및 개선과제"
+    ]
+    date = [b for b in blocks if b.text.startswith("2020.3.30.")]
+    assert len(date) == 1 and date[0].kind == "paragraph"
+    footnotes = _texts(blocks, "footnote")
+    assert any(t.startswith("1) 손해보험의 표준약관") for t in footnotes)
+    assert any(t.startswith("* 경제산업조사실") for t in footnotes)
+
+
+def test_centred_title_lines_are_one_title():
+    """2206.01062 p1: the second centred title line starts right of the first;
+    that is not a first-line indent."""
+    blocks = _layout("centred_title")
+    assert _texts(blocks, "title") == [
+        "DocLayNet: A Large Human-Annotated Dataset for Document-Layout Analysis"
+    ]
+
+
+def test_a_page_number_in_a_deep_bottom_margin_is_a_footer():
+    """code_and_formula p1: the folio sits 12% above the page bottom (LaTeX margins)."""
+    blocks = _layout("page_number_low")
+    assert _texts(blocks, "page_footer") == ["1"]
+
+
+def test_bullets_set_apart_from_their_text_start_list_items():
+    """NASA slide 11: '•' then a wide gap, then a larger bold label."""
+    blocks = _layout("slide_bullets")
+    items = _texts(blocks, "list_item")
+    assert "Pro 1RF:" in items and "Pro No Oscillation: -provides larger window of" in items
+    assert not [t for t in _texts(blocks, "heading") if t.startswith("•")]

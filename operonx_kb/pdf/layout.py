@@ -9,9 +9,10 @@ table structure → page assemble → reading order), with rules instead of mode
    cut into segments where the gap between words exceeds ``segment_gap`` em —
    column gutters and table cells live in those gaps. Rotated words (an arXiv
    stamp, a form's side label) are turned upright and form blocks of their own.
-2. **Furniture.** A segment in the top or bottom margin band is a page header or
-   footer when its digit-masked text repeats on another page, or when it is a
-   page number ("3", "Page 3 of 9", "- 3 -", "Trang 3"). Docling relies on its
+2. **Furniture.** A segment in the top or bottom margin band, a line's height
+   clear of the next line towards the body, is a page
+   header or footer when its digit-masked text repeats on another page, or when
+   it is a page number ("3", "Page 3 of 9", "- 3 -", "Trang 3", "7-45"). Docling relies on its
    layout model's labels; repetition is the rule-based equivalent.
 3. **Tables.** Ruling lines that connect into a grid (≥ 2 horizontal and ≥ 2
    vertical) are a table; words go to the grid cell holding their centre. Without
@@ -52,6 +53,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from operonx_kb.model.ids import fingerprint
 from operonx_kb.pdf.assemble import (
     continues,
+    is_bullet,
     is_caption,
     join_continued,
     join_lines,
@@ -166,10 +168,13 @@ class LayoutModel(ABC):
 # ── helpers ─────────────────────────────────────────────────────────────
 
 _PAGE_NUMBER = re.compile(
-    r"^(page|trang|p\.?|pg\.?)?\s*[-–—(]?\s*\d{1,4}\s*[-–—)]?(\s*(of|/|trên)\s*\d{1,4})?$", re.I
+    r"^(page|trang|p\.?|pg\.?)?\s*[-–—(]?\s*\d{1,4}\s*[-–—)]?(\s*(of|/|trên)\s*\d{1,4})?$"
+    r"|^\d{1,3}\s*[-–]\s*\d{1,4}$"  # chapter-page: 7-45
+    r"|^[ivxlcdm]{1,7}$",  # front matter: xi
+    re.I,
 )
 _HEADING_NUMBER = re.compile(r"^(\d+(?:\.\d+)*)\.?\s+\S")
-_FOOTNOTE_MARK = re.compile(r"^(\d{1,2}|[*†‡§¶])\s*\S")
+_FOOTNOTE_MARK = re.compile(r"^(\d{1,2}\)?|[*†‡§¶])\s*\S")
 
 
 def _mask(text: str) -> str:
@@ -310,7 +315,7 @@ class HeuristicLayout(LayoutModel):
 
     def __init__(
         self,
-        margin_band: float = 0.08,
+        margin_band: float = 0.15,
         segment_gap: float = 1.0,
         paragraph_gap: float = 0.5,
         heading_ratio: float = 1.15,
@@ -353,8 +358,15 @@ class HeuristicLayout(LayoutModel):
             current = [line[0]]
             for prev, word in zip(line, line[1:]):
                 em = max(min(prev.size, word.size), 1.0)
-                if word.x0 - prev.x1 > self.segment_gap * em and self._channel(
-                    lines, index, prev.x1, word.x0, em
+                hanging = (
+                    len(current) == 1
+                    and is_bullet(current[0].text)
+                    and word.x0 - prev.x1 <= 4 * max(word.size, 1.0)
+                )  # a bullet set apart from its text ("•   Pro 1RF: -Saves time")
+                if (
+                    not hanging
+                    and word.x0 - prev.x1 > self.segment_gap * em
+                    and self._channel(lines, index, prev.x1, word.x0, em)
                 ):
                     out.append(Segment(current, page.page_no, index))
                     current = []
@@ -474,16 +486,38 @@ class HeuristicLayout(LayoutModel):
     # -- 2. furniture ------------------------------------------------------------
 
     def mark_furniture(self, pages: Sequence[PdfPage], segs: Dict[int, List[Segment]]) -> None:
+        """Mark running headers, footers and page numbers.
+
+        A segment is a candidate when it lies in the top or bottom
+        ``margin_band`` of the page and stands apart from the next line towards
+        the body (a gap of at least its own height): table rows and paragraph
+        lines in the band do not. A candidate is furniture when its digit-masked
+        text repeats on another page or reads as a page number ("3", "- 3 -",
+        "Page 3 of 9", "7-45", "xi").
+        """
         seen: Dict[Tuple[str, str], set] = defaultdict(set)
         candidates: List[Tuple[Segment, str]] = []
         for page in pages:
-            for s in segs[page.page_no]:
-                if s.y1 <= self.margin_band * page.height:
+            page_segs = segs[page.page_no]
+            top = self.margin_band * page.height
+            bottom = (1 - self.margin_band) * page.height
+            for s in page_segs:
+                if s.y1 <= top:
                     band = "page_header"
-                elif s.y0 >= (1 - self.margin_band) * page.height:
+                    gap = min(
+                        (t.y0 - s.y1 for t in page_segs if t.line != s.line and t.y0 >= s.y1 - 1),
+                        default=page.height,
+                    )
+                elif s.y0 >= bottom:
                     band = "page_footer"
+                    gap = min(
+                        (s.y0 - t.y1 for t in page_segs if t.line != s.line and t.y1 <= s.y0 + 1),
+                        default=page.height,
+                    )
                 else:
                     continue
+                if gap < s.y1 - s.y0:
+                    continue  # text runs on towards the body: a table row, a paragraph
                 candidates.append((s, band))
                 seen[(band, _mask(s.text))].add(page.page_no)
         for s, band in candidates:
@@ -1026,9 +1060,10 @@ class HeuristicLayout(LayoutModel):
             return False
         if split_list_marker(block.lines[0]) is not None:
             return s.x0 > block.x0 + 0.3 * size  # a list item's wrapped lines hang under its text
+        centred = abs((s.x0 + s.x1) - (last.x0 + last.x1)) <= size
         left = min(block.x0, block.regions[-1][1][0])  # the first line may be indented
-        if s.x0 > left + 0.8 * size and s.x0 - last.x0 > 0.8 * size:
-            return False  # first-line indent of a new paragraph
+        if not centred and s.x0 > left + 0.8 * size and s.x0 - last.x0 > 0.8 * size:
+            return False  # first-line indent of a new paragraph (centred lines have none)
         return True
 
     @staticmethod
@@ -1067,7 +1102,9 @@ class HeuristicLayout(LayoutModel):
             if is_caption(text):
                 b.kind = "caption"
                 continue
-            larger = b.size >= self.heading_ratio * body
+            marker = split_list_marker(text)
+            bulleted = marker is not None and is_bullet(marker[0]) and marker[0] not in "-–—*+"
+            larger = b.size >= self.heading_ratio * body and not bulleted
             bold_short = (
                 b.bold >= 0.9
                 and b.size >= 0.95 * body
@@ -1075,10 +1112,13 @@ class HeuristicLayout(LayoutModel):
                 and not text.rstrip().endswith((".", ":", ";", ","))
             )
             if (larger and len(b.lines) <= 3 and len(text) <= 200) or (
-                bold_short and len(b.lines) <= 2
+                bold_short and not bulleted and len(b.lines) <= 2
             ):
                 b.kind = "heading"
                 headings.append(b)
+                continue
+            if b.size <= 0.85 * body and y0 >= 0.7 * page_h and _FOOTNOTE_MARK.match(text):
+                b.kind = "footnote"  # "1) ..." low on the page in small type: not a list
                 continue
             marker = split_list_marker(text)
             if marker is not None:
@@ -1089,16 +1129,19 @@ class HeuristicLayout(LayoutModel):
                 b.lines = [marker[2]]  # the joined text without its marker
                 list_x[(b.page_no, b.column)].append(b.regions[0][1][0])
                 continue
-            if b.size <= 0.85 * body and y0 >= 0.7 * page_h and _FOOTNOTE_MARK.match(text):
-                b.kind = "footnote"
         # List depth: rank of the item's indentation among the items of its column.
         for b in blocks:
             if b.kind == "list_item":
                 levels = _cluster(list_x[(b.page_no, b.column)], 3.0)
                 b.depth = max(0, sum(1 for x in levels if x < b.regions[0][1][0] - 3.0))
-        self._levels(headings, body)
+        self._levels(headings, body, heights)
 
-    def _levels(self, headings: List[LayoutBlock], body: float) -> None:
+    def _levels(
+        self,
+        headings: List[LayoutBlock],
+        body: float,
+        heights: Optional[Dict[int, float]] = None,
+    ) -> None:
         if not headings:
             return
         # Style key, after docling's heading_hierarchy: size clusters (largest
@@ -1112,11 +1155,21 @@ class HeuristicLayout(LayoutModel):
             clusters[size] = rank
         keys = sorted({(clusters[round(h.size, 1)], -int(h.bold >= 0.5)) for h in headings})
         style_level = {k: i + 1 for i, k in enumerate(keys)}
-        first = headings[0]
+        # The title is the largest heading on the first page with headings, in
+        # its upper half, alone at its size and clearly larger than the body; a
+        # masthead line above it (an issue number) does not hide it.
+        first_page = min(h.page_no for h in headings)
         top = max(h.size for h in headings)
+        cands = [
+            h
+            for h in headings
+            if h.page_no == first_page
+            and h.size == top
+            and h.regions[0][1][1] <= 0.5 * (heights or {}).get(first_page, float("inf"))
+        ]
+        first = cands[0] if cands else headings[0]
         title_candidate = (
-            first.page_no == min(h.page_no for h in headings)
-            and first.size == top
+            bool(cands)
             and first.size >= 1.3 * body
             and sum(1 for h in headings if abs(h.size - top) < 0.05 * top) == 1
             and not _HEADING_NUMBER.match(first.text)

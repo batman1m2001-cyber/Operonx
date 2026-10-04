@@ -238,3 +238,9 @@ def test_backend_reports_the_text_direction():
     assert words["Specific"].angle == 90.0 and not words["Specific"].horizontal
     assert words["Request"].angle == 0.0 and words["Request"].horizontal
     assert words["Specific"].size < 10  # the glyph height, not the rotated box's height
+
+
+def test_dates_and_long_numbers_are_not_list_markers():
+    assert split_list_marker("2020.3.30. 0시 기준") is None
+    assert split_list_marker("1.2.3 Scope") == ("1.2.3", True, "Scope")
+    assert split_list_marker("119. For release") == ("119.", True, "For release")
