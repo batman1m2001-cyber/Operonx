@@ -550,6 +550,13 @@ class Operon:
             self.name,
         )
 
+    @property
+    def trace_consumers(self) -> List[Any]:
+        """The consumers every run of this engine feeds, resolved from
+        ``trace=`` — for a caller that runs another graph beside this one
+        and wants it traced to the same places (an eval's judges)."""
+        return list(self._trace_consumers)
+
     @staticmethod
     def _resolve_trace_consumers(trace: Any) -> List[Any]:
         """Resolve `trace=` argument → list of Consumer instances.

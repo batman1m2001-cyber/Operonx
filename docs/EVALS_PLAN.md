@@ -1,6 +1,6 @@
 # Evals — experiments with an identity, repeats, error bars and a gate
 
-Status: **E0 committed 2026-10-04; E1 built on `feat/evals-e1`; E2–E3 on `feat/evals-e2`; E4 on `feat/evals-e4`.**
+Status: **E0 committed 2026-10-04; E1 built on `feat/evals-e1`; E2–E3 on `feat/evals-e2`; E4 on `feat/evals-e4`; E5 on `feat/evals-e5`.**
 Source: `docs/roadmap/ROADMAP.md` §3 and the full design in `docs/roadmap/track4_eval.md`
 (cited below as T4 §n). This file is the working plan: it keeps what T4 decided, resolves
 what T4 left to the implementer, and says what each phase ships and how it is tested.
@@ -29,7 +29,8 @@ E1's gate: no measurable change to that at `repeats=1`.
 | E2 | `TraceView`, trajectory / tool / op-output / budget evaluators, `rescore` | T4 §18 P2 | `from_trace(live) == from_rows(stored)` |
 | E3 | `ScoreStore` (files+SQLite, ClickHouse v3) | T4 §18 P3 | host A's experiment visible on host B |
 | E4 | `operonx eval` CLI, md/json/junit reports, pytest plugin, `calibrate`, `power` | T4 §18 P4 | exit-code matrix through the CLI |
-| E5–E8 | judges as traced graphs, Studio, online eval, conversations | T4 §18 P5–P8 | as T4 |
+| E5 | judges as traced graphs (version, cache, binary, pairwise with swap), alignment (κ, TPR, TNR), `operonx eval align` | T4 §18 P5 | κ measured on human labels (§10) |
+| E6–E8 | Studio, online eval, conversations | T4 §18 P6–P8 | as T4 |
 
 The roadmap's E0 measurement ("callbot QC cases 3× on one sha → flip rate") runs on the
 callbot side (`refactor/operonx-studio`), not in this repo. It does not block E1: E1's
@@ -200,7 +201,65 @@ what it left open is decided here before the code.
 - Guide: `07-evals.md` gains the CLI (`bash run` snippets), reports and the pytest plugin;
   `docs/guide/13-evals.md` gains the CLI, CI for GitLab and GitHub, and the plugin.
 
-## 9. Log
+## 9. Decisions (E5)
+
+Branch `feat/evals-e5`, stacked on `feat/evals-e4`. Same rules: what T4 decided is kept;
+what it left open is decided here before the code.
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| D49 | Graph evaluators | Any `GraphOp` or `@graph` factory in `evaluators=` is a **graph evaluator** (`judges.GraphEvaluator`; `evaluator_of(ev)` wraps it, and `prepare`, `Eval`, `rescore` and the pytest plugin all go through it). Its inputs are the graph's declared inputs, filled by name from what any evaluator can take — `input`, `output`, `expected`, `row`, `outputs`, and `trace_summary` (D53); an input outside those is an error at construction naming the ones there are. Its result (the run's outputs) becomes the verdict as a function's does (`verdict_of`), plus `judge_trace_id` (its own trace), `cost_usd` and tokens (its priced LLM calls, the rule `summarize` uses). A graph evaluator **is a judge**: `eval_kind = "judge"`, scores with `source=judge`, never rescored; a deterministic check stays a function (microsecond cost, no engine, T4 §7.4) | T4 §7.4, one mechanism for `judge()`, `pairwise()` and a user's own graph |
+| D50 | How a judge is traced | Each call is its own run of its own `Operon` (one per graph per eval run), traced to the consumers the eval's engine feeds (the job's `trace=`; `Operon.trace_consumers` exposes them), with `origin_metadata("eval", job, job_run, key, case, role="judge", judged_trace=<the case run's trace id>, evaluator=<check name>)` merged onto its trace as `serve_session` merges a job's (`merge_trace_metadata`, factored out of it). The context reaches the judge as the injected argument `judging` (a `Judging`: consumers, metadata, the judge cache, the `judge_concurrency` semaphore, per-judge counters) that `Eval` builds per run and the pytest plugin per session. Called without one (a script, a unit test) a judge runs untraced and uncached — nothing to trace to, nowhere to cache | T4 §7.4; the case run's trace stays the system's alone, so `cost_usd` (system) never holds judge spend |
+| D51 | `judge()` | `judge(llm, rubric, *, name=None, labels=("PASS", "FAIL"), pass_labels=("PASS",), reference="auto", examples=(), include_trace=False, temperature=0.0, max_retries=1)` → a `Judge`. Graph: `render` (sync op: the messages) → `LLMOp(messages=…, fields=["reason: str", "verdict: str"], parser="json", validators={"verdict": labels}, on_failure="error")` → `decide` (sync op: label → `passed`). The model writes its reason before its verdict (rationale first), and the reason is kept on the verdict and the score. *Changed while building:* the answer was first `<reason>…</reason><verdict>…</verdict>` (XML); on 60 real callbot items `qwen3.7-flash` left `</reason>` unclosed in 6 (10%), which the strict XML parser rejects even after a retry; the same 60 as one JSON object: 0 failures, and 0 of 406 in the full run (§11) **Binary by default**; `labels`/`pass_labels` make it categorical (an ordinal scale is categorical labels; a numeric 1–10 judge is not built — T4 Avoid). **One criterion per judge** is structural: one judge, one label, one score name `judge:<name>`. `rubric` is text, or a path ending `.md`/`.txt` that must exist (read once, at construction); `name` defaults to that file's stem and is required with inline text. `reference="auto"` shows `expected` when the case has one, `True` requires it (a case without fails its check with that reason), `False` never shows it. `examples` (`{input, output, expected?, verdict, reason?}`) are few-shot in the system message | T4 §7.5 rules 1–3 |
+| D52 | 1.9.0 `llm_judge` | **Migrated** onto `Judge` as a thin compatible form, not kept beside it: `llm_judge(resource, rubric, *, name="llm_judge")` is a `Judge` whose graph asks for 1.9.0's JSON `{passed, score, reason}` with 1.9.0's prompt (rubric as the system message, then `Input:/Output:/Expected:`), so its check name, verdict fields and the 11 tests of 1.9.0 are unchanged — and it is now traced, versioned and cached like any judge. Prompt text that was `.format`ted (rubric braces doubled) is now a message list that is never formatted | one judge implementation; the old name keeps its contract |
+| D53 | `trace_summary` | A compact text of the case's `TraceView` — one line per step of `path()`: name, type, status, ms, outputs clipped — injectable by name like `trace` (built only when some evaluator takes it). `judge(include_trace=True)` puts it in the prompt (a trajectory judge) | T4 §7.4 |
+| D54 | Judge version | `Judge.eval_version` = digest of the rubric, examples, labels, pass labels, reference mode, `include_trace`, temperature, the judge graph (the source digests of the builder and its ops — the graph is a pure function of them and these parameters), and the **model**: the resolved `llm:` config read from the resource hub (`get_config`, not an instance), scrubbed of secrets and reduced to what `config_hash` keeps. A resource the hub does not declare at version time is identified by its key and the judge's summary says `model_resolved: false` with a warning (the call itself then fails loudly unless something stands in for the hub). A user's graph evaluator: digest of `graph_spec` + `config_spec` of its `serialize()` (D3/D4) | T4 §7.5 rule 2 |
+| D55 | Judge cache | `key = sha256(version, canonical(the graph's filled inputs))` — the inputs the judge actually saw, so `expected` counts only when shown. Read before the call, written after a verdict that is not an error, in the eval's score store (`cache_get`/`cache_put`, D30); no store → no cache. A hit makes **no LLM call and no judge run**: the verdict is the cached one with `cached: true`, `cost_usd: 0.0` (spend, not value) and the `judge_trace_id` of the run that produced it. `Eval(judge_cache=False)` / `operonx eval run --no-cache` skips reads and writes (to measure a judge's own noise) | T4 §7.5 rule 6 |
+| D56 | Pairwise | `pairwise(llm, rubric, *, name=None, reference="auto", examples=(), temperature=0.0)` → a `PairwiseJudge`: one graph, `START >> [ab, ba]`, each branch `render → LLMOp` asking `A`/`B`/`TIE` with the two answers in one order, joined by `reconcile`. Both orders run as parallel branches of one run (one trace). Mapped back to experiments, the two agree → that winner; they differ in any way (a flip, or a preference against a tie) → `tie` with `inconsistent: true`. `compare_pairwise(a, b, judges, *, dataset=None, scores=None, trace=None, judge_cache=None, concurrency=8)` (async) judges repeat 0 of every case both experiments ran cleanly with an unchanged `case_hash`, the input read from the dataset (b's, else `dataset=`); a clipped output or a case missing from the dataset is skipped and counted. Per judge: wins of a and b, ties, the **swap-inconsistency rate**, b's preference `mean(value)` (b = 1, tie = ½, a = 0) with its interval over cases (`stats.estimate`), judge cost. Scores: target `pair`, `label` the winner, `metadata.inconsistent`. A `PairwiseJudge` in `Eval(evaluators=)` is refused (it judges two experiments, not a case). `compare` stays sync and statistical; `operonx eval compare A B --pairwise mod:attr` runs both | T4 §7.5 rule 4 |
+| D57 | Self-preference | The fingerprint gains `models`: the sorted `model` names of the resolved `llm:` configs the graph's ops carry (from `config_spec`, so no new read), kept on the experiment row's metadata. A judge whose resolved model is in `models` gets a warning in the eval's gate warnings and its summary (`self_preference: true`); `compare_pairwise` warns when it is in either experiment's `models`. An experiment from before E5 has no `models`: not checked, and said so | T4 §7.5 rule 5 |
+| D58 | Judge cost | Already apart at the summary (`cost_usd` = the case runs' own traces, `judge_cost_usd` = the checks' `cost_usd`), and D50 keeps it apart at the trace. Added: `summary["judges"][name]` — `version`, `model`, `calls` (judge runs), `cached`, `errors`, `cost_usd`, `gating`, `self_preference`, `alignment` — kept on the experiment row's metadata; the Markdown report gets a **Judges** table (one row per judge: its spend beside the system's) | T4 §7.5 rule 8, §5.1 `judge_cost_usd` |
+| D59 | Alignment | `align.py`. `Score` gains the target `evaluator` (needs `evaluator_version`; its id is the existing online rule, `sha(target, …, score_name, evaluator_version)`, so re-aligning a version replaces its record). `align(store, judge, *, human=None, version=None, experiment=None)`: judge scores (`source=judge`, `score_name=judge`; the newest `evaluator_version` unless given) joined with human scores (`source=human`, `score_name=human`, default the judge's own name) **on the same target**: the same trace (and op), or the same item (experiment, case, repeat). Several reviewers of one target: the majority; a tie is left out and counted. A human score counts as PASS by `passed`, else a `label` in `pass/good/yes/true` (FAIL: `fail/bad/no/false`), else `value ≥ 0.5`; anything else is unusable and counted. A judge score that is no verdict (the check errored: `metadata.error`, which `check_score` now keeps) is left out and counted as `judge_errors` — found measuring: a parse failure is `passed: false` and was being scored as a FAIL disagreement PASS is the positive class: **TPR** = judge PASS given human PASS, **TNR** = judge FAIL given human FAIL (each with its Wilson interval), accuracy, **Cohen's κ** = (p_o − p_e)/(1 − p_e) with Cohen's (1960) large-sample SE and interval, `None` when p_e = 1 (one class only: undefined, said so), the 2×2 matrix, and the disagreements (target, both labels, the judge's reason). `record_alignment` writes it as a score (`target=evaluator`, `source=code`, `value` κ, `passed` κ ≥ 0.6, metadata the rest); `alignment_of(store, judge, version)` reads the newest. `operonx eval align <judge>` (`--human`, `--version`, `--experiment`, `--no-record`, `--format`) prints and records it; exit 0 aligned (κ ≥ 0.6), 1 measured and not aligned, 2 nothing to measure | T4 §7.5 rule 7, §10.3 |
+| D60 | The unvalidated-judge warning | At run start (with the git baseline, before the record opens) the eval reads, for each judge, the alignment record of **its current version** from its score store. A judge **gates** when its check can move the verdict: without a `Gate` every check does (1.9.0: a failed check fails the run); with one, when `pass` or the judge's name is gated or has a threshold. A gating judge with no record for its version (none at all, one for an older version, or no score store to look in) or κ < 0.6 puts a warning, starting `UNVALIDATED JUDGE`, in the gate's `warnings` (a gate-less block gains `warnings` too) and in its `summary["judges"]` entry. The verdict does not change: T4 — it "can still gate, but every report carries a loud warning". The Markdown report shows these first, above the reasons | T4 §7.5 rule 7 |
+| D61 | Concurrency | Judges share `Eval(judge_concurrency=8)`: a semaphore around each judge run (not around cache reads) | T4 §7.1 G7 |
+
+Out of E5 (later phases, not stubs): Studio's alignment screen and "add as few-shot" (E6),
+reviews → human scores and annotation queues (E7, D59 reads whatever human scores exist),
+judge panels and bias-corrected pass rates (Later).
+
+## 10. E5 tests
+
+All against a local stand-in model that counts its calls (`_fake_llm.py` gains a
+scripted answer function), never a real model.
+
+- `tests/internal/app/evals/test_judges.py`: a judge in an eval is its own trace in the run
+  store — `origin=eval`, `role=judge`, `judged_trace` = the case's trace id, `job_run`,
+  `case` — and the verdict's `judge_trace_id` is it; the case trace holds no judge call and
+  `cost_usd` ≠ `judge_cost_usd`, each equal to its own calls' price (by hand); binary prompt
+  and reason kept; a label outside the allowed ones retries, then fails the check with the
+  parse error; version changes with rubric, examples, labels, temperature, the model in
+  `resources.yaml` — not with the API key; cache: a second run makes **zero** calls (the
+  server's counter) with the same verdicts, `cached`, cost 0; `judge_cache=False` calls
+  again; an edited rubric misses; `reference` modes; a user's `@graph` evaluator is traced
+  the same way; a judge is refused by `rescore`; `judge_concurrency` bounds calls in flight.
+- `test_pairwise.py`: a scripted judge consistent in both orders → that winner; one that
+  always says `A` (position bias) → every case `tie` + `inconsistent`, rate 1.0; both
+  orders run at once (two 0.3 s answers finish in < 0.5 s); scores with target `pair`;
+  self-preference warning when the judge's model is the system's (`models`), none when not.
+- `test_align.py`: κ, TPR, TNR, accuracy and κ's SE against a hand-computed 2×2 (20/5/10/15
+  → κ = 0.4, TPR 2/3, TNR 3/4) and against a second computation (the general k-category κ
+  over the label pairs); κ undefined with one class; the join (trace, op, item; majority;
+  ties; unusable labels; unmatched counts); the record round-trips through the files and
+  sqlite stores and is replaced, not duplicated; reports: no record → `UNVALIDATED JUDGE`
+  in the gate warnings and the Markdown; κ < 0.6 → warned; κ ≥ 0.6 for this version → not;
+  a record for the previous version → warned; a non-gating judge → not.
+- `tests/internal/app/test_evals.py`: the 1.9.0 judge test unchanged and green.
+- `tests/internal/cli/test_eval_cli.py`: `align` exit codes 0/1/2 and its record;
+  `compare --pairwise`; `run --no-cache`.
+- Guide: `07-evals.md` gains judges (traced, cached, aligned) and pairwise, run in
+  `tests/guide/` against the stand-in model.
+- Measured (P5 gate): κ of a judge on the human-labelled callbot items that exist (§11).
+
+## 11. Log
 
 **E1 built, 2026-10-04** (`feat/evals-e1`).
 
@@ -287,3 +346,45 @@ what it left open is decided here before the code.
   `cost_usd`, so a report read from a record and from the store differed until
   `numbers()` computed them; an unknown `--cases` id surfaced as a source error and exit 3
   (infrastructure) until the CLI checks the selection before the run.
+
+**E5 built, 2026-10-04** (`feat/evals-e5`).
+
+- Judges (`test_judges.py`, a local stand-in model counting its requests): a judge's call is
+  its own run in the run store with `origin=eval`, `role=judge`, `judged_trace`, `job_run`,
+  `case`; the case run holds one LLM call (the system's) and the judge's run one, so
+  `cost_usd` and `judge_cost_usd` are each their own calls' price. A second run against the
+  same score store makes **0** judge requests (2 → 2), `--no-cache` / `judge_cache=False`
+  makes them again (→ 4), an edited rubric misses (→ 6). `judge_concurrency=2` with 6 cases
+  in flight: at most 2 requests at the server at once.
+- Pairwise (`test_pairwise.py`): a fair scripted judge names the better answer in both
+  orders; one that always says `A` makes every case `tie` + `inconsistent` (rate 1.0); two
+  0.3 s answers per case finish in < 0.55 s — the orders run side by side.
+- Alignment (`test_align.py`): κ 0.4, TPR 2/3, TNR 3/4, SE √(0.21/12.5) on the 20/5/10/15
+  table by hand, equal to a general k-category κ on four more tables; undefined with one
+  class.
+- **P5 measurement — human-labelled callbot data.** Studio review queues
+  (`.operonx/reviews.jsonl`): **none** in `callbot-wt/refactor` or `educa-reminder-agent`
+  (the only two review lines on this machine are a scratch demo's, not callbot data). So
+  the P5 gate as T4 words it — κ of polite/handoff judges on 100 *reviewed* callbot replies
+  — is **not met: 0 such reviews exist**. The human labels that do exist are the callbot QC
+  spreadsheets (`docs/scenarios/test_case_{educa_reminder,educa_hr_ver2,ahamove_hr}.xlsx`,
+  read read-only through the callbot's own loader): **406 steps**, each a customer line, the
+  bot reply the QC team wrote, and the state the team says the call moves to. Measured on
+  all 406: judge `ends_call` ("the bot's reply ends the call: goodbye or hand-off to the
+  hotline"), human label = the spreadsheet's `state_after` ∈ {FINISH, TRANSFER_HOTLINE}
+  (82 PASS, 324 FAIL), model `qwen3.7-flash` on the callbot's Siraya gateway (its
+  configured `qwen-turbo` is no longer served there), the replies passed through an identity
+  graph so the judge reads exactly the team's text. **κ = 0.992** (95% CI 0.977–1.0),
+  TPR 0.988 (81/82), TNR 1.0 (324/324), accuracy 0.998, 0 judge errors; 406 calls, 95k
+  input / 19k output tokens, 81 s. The one disagreement: a reply that promises a call-back
+  and ends on a question. The re-run answered all 406 from the cache (0 calls) and, with the
+  alignment recorded, carried no `UNVALIDATED JUDGE` warning. Read honestly: these labels
+  are a specification's, not reviews of what the bot said live, and "does this reply end
+  the call" is an easy criterion — this shows the pipeline measures what it claims on real
+  data at n ≥ 100, not that a polite or handoff judge of live calls is aligned. That needs
+  the reviews E7 turns into human scores.
+- Found on the way: the XML answer format failed to parse 10% of the time on a real model
+  (D51); an errored judge check counted as a FAIL in alignment (D59); `operonx.app.evals.pairwise`
+  would have been shadowed by the `pairwise` function (the module is `pairs.py`, as
+  `rescoring.py` was for `rescore`); a `**kwargs` evaluator must not force the trace text
+  (`trace_summary` is built only for an evaluator that names it, D23 kept).

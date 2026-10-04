@@ -26,8 +26,14 @@ expectations. ``"dataset:name"`` names ``<project>/datasets/name.jsonl``.
 its body) — that takes any of ``input``, ``output``, ``expected``, ``row``,
 ``outputs`` and ``trace`` by name and returns a verdict: ``True``/``False``,
 a score in [0, 1] (passes at 0.5), or ``{"passed", "score", "reason"}``.
-Helpers: :func:`exact`, :func:`contains`, :func:`fuzzy`, :func:`json_match`,
-:func:`llm_judge`. ``output`` is what the case produced: the one item the
+Helpers: :func:`exact`, :func:`contains`, :func:`fuzzy`, :func:`json_match`.
+**A judge** is an evaluator that is an operonx graph — :func:`judge` (a
+model grades one criterion, PASS/FAIL with its reason), any ``@graph``,
+:func:`llm_judge` (1.9.0's) — run as its own traced run (``role=judge``),
+versioned and, with a score store, cached (:mod:`.judges`);
+:func:`pairwise` with :func:`compare_pairwise` prefers one experiment's
+answer over another's in both orders, and :mod:`.align` measures a judge
+against human labels (κ, TPR, TNR). ``output`` is what the case produced: the one item the
 graph sent (or its result, for a graph with no doors), a list when it sent
 several, ``None`` when it sent nothing. ``trace`` is a :class:`TraceView`
 of the case's run — built only for an evaluator that takes it — which
@@ -62,10 +68,12 @@ from . import trajectory
 from .calibrate import calibrate
 from .compare import compare
 from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
-from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
+from .evaluators import contains, exact, fuzzy, json_match, verdict_of
 from .experiments import ExperimentData, load_experiment
 from .gate import Gate
 from .job import Eval
+from .judges import GraphEvaluator, Judge, PairwiseJudge, judge, llm_judge, pairwise
+from .pairs import compare_pairwise
 from .publish import publish
 from .rescoring import Rescored, rescore
 from .traceview import OpRow, ToolCall, TraceView
@@ -76,20 +84,26 @@ __all__ = [
     "Eval",
     "ExperimentData",
     "Gate",
+    "GraphEvaluator",
+    "Judge",
     "OpRow",
+    "PairwiseJudge",
     "Rescored",
     "ToolCall",
     "TraceView",
     "budget",
     "calibrate",
     "compare",
+    "compare_pairwise",
     "contains",
     "dataset_path",
     "exact",
     "fuzzy",
     "json_match",
+    "judge",
     "llm_judge",
     "load_experiment",
+    "pairwise",
     "publish",
     "rescore",
     "trajectory",

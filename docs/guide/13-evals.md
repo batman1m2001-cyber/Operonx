@@ -79,7 +79,59 @@ The built-ins, each a factory:
 | `contains(*needles, field=None, case=False)` | the output text contains every needle — the given ones, else `expected` (a string or a list) |
 | `fuzzy(threshold=0.8, field=None)` | the output text's similarity to `expected` reaches `threshold` |
 | `json_match(keys=None)` | the output object agrees with `expected` on `keys` (every key `expected` has, when none are named) |
-| `llm_judge(resource, rubric)` | an LLM grades the case against the rubric; its cost and usage stay on the verdict |
+| `judge(llm, rubric, name=…)` | a model says `PASS` for one criterion (its reason is kept) — see [Judges](#judges) |
+| `llm_judge(resource, rubric)` | the 1.9.0 judge: JSON `{passed, score, reason}`; now a traced, cached `Judge` |
+
+## Judges
+
+`judge("llm:judge", rubric, name="polite")` is an evaluator that asks a
+model whether the output meets **one** criterion and answers `PASS` or
+`FAIL` with its reason (`labels=`/`pass_labels=` make it categorical; a
+rubric ending `.md`/`.txt` is read from that file and names the judge). It
+is an operonx graph — render the prompt → `LLMOp` (reason, then verdict)
+→ decide — so:
+
+- **Traced on its own.** Each call is its own run in the eval's trace
+  sinks with `origin=eval`, `role=judge`, `judged_trace` (the case's run),
+  `job_run` and `case`; the verdict's `judge_trace_id` is that run. The
+  case's run holds only the system's calls, so the report shows the
+  system's cost and the judges' apart, and a **Judges** table per judge
+  (version, model, alignment, calls, cache hits, cost).
+- **Versioned.** The rubric, examples, labels, temperature, the model the
+  `llm:` resource resolves to (secrets dropped) and the judge's code.
+  Changing any of them changes `evaluators_hash`.
+- **Cached** in the eval's score store, keyed by the version and what the
+  judge was shown: re-judging an unchanged output makes no call
+  (`cached: true`, cost 0). `Eval(judge_cache=False)` or `operonx eval run
+  --no-cache` asks again. `Eval(judge_concurrency=8)` bounds judge runs in
+  flight.
+- **Any `@graph`** passed as an evaluator is a judge the same way: its
+  inputs are named `input`, `output`, `expected`, `row`, `outputs` or
+  `trace_summary` (the case's run as text); it returns `{passed, reason}`.
+  Judges are never rescored.
+- **Self-preference.** A judge whose model the system also uses (the
+  fingerprint's `models`) is warned about.
+
+### Alignment with people
+
+A judge that gates an eval is reported as **`UNVALIDATED JUDGE`** until
+it has an alignment record for its current version with Cohen's κ ≥ 0.6.
+Human labels are scores with `source="human"` on the runs (or items) the
+judge scored; `operonx eval align judge:polite` (or `align` +
+`record_alignment` in `operonx.app.evals.align`) pairs them and reports κ,
+TPR (PASS when people say PASS), TNR (FAIL when people say FAIL),
+accuracy, the 2×2 table and the disagreements, and records it on the
+judge. It exits 0 aligned, 1 not, 2 when nothing could be paired. The
+warning never changes the verdict.
+
+### Pairwise
+
+`pairwise("llm:judge", rubric, name="helpful")` asks which of two
+experiments' answers is better, in both orders as two parallel branches
+of one judge run. Orders that disagree make the case a `tie` marked
+`inconsistent`, and the swap-inconsistency rate is reported per judge.
+`await compare_pairwise(a, b, [judge])` or `operonx eval compare A B
+--pairwise judges:helpful`; the preferences are stored as `pair` scores.
 
 ## Checking the run: `trace`
 
@@ -294,9 +346,9 @@ bind it there first:
 
 ```python
 # checks.py
-from operonx.app.evals import llm_judge
+from operonx.app.evals import judge
 
-polite = llm_judge("llm:judge", "Is the reply polite and correct?")
+polite = judge("llm:judge", "The reply is polite and correct.", name="polite")
 
 async def names_the_time(output, expected):
     return expected in output

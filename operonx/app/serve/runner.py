@@ -89,12 +89,7 @@ async def serve_session(
     )
     trace = getattr(handle, "trace", None)
     if metadata and trace is not None:
-        extra = dict(metadata)
-        tags = extra.pop("tags", None)
-        trace.metadata.update(extra)
-        if tags:
-            have = list(trace.metadata.get("tags") or [])
-            trace.metadata["tags"] = have + [t for t in tags if t not in have]
+        trace.tag(metadata)
     if on_start is not None:
         try:
             on_start(handle)

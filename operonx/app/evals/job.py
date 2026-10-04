@@ -47,9 +47,10 @@ from .gate import (
     outcomes,
     trials_of_items,
 )
+from .judges import Judging, evaluator_of
 from .publish import ScoreWriter, experiment_of, item_of, scores_of, warn_lost
 from .stats import Estimate, estimate, pass_hat_k
-from .traceview import TraceView
+from .traceview import TraceView, run_cost
 
 __all__ = ["Eval", "gate_run", "git_baseline", "numbers", "record_baseline"]
 
@@ -143,6 +144,10 @@ class Eval(Job):
             :func:`~operonx.app.evals.publish` sends it later.
         variant: A free label for what this experiment tries ("prompt
             v7"), kept on its record and its experiment row.
+        judge_cache: With a score store, a judge's verdict is kept there,
+            keyed by its version and what it was shown, and an unchanged
+            case is not judged again (no call). ``False`` asks every time.
+        judge_concurrency: Judge runs in flight at once, over all cases.
     """
 
     origin = "eval"
@@ -163,13 +168,25 @@ class Eval(Job):
         scores: Any = None,
         scores_timeout: float = 10.0,
         variant: Optional[str] = None,
+        judge_cache: bool = True,
+        judge_concurrency: int = 8,
         **kwargs: Any,
     ):
         self.dataset = dataset if isinstance(dataset, Dataset) else Dataset(dataset_path(dataset))
-        self.evaluators = list(evaluators)
+        self.evaluators = [evaluator_of(ev) for ev in evaluators]
         self._prepared = [prepare(ev) for ev in self.evaluators]
         # a case's trace view is built only when some evaluator can take it
         self._wants_trace = any(p.wants("trace") for p in self._prepared)
+        # text, so never lazy: made only for an evaluator that names it (one taking
+        # **kwargs has `trace`, and `trace.as_text()` when it wants it)
+        self._wants_summary = any(
+            p.params is not None and "trace_summary" in p.params for p in self._prepared
+        )
+        self._wants_judging = any(p.wants("judging") for p in self._prepared)
+        if isinstance(judge_concurrency, bool) or int(judge_concurrency) < 1:
+            raise ValueError(f"eval {name!r}: judge_concurrency is a number of judge runs, ≥ 1")
+        self.judge_cache = bool(judge_cache)
+        self.judge_concurrency = int(judge_concurrency)
         if threshold is not None and not 0 <= float(threshold) <= 1:
             raise ValueError(f"eval {name!r}: threshold is a pass rate in [0, 1]")
         self.threshold = float(threshold) if threshold is not None else None
@@ -200,6 +217,9 @@ class Eval(Job):
         self._judges = [
             _name(ev) for ev in self.evaluators if getattr(ev, "eval_kind", None) == "judge"
         ]
+        self._judging: Optional[Judging] = None
+        self._judge_counts: Dict[str, Dict[str, Any]] = {}
+        self._alignments: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None
         self._store: Optional[ScoreStore] = None
         self._writer: Optional[ScoreWriter] = None
         self._experiment: Optional[Experiment] = None
@@ -227,9 +247,17 @@ class Eval(Job):
     # -- the experiment in a score store ---------------------------------------
 
     def begin(self, run_id: str, started: str) -> None:
-        """The runner opened the record: with ``scores=``, the experiment's
-        ``running`` row goes to the store before any case."""
+        """The runner opened the record: the judges get their context (the
+        eval's sinks, this run's ids, the cache); with ``scores=``, the
+        experiment's ``running`` row goes to the store before any case."""
         self._writer, self._experiment = None, None
+        self._judge_counts = {}
+        self._judging = Judging(
+            trace=self.engine().trace_consumers,
+            metadata={"job": self.name, "job_run": run_id},
+            cache=self._store if self.judge_cache else None,
+            concurrency=self.judge_concurrency,
+        )
         if self._store is None:
             return
         opened = JobRun(
@@ -255,6 +283,10 @@ class Eval(Job):
         # so is a commit's baseline: no experiment there, no run (and no cost)
         ref = git_ref(self.gate.baseline) if self.gate is not None else None
         self._from_git = await asyncio.to_thread(self._git_baseline, ref) if ref else None
+        # each judge's alignment record, read once: the report warns on an unvalidated one
+        self._alignments = (
+            await asyncio.to_thread(self._read_alignments) if self._store is not None else None
+        )
         run: Optional[JobRun] = None
         try:
             run = await super().run(resume=resume)
@@ -314,6 +346,11 @@ class Eval(Job):
             evaluators_hash=evaluators_hash,
         )
 
+    def _read_alignments(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        from .align import alignments_of
+
+        return {name: alignments_of(self._store, name) for name in self._judges}
+
     def _load_baseline(self) -> Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]]:
         return record_baseline(Path(self.record_dir), self.name, str(self.gate.baseline))  # type: ignore[union-attr]
 
@@ -352,10 +389,19 @@ class Eval(Job):
                 "row": row,
                 "outputs": sent,
             }
-            if self._wants_trace:
-                trace = getattr(result, "trace", None)
-                avail["trace"] = TraceView.from_trace(trace) if trace is not None else None
-            verdict = case_verdict(await judge_all(self._prepared, avail))
+            trace = getattr(result, "trace", None)
+            if self._wants_trace or self._wants_summary:
+                view = TraceView.from_trace(trace) if trace is not None else None
+                avail["trace"] = view
+                if self._wants_summary:
+                    avail["trace_summary"] = view.as_text() if view is not None else None
+            if self._wants_judging and self._judging is not None:
+                avail["judging"] = self._judging.for_case(
+                    key=result.key, case=case, judged_trace=result.trace_id
+                )
+            checks = await judge_all(self._prepared, avail)
+            self._count_judges(checks)
+            verdict = case_verdict(checks)
         result.verdict = recorded_verdict(
             verdict,
             row,
@@ -371,6 +417,118 @@ class Eval(Job):
             meta = {"eval": {"fingerprint": self._fingerprint}, "judges": self._judges}
             item = item_of(self._experiment.experiment_id, result)
             self._writer.submit([item, *scores_of(meta, self._experiment, result)])
+
+    def _count_judges(self, checks: Mapping[str, Any]) -> None:
+        for name in self._judges:
+            c = checks.get(name)
+            if c is None:
+                continue
+            n = self._judge_counts.setdefault(
+                name, {"calls": 0, "cached": 0, "errors": 0, "cost_usd": None}
+            )
+            if c.get("cached"):
+                n["cached"] += 1
+            elif c.get("judge_trace_id"):
+                n["calls"] += 1
+            if c.get("error"):
+                n["errors"] += 1
+            if c.get("cost_usd") is not None:
+                n["cost_usd"] = round((n["cost_usd"] or 0.0) + float(c["cost_usd"]), 10)
+
+    def _gating(self, name: str) -> bool:
+        """Whether *name*'s check can move the verdict (D60)."""
+        gate = self.gate
+        if gate is None:
+            return True  # 1.9.0: any failed check fails the run
+        thresholds = gate.thresholds()
+        if PASS_METRIC in thresholds or name in thresholds:
+            return True
+        if gate.baseline is not None and (PASS_METRIC in gate.gated() or name in gate.gated()):
+            return True
+        tag = gate.must_pass_tag
+        return bool(tag) and any(tag in (row.get("tags") or ()) for row in self._rows.values())
+
+    def _judge_report(self, fp: Optional[Mapping[str, Any]]) -> Tuple[Dict[str, Any], List[str]]:
+        """``summary["judges"]`` and the warnings it calls for (D57, D58, D60)."""
+        from .align import ALIGNED_KAPPA, describe
+
+        versions = (fp or {}).get("evaluators") or {}
+        system_models = (fp or {}).get("models")
+        out: Dict[str, Any] = {}
+        warnings: List[str] = []
+        by_name = {_name(ev): ev for ev in self.evaluators}
+        for name in self._judges:
+            ev = by_name[name]
+            version = versions.get(name)
+            models = ev.models() if hasattr(ev, "models") else []
+            resolved = ev.model_resolved() if hasattr(ev, "model_resolved") else True
+            counts = self._judge_counts.get(
+                name, {"calls": 0, "cached": 0, "errors": 0, "cost_usd": None}
+            )
+            self_pref = (
+                bool(set(models) & set(system_models)) if system_models is not None else None
+            )
+            records = (self._alignments or {}).get(name) if self._alignments is not None else None
+            record = records.get(version) if records else None
+            gating = self._gating(name)
+            entry = {
+                "version": version,
+                "model": models[0] if len(models) == 1 else (models or None),
+                "model_resolved": resolved,
+                **counts,
+                "gating": gating,
+                "self_preference": self_pref,
+                "alignment": None,
+            }
+            mine: List[str] = []
+            if record is not None:
+                entry["alignment"] = {
+                    k: record.get(k)
+                    for k in ("kappa", "kappa_ci", "tpr", "tnr", "accuracy", "n", "human")
+                }
+            if not resolved:
+                mine.append(
+                    f"judge {name!r}: its resource is not declared in the resource hub, so its "
+                    "version names the resource, not the model behind it"
+                )
+            if self_pref:
+                mine.append(
+                    f"judge {name!r} runs on {entry['model']!r}, a model the system under test "
+                    "also uses (self-preference: a model tends to favour its own answers) — "
+                    "judge with another model"
+                )
+            if gating:
+                fix = f"measure it: `operonx eval align {name}` on human-labelled cases"
+                if self._alignments is None:
+                    mine.append(
+                        f"UNVALIDATED JUDGE {name!r} gates this eval and there is no score store "
+                        f"to read an alignment record from (Eval(scores=…)); {fix}"
+                    )
+                elif record is None:
+                    other = sorted(records) if records else []
+                    found = (
+                        f" (records exist for {', '.join(other)}: a rubric, model or graph "
+                        "change makes a new judge)"
+                        if other
+                        else ""
+                    )
+                    mine.append(
+                        f"UNVALIDATED JUDGE {name!r} gates this eval and has no alignment record "
+                        f"for its version {version}{found}: nothing shows its verdicts agree "
+                        f"with people; {fix}"
+                    )
+                elif record.get("kappa") is None or record["kappa"] < ALIGNED_KAPPA:
+                    k = record.get("kappa")
+                    said = f"κ = {k:.2f} < {ALIGNED_KAPPA}" if k is not None else "κ undefined"
+                    mine.append(
+                        f"UNVALIDATED JUDGE {name!r} gates this eval with {said} against human "
+                        f"labels ({describe(record)}): it disagrees with people too often to "
+                        "trust alone"
+                    )
+            entry["warnings"] = mine
+            warnings += mine
+            out[name] = entry
+        return out, warnings
 
     # -- the run's numbers ---------------------------------------------------
 
@@ -415,6 +573,10 @@ class Eval(Job):
             fingerprint=fp,
             baseline_ref=self._from_git[3] if self._from_git is not None else None,
         )
+        if self._judges:
+            summary["judges"], warned = self._judge_report(fp)
+            if warned:  # loud, but not a verdict: an unvalidated judge can still gate (T4)
+                summary["gate"]["warnings"] = list(summary["gate"].get("warnings") or []) + warned
         return {"eval": summary}, status
 
     # -- judging a recorded run again ---------------------------------------
@@ -563,7 +725,7 @@ def recorded_verdict(
     verdict.update(case=case, repeat=repeat, case_hash=digest)
     if cluster is not None:
         verdict["cluster"] = cluster
-    verdict.update(_run_cost(trace))
+    verdict.update(run_cost(trace))
     return verdict
 
 
@@ -819,27 +981,6 @@ def _open_scores(value: Any) -> ScoreStore:
     from operonx.core.registry import ResourceHub
 
     return ResourceHub.instance().get(value)
-
-
-def _run_cost(trace: Any) -> Dict[str, Any]:
-    """The case run's own LLM cost and tokens, as the run store counts them
-    (an execution reporting ``cost_usd`` is an LLM call; the cost is
-    ``None`` when none was priced). Nothing for a run with no LLM call."""
-    calls, cost, tokens_in, tokens_out = 0, None, 0, 0
-    for node in getattr(trace, "nodes", None) or ():
-        out = node.outputs
-        if not isinstance(out, dict) or "cost_usd" not in out:
-            continue
-        calls += 1
-        if isinstance(out["cost_usd"], (int, float)):
-            cost = (cost or 0.0) + float(out["cost_usd"])
-        usage = out.get("usage")
-        if isinstance(usage, dict):
-            tokens_in += int(usage.get("prompt_tokens") or 0)
-            tokens_out += int(usage.get("completion_tokens") or 0)
-    if not calls:
-        return {}
-    return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out}
 
 
 def _clip(value: Any, limit: int = 4000) -> Any:

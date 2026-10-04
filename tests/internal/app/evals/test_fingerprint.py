@@ -148,6 +148,13 @@ def hub_reset():
     ResourceHub.reset_instance()
 
 
+def test_models_are_the_resolved_configs_models(tmp_path, hub_reset):
+    from operonx.app.evals.fingerprint import models_of
+
+    assert models_of(config_spec(_llm_graph(tmp_path))) == ["model-a"]
+    assert models_of(config_spec(_llm_graph(tmp_path, model="model-b"))) == ["model-b"]
+
+
 def test_config_and_graph_hashes_split_what_changed(tmp_path, hub_reset):
     base = _llm_graph(tmp_path)
     h = lambda spec: (digest(graph_spec(spec)), digest(config_spec(spec)))  # noqa: E731
@@ -314,7 +321,9 @@ def test_the_fingerprint_is_on_the_run_record(tmp_path):
         "evaluators",
         "evaluators_hash",
         "operonx_version",
+        "models",
     }
+    assert first["models"] == []  # no LLM in the system: nothing a judge could favour
     assert first["evaluators"] == {"exact(label)": evaluator_version(exact("label"))}
     assert first["operonx_version"] == operonx.__version__
     assert run().meta["eval"]["fingerprint"] == first

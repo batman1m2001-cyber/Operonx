@@ -17,7 +17,7 @@ import pytest
 
 from operonx.app.evals import job as job_module
 from operonx.cli.main import main
-from operonx.telemetry.scores import ExperimentFilter, open_score_store
+from operonx.telemetry.scores import ExperimentFilter, ScoreFilter, open_score_store
 
 pytestmark = pytest.mark.unit
 
@@ -97,8 +97,11 @@ def project(tmp_path, monkeypatch):
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setattr(job_module, "_versions", {})
     yield root
-    for name in ("labels", "checks"):
+    for name in ("labels", "checks", "judges"):
         sys.modules.pop(name, None)
+    from operonx.core.registry import ResourceHub
+
+    ResourceHub.reset_instance()  # a judge project bootstraps its resources.yaml
 
 
 def _eval(*argv: str) -> int:
@@ -388,3 +391,118 @@ def test_baseline_main_end_to_end_in_git(project, monkeypatch, capsys):
     assert _eval(*args) == 1
     out = capsys.readouterr().out
     assert "gate=regressed" in out and "git:main @ " in out
+
+
+# ── judges: align, compare --pairwise, run --no-cache (D55, D56, D59) ─────
+
+JUDGES = """
+from operonx.app.evals import judge, pairwise
+
+on_topic = judge("llm:judge", "The label fits the message.", name="on_topic")
+helpful = pairwise("llm:judge", "Which label fits the message better?", name="helpful")
+"""
+
+
+def _judge_project(project, base_url, evaluators='["checks:label", "judges:on_topic"]'):
+    (project / "judges.py").write_text(JUDGES)
+    (project / "resources.yaml").write_text(
+        f"llm:judge:\n  api_type: openai\n  api_key: sk-local-test\n"
+        f"  base_url: {base_url}\n  model: judge-model\n"
+    )
+    toml = _toml().replace('evaluators = ["checks:label"]', f"evaluators = {evaluators}")
+    toml = toml.replace(
+        'name = "demo"\n', 'name = "demo"\n\n[resources]\noverlay = "resources.yaml"\n'
+    )
+    (project / "operonx.toml").write_text(toml)
+
+
+def _says(body):
+    msgs = body.get("messages") or []
+    system = " ".join(str(m.get("content") or "") for m in msgs if m.get("role") == "system")
+    if '"verdict"' not in system:
+        return None
+    verdict = "A" if "A|B|TIE" in system else "PASS"
+    return json.dumps({"reason": "fine", "verdict": verdict})
+
+
+def test_run_no_cache_asks_the_judge_again(project):
+    from tests.internal.app.evals._fake_llm import fake_llm
+
+    with fake_llm(_says) as server:
+        _judge_project(project, server.base_url)
+        assert _eval("run", "labels", "--cases", "c1,c2") == 0
+        assert len(server.requests) == 2
+        assert _eval("run", "labels", "--cases", "c1,c2") == 0
+        assert len(server.requests) == 2  # the project's score store is the cache
+        assert _eval("run", "labels", "--cases", "c1,c2", "--no-cache") == 0
+        assert len(server.requests) == 4
+
+
+def test_compare_pairwise_reports_both_orders(project, monkeypatch, capsys):
+    from tests.internal.app.evals._fake_llm import fake_llm
+
+    with fake_llm(_says) as server:
+        _judge_project(project, server.base_url, evaluators='["checks:label"]')
+        assert _eval("run", "labels", "--cases", "c0,c1,c2") == 0
+        monkeypatch.setenv("BROKEN", "1")
+        assert _eval("run", "labels", "--cases", "c0,c1,c2") in (0, 1)
+        a, b = _runs(project)
+        capsys.readouterr()
+        assert _eval("compare", a, b, "--pairwise", "judges:helpful") == 0
+        out = capsys.readouterr().out
+        assert len(server.requests) == 6  # 3 cases × 2 orders
+    # the judge always says "A": every case flips with the order
+    assert "### Pairwise — 3 cases judged in both orders" in out
+    assert "`pairwise:helpful` | 0 | 0 | 3 | 100.0%" in out
+    assert "follows the position" in out
+    pairs = _store(project).scores(ScoreFilter(target="pair"))
+    assert len(pairs) == 3 and {s.label for s in pairs} == {"tie"}
+
+
+def _align_scores(project, cells):
+    from operonx.telemetry.scores import Score
+
+    tp, fp, fn, tn = cells
+    pairs = [(1, 1)] * tp + [(1, 0)] * fp + [(0, 1)] * fn + [(0, 0)] * tn
+    rows = []
+    for i, (j, h) in enumerate(pairs):
+        rows.append(
+            Score(
+                score_name="judge:polite",
+                source="judge",
+                target="trace",
+                trace_id=f"t{i}",
+                passed=bool(j),
+                evaluator_version="v1",
+            )
+        )
+        rows.append(
+            Score(
+                score_name="judge:polite",
+                source="human",
+                target="trace",
+                trace_id=f"t{i}",
+                passed=bool(h),
+                author="ann",
+            )
+        )
+    _store(project).put_scores(rows)
+
+
+def test_align_exit_codes_and_its_record(project, capsys):
+    assert _eval("align", "judge:polite") == 2  # nothing to measure
+    assert "no scores of judge 'judge:polite'" in capsys.readouterr().err
+
+    _align_scores(project, (20, 5, 10, 15))
+    assert _eval("align", "judge:polite") == 1  # κ 0.40
+    out = capsys.readouterr().out
+    assert "κ = 0.40, TPR 0.67, TNR 0.75, n = 50" in out and "NOT aligned" in out
+
+    _align_scores(project, (45, 2, 3, 50))  # the same targets, relabelled: κ ≈ 0.90
+    assert _eval("align", "judge:polite", "--format", "json") == 0
+    got = json.loads(capsys.readouterr().out)
+    assert got["aligned"] is True and got["n"] == 100
+    (rec,) = _store(project).scores(ScoreFilter(score_name="judge:polite", target="evaluator"))
+    assert rec.evaluator_version == "v1" and rec.passed is True
+
+    assert _eval("align", "judge:polite", "--human", "review") == 2  # no such human scores

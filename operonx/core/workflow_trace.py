@@ -221,6 +221,18 @@ class WorkflowTrace:
     def duration_ms(self) -> float:
         return (self.ended_at - self.started_at) * 1000.0
 
+    def tag(self, metadata: Dict[str, Any]) -> None:
+        """Merge *metadata* onto the run before it ends, so every consumer
+        sees it: ``tags`` extend the trace's list (no repeats), every other
+        key is set. How a job names its runs (``job``, ``job_run``, …) and
+        an eval its judges' (``role``, ``judged_trace``)."""
+        extra = dict(metadata)
+        tags = extra.pop("tags", None)
+        self.metadata.update(extra)
+        if tags:
+            have = list(self.metadata.get("tags") or [])
+            self.metadata["tags"] = have + [t for t in tags if t not in have]
+
     @property
     def status(self) -> str:
         """``"error"`` when anything in the run failed, else ``"ok"``.

@@ -5,11 +5,12 @@
     operonx eval run labels --baseline main --tolerance 0.03 --strict \\
                             --report md,junit --out out/eval
     operonx eval run labels --repeats 3 --split smoke --tag critical --cases c1,c2 --sample 50
-    operonx eval compare <expA> <expB> [--tolerance 0.03]
+    operonx eval compare <expA> <expB> [--tolerance 0.03] [--pairwise judges:helpful]
     operonx eval report <exp> [--format md|json|junit] [--out FILE]
     operonx eval rescore <exp> [--evaluators checks:strict,checks:budget]
     operonx eval calibrate labels --runs 3 [--tolerance 0.03]
     operonx eval power labels --delta 0.05 [--discordance 0.10]
+    operonx eval align judge:polite [--human review] [--version V]   # κ, TPR, TNR vs people
     operonx eval dataset validate|stats|diff labels [--against main]
 
 An eval is named as ``operonx run`` names a job: one the project declares,
@@ -30,6 +31,9 @@ Exit status — ``run``, and ``compare`` with a ``--tolerance``:
        (an unknown eval, a bad flag, no baseline at the merge-base, a
        store that cannot be opened) — the message on stderr says which
     3  an infrastructure error: retry the job, the quality is unknown
+
+``align`` exits 0 when the judge agrees with the human labels (κ ≥ 0.6),
+1 when it was measured and does not, 2 when there was nothing to measure.
 """
 
 from __future__ import annotations
@@ -265,6 +269,8 @@ def _configure(ev: Any, args: argparse.Namespace) -> None:
         ev.variant = args.variant
     if args.concurrency:
         ev.concurrency = args.concurrency
+    if args.no_cache:
+        ev.judge_cache = False
     tolerance = _tolerance(args.tolerance)
     if args.baseline or tolerance is not None or args.strict:
         gate = ev.gate or Gate(threshold=ev.threshold)
@@ -336,11 +342,47 @@ def _cmd_compare(project: _Project, args: argparse.Namespace) -> int:
         )
     except (TypeError, ValueError) as exc:
         raise _Usage(str(exc)) from None
+    if args.pairwise:
+        got["pairwise"] = _pairwise(project, a, b, args)
     if args.format == "json":
         _emit(json.dumps(got, indent=2, default=str) + "\n", args.out)
     else:
         _emit(compare_markdown(got), args.out)
     return int(got["exit_code"]) if got["exit_code"] is not None else 0
+
+
+def _load_objects(project: _Project, text: str, field: str) -> List[Any]:
+    from operonx.app.serve.registry import load_object
+
+    if project.app is not None:
+        project.app.bootstrap()
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+    return [load_object(e, field=field) for e in _csv(text)]
+
+
+def _pairwise(project: _Project, a: Any, b: Any, args: argparse.Namespace) -> Dict[str, Any]:
+    """``--pairwise``: the judges' preferences between the two experiments."""
+    import asyncio
+
+    from operonx.app.evals import compare_pairwise
+
+    judges = _load_objects(project, args.pairwise, "--pairwise")
+    store = None if args.no_store else project.scores()
+    try:
+        return asyncio.run(
+            compare_pairwise(
+                a,
+                b,
+                judges,
+                scores=store,
+                trace=[project.run_store()],
+                judge_cache=store,
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise _Usage(str(exc)) from None
 
 
 def _cmd_report(project: _Project, args: argparse.Namespace) -> int:
@@ -488,6 +530,70 @@ def _cmd_calibrate(project: _Project, args: argparse.Namespace) -> int:
         (out / "calibration.json").write_text(json.dumps(got, indent=2) + "\n", encoding="utf-8")
         print(f"  written: {out / 'calibration.json'}")
     return 0
+
+
+def _cmd_align(project: _Project, args: argparse.Namespace) -> int:
+    from operonx.app.evals.align import align, describe, record_alignment
+
+    store = project.scores()
+    got = align(
+        store, args.judge, human=args.human, version=args.version, experiment=args.experiment
+    )
+    if not got.version:
+        raise _Usage(
+            f"no scores of judge {args.judge!r} in the score store: run an eval that uses it "
+            "(with the store) first"
+        )
+    if got.n == 0:
+        raise _Usage(
+            f"judge {args.judge!r} (version {got.version}) and the human scores named "
+            f"{got.human!r} share no target: {got.unmatched_judge} judged, "
+            f"{got.unmatched_human} labelled elsewhere. Label the runs or items the judge "
+            "scored (Studio's review, or Score(source='human') rows), or name the human score "
+            "with --human"
+        )
+    s = got.summary()
+    if not args.no_record:
+        record_alignment(store, got)
+    if args.format == "json":
+        _emit(
+            json.dumps({**s, "disagreements": got.disagreements}, indent=2, default=str) + "\n",
+            None,
+        )
+    else:
+        print(f"{got.judge} @ {got.version} against human {got.human!r}: {describe(s)}")
+        c = s["confusion"]
+        print(f"  judge PASS: {c['tp']} agree, {c['fp']} people said FAIL")
+        print(f"  judge FAIL: {c['tn']} agree, {c['fn']} people said PASS")
+        if s["kappa_ci"]:
+            lo, hi = s["kappa_ci"]
+            print(f"  κ 95% CI [{lo:.2f}, {hi:.2f}] · accuracy {s['accuracy']:.1%}")
+        if s["note"]:
+            print(f"  note: {s['note']}")
+        skipped = {
+            k: s[k]
+            for k in (
+                "unmatched_judge",
+                "unmatched_human",
+                "human_ties",
+                "unusable_human",
+                "judge_errors",
+            )
+            if s[k]
+        }
+        if skipped:
+            print(
+                "  not paired: "
+                + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in skipped.items())
+            )
+        for d in got.disagreements[: args.disagreements]:
+            where = d.get("case_id") or d.get("trace_id")
+            print(
+                f"  disagree {where}: judge {d['judge']}, people {d['human']} — {d['reason'] or ''}"
+            )
+        verdict = "aligned" if got.aligned else "NOT aligned (κ < 0.6)"
+        print(f"  {verdict}" + ("" if args.no_record else "; recorded in the score store"))
+    return 0 if got.aligned else 1
 
 
 def _eval_facts(project: _Project, name: str) -> Tuple[str, int, Path]:
@@ -716,6 +822,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--strict", action="store_true", help="inconclusive exits 2")
     run.add_argument("--variant", default=None, help="a label for this experiment")
     run.add_argument("--concurrency", type=int, default=None, help="cases in flight at once")
+    run.add_argument(
+        "--no-cache", action="store_true", help="ask every judge again (no judge cache)"
+    )
     run.add_argument("--report", default=None, metavar="md,json,junit", help="reports to write")
     run.add_argument("--out", default=None, help="where the reports go (default: the run's record)")
     run.add_argument(
@@ -733,6 +842,12 @@ def _parser() -> argparse.ArgumentParser:
     cmp.add_argument("--format", choices=("md", "json"), default="md")
     cmp.add_argument("--out", default=None, help="write here instead of stdout")
     cmp.add_argument("--no-store", action="store_true", help="look only in the record directories")
+    cmp.add_argument(
+        "--pairwise",
+        default=None,
+        metavar="mod:attr,...",
+        help="pairwise judges: which answer is better, case by case, in both orders",
+    )
 
     rep = command("report", "an experiment as Markdown, JSON or JUnit XML")
     rep.add_argument("experiment", help="a run id or a record directory")
@@ -773,6 +888,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     pw.add_argument("--no-store", action="store_true")
 
+    al = command("align", "how often a judge agrees with human labels: κ, TPR, TNR")
+    al.add_argument("judge", help="the judge's score name, e.g. judge:polite")
+    al.add_argument("--human", default=None, help="the human scores' name (default: the judge's)")
+    al.add_argument("--version", default=None, help="the judge version (default: its newest)")
+    al.add_argument("--experiment", default=None, help="only this experiment's judge scores")
+    al.add_argument("--no-record", action="store_true", help="measure without recording it")
+    al.add_argument("--disagreements", type=int, default=10, help="how many to print")
+    al.add_argument("--format", choices=("text", "json"), default="text")
+
     command("list", "the project's evals and datasets, and each eval's last verdict")
 
     ds = command("dataset", "check a dataset, count it, or diff it against git")
@@ -789,6 +913,7 @@ _COMMANDS = {
     "rescore": _cmd_rescore,
     "calibrate": _cmd_calibrate,
     "power": _cmd_power,
+    "align": _cmd_align,
     "list": _cmd_list,
     "dataset": _cmd_dataset,
 }

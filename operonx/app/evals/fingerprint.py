@@ -10,6 +10,8 @@ test. The fingerprint records each of those, as short hashes::
                                   inline prompts, and each op's source
     config_hash                   the resolved resources its ops use (model,
                                   temperature, endpoint) — secrets left out
+    models                        the models those resources name (what a
+                                  judge of the same model would favour)
     dataset_version               the cases, sorted by id
     evaluators, evaluators_hash   each evaluator's version, and all of them
     operonx_version               the engine
@@ -33,6 +35,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 __all__ = [
     "case_hash",
+    "config_identity",
     "config_spec",
     "dataset_version",
     "digest",
@@ -40,6 +43,7 @@ __all__ = [
     "evaluators_version",
     "fingerprint",
     "graph_spec",
+    "models_of",
 ]
 
 #: Where ``serialize()`` puts an op's *resolved* resource configs. They
@@ -225,6 +229,24 @@ def config_spec(spec: Mapping) -> List[Dict[str, Any]]:
     return sorted(found, key=lambda r: str(r["op"]))
 
 
+def config_identity(config: Any) -> Any:
+    """One resolved resource config as ``config_hash`` keeps it: plain
+    data, credentials dropped, URLs cut to scheme, host and path."""
+    return _scrub(canonical(config))
+
+
+def models_of(configs: Sequence[Mapping]) -> List[str]:
+    """The ``model`` names in :func:`config_spec`'s entries, sorted, once each."""
+    found = set()
+    for entry in configs:
+        for key in RESOURCE_KEYS:
+            held = entry.get(key)
+            for cfg in held if isinstance(held, list) else [held]:
+                if isinstance(cfg, Mapping) and isinstance(cfg.get("model"), str):
+                    found.add(cfg["model"])
+    return sorted(found)
+
+
 # ── cases and evaluators ─────────────────────────────────────────────────
 
 
@@ -288,7 +310,7 @@ def fingerprint(
     unless *code* already holds what ``origin.code_version`` said (an
     eval asks git in the background, while its cases run). A graph that
     cannot serialize (a cycle-rewritten loop refuses to) has
-    ``graph_hash`` and ``config_hash`` ``None`` and says why.
+    ``graph_hash``, ``config_hash`` and ``models`` ``None`` and says why.
     """
     import operonx
     from operonx.app.origin import code_version
@@ -302,9 +324,14 @@ def fingerprint(
     try:
         spec = graph.serialize()
     except NotImplementedError as exc:
-        out.update(graph_hash=None, config_hash=None, graph_hash_error=str(exc))
+        out.update(graph_hash=None, config_hash=None, models=None, graph_hash_error=str(exc))
     else:
-        out.update(graph_hash=digest(graph_spec(spec)), config_hash=digest(config_spec(spec)))
+        configs = config_spec(spec)
+        out.update(
+            graph_hash=digest(graph_spec(spec)),
+            config_hash=digest(configs),
+            models=models_of(configs),
+        )
     versions, versions_hash = evaluators_version(evaluators)
     out.update(
         dataset_version=dataset_version(rows),
