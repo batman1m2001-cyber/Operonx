@@ -42,11 +42,14 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import prepare_eval  # noqa: E402
+import prepare_vi_public  # noqa: E402
 
 EMBEDDER = "intfloat/multilingual-e5-small"
 RERANKER = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
-SETS = ["xquad_vi", "xquad_en", "corpus_vi"]
-VI_SETS = ["xquad_vi", "corpus_vi"]
+#: Every set the script can build, and its language.
+LANGS = {"xquad_vi": "vi", "xquad_en": "en", "corpus_vi": "vi", "vi_public": "vi"}
+SETS = ["xquad_vi", "xquad_en", "corpus_vi"]  # --sets
+VI_SETS = [s for s in SETS if LANGS[s] == "vi"]
 ANALYZERS = {
     "simple": {"kind": "simple", "fold_diacritics": False},
     "simple+fold": {"kind": "simple", "fold_diacritics": True},
@@ -98,7 +101,7 @@ async def ingest(kb, name: str, corpus: Path, lexical) -> Dict[str, Any]:
             dense=DenseIndexSpec(embedder="e5", store=f"vector_store:{name}", batch_size=32,
                                  passage_template="passage: {text}", query_template="query: {text}"),
             lexical=lexical,
-            language="vi" if name in VI_SETS else "en",
+            language=LANGS[name],
         ),
     )  # fmt: skip
     started = time.perf_counter()
@@ -141,11 +144,15 @@ async def main(args) -> None:
     work = args.work.resolve()
     work.mkdir(parents=True, exist_ok=True)
     sets_dir = work / "sets"
-    for lang in ("vi", "en"):
-        if not (sets_dir / f"xquad_{lang}" / "cases.jsonl").exists():
-            prepare_eval.xquad_set(lang, sets_dir / f"xquad_{lang}", work / "cache")
-    if not (sets_dir / "corpus_vi" / "cases.jsonl").exists():
-        prepare_eval.corpus_vi_set(sets_dir / "corpus_vi")
+    for name in SETS:
+        if (sets_dir / name / "cases.jsonl").exists():
+            continue
+        if name.startswith("xquad_"):
+            prepare_eval.xquad_set(LANGS[name], sets_dir / name, work / "cache")
+        elif name == "corpus_vi":
+            prepare_eval.corpus_vi_set(sets_dir / name)
+        else:
+            prepare_vi_public.vi_public_set(sets_dir / name, ROOT / ".operonx" / "cache" / name)
     if args.limit:  # a smoke run: the first N cases of each set
         for name in SETS:
             path = sets_dir / name / "cases.jsonl"
@@ -229,7 +236,7 @@ async def main(args) -> None:
     wins = [n for n in SETS if results["gate"][n]["hybrid"]["metrics"]["recall@10"]
             > results["gate"][n]["dense"]["metrics"]["recall@10"]]  # fmt: skip
     results["hybrid_wins_r10"] = wins
-    results["default_mode"] = "hybrid" if len(wins) >= 2 else "dense"
+    results["default_mode"] = "hybrid" if 2 * len(wins) > len(SETS) else "dense"  # a majority
     (work / "per_case.json").write_text(json.dumps(per_case), encoding="utf-8")
 
     # 3. Postgres FTS beside SQLite FTS5
@@ -277,7 +284,7 @@ async def main(args) -> None:
                                  "expected": row["expected"], "answer": answer["text"],
                                  "citations": [{k: c[k] for k in ("source", "key", "quote", "span", "pages")}
                                                for c in answer["citations"]],
-                                 "dropped": answer["dropped"],
+                                 "dropped": answer["dropped"], "sources": answer["sources"],
                                  "unsupported_sentences": answer["unsupported_sentences"]})  # fmt: skip
         (work / "answers.jsonl").write_text(
             "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows_out), "utf-8"
@@ -298,11 +305,14 @@ if __name__ == "__main__":
     ap.add_argument("--llm-resources", type=Path, default=ROOT.parent / "Operon" / "resources.yaml")
     ap.add_argument("--env", type=Path, default=ROOT.parent / "Operon" / ".env")
     ap.add_argument("--limit", type=int, default=0, help="smoke run: first N cases of each set")
+    ap.add_argument("--sets", default=",".join(SETS), help=f"comma-separated, of {sorted(LANGS)}")
     ap.add_argument(
         "--threads", type=int, default=8, help="torch CPU threads (latency is measured)"
     )
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     parsed = ap.parse_args()
+    SETS[:] = parsed.sets.split(",")
+    VI_SETS[:] = [s for s in SETS if LANGS[s] == "vi"]
     import torch
 
     torch.set_num_threads(parsed.threads)

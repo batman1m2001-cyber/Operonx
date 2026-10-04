@@ -8,7 +8,10 @@ regions (page + bbox), so a viewer can highlight the exact box.
 
 Matching is exact up to Unicode composition (NFC) and whitespace: runs of
 whitespace match runs of whitespace, so a quote that re-wraps a line still
-matches, but a paraphrase, an ellipsis or a changed word does not. What does
+matches, but a paraphrase, an ellipsis or a changed word does not. Two
+differences are tolerated (:data:`TOLERANCES`, measured in ``docs/bench/k2.md``):
+the kind of quotation mark, and the case of the first letter. A citation records
+which it needed (``tolerated``), and always shows the canonical text at its span. What does
 not verify is **dropped and reported**, never shown: its ``[n]`` markers leave
 the answer text when no verified quote is left for source ``n``, and the
 sentences left without a marker are listed in ``unsupported_sentences``.
@@ -17,6 +20,7 @@ sentences left without a marker are listed in ``unsupported_sentences``.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from operonx_kb.model.document import Element, Span
@@ -24,7 +28,15 @@ from operonx_kb.text.normalize import clean_chars
 from operonx_kb.text.sentences import sentence_spans
 from operonx_kb.text.spans import elements_in_span, regions_for_span
 
-__all__ = ["find_quote", "verify_citations", "answer_sentences", "MARKER"]
+__all__ = [
+    "TOLERANCES",
+    "QuoteMatch",
+    "match_quote",
+    "find_quote",
+    "verify_citations",
+    "answer_sentences",
+    "MARKER",
+]
 
 #: An answer's citation marker: ``[1]``, or several in one bracket ``[1, 3]``.
 MARKER = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
@@ -44,23 +56,78 @@ def _collapsed(text: str) -> Tuple[str, List[int]]:
     return "".join(out), origin
 
 
-def find_quote(canonical: str, spans: Sequence[Span], quote: str) -> Optional[Span]:
-    """The canonical span of ``quote`` inside one of ``spans``, or ``None``.
+#: Differences a quote may have from its source and still verify (PLAN R6): the kind of
+#: quotation mark (a model writing JSON turns ``"`` into ``'``), and the case of the first
+#: letter (a sentence quoted from its middle starts with a capital, or the reverse).
+#: The citation then shows the canonical text at the span, never the model's string.
+TOLERANCES = ("quote_marks", "first_letter_case")
+_QUOTE_MARKS = str.maketrans(
+    {c: '"' for c in "'\u2018\u2019\u201a\u201b\u201c\u201d\u201e\u201f\u00ab\u00bb\u2039\u203a"}
+)
 
-    Whitespace-insensitive, and the quote is cleaned like the canonical text (NFC,
-    invisible characters dropped, :func:`~operonx_kb.text.normalize.clean_chars`); the quote's own surrounding quotation marks and spaces are ignored. A
-    quote must lie within one span: two pieces of text the source shows apart are
-    not one quotation.
-    """
-    needle = _WS.sub(" ", clean_chars(quote)).strip().strip(_EDGE_QUOTES).strip()
-    if not needle:
-        return None
+
+@dataclass(frozen=True)
+class QuoteMatch:
+    """Where a quote is in the canonical text, and which tolerances it needed."""
+
+    span: Span
+    tolerated: Tuple[str, ...] = ()
+
+
+def _find(spans: Sequence[Span], canonical: str, needle: str, marks: bool) -> Optional[Span]:
+    if marks:
+        needle = needle.translate(_QUOTE_MARKS)
     for start, end in spans:
         hay, origin = _collapsed(canonical[start:end])
+        if marks:
+            hay = hay.translate(_QUOTE_MARKS)  # one character for one: offsets hold
         at = hay.find(needle)
         if at >= 0:
             return (start + origin[at], start + origin[at + len(needle) - 1] + 1)
     return None
+
+
+def match_quote(
+    canonical: str, spans: Sequence[Span], quote: str, tolerances: Sequence[str] = TOLERANCES
+) -> Optional[QuoteMatch]:
+    """The canonical span of ``quote`` inside one of ``spans``, or ``None``.
+
+    Whitespace-insensitive, and the quote is cleaned like the canonical text (NFC,
+    invisible characters dropped, :func:`~operonx_kb.text.normalize.clean_chars`); the
+    quote's own surrounding quotation marks and spaces are ignored. A quote must lie
+    within one span: two pieces of text the source shows apart are not one quotation.
+    An exact match is tried first; then each of ``tolerances`` (:data:`TOLERANCES`),
+    and the match says which it needed.
+    """
+    needle = _WS.sub(" ", clean_chars(quote)).strip().strip(_EDGE_QUOTES).strip()
+    if not needle:
+        return None
+    unknown = set(tolerances) - set(TOLERANCES)
+    if unknown:
+        raise ValueError(f"unknown quote tolerances {sorted(unknown)}; known: {list(TOLERANCES)}")
+    marks = "quote_marks" in tolerances
+    first = "first_letter_case" in tolerances and needle[0].isalpha()
+    variants = [(needle, False, ())]
+    if marks:
+        variants.append((needle, True, ("quote_marks",)))
+    if first:
+        swapped = needle[0].swapcase() + needle[1:]
+        variants.append((swapped, False, ("first_letter_case",)))
+        if marks:
+            variants.append((swapped, True, ("quote_marks", "first_letter_case")))
+    for text, use_marks, tolerated in variants:
+        span = _find(spans, canonical, text, use_marks)
+        if span is not None:
+            return QuoteMatch(span, tolerated)
+    return None
+
+
+def find_quote(
+    canonical: str, spans: Sequence[Span], quote: str, tolerances: Sequence[str] = TOLERANCES
+) -> Optional[Span]:
+    """:func:`match_quote`'s span, or ``None``."""
+    found = match_quote(canonical, spans, quote, tolerances)
+    return found.span if found else None
 
 
 def _markers(text: str) -> List[Tuple[int, int, List[int]]]:
@@ -76,6 +143,7 @@ def verify_citations(
     sources: Sequence[Mapping[str, Any]],
     canonicals: Mapping[str, str],
     elements: Mapping[str, Sequence[Element]],
+    tolerances: Sequence[str] = TOLERANCES,
 ) -> Dict[str, Any]:
     """Check every citation against its source; resolve the verified ones.
 
@@ -85,6 +153,7 @@ def verify_citations(
         sources: The context's sources (:meth:`~operonx_kb.retrieval.context.Source.as_dict`).
         canonicals: ``version_id -> canonical text`` of the sources' versions.
         elements: ``version_id -> element tree`` of the same versions.
+        tolerances: Which :data:`TOLERANCES` a quote may use (``()``: exact only).
 
     Returns:
         ``{"text", "citations", "dropped", "unsupported_sentences", "stats"}``. ``text``
@@ -107,10 +176,13 @@ def verify_citations(
             dropped.append({"citation": raw, "reason": f"there is no source [{n}]"})
             continue
         canonical = canonicals[source["version_id"]]
-        span = find_quote(canonical, [tuple(s) for s in source["spans"]], raw["quote"])
-        if span is None:
+        found = match_quote(
+            canonical, [tuple(s) for s in source["spans"]], raw["quote"], tolerances
+        )
+        if found is None:
             dropped.append({"citation": raw, "reason": f"the quote is not in source [{n}]"})
             continue
+        span = found.span
         tree = elements[source["version_id"]]
         regions = regions_for_span(tree, span)
         verified.append(
@@ -127,6 +199,7 @@ def verify_citations(
                 "pages": sorted({r.page_no for r in regions}),
                 "regions": [{"page_no": r.page_no, "bbox": list(r.bbox)} for r in regions],
                 "support": "verified",
+                "tolerated": list(found.tolerated),
             }
         )
     supported = {c["source"] for c in verified}
@@ -139,6 +212,7 @@ def verify_citations(
         "verified": len(verified),
         "dropped": len(dropped),
         "precision": round(len(verified) / cited, 4) if cited else None,
+        "tolerated": sum(1 for c in verified if c["tolerated"]),
         "sentences": len(sentences),
         "unsupported": len(unsupported),
     }

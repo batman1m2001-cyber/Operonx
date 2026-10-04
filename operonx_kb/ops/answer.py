@@ -98,7 +98,7 @@ def check_answer(
     elements = {v: cat.elements(v, canonicals[v]) for v in versions}
     out: Dict[str, Any] = verify_citations(answer, citations or [], passages, canonicals, elements)
     shown: List[Dict[str, Any]] = [
-        {k: s[k] for k in ("n", "key", "title", "version_id", "heading_path", "pages")}
+        {k: s[k] for k in ("n", "key", "title", "version_id", "heading_path", "pages", "spans")}
         for s in passages
     ]
     out.update(sources=shown, usage=usage or {})

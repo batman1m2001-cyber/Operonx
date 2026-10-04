@@ -163,3 +163,52 @@ def test_a_touching_hit_that_does_not_fit_is_not_claimed_by_the_source(version):
 def test_a_quote_is_cleaned_like_the_canonical_text():
     canonical = "Unused days expire on 31 March."
     assert find_quote(canonical, [(0, len(canonical))], "expire on 31​ March") == (12, 30)
+
+
+SOURCE = 'A version was designated as a "design build" contract. Unused days expire in March.'
+
+
+@pytest.mark.parametrize(
+    "quote, tolerated, shown",
+    [
+        # the model swapped " for ' (the quote's own edge marks are ignored, as before)
+        ("'design build' contract", ("quote_marks",), 'design build" contract'),
+        ("as a “design build” contract", ("quote_marks",), 'as a "design build" contract'),
+        ("a version was designated", ("first_letter_case",), "A version was designated"),
+        ("unused days expire in March", ("first_letter_case",), "Unused days expire in March"),
+    ],
+)
+def test_tolerated_differences_resolve_to_the_canonical_text(quote, tolerated, shown):
+    from operonx_kb.retrieval.citations import TOLERANCES, match_quote
+
+    got = match_quote(SOURCE, [(0, len(SOURCE))], quote, tolerances=TOLERANCES)
+    assert got is not None and got.tolerated == tolerated
+    assert SOURCE[got.span[0] : got.span[1]] == shown  # what a citation shows: the source
+    assert match_quote(SOURCE, [(0, len(SOURCE))], quote, tolerances=()) is None  # strict
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "a version was designated as a design build contract",  # quotes dropped: not a quote mark swap
+        "Unused days Expire in March",  # a case change inside the quote
+        "A version was taken",  # different words
+    ],
+)
+def test_other_differences_are_still_refused(quote):
+    from operonx_kb.retrieval.citations import TOLERANCES, match_quote
+
+    assert match_quote(SOURCE, [(0, len(SOURCE))], quote, tolerances=TOLERANCES) is None
+
+
+def test_a_tolerated_citation_says_so_and_strict_mode_drops_it(version):
+    tree, chunks, occ = version
+    i = next(i for i, o in enumerate(occ) if "twelve days" in chunks[o.chunk_id].text)
+    sources = [s.as_dict() for s in sources_for(version, [i], neighbours=0)]
+    args = ("Twelve days [1].", [{"source": 1, "quote": "every employee has twelve days"}], sources,
+            {"ver_1": tree.canonical}, {"ver_1": tree.elements})  # fmt: skip
+    out = verify_citations(*args)
+    (cite,) = out["citations"]
+    assert cite["tolerated"] == ["first_letter_case"] and cite["quote"].startswith("Every")
+    assert out["stats"]["tolerated"] == 1
+    assert verify_citations(*args, tolerances=())["citations"] == []

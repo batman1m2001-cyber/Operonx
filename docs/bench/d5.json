@@ -1,0 +1,1172 @@
+{
+ "embedder": "intfloat/multilingual-e5-small",
+ "reranker": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+ "sets": {
+  "vi_public": {
+   "documents": 691,
+   "chunks": 3727,
+   "seconds": 1047.4,
+   "cases": 511
+  }
+ },
+ "analyzers": {
+  "vi_public": {
+   "simple": {
+    "accented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.7867,
+      "recall@10": 0.8337,
+      "recall@20": 0.8845,
+      "mrr": 0.7067,
+      "ndcg@10": 0.7346
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.7867,
+       "se": 0.0181,
+       "ci_lo": 0.7491,
+       "ci_hi": 0.82,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.8337,
+       "se": 0.0165,
+       "ci_lo": 0.7989,
+       "ci_hi": 0.8634,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.8845,
+       "se": 0.0142,
+       "ci_lo": 0.8539,
+       "ci_hi": 0.9094,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.7067,
+       "se": 0.018,
+       "ci_lo": 0.6713,
+       "ci_hi": 0.742,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.7346,
+       "se": 0.0171,
+       "ci_lo": 0.701,
+       "ci_hi": 0.7681,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 62.27467395365238,
+     "p95_ms": 79.39799875020981,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "9541c5c1c273",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "35b6c168c682",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "unaccented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.4481,
+      "recall@10": 0.4873,
+      "recall@20": 0.5342,
+      "mrr": 0.3446,
+      "ndcg@10": 0.3766
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.4481,
+       "se": 0.022,
+       "ci_lo": 0.4056,
+       "ci_hi": 0.4915,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.4873,
+       "se": 0.0221,
+       "ci_lo": 0.4442,
+       "ci_hi": 0.5306,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.5342,
+       "se": 0.0221,
+       "ci_lo": 0.4909,
+       "ci_hi": 0.5771,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.3446,
+       "se": 0.0188,
+       "ci_lo": 0.3077,
+       "ci_hi": 0.3815,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.3766,
+       "se": 0.019,
+       "ci_lo": 0.3394,
+       "ci_hi": 0.4138,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 41.791421826928854,
+     "p95_ms": 58.957825880497694,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "9541c5c1c273",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "bc9c31b67d9e",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    }
+   },
+   "simple+fold": {
+    "accented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.7182,
+      "recall@10": 0.775,
+      "recall@20": 0.8239,
+      "mrr": 0.6321,
+      "ndcg@10": 0.6641
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.7182,
+       "se": 0.0199,
+       "ci_lo": 0.6777,
+       "ci_hi": 0.7555,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.775,
+       "se": 0.0185,
+       "ci_lo": 0.7368,
+       "ci_hi": 0.809,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.8239,
+       "se": 0.0169,
+       "ci_lo": 0.7885,
+       "ci_hi": 0.8545,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.6321,
+       "se": 0.0191,
+       "ci_lo": 0.5947,
+       "ci_hi": 0.6695,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.6641,
+       "se": 0.0183,
+       "ci_lo": 0.6282,
+       "ci_hi": 0.7001,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 60.716241132467985,
+     "p95_ms": 77.64551509171724,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "41cedd9ba4b7",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "35b6c168c682",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "unaccented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.7182,
+      "recall@10": 0.775,
+      "recall@20": 0.8239,
+      "mrr": 0.6321,
+      "ndcg@10": 0.6641
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.7182,
+       "se": 0.0199,
+       "ci_lo": 0.6777,
+       "ci_hi": 0.7555,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.775,
+       "se": 0.0185,
+       "ci_lo": 0.7368,
+       "ci_hi": 0.809,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.8239,
+       "se": 0.0169,
+       "ci_lo": 0.7885,
+       "ci_hi": 0.8545,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.6321,
+       "se": 0.0191,
+       "ci_lo": 0.5947,
+       "ci_hi": 0.6695,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.6641,
+       "se": 0.0183,
+       "ci_lo": 0.6282,
+       "ci_hi": 0.7001,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 61.170683708041906,
+     "p95_ms": 78.14274122938514,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "41cedd9ba4b7",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "bc9c31b67d9e",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    }
+   },
+   "vi": {
+    "accented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.7789,
+      "recall@10": 0.8356,
+      "recall@20": 0.8787,
+      "mrr": 0.6723,
+      "ndcg@10": 0.7094
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.7789,
+       "se": 0.0184,
+       "ci_lo": 0.7409,
+       "ci_hi": 0.8127,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.8356,
+       "se": 0.0164,
+       "ci_lo": 0.801,
+       "ci_hi": 0.8652,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.8787,
+       "se": 0.0145,
+       "ci_lo": 0.8475,
+       "ci_hi": 0.9042,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.6723,
+       "se": 0.0182,
+       "ci_lo": 0.6367,
+       "ci_hi": 0.708,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.7094,
+       "se": 0.017,
+       "ci_lo": 0.676,
+       "ci_hi": 0.7428,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 91.80008294060826,
+     "p95_ms": 115.70906499400735,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "3ad46789d87e",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "35b6c168c682",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "unaccented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.4423,
+      "recall@10": 0.4892,
+      "recall@20": 0.5362,
+      "mrr": 0.342,
+      "ndcg@10": 0.375
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.4423,
+       "se": 0.022,
+       "ci_lo": 0.3998,
+       "ci_hi": 0.4856,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.4892,
+       "se": 0.0221,
+       "ci_lo": 0.4461,
+       "ci_hi": 0.5325,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.5362,
+       "se": 0.0221,
+       "ci_lo": 0.4929,
+       "ci_hi": 0.579,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.342,
+       "se": 0.0188,
+       "ci_lo": 0.3052,
+       "ci_hi": 0.3788,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.375,
+       "se": 0.0189,
+       "ci_lo": 0.3379,
+       "ci_hi": 0.4121,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 53.10782231390476,
+     "p95_ms": 87.37594913691282,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "3ad46789d87e",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "bc9c31b67d9e",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    }
+   },
+   "vi+fold": {
+    "accented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.7789,
+      "recall@10": 0.8356,
+      "recall@20": 0.865,
+      "mrr": 0.6697,
+      "ndcg@10": 0.7085
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.7789,
+       "se": 0.0184,
+       "ci_lo": 0.7409,
+       "ci_hi": 0.8127,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.8356,
+       "se": 0.0164,
+       "ci_lo": 0.801,
+       "ci_hi": 0.8652,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.865,
+       "se": 0.0151,
+       "ci_lo": 0.8326,
+       "ci_hi": 0.8919,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.6697,
+       "se": 0.0181,
+       "ci_lo": 0.6341,
+       "ci_hi": 0.7052,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.7085,
+       "se": 0.017,
+       "ci_lo": 0.6753,
+       "ci_hi": 0.7418,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 87.7989362925291,
+     "p95_ms": 111.96240317076445,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "78746d61fa29",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "35b6c168c682",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "unaccented": {
+     "cases": 511,
+     "metrics": {
+      "recall@5": 0.7789,
+      "recall@10": 0.8356,
+      "recall@20": 0.865,
+      "mrr": 0.6697,
+      "ndcg@10": 0.7085
+     },
+     "ci": {
+      "recall@5": {
+       "n": 511,
+       "mean": 0.7789,
+       "se": 0.0184,
+       "ci_lo": 0.7409,
+       "ci_hi": 0.8127,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 511,
+       "mean": 0.8356,
+       "se": 0.0164,
+       "ci_lo": 0.801,
+       "ci_hi": 0.8652,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 511,
+       "mean": 0.865,
+       "se": 0.0151,
+       "ci_lo": 0.8326,
+       "ci_hi": 0.8919,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 511,
+       "mean": 0.6697,
+       "se": 0.0181,
+       "ci_lo": 0.6341,
+       "ci_hi": 0.7052,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 511,
+       "mean": 0.7085,
+       "se": 0.017,
+       "ci_lo": 0.6753,
+       "ci_hi": 0.7418,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 511,
+      "recall@10": 511,
+      "recall@20": 511,
+      "mrr": 511,
+      "ndcg@10": 511
+     },
+     "p50_ms": 87.76351297274232,
+     "p95_ms": 111.46983411163092,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "0bb1e2511fbb",
+      "version_dirty": false,
+      "graph_hash": "78746d61fa29",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "bc9c31b67d9e",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    }
+   }
+  }
+ },
+ "gate": {
+  "vi_public": {
+   "dense": {
+    "cases": 511,
+    "metrics": {
+     "recall@5": 0.7436,
+     "recall@10": 0.7926,
+     "recall@20": 0.8356,
+     "mrr": 0.6414,
+     "ndcg@10": 0.6758
+    },
+    "ci": {
+     "recall@5": {
+      "n": 511,
+      "mean": 0.7436,
+      "se": 0.0193,
+      "ci_lo": 0.7041,
+      "ci_hi": 0.7796,
+      "method": "wilson"
+     },
+     "recall@10": {
+      "n": 511,
+      "mean": 0.7926,
+      "se": 0.018,
+      "ci_lo": 0.7553,
+      "ci_hi": 0.8255,
+      "method": "wilson"
+     },
+     "recall@20": {
+      "n": 511,
+      "mean": 0.8356,
+      "se": 0.0164,
+      "ci_lo": 0.801,
+      "ci_hi": 0.8652,
+      "method": "wilson"
+     },
+     "mrr": {
+      "n": 511,
+      "mean": 0.6414,
+      "se": 0.0187,
+      "ci_lo": 0.6046,
+      "ci_hi": 0.6781,
+      "method": "clt"
+     },
+     "ndcg@10": {
+      "n": 511,
+      "mean": 0.6758,
+      "se": 0.0179,
+      "ci_lo": 0.6407,
+      "ci_hi": 0.7109,
+      "method": "clt"
+     }
+    },
+    "scored": {
+     "recall@5": 511,
+     "recall@10": 511,
+     "recall@20": 511,
+     "mrr": 511,
+     "ndcg@10": 511
+    },
+    "p50_ms": 110.34058313816786,
+    "p95_ms": 123.87138977646828,
+    "errors": 0,
+    "error_samples": [],
+    "gate": "failed",
+    "fingerprint": {
+     "code_version": "0bb1e2511fbb",
+     "version_dirty": false,
+     "graph_hash": "9479e0a7164c",
+     "config_hash": "c0a59f84facd",
+     "models": [
+      "intfloat/multilingual-e5-small"
+     ],
+     "dataset_version": "35b6c168c682",
+     "evaluators": {
+      "recall@5": "28308e6201ef",
+      "recall@10": "d5950c925afe",
+      "recall@20": "0e60f4c389ef",
+      "mrr": "4c7db592fb9c",
+      "ndcg@10": "7eccc075e83c"
+     },
+     "evaluators_hash": "e236ee892374",
+     "operonx_version": "1.14.0"
+    }
+   },
+   "lexical": {
+    "cases": 511,
+    "metrics": {
+     "recall@5": 0.7789,
+     "recall@10": 0.8356,
+     "recall@20": 0.865,
+     "mrr": 0.6697,
+     "ndcg@10": 0.7085
+    },
+    "ci": {
+     "recall@5": {
+      "n": 511,
+      "mean": 0.7789,
+      "se": 0.0184,
+      "ci_lo": 0.7409,
+      "ci_hi": 0.8127,
+      "method": "wilson"
+     },
+     "recall@10": {
+      "n": 511,
+      "mean": 0.8356,
+      "se": 0.0164,
+      "ci_lo": 0.801,
+      "ci_hi": 0.8652,
+      "method": "wilson"
+     },
+     "recall@20": {
+      "n": 511,
+      "mean": 0.865,
+      "se": 0.0151,
+      "ci_lo": 0.8326,
+      "ci_hi": 0.8919,
+      "method": "wilson"
+     },
+     "mrr": {
+      "n": 511,
+      "mean": 0.6697,
+      "se": 0.0181,
+      "ci_lo": 0.6341,
+      "ci_hi": 0.7052,
+      "method": "clt"
+     },
+     "ndcg@10": {
+      "n": 511,
+      "mean": 0.7085,
+      "se": 0.017,
+      "ci_lo": 0.6753,
+      "ci_hi": 0.7418,
+      "method": "clt"
+     }
+    },
+    "scored": {
+     "recall@5": 511,
+     "recall@10": 511,
+     "recall@20": 511,
+     "mrr": 511,
+     "ndcg@10": 511
+    },
+    "p50_ms": 88.19690113887191,
+    "p95_ms": 113.35195694118738,
+    "errors": 0,
+    "error_samples": [],
+    "gate": "failed",
+    "fingerprint": {
+     "code_version": "0bb1e2511fbb",
+     "version_dirty": false,
+     "graph_hash": "78746d61fa29",
+     "config_hash": "4f53cda18c2b",
+     "models": [],
+     "dataset_version": "35b6c168c682",
+     "evaluators": {
+      "recall@5": "28308e6201ef",
+      "recall@10": "d5950c925afe",
+      "recall@20": "0e60f4c389ef",
+      "mrr": "4c7db592fb9c",
+      "ndcg@10": "7eccc075e83c"
+     },
+     "evaluators_hash": "e236ee892374",
+     "operonx_version": "1.14.0"
+    }
+   },
+   "hybrid": {
+    "cases": 511,
+    "metrics": {
+     "recall@5": 0.8297,
+     "recall@10": 0.8611,
+     "recall@20": 0.91,
+     "mrr": 0.7297,
+     "ndcg@10": 0.759
+    },
+    "ci": {
+     "recall@5": {
+      "n": 511,
+      "mean": 0.8297,
+      "se": 0.0166,
+      "ci_lo": 0.7947,
+      "ci_hi": 0.8598,
+      "method": "wilson"
+     },
+     "recall@10": {
+      "n": 511,
+      "mean": 0.8611,
+      "se": 0.0153,
+      "ci_lo": 0.8284,
+      "ci_hi": 0.8884,
+      "method": "wilson"
+     },
+     "recall@20": {
+      "n": 511,
+      "mean": 0.91,
+      "se": 0.0127,
+      "ci_lo": 0.882,
+      "ci_hi": 0.9318,
+      "method": "wilson"
+     },
+     "mrr": {
+      "n": 511,
+      "mean": 0.7297,
+      "se": 0.0173,
+      "ci_lo": 0.6958,
+      "ci_hi": 0.7636,
+      "method": "clt"
+     },
+     "ndcg@10": {
+      "n": 511,
+      "mean": 0.759,
+      "se": 0.0163,
+      "ci_lo": 0.7272,
+      "ci_hi": 0.7909,
+      "method": "clt"
+     }
+    },
+    "scored": {
+     "recall@5": 511,
+     "recall@10": 511,
+     "recall@20": 511,
+     "mrr": 511,
+     "ndcg@10": 511
+    },
+    "p50_ms": 175.96498597413301,
+    "p95_ms": 206.08632499352098,
+    "errors": 0,
+    "error_samples": [],
+    "gate": "failed",
+    "fingerprint": {
+     "code_version": "0bb1e2511fbb",
+     "version_dirty": false,
+     "graph_hash": "675c7970bb82",
+     "config_hash": "2ea793bff384",
+     "models": [
+      "intfloat/multilingual-e5-small"
+     ],
+     "dataset_version": "35b6c168c682",
+     "evaluators": {
+      "recall@5": "28308e6201ef",
+      "recall@10": "d5950c925afe",
+      "recall@20": "0e60f4c389ef",
+      "mrr": "4c7db592fb9c",
+      "ndcg@10": "7eccc075e83c"
+     },
+     "evaluators_hash": "e236ee892374",
+     "operonx_version": "1.14.0"
+    }
+   },
+   "hybrid+rerank": {
+    "cases": 511,
+    "metrics": {
+     "recall@5": 0.8552,
+     "recall@10": 0.8806,
+     "recall@20": 0.9139,
+     "mrr": 0.7846,
+     "ndcg@10": 0.8062
+    },
+    "ci": {
+     "recall@5": {
+      "n": 511,
+      "mean": 0.8552,
+      "se": 0.0156,
+      "ci_lo": 0.822,
+      "ci_hi": 0.883,
+      "method": "wilson"
+     },
+     "recall@10": {
+      "n": 511,
+      "mean": 0.8806,
+      "se": 0.0144,
+      "ci_lo": 0.8496,
+      "ci_hi": 0.9059,
+      "method": "wilson"
+     },
+     "recall@20": {
+      "n": 511,
+      "mean": 0.9139,
+      "se": 0.0124,
+      "ci_lo": 0.8864,
+      "ci_hi": 0.9352,
+      "method": "wilson"
+     },
+     "mrr": {
+      "n": 511,
+      "mean": 0.7846,
+      "se": 0.0163,
+      "ci_lo": 0.7526,
+      "ci_hi": 0.8166,
+      "method": "clt"
+     },
+     "ndcg@10": {
+      "n": 511,
+      "mean": 0.8062,
+      "se": 0.0154,
+      "ci_lo": 0.776,
+      "ci_hi": 0.8363,
+      "method": "clt"
+     }
+    },
+    "scored": {
+     "recall@5": 511,
+     "recall@10": 511,
+     "recall@20": 511,
+     "mrr": 511,
+     "ndcg@10": 511
+    },
+    "p50_ms": 4941.99049891904,
+    "p95_ms": 6061.541438102722,
+    "errors": 0,
+    "error_samples": [],
+    "gate": "failed",
+    "fingerprint": {
+     "code_version": "0bb1e2511fbb",
+     "version_dirty": false,
+     "graph_hash": "70490fbcf113",
+     "config_hash": "a41fcb295145",
+     "models": [
+      "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+      "intfloat/multilingual-e5-small"
+     ],
+     "dataset_version": "35b6c168c682",
+     "evaluators": {
+      "recall@5": "28308e6201ef",
+      "recall@10": "d5950c925afe",
+      "recall@20": "0e60f4c389ef",
+      "mrr": "4c7db592fb9c",
+      "ndcg@10": "7eccc075e83c"
+     },
+     "evaluators_hash": "e236ee892374",
+     "operonx_version": "1.14.0"
+    }
+   },
+   "hybrid_minus_dense_r10": {
+    "n": 511,
+    "a": 0.7926,
+    "b": 0.8611,
+    "diff": 0.0685,
+    "ci_lo": 0.0417,
+    "ci_hi": 0.0964,
+    "p": 0.0,
+    "method": "mcnemar",
+    "corr": 0.6736,
+    "regressed": 8,
+    "fixed": 43
+   }
+  }
+ },
+ "pg_fts": {
+  "vi_public": {
+   "cases": 511,
+   "metrics": {
+    "recall@5": 0.2192,
+    "recall@10": 0.3014,
+    "recall@20": 0.3659,
+    "mrr": 0.163,
+    "ndcg@10": 0.1918
+   },
+   "ci": {
+    "recall@5": {
+     "n": 511,
+     "mean": 0.2192,
+     "se": 0.0183,
+     "ci_lo": 0.1855,
+     "ci_hi": 0.2571,
+     "method": "wilson"
+    },
+    "recall@10": {
+     "n": 511,
+     "mean": 0.3014,
+     "se": 0.0203,
+     "ci_lo": 0.2632,
+     "ci_hi": 0.3425,
+     "method": "wilson"
+    },
+    "recall@20": {
+     "n": 511,
+     "mean": 0.3659,
+     "se": 0.0213,
+     "ci_lo": 0.3253,
+     "ci_hi": 0.4086,
+     "method": "wilson"
+    },
+    "mrr": {
+     "n": 511,
+     "mean": 0.163,
+     "se": 0.0139,
+     "ci_lo": 0.1357,
+     "ci_hi": 0.1903,
+     "method": "clt"
+    },
+    "ndcg@10": {
+     "n": 511,
+     "mean": 0.1918,
+     "se": 0.0147,
+     "ci_lo": 0.163,
+     "ci_hi": 0.2206,
+     "method": "clt"
+    }
+   },
+   "scored": {
+    "recall@5": 511,
+    "recall@10": 511,
+    "recall@20": 511,
+    "mrr": 511,
+    "ndcg@10": 511
+   },
+   "p50_ms": 332.5320901349187,
+   "p95_ms": 669.4709709845483,
+   "errors": 0,
+   "error_samples": [],
+   "gate": "failed",
+   "fingerprint": {
+    "code_version": "0bb1e2511fbb",
+    "version_dirty": false,
+    "graph_hash": "e852c769fe73",
+    "config_hash": "4f53cda18c2b",
+    "models": [],
+    "dataset_version": "35b6c168c682",
+    "evaluators": {
+     "recall@5": "28308e6201ef",
+     "recall@10": "d5950c925afe",
+     "recall@20": "0e60f4c389ef",
+     "mrr": "4c7db592fb9c",
+     "ndcg@10": "7eccc075e83c"
+    },
+    "evaluators_hash": "e236ee892374",
+    "operonx_version": "1.14.0"
+   }
+  }
+ },
+ "answers": {
+  "vi_public": {
+   "cases": 30,
+   "metrics": {
+    "citation_precision": 0.9643,
+    "faithfulness": 0.7101,
+    "grounded_recall": 0.2667
+   },
+   "ci": {
+    "citation_precision": {
+     "n": 28,
+     "mean": 0.9643,
+     "se": 0.0357,
+     "ci_lo": 0.8229,
+     "ci_hi": 0.9937,
+     "method": "wilson"
+    },
+    "faithfulness": {
+     "n": 30,
+     "mean": 0.7101,
+     "se": 0.0552,
+     "ci_lo": 0.6019,
+     "ci_hi": 0.8184,
+     "method": "clt"
+    },
+    "grounded_recall": {
+     "n": 30,
+     "mean": 0.2667,
+     "se": 0.0821,
+     "ci_lo": 0.1418,
+     "ci_hi": 0.4445,
+     "method": "wilson"
+    }
+   },
+   "scored": {
+    "citation_precision": 28,
+    "faithfulness": 30,
+    "grounded_recall": 30
+   },
+   "p50_ms": 1849.0800959989429,
+   "p95_ms": 2917.674125637859,
+   "errors": 0,
+   "error_samples": [],
+   "gate": "failed",
+   "fingerprint": {
+    "code_version": "0bb1e2511fbb",
+    "version_dirty": false,
+    "graph_hash": "6f2b26a5da3a",
+    "config_hash": "e04325508677",
+    "models": [
+     "gpt-4o-mini",
+     "intfloat/multilingual-e5-small"
+    ],
+    "dataset_version": "7b4b2b749d0b",
+    "evaluators": {
+     "citation_precision": "c34b125050a3",
+     "faithfulness": "9c08e79115ce",
+     "grounded_recall": "4e24c8ec57bc"
+    },
+    "evaluators_hash": "14c82a38377f",
+    "operonx_version": "1.14.0"
+   }
+  }
+ },
+ "analyzer_chosen": "vi+fold",
+ "hybrid_wins_r10": [
+  "vi_public"
+ ],
+ "default_mode": "hybrid"
+}
