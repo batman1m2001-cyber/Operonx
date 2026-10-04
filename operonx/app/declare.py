@@ -602,8 +602,8 @@ def describe_jobspec(j: Any, manifest: Any = None) -> Dict[str, Any]:
 def graph_refs(manifest: Any) -> list:
     """Every graph the manifest names, once each, as
     ``(name, entry, used_by, bind, graph_object)`` — the ``[[graph]]``
-    blocks, then whatever services and jobs point at; a door with variants
-    contributes one per variant."""
+    blocks, then whatever services and jobs point at (a door's ``resume``
+    graph too); a door with variants contributes one per variant."""
     by_entry: Dict[str, Any] = {}
     variants: list = []
     for g in manifest.graphs:
@@ -618,6 +618,12 @@ def graph_refs(manifest: Any) -> list:
                 variants.append((f"{base}[{v}]", entry, (f"serve:{s.name}",), dict(bind), s.graph))
         else:
             by_entry.setdefault(entry, [base, [], s.graph])[1].append(f"serve:{s.name}")
+        if s.resume:
+            # the door's resume route runs a graph of its own (or the same one)
+            entry = ref_name(s.resume)
+            by_entry.setdefault(entry, [entry.rpartition(":")[2], [], s.resume])[1].append(
+                f"serve:{s.name}.resume"
+            )
     for j in manifest.jobs:
         if j.graph:
             by_entry.setdefault(j.graph, [j.graph.rpartition(":")[2], [], None])[1].append(

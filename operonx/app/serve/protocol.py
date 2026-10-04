@@ -151,6 +151,13 @@ class BoundedSession:
     and reported, never dropped in silence.
     """
 
+    #: Whether the peer reads what the run sends as a stream, item by item
+    #: (a websocket, an HTTP caller accepting ``text/event-stream``), or
+    #: waits for one reply (a JSON HTTP caller, a job's sink: one row per
+    #: item). A graph that can answer either way — every event of an agent
+    #: run, or only its result — reads it from :func:`current_session`.
+    stream: bool = True
+
     def __init__(
         self, meta: Optional[Mapping[str, Any]] = None, max_inflight: Optional[int] = None
     ):

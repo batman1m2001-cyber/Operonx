@@ -211,6 +211,11 @@ class TestResumeRoute:
         assert describe_service(spec)["resume"] == f"{__name__}:resumer"
         assert spec.resume_spec().path == "/agent/resume"
 
+    def test_the_resume_graph_is_one_of_the_projects_graphs(self):
+        graphs = {g["name"]: g for g in self._app().describe()["graphs"]}
+        assert graphs["resumer"]["used_by"] == ["serve:agent.resume"]
+        assert graphs["starter"]["used_by"] == ["serve:agent"]
+
     def test_the_toml_block_says_the_same(self):
         spec = Manifest.from_dict(
             {
@@ -239,3 +244,17 @@ class TestResumeRoute:
             Manifest.from_dict(
                 {"serve": [{"name": "a", "kind": "http", "graph": "a:b", "resume": "nope"}]}
             )
+
+
+def test_a_session_says_whether_its_peer_reads_a_stream():
+    """`BoundedSession.stream`: a graph that can answer with every event or
+    with one result (an agent run) asks the session which its peer wants."""
+    from operonx.app.jobs.session import JobSession
+    from operonx.app.serve import MemorySession
+    from operonx.app.serve.asgi import HttpSession, WebSocketSession
+
+    assert HttpSession("x").stream is False
+    assert HttpSession("x", stream=True).stream is True
+    assert WebSocketSession(websocket=None).stream is True
+    assert MemorySession().stream is True
+    assert JobSession(sink=None, key="k").stream is False
