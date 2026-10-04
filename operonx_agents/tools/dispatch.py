@@ -19,7 +19,8 @@ and the GenAI attributes; outside a traced run that costs nothing.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
+import copy
+import functools
 import inspect
 import json
 import re
@@ -40,6 +41,13 @@ __all__ = ["Approver", "dispatch", "tool_message"]
 #: ``await approve(call, spec) -> bool``: a human's answer to one call that
 #: needs approval. ``call`` is ``{"id", "name", "args"}`` with validated args.
 Approver = Callable[[Dict[str, Any], ToolSpec], Awaitable[bool]]
+
+#: ``on_start(call)``: a call passed every check and its tool is about to
+#: run; ``call`` is ``{"id", "name", "args"}`` with validated args.
+OnStart = Callable[[Dict[str, Any]], None]
+
+#: ``await on_message(message)``: a call's one tool message is ready.
+OnMessage = Callable[[dict], Awaitable[None]]
 
 # The wording the model reads. Kept from operonx.agents' dispatch, where
 # each was tuned against a live model: a named error beats a silent absence.
@@ -80,6 +88,8 @@ async def dispatch(
     ctx: Optional[RunContext] = None,
     policy: Optional[ToolPolicy] = None,
     approve: Optional[Approver] = None,
+    on_start: Optional[OnStart] = None,
+    on_message: Optional[OnMessage] = None,
 ) -> List[dict]:
     """Run ``calls`` against ``toolset``; one tool message per call, in order.
 
@@ -95,6 +105,10 @@ async def dispatch(
         approve: How a call that needs a human is asked. Without one,
             such a call is refused (fail closed): a gate that opens when
             nobody can answer is decoration.
+        on_start: Told when a call's tool is about to run (the runner's
+            ``ToolCallStarted``).
+        on_message: Awaited with each call's message as soon as it is
+            ready, in completion order (the runner journals it).
     """
     policy = policy or DEFAULT_POLICY
     base_ctx = ctx if ctx is not None else RunContext()
@@ -102,15 +116,34 @@ async def dispatch(
     out: List[Optional[dict]] = [None] * len(normal)
 
     async def run(index: int) -> None:
-        out[index] = await _one(normal[index], toolset, base_ctx, policy, approve)
+        out[index] = await _one(normal[index], toolset, base_ctx, policy, approve, on_start)
+        if on_message is not None:
+            await on_message(out[index])
 
     together = [i for i, c in enumerate(normal) if not _sequential(toolset.get(c["name"]))]
     if together:
-        await asyncio.gather(*(run(i) for i in together))
+        # The first runs in this task, the others as tasks that start as
+        # soon as it waits on anything: as concurrent as a gather, one task
+        # fewer per batch (and none for a lone call).
+        others = [asyncio.ensure_future(run(i)) for i in together[1:]]
+        try:
+            await run(together[0])
+            for task in others:
+                await task
+        finally:
+            for task in others:
+                task.cancel()
     for i, call in enumerate(normal):
         if out[i] is None:
             await run(i)
     return out  # type: ignore[return-value]
+
+
+@functools.lru_cache(maxsize=1024)
+def _label(name: str) -> str:
+    """The trace name of a call. The model chose ``name``, and a trace
+    segment cannot hold ``.``, ``[``, ``]`` or ``#``."""
+    return _UNSAFE.sub("_", name) or "tool"
 
 
 def _sequential(t: Optional[Tool]) -> bool:
@@ -124,11 +157,11 @@ async def _one(
     ctx: RunContext,
     policy: ToolPolicy,
     approve: Optional[Approver],
+    on_start: Optional[OnStart],
 ) -> dict:
     call_id, name, raw = call["id"], call["name"], call["args"]
     found = toolset.get(name)
-    # The model chose the name; a trace segment cannot hold '.', '[', ']'.
-    label = _UNSAFE.sub("_", name) or "tool"
+    label = _label(name)
     async with child(label, inputs={"args": raw}, op_type="tool") as rec:
         rec.attrs.update(
             {
@@ -137,12 +170,12 @@ async def _one(
                 "gen_ai.tool.call.id": call_id,
             }
         )
-        message = await _answer(call_id, name, raw, found, toolset, ctx, policy, approve)
+        message = await _answer(call_id, name, raw, found, toolset, ctx, policy, approve, on_start)
         rec.outputs = {"tool_message": message}
         return message
 
 
-async def _answer(call_id, name, raw, found, toolset, ctx, policy, approve) -> dict:
+async def _answer(call_id, name, raw, found, toolset, ctx, policy, approve, on_start) -> dict:
     def say(content: str, *, error: bool = False) -> dict:
         limit = found.spec.max_result_chars if found is not None else 0
         return tool_message(call_id, name, _truncate(content, limit), is_error=error)
@@ -172,13 +205,18 @@ async def _answer(call_id, name, raw, found, toolset, ctx, policy, approve) -> d
     except pydantic.ValidationError as exc:
         return say(BAD_ARGS.format(name=name, error=_field_errors(exc)), error=True)
 
-    call_ctx = dataclasses.replace(ctx, tool_call_id=call_id)
+    call_ctx = ctx
+    if found.takes_context or not isinstance(found.spec.approval, str):
+        call_ctx = copy.copy(ctx)  # per call; deps and the meter are shared
+        call_ctx.tool_call_id = call_id
     if decision == "ask" or _needs_approval(found.spec, call_ctx, args):
         if approve is None:
             return say(NO_APPROVER.format(name=name), error=True)
         if not await approve({"id": call_id, "name": name, "args": args}, found.spec):
             return say(DENIED.format(name=name), error=True)
 
+    if on_start is not None:
+        on_start({"id": call_id, "name": name, "args": args})
     try:
         result = found.function(call_ctx, **args) if found.takes_context else found.function(**args)
         if inspect.isawaitable(result):

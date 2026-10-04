@@ -26,7 +26,7 @@ class Toolset:
             which it meant, and dispatch would run whichever came last.
     """
 
-    __slots__ = ("_tools",)
+    __slots__ = ("_tools", "_definitions")
 
     def __init__(self, tools: Iterable[Union[Tool, Callable[..., Any]]] = ()) -> None:
         self._tools: Dict[str, Tool] = {}
@@ -38,6 +38,7 @@ class Toolset:
                     "rename one: @tool(name=...)."
                 )
             self._tools[t.name] = t
+        self._definitions = [t.spec.definition() for t in self._tools.values()]
 
     def get(self, name: str) -> Optional[Tool]:
         return self._tools.get(name)
@@ -47,8 +48,9 @@ class Toolset:
         return list(self._tools)
 
     def definitions(self) -> List[Dict[str, Any]]:
-        """Every tool as a ``tools=[...]`` entry, in order."""
-        return [t.spec.definition() for t in self._tools.values()]
+        """Every tool as a ``tools=[...]`` entry, in order (a new list of
+        the same entries each call: built once, sent every turn)."""
+        return list(self._definitions)
 
     def __iter__(self) -> Iterator[Tool]:
         return iter(self._tools.values())
