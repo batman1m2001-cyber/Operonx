@@ -241,6 +241,44 @@ async def test_timeout_records_and_skips_successors():
     assert "z" not in out and CALLS["after"] == 0
 
 
+FELL_BACK = []
+
+
+@op
+def fallback(error: str) -> dict:
+    FELL_BACK.append(error)
+    return {"y": -1}
+
+
+@graph
+def degrading_graph(x):
+    s = slow(x=x)
+    f = fallback()
+    p = plus_one(y=s["y"])
+    s.on_error(f)
+    f["y"] >> p["y"]
+    START >> s >> p >> END
+    f >> p  # s and its handler are exclusive: p merges them
+
+
+@pytest.mark.parametrize("errors", ["record", "raise"])
+async def test_timed_out_op_degrades_to_its_fallback_and_downstream_runs(errors):
+    """K3 in track3 §5: a timed-out op emits its fallback outputs (here the
+    error edge's, the R1 form of ``on_timeout=``) and its downstream runs —
+    under ``errors="raise"`` too, since the timeout is handled."""
+    CALLS["after"] = 0
+    FELL_BACK.clear()
+    t0 = time.perf_counter()
+    out = await Operon(degrading_graph, params={"x": None}, errors=errors).run({"x": 1})
+    took = time.perf_counter() - t0
+
+    assert took < 0.4, took  # Timeout(run=0.2) plus the fallback and plus_one
+    assert out["z"] == 0 and CALLS["after"] == 1
+    (why,) = FELL_BACK
+    assert why.startswith("TimeoutError: ") and "Timeout(run=0.2)" in why
+    assert "TimeoutError" in str(out["$errors"]), "handled, still on the record"
+
+
 async def test_timeout_records_and_retries():
     CALLS["slow"] = 0
     retried = slow(x=1, retry=Retry(max_attempts=2, **FAST))  # outside a graph: just the op

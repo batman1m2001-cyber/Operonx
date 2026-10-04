@@ -13,6 +13,7 @@ lets an error escape produces no message and no traceback either.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -243,6 +244,24 @@ class TestDispatchCallsTheFunction:
             )
             assert '"a": %d' % a in out["tool_message"]["content"]
         assert built == []
+
+    @pytest.mark.asyncio
+    async def test_dispatch_costs_under_a_fifth_of_a_millisecond(self):
+        """The dispatch-only benchmark: A0 measured 1.98 ms per call with an op
+        built per call and 0.009 ms without. 0.2 ms leaves 20x headroom for a
+        loaded machine and still catches any per-call construction."""
+        from operonx.agents.graphs.dispatch import execute
+
+        run = execute.__wrapped__
+        approved = {"approved": True}
+        for i in range(20):  # warm-up: the first call reads the tool's source
+            await run(call_id=str(i), tool_name="echo", args={"a": i}, auto_decision=approved)
+        n = 300
+        t0 = time.perf_counter()
+        for i in range(n):
+            await run(call_id=str(i), tool_name="echo", args={"a": i}, auto_decision=approved)
+        per_call_ms = (time.perf_counter() - t0) * 1000 / n
+        assert per_call_ms < 0.2, f"{per_call_ms:.3f} ms per call"
 
     @pytest.mark.asyncio
     async def test_argument_named_like_an_op_keyword_reaches_the_tool(self):
