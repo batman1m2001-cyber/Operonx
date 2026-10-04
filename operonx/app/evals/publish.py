@@ -78,9 +78,18 @@ def experiment_of(run: JobRun) -> Experiment:
             "record": str(run.path),
             **{
                 k: ev[k]
-                for k in ("pass_rate", "passed", "failed", "trials", "threshold", "reliability")
+                for k in (
+                    "pass_rate",
+                    "passed",
+                    "failed",
+                    "trials",
+                    "threshold",
+                    "reliability",
+                    "judges",
+                )
                 if k in ev
             },
+            **({"models": fp["models"]} if fp.get("models") is not None else {}),
         },
     )
 

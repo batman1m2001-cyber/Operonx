@@ -14,9 +14,9 @@ def llm(tmp_path):
     from operonx.core.registry import ResourceHub
 
     CALLS.clear()
-    with fake_llm() as base_url:
-        llm_hub(tmp_path, base_url)
+    with fake_llm() as server:
+        llm_hub(tmp_path, server.base_url)
         try:
-            yield base_url
+            yield server.base_url
         finally:
             ResourceHub.reset_instance()

@@ -8,10 +8,12 @@ the same way::
     print(markdown(exp))                    # the gate first, then why
     write_reports(exp, ["md", "junit"], "out/eval")
 
-**Markdown** leads with the verdict and exit code, then the reasons and
-warnings, the metrics with their intervals, the comparison with the
+**Markdown** leads with the verdict and exit code, then any judge that
+gates the eval without being shown to agree with people (``UNVALIDATED
+JUDGE``), the reasons and warnings, the metrics with their intervals, the
+judges (version, model, alignment, calls, spend), the comparison with the
 baseline (and the cases that flipped), the failing and flaky cases, cost
-and latency. **JSON** is the experiment as data. **JUnit** is what CI
+and latency — the system's and the judges' apart. **JSON** is the experiment as data. **JUnit** is what CI
 widgets read: a ``gate`` testcase (failed on ``failed``/``regressed``,
 an error on ``error``, skipped on ``inconclusive`` — failed under
 ``strict``), then one testcase per case and check, failed unless every
@@ -174,14 +176,56 @@ def _comparison_lines(comparison: Mapping[str, Any], alpha: float, ref: str = ""
     return out
 
 
+#: How a judge warning that must not be missed starts (D60).
+UNVALIDATED = "UNVALIDATED JUDGE"
+
+
+def _f2(x: Any) -> str:
+    return "–" if x is None else f"{float(x):.2f}"
+
+
+def _judges_lines(judges: Mapping[str, Any]) -> List[str]:
+    rows = []
+    for name, j in judges.items():
+        a = j.get("alignment")
+        aligned = (
+            f"κ {_f2(a.get('kappa'))} · TPR {_f2(a.get('tpr'))} · TNR {_f2(a.get('tnr'))} · "
+            f"n {a.get('n')}"
+            if a
+            else "none"
+        )
+        model = j.get("model")
+        rows.append(
+            [
+                f"`{_cell(name, 60)}`",
+                f"`{j.get('version') or '?'}`",
+                _cell(model if isinstance(model, str) else ", ".join(model or []) or "–", 40),
+                "yes" if j.get("gating") else "no",
+                aligned,
+                j.get("calls", 0),
+                j.get("cached", 0),
+                j.get("errors", 0),
+                "–" if j.get("cost_usd") is None else f"${float(j['cost_usd']):.4f}",
+            ]
+        )
+    head = ["Judge", "Version", "Model", "Gates", "Alignment", "Calls", "Cached", "Errors", "Cost"]
+    return ["### Judges", ""] + _table(head, rows) + [""]
+
+
 def markdown(exp: ExperimentData, *, max_cases: int = MAX_CASES) -> str:
     """The experiment as Markdown for an MR comment (see the module docstring)."""
     s, gate = exp.summary, exp.gate
     out = [_headline(exp), "", _identity(exp), ""]
+    warnings = list(gate.get("warnings") or [])
+    loud = [w for w in warnings if str(w).startswith(UNVALIDATED)]
+    if loud:
+        out += [f"> **{UNVALIDATED}** — {_cell(w[len(UNVALIDATED) :].strip(), 400)}" for w in loud]
+        out += [""]
     if gate.get("reasons"):
         out += ["**Why**", ""] + [f"- {_cell(r, 400)}" for r in gate["reasons"]] + [""]
-    if gate.get("warnings"):
-        out += ["**Warnings**", ""] + [f"- {_cell(w, 400)}" for w in gate["warnings"]] + [""]
+    rest = [w for w in warnings if w not in loud]
+    if rest:
+        out += ["**Warnings**", ""] + [f"- {_cell(w, 400)}" for w in rest] + [""]
 
     metrics = exp.metrics
     if metrics:
@@ -200,6 +244,9 @@ def markdown(exp: ExperimentData, *, max_cases: int = MAX_CASES) -> str:
         out += (
             ["### Metrics", ""] + _table(["Metric", "Mean", "95% CI", "n", "Method"], rows) + [""]
         )
+
+    if s.get("judges"):
+        out += _judges_lines(s["judges"])
 
     comparison = gate.get("comparison")
     if comparison:
@@ -271,7 +318,47 @@ def compare_markdown(result: Mapping[str, Any]) -> str:
     if result.get("warnings"):
         out += ["**Warnings**", ""] + [f"- {_cell(w, 400)}" for w in result["warnings"]] + [""]
     out += _comparison_lines(result["comparison"], float(result.get("alpha") or 0.05))
+    if result.get("pairwise"):
+        out += [""] + _pairwise_lines(result["pairwise"])
     return "\n".join(out).rstrip() + "\n"
+
+
+def _pairwise_lines(got: Mapping[str, Any]) -> List[str]:
+    """``compare_pairwise``'s result: per judge, who won, how often the
+    order decided, what it cost."""
+    out = [f"### Pairwise — {got.get('cases', 0)} cases judged in both orders", ""]
+    rows, notes = [], []
+    for name, j in (got.get("judges") or {}).items():
+        pref = j.get("preference") or {}
+        rows.append(
+            [
+                f"`{_cell(name, 60)}`",
+                j.get("wins_a", 0),
+                j.get("wins_b", 0),
+                j.get("ties", 0),
+                _pct(j.get("inconsistency_rate")),
+                f"{_pct(pref.get('mean'))} [{_pct(pref.get('ci_lo'))}, {_pct(pref.get('ci_hi'))}]"
+                if pref
+                else "–",
+                "–" if j.get("cost_usd") is None else f"${float(j['cost_usd']):.4f}",
+            ]
+        )
+        notes += j.get("warnings") or []
+    head = [
+        "Judge",
+        "Baseline wins",
+        "This run wins",
+        "Ties",
+        "Order flipped",
+        "Preference",
+        "Cost",
+    ]
+    out += _table(head, rows)
+    if got.get("skipped"):
+        out += ["", f"skipped: {len(got['skipped'])} case(s)"]
+    if notes:
+        out += ["", "**Warnings**", ""] + [f"- {_cell(w, 400)}" for w in notes]
+    return out
 
 
 def as_json(exp: ExperimentData) -> str:
@@ -376,6 +463,8 @@ def junit(exp: ExperimentData) -> str:
         ("dataset_version", fp.get("dataset_version")),
         ("evaluators_hash", fp.get("evaluators_hash")),
         ("pass_rate", exp.summary.get("pass_rate")),
+        ("cost_usd", exp.summary.get("cost_usd")),
+        ("judge_cost_usd", exp.summary.get("judge_cost_usd")),
     ):
         if value is not None:
             ET.SubElement(props, "property", name=key, value=_xml(str(value), 200))

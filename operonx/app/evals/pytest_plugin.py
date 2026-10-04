@@ -89,6 +89,7 @@ from .job import (
     recorded_verdict,
     trial_of,
 )
+from .judges import Judging
 from .traceview import TraceView
 
 __all__ = ["CaseRun", "CaseRunner", "cases"]
@@ -130,6 +131,8 @@ class CaseRun:
     checks: Dict[str, Any] = field(default_factory=dict)
     _view: Any = field(default=None, repr=False)
     _seen: Optional[Callable[[Any], None]] = field(default=None, repr=False)
+    #: The context its judges run in (traced beside the case); ``None`` before it ran.
+    judging: Any = field(default=None, repr=False)
 
     @property
     def status(self) -> str:
@@ -188,6 +191,10 @@ class CaseRun:
         avail = self.available()
         if any(p.wants("trace") for p in prepared):
             avail["trace"] = self.trace
+        if any(p.params is not None and "trace_summary" in p.params for p in prepared):
+            avail["trace_summary"] = self.trace.as_text() if self.trace is not None else None
+        if self.judging is not None and any(p.wants("judging") for p in prepared):
+            avail["judging"] = self.judging
         return avail
 
     def check(self, evaluator: Any) -> bool:
@@ -375,6 +382,17 @@ class _Experiment:
             _seen=self.saw,
         )
         self.graphs.setdefault(str(job.describe()["graph"]), engine.graph)
+        # a judge's run is traced beside the case's, as in an Eval (D50)
+        got.judging = Judging(
+            trace=engine.trace_consumers,
+            metadata={
+                "job": self.name,
+                "job_run": record.run_id,
+                "key": nodeid,
+                "case": nodeid,
+                "judged_trace": result.trace_id,
+            },
+        )
         if evaluators and result.status in (ITEM_OK, ITEM_EMPTY):
             prepared = [prepare(ev) for ev in evaluators]
             got.checks.update(await judge_all(prepared, got._avail_for(prepared)))

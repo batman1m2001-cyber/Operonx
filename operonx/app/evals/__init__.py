@@ -62,10 +62,12 @@ from . import trajectory
 from .calibrate import calibrate
 from .compare import compare
 from .dataset import CASE_KEYS, Dataset, case_id, dataset_path
-from .evaluators import contains, exact, fuzzy, json_match, llm_judge, verdict_of
+from .evaluators import contains, exact, fuzzy, json_match, verdict_of
 from .experiments import ExperimentData, load_experiment
 from .gate import Gate
 from .job import Eval
+from .judges import GraphEvaluator, Judge, PairwiseJudge, judge, llm_judge, pairwise
+from .pairs import compare_pairwise
 from .publish import publish
 from .rescoring import Rescored, rescore
 from .traceview import OpRow, ToolCall, TraceView
@@ -76,20 +78,26 @@ __all__ = [
     "Eval",
     "ExperimentData",
     "Gate",
+    "GraphEvaluator",
+    "Judge",
     "OpRow",
+    "PairwiseJudge",
     "Rescored",
     "ToolCall",
     "TraceView",
     "budget",
     "calibrate",
     "compare",
+    "compare_pairwise",
     "contains",
     "dataset_path",
     "exact",
     "fuzzy",
     "json_match",
+    "judge",
     "llm_judge",
     "load_experiment",
+    "pairwise",
     "publish",
     "rescore",
     "trajectory",

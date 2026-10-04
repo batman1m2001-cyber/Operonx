@@ -2,9 +2,12 @@
 
 An evaluator is a function — plain, async, or an ``@op`` (called for its
 body) — that takes any of ``input``, ``output``, ``expected``, ``row``,
-``outputs`` and ``trace`` (a :class:`~.traceview.TraceView` of the case's
-run) by name and returns ``True``/``False``, a score in [0, 1] (passes at
-0.5), or ``{"passed", "score", "reason"}``.
+``outputs``, ``trace`` (a :class:`~.traceview.TraceView` of the case's
+run) and ``trace_summary`` (that run as text) by name and returns
+``True``/``False``, a score in [0, 1] (passes at 0.5), or ``{"passed",
+"score", "reason"}``. A graph is an evaluator too — a judge, run and
+traced on its own (:mod:`.judges`, where :func:`~.judges.judge` and
+:func:`~.judges.llm_judge` live).
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
-__all__ = ["contains", "exact", "fuzzy", "json_match", "llm_judge", "verdict_of"]
+__all__ = ["contains", "exact", "fuzzy", "json_match", "verdict_of"]
 
 # ── verdicts ─────────────────────────────────────────────────────────────
 
@@ -65,7 +68,15 @@ class Prepared:
 
 
 def prepare(ev: Any) -> Prepared:
-    """Read *ev*'s signature once (an ``@op`` is called for its body)."""
+    """Read *ev*'s signature once (an ``@op`` is called for its body; a
+    graph becomes a :class:`~.judges.GraphEvaluator`, which says what it
+    takes in ``eval_params``)."""
+    from .judges import evaluator_of
+
+    ev = evaluator_of(ev)
+    declared = getattr(ev, "eval_params", None)
+    if declared is not None:
+        return Prepared(ev, ev, _name(ev), frozenset(declared))
     fn = getattr(ev, "__wrapped__", ev)
     try:
         params = inspect.signature(fn).parameters
@@ -236,51 +247,3 @@ def json_match(keys: Optional[Sequence[str]] = None) -> Callable:
 
     json_agree.eval_name = "json_match"
     return json_agree
-
-
-def llm_judge(resource: str, rubric: str, *, name: str = "llm_judge") -> Callable:
-    """An LLM grades the case against *rubric*: ``{passed, score, reason}``
-    parsed from its JSON answer, with the call's cost and usage kept on
-    the verdict. *resource* is an ``llm:`` key (or a bare name) the hub
-    resolves."""
-    safe_rubric = rubric.replace("{", "{{").replace("}", "}}")
-
-    async def judge(input: Any = None, output: Any = None, expected: Any = None) -> Dict[str, Any]:  # noqa: A002
-        from operonx.core import END, START, Operon
-        from operonx.core.ops.graph.graph_op import GraphOp
-        from operonx.providers.ops import LLMOp
-
-        def show(v: Any) -> str:
-            return v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
-
-        with GraphOp(name="llm_judge") as g:
-            node = LLMOp.of(
-                resource=resource.partition(":")[2] if resource.startswith("llm:") else resource,
-                prompt={
-                    "system": safe_rubric + "\n\nAnswer with JSON only: "
-                    '{{"passed": true|false, "score": 0.0-1.0, "reason": "one sentence"}}',
-                    "user": "Input:\n{case_input}\n\nOutput:\n{case_output}\n\nExpected:\n{case_expected}",
-                },
-                fields=["passed: bool", "score: float", "reason: str"],
-                parser="json",
-                case_input=show(input),
-                case_output=show(output),
-                case_expected=show(expected) if expected is not None else "(none given)",
-            )
-            START >> node >> END
-        out = await Operon(g).run(inputs={})
-        if out.get("error"):
-            return {"passed": False, "error": str(out["error"])}
-        verdict = {
-            "passed": bool(out.get("passed")),
-            "score": out.get("score"),
-            "reason": out.get("reason"),
-        }
-        if out.get("cost_usd") is not None or "usage" in out:
-            verdict["cost_usd"] = out.get("cost_usd")
-            verdict["usage"] = out.get("usage")
-        return verdict
-
-    judge.eval_name = name
-    judge.eval_kind = "judge"  # asks a model: not rescored, and not deterministic
-    return judge

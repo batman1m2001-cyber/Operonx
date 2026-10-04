@@ -158,6 +158,8 @@ class ExperimentData:
             }
             if "expected" in v:
                 row["expected"] = v["expected"]
+            if v.get("output_clipped"):
+                row["output_clipped"] = True
             items.append(row)
         return cls(
             experiment_id=run.run_id,
@@ -219,7 +221,15 @@ class ExperimentData:
             "dataset": meta.get("dataset_path") or exp.dataset,
             **{
                 k: meta[k]
-                for k in ("pass_rate", "passed", "failed", "trials", "threshold", "reliability")
+                for k in (
+                    "pass_rate",
+                    "passed",
+                    "failed",
+                    "trials",
+                    "threshold",
+                    "reliability",
+                    "judges",
+                )
                 if k in meta
             },
             "cases": exp.cases,
@@ -231,7 +241,10 @@ class ExperimentData:
             "judge_cost_usd": exp.judge_cost_usd,
             "metrics": dict(exp.metrics or {}),
             "gate": dict(exp.gate or {}),
-            "fingerprint": {k: getattr(exp, k) for k in _FINGERPRINT},
+            "fingerprint": {
+                **{k: getattr(exp, k) for k in _FINGERPRINT},
+                **({"models": meta["models"]} if "models" in meta else {}),
+            },
         }
         for k in ("variant", "split"):
             if getattr(exp, k):

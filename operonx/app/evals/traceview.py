@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from operonx.telemetry.consumer import Consumer
 from operonx.telemetry.runs.model import RunSummary, rows_of_trace, summarize
 
-__all__ = ["OpRow", "ToolCall", "TraceView"]
+__all__ = ["OpRow", "ToolCall", "TraceView", "run_cost"]
 
 #: Executions that route or contain, not steps: left out of ``path()``
 #: unless asked for by type.
@@ -364,6 +364,25 @@ class TraceView:
         """Executions that did not end ``ok``."""
         return [r for r in self.rows if r.status != "ok"]
 
+    def as_text(self, limit: int = 4000) -> str:
+        """The run as a model reads it (a judge's ``trace_summary``): one
+        line per step of :meth:`path` — name, type, status, time, and its
+        outputs clipped to one line — cut to *limit* characters."""
+        lines = []
+        for r in self.rows:
+            if r.op_type in STRUCTURAL:
+                continue
+            out = json.dumps(r.outputs, ensure_ascii=False, default=str)
+            out = out if len(out) <= 200 else out[:199] + "…"
+            err = (
+                f" error={r.error.strip().splitlines()[-1]}" if r.error and r.error.strip() else ""
+            )
+            lines.append(
+                f"{r.op_name} ({r.op_type}) {r.status} {r.duration_ms:.0f} ms{err} → {out}"
+            )
+        text = "\n".join(lines)
+        return text if len(text) <= limit else text[: limit - 1] + "…"
+
     # -- identity --------------------------------------------------------------
 
     def _key(self) -> tuple:
@@ -379,3 +398,26 @@ class TraceView:
     def __repr__(self) -> str:
         n = "?" if self._rows is None else len(self._rows)
         return f"TraceView({self.trace_id!r}, {n} executions)"
+
+
+def run_cost(trace: Any) -> Dict[str, Any]:
+    """A run's own LLM cost and tokens, read off a live ``WorkflowTrace``
+    as the run store counts them (an execution reporting ``cost_usd`` is
+    an LLM call; the cost is ``None`` when none was priced). Empty for a
+    run with no LLM call. An eval reads it for each case's run and each
+    judge's — two traces, so the system's cost never holds a judge's."""
+    calls, cost, tokens_in, tokens_out = 0, None, 0, 0
+    for node in getattr(trace, "nodes", None) or ():
+        out = node.outputs
+        if not isinstance(out, dict) or "cost_usd" not in out:
+            continue
+        calls += 1
+        if isinstance(out["cost_usd"], (int, float)):
+            cost = (cost or 0.0) + float(out["cost_usd"])
+        usage = out.get("usage")
+        if isinstance(usage, dict):
+            tokens_in += int(usage.get("prompt_tokens") or 0)
+            tokens_out += int(usage.get("completion_tokens") or 0)
+    if not calls:
+        return {}
+    return {"cost_usd": cost, "tokens_in": tokens_in, "tokens_out": tokens_out}
