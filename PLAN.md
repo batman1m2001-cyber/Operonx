@@ -12,7 +12,7 @@ refer to it) and `ROADMAP.md` §5. This file records where we differ and what ea
 |---|---|---|
 | D1 | **No `docling` dependency.** We re-implement its conversion pipeline as our own operonx ops over our own model (§5). Ideas taken from docling, with the file they come from, are cited in the code. | No `parsers/docling.py`; `DoclingDocument` and docling-core types never leave the PDF backend adapter. |
 | D2 | **PDF text + coordinates come from `docling-parse`** (MIT, C++), behind our `PdfBackend` adapter, extra `pdf`. | One adapter module imports `docling_parse`/`docling_core`; everything after it sees `PdfPage`/`PdfLine` (ours). |
-| D3 | **ML layout and tables are an optional extra `layout`, off by default**, behind `LayoutDetector`/`TableStructurer` (in `ModelLayout`). Since `docling-ibm-models` 4 ships only TableFormer, the layout detector is docling's Heron (RT-DETRv2, Apache-2.0) run with `transformers`, as docling itself does; CPU torch from the PyTorch CPU index. The default is our heuristic layout: font size/weight, positions, columns, reading order, ruled and aligned tables. | Core install has no torch. The heuristic is the `LayoutModel` everyone gets; the ML adapter must beat it on golden docs (K1b gate) to be recommended. |
+| D3 | **ML layout and tables are an optional extra `layout`, off by default**, behind `LayoutDetector`/`TableStructurer` (in `ModelLayout`). Since `docling-ibm-models` 4 ships only TableFormer, the layout detector is docling's Heron (RT-DETRv2, Apache-2.0) run with `transformers`, as docling itself does; CPU torch from the PyTorch CPU index. The default is our heuristic layout: font size/weight, positions, geometric blocks, docling's rule-based reading order, ruled and aligned tables. | Core install has no torch. The heuristic is the `LayoutModel` everyone gets. K1d (`docs/bench/k1d_layout.md`): text recall 0.69 on the hand-checked reference (12 real pages) and 0.72 against docling's outputs (97 pages), from 0.44 / 0.51, at 0.13–0.15 s/page; `ModelLayout` reaches 0.90 / 0.94 at 2.6–3.6 s/page and is the only one with usable table cells (0.83 vs 0.13). Recommended: the heuristic for born-digital prose, reports, manuals, slides and bulk ingestion; `ModelLayout` for papers, forms and table-heavy PDFs. |
 | D4 | **Office, HTML, Markdown parse with the stdlib** (`zipfile`, `defusedxml`, `html.parser`), porting the useful rules of docling's pure-Python backends. | Core deps: `operonx`, `pydantic`, `defusedxml`. No python-docx/pptx/openpyxl/selectolax/marko. |
 | D5 | **No Rust.** A native hotspot is reported with a profile, never added. | |
 | D6 | **No shims for upstream gaps.** U1 (`BaseVectorStore.delete`, `VectorUpsertOp`/`VectorDeleteOp`), U2 (`operonx.resources` entry points; an unknown category raises) and U6 (`operonx.core.media_store`) were built upstream on `feat/kb-upstream` (operonx PR #74) and the KB uses them directly. | The dense index **is** an operonx `vector_store:` resource written by `VectorUpsertOp`/`VectorDeleteOp` inside the ingest, delete and GC graphs; there is no KB index abstraction. Until PR #74 merges, run with `PYTHONPATH=<feat-kb-upstream>`. |
@@ -55,8 +55,8 @@ item {key, path | data, mime?, metadata?}
   attrs; `PageInfo`s). Parsers: plain, markdown, html, docx, pptx, xlsx, pdf. `ParserRouter` picks by
   mime/extension.
 - `operonx_kb.pdf`: the PDF pipeline, docling's StandardPdfPipeline stages as functions:
-  backend (docling-parse) → lines → layout (`HeuristicLayout`: furniture, columns, blocks, headings,
-  lists, tables) → reading order → assemble (dehyphenation, line joining) → `RawBlock`s.
+  backend (docling-parse) → lines → layout (`HeuristicLayout`: furniture, tables, geometric blocks,
+  headings, lists) → reading order (docling's rule-based, `reading_order.py`) → assemble (dehyphenation, line joining) → `RawBlock`s.
 - `operonx_kb.structure`: `build_version(parsed)` → element tree + canonical text + spans. Pure.
 - `operonx_kb.chunking`: `StructuralChunker` (heading-scoped packing to a token budget, sentence
   splits of oversize elements, tables as evidence units with caption and referring paragraph,
@@ -83,7 +83,9 @@ Removed chunks are deleted from the index after the flip (`VectorDeleteOp`), the
 
 Known limitations (K1): XLSX cells are stored values (dates are Excel serials, number formats are not
 applied); PDFs without a text layer produce no text (OCR is out of scope); the heuristic layout does
-not detect figures without an image resource, nor tables with neither rules nor ≥3 aligned rows.
+not detect figures without an image resource (vector plots), nor tables with neither rules nor ≥3
+aligned rows, and cuts multi-line rows of ruled tables into one cell; right-to-left text is not
+reordered (see `docs/bench/k1d_layout.md` §4).
 
 ## 4 · Phases and gates (measured; numbers recorded in `docs/bench/`)
 
@@ -93,6 +95,7 @@ not detect figures without an image resource, nor tables with neither rules nor 
 | **K1a** ✔ | Blob store, SQLite catalog, dense index on operonx vector stores (U1) with the ledger, entry points (U2) + migrations, parsers (plain, md, html, docx, pptx, xlsx, pdf via docling-parse), heuristic layout, structurer, structural + recursive chunkers, ingest graph, embedding cache, chunk diff, commit flip, delete/tombstone/purge, GC, `verify`, CLI basics, golden corpus | (a) span invariant on 100% of golden docs; (b) re-ingest of the unchanged corpus = 0 parse spans and 0 embed calls; (c) one-paragraph edit re-embeds only the changed chunks (≤ 3); (d) purge leaves 0 index entries and 0 orphan blobs for that document; (e) PDF ingest throughput recorded |
 | **K1b** ✔ | `layout` extra: docling's Heron layout detector (transformers) + TableFormer (`docling-ibm-models`) behind `LayoutDetector`/`TableStructurer`, as `ModelLayout` | Recorded in `docs/bench/k1b_layout.md`: equal to the heuristic on the golden PDFs; far ahead on docling's 97 real test pages (agreement with docling's reference output), at ~30x the CPU time. Default stays the heuristic (D3, no torch in core); `ModelLayout` is the recommended setting for real-world PDFs. |
 | **K1c** ✔ | Postgres catalog behind `Catalog` (one SQL implementation for both dialects); `rebuild` into a new index generation from catalog + embedding cache, with switch and drop of the old one; conformance on FAISS, pgvector and Qdrant; generated 200-document corpus and 100-page PDF | Met (`docs/bench/k1c.md`): rebuild reproduces the id set and the top-10 of 50 queries with 0 parses and 0 embed calls; unchanged 200-doc re-ingest = 0 parses, 0 embeds, 0 upserts; one-paragraph edit in a 106-page PDF ≤ 3 re-embeds; purge leaves 0 vectors/ledger rows/blobs; conformance passes on all three backends and both catalogs |
+| **K1d** ✔ | Honest layout measurement and a better heuristic: hand-checked reference of 12 real pages (`tests/layout_reference`), scorer fixes (figures by geometry, per-page scoring), cause diagnosis (`scripts/diagnose_layout.py`); rotated text, TeX/URW/Libertine font styles, frames and figure grids, geometric blocks with docling's rule-based reading order, leading-relative paragraph gaps, furniture and label rules, each with a regression test from a real page crop | Recorded in `docs/bench/k1d_layout.md`: golden PDFs exact (now a test); span invariant 100%; heuristic text recall 0.44 → 0.69 (hand) and 0.51 → 0.72 (docling), kind accuracy 0.34 → 0.58 and 0.42 → 0.63; 0.13–0.15 s/page, no ML, no Rust |
 | K2+ | track5 §18 P2-P7 (lexical, hybrid, citations, eval; Studio; enrichment; visual; graph) | track5 gates |
 
 ## 5 · Testing
