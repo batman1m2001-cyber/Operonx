@@ -233,6 +233,17 @@ class TestWhereItApplies:
         assert SECRET in tool_record.outputs["tool_message"]["content"]
         assert SECRET not in json.dumps(tool_record.exported())
 
+    async def test_the_first_turn_says_what_the_run_was_asked_scrubbed_on_export(self, hub):
+        """The run's input is on its first turn's record (what a dataset made
+        from runs replays), scrubbed where the trace leaves the process."""
+        agent, _ = make(hub, asks(("read_env", {})), says("done"), tools=[read_env])
+        handle = traced(agent).start({"question": f"my key is {SECRET}"})
+        await handle.result()
+        first, second = [n for n in handle.trace.nodes if n.op_name == "turn"]
+        assert first.inputs["input"] == [{"role": "user", "content": f"my key is {SECRET}"}]
+        assert "input" not in second.inputs
+        assert SECRET not in json.dumps(first.exported())
+
     async def test_a_run_store_holds_no_secret(self, hub, tmp_path):
         from operonx.telemetry.runs.sqlite import SqliteRunStore
 

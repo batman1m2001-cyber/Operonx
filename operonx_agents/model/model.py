@@ -41,6 +41,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Union
 
 from operonx import child
 from operonx.core import LOGGER
+from operonx.core.registry.resource_hub import ResourceHub
 from operonx.providers.llms.base import normalize_tool_call
 
 from operonx_agents.errors import ModelError, ModelRefused, ModelTimeout
@@ -175,13 +176,17 @@ class Model:
 
     def llm(self, resource: Optional[str] = None) -> Any:
         """The backend for ``resource`` (default: the primary), from the
-        ResourceHub. ``operonx.bootstrap()`` must have loaded it."""
-        key = resource or self.resource
-        if key not in self._llms:
-            from operonx.core.registry.resource_hub import ResourceHub
+        ResourceHub. ``operonx.bootstrap()`` must have loaded it.
 
-            self._llms[key] = ResourceHub.instance().get(f"llm:{key}")
-        return self._llms[key]
+        Kept per hub: a model made once (a module-level agent) reads the
+        hub installed now — a test's, or a re-bootstrapped one — not the
+        first one it ever resolved against."""
+        key = resource or self.resource
+        hub = ResourceHub.instance()
+        held = self._llms.get(key)
+        if held is None or held[0] is not hub:
+            held = self._llms[key] = (hub, hub.get(f"llm:{key}"))
+        return held[1]
 
     def structured_output(self, resource: Optional[str] = None) -> str:
         """What the resource declares: ``native``, ``tool`` or ``prompted``."""

@@ -540,8 +540,14 @@ class _Run:
         # wait would otherwise hold the loop for the whole run, and every
         # other coroutine in the process (a voice call's audio) with it.
         await asyncio.sleep(0)
-        async with child("turn", inputs={"turn": n}, op_type="turn") as rec:
+        # The first turn of a run says what the run was asked: the tree
+        # reads as the conversation, and a dataset made from recorded runs
+        # replays it (`operonx_agents.evals.dataset_from_runs`).
+        asked = {"turn": n, "input": s.input} if s.input else {"turn": n}
+        async with child("turn", inputs=asked, op_type="turn") as rec:
             rec.attrs.update({"gen_ai.agent.name": agent.name, "operonx.agent.run_id": s.run_id})
+            if s.input:
+                rec.redact = self.redact
             if self.emit is not None:
                 self.emit(TurnStarted(n))
             items: List[Dict[str, Any]] = list(s.input)

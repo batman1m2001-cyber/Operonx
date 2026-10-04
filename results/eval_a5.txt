@@ -1,0 +1,4 @@
+============================= operonx eval support =============================
+support 20261004T162511-650606 ok  ok=20 failed=0 empty=0 skipped=0  passed=20/20 (100.0%)  gate=pass (exit 0)
+  /home/thanglq/operonx-agents/results/eval_a5/support/20261004T162511-650606
+20 passed in 1.12s
