@@ -1,0 +1,13 @@
+Shadow replay latency decomposition, 2026-10-04 (same 58 recorded turns, 3 passes,
+arms rotated per turn; ms timed outside the engine; inhouse gateway, gemma-4-E2B-it).
+
+arm          n    p50    p95   what
+control      174  90.4  107.3  callbot LLMOp.of(fields=["intent: str"], parser="json", max_retries=1)
+step_lp      174  91.9  109.6  llm_step, native json_schema, logprobs=True (the A6 shape)
+step_nolp    174  90.8  107.4  llm_step, native json_schema, logprobs off
+raw_native   174  89.0  105.0  backend.generate with the json_schema, no engine
+raw_plain    174  87.6  105.0  backend.generate, plain, no engine
+
+Reading: the step's whole p95 gap to control (+2.3 ms) is the logprobs payload;
+without logprobs the step's p95 equals control's (107.4 vs 107.3).
+Script: scripts/shadow_latency.py.
