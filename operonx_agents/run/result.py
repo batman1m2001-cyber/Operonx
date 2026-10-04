@@ -6,6 +6,8 @@
     match res.status:
         case "completed": res.output        # str, or the output_type's value
         case "limit":     res.limit_hit     # which cap; res.output is the best answer so far
+        case "interrupted": res.interruptions   # calls waiting for a human: Runner.resume
+        case "blocked":   res.error         # "Tripwire: <reason>", from a hook
         case "failed":    res.error         # "ModelTimeout: ..."
 """
 
@@ -17,6 +19,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 from operonx_agents.model.usage import Usage
+from operonx_agents.run.interruption import Interruption
 from operonx_agents.run.state import Status
 
 __all__ = ["RunResult", "TRUNCATED_REASONS"]
@@ -28,18 +31,23 @@ TRUNCATED_REASONS = frozenset({"length", "max_tokens", "content_filter"})
 @dataclass(frozen=True)
 class RunResult:
     """Attributes:
-    status: ``completed``, ``limit`` (a cap ran out) or ``failed``.
+    status: ``completed``, ``limit`` (a cap ran out), ``interrupted``
+        (calls wait for a human), ``blocked`` (a hook's tripwire) or
+        ``failed``.
     output: The answer: text, or the agent's ``output_type`` value.
         For ``limit``, the last answer the model gave, else ``None``.
-        For ``failed``, ``None``: a stale answer is worse than none.
+        For the others, ``None``: a stale answer is worse than none.
     usage: What the run spent, its children's runs included.
     run_id: The run's id; ``Runner.resume`` takes it.
     turns: Model turns committed.
     messages: The conversation as the model last saw it (no system prompt).
     new_items: What the run added to its session.
     limit_hit: The cap that ran out, for ``limit``.
-    error: ``"TypeName: message"``, for ``failed``.
+    error: ``"TypeName: message"``, for ``failed``; ``"Tripwire:
+        <reason>"`` for ``blocked``.
     finish_reason: The last model answer's stop reason.
+    interruptions: For ``interrupted``, what the run waits on; answer
+        them with ``Runner.resume(..., approvals={id: Approve()})``.
     """
 
     status: Status
@@ -52,6 +60,7 @@ class RunResult:
     limit_hit: Optional[str] = None
     error: Optional[str] = None
     finish_reason: Optional[str] = None
+    interruptions: List[Interruption] = field(default_factory=list)
 
     @property
     def truncated(self) -> bool:
@@ -77,4 +86,5 @@ class RunResult:
             "limit_hit": self.limit_hit,
             "error": self.error,
             "finish_reason": self.finish_reason,
+            "interruptions": [i.to_json() for i in self.interruptions],
         }

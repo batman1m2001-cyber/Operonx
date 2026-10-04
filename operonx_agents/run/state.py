@@ -26,13 +26,16 @@ __all__ = ["PendingTurn", "RunState", "Status", "STATE_VERSION"]
 
 STATE_VERSION = 1
 
-#: ``running`` until the run ends; a crashed run stays ``running``.
-Status = Literal["running", "completed", "limit", "failed"]
+#: ``running`` until the run ends; a crashed run stays ``running``. An
+#: ``interrupted`` run waits for a human (``Runner.resume`` continues it);
+#: a ``blocked`` one was stopped by a hook's tripwire.
+Status = Literal["running", "completed", "limit", "failed", "interrupted", "blocked"]
 
 
 @dataclass
 class PendingTurn:
-    """A turn whose tools were running when it was saved.
+    """A turn whose tools were running when it was saved, or that waits for
+    a human.
 
     Attributes:
         items: The turn's session items so far, the assistant message that
@@ -42,6 +45,9 @@ class PendingTurn:
         calls: Those calls, ``{"id", "name", "args"}``, in emitted order.
         inflight: Ids of the calls with no result yet.
         results: The tool messages of the calls that finished, by id.
+        interruptions: What the turn waits on (``Interruption.to_json()``),
+            its sub-agents' included; a call with no result that is not in
+            flight waits.
     """
 
     items: List[Dict[str, Any]]
@@ -49,6 +55,7 @@ class PendingTurn:
     calls: List[Dict[str, Any]]
     inflight: List[str]
     results: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    interruptions: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(kw_only=True)
@@ -82,7 +89,8 @@ class RunState:
         final_turn: The cap (``turns`` or ``tool_calls``) that makes the
             next turn the last one.
         compact_next: The last prompt crossed the compaction threshold.
-        pending: The turn whose tools were running, if any.
+        pending: The turn whose tools were running, or that waits for a
+            human, if any.
         output / limit_hit / error / finish_reason: How it ended.
     """
 

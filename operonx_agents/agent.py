@@ -28,6 +28,8 @@ from operonx_agents.context.compaction import ContextPolicy
 from operonx_agents.model.model import Model, ModelSettings
 from operonx_agents.run.context import RunContext
 from operonx_agents.run.limits import UsageLimits
+from operonx_agents.safety.hooks import Hooks, HookSet
+from operonx_agents.safety.redact import Redactor
 from operonx_agents.tools.policy import ToolPolicy
 from operonx_agents.tools.toolset import Toolset
 
@@ -60,6 +62,14 @@ class Agent:
             ask, and with no one to ask they are refused).
         context: When to compact the conversation; ``None`` never does.
         settings: Request knobs over the model's.
+        hooks: :class:`~operonx_agents.Hooks` around the model and tool
+            calls (guardrails, rewrites, :class:`RedactToolOutput`).
+        redact: Scrubs credentials from what leaves the run: trace
+            records and the arguments an approval request shows. ``None``
+            turns it off. What the model reads is untouched unless a
+            ``RedactToolOutput`` hook is added.
+        approval_ttl: Seconds an approval request stays answerable; past
+            it the call is refused. ``None``: no expiry.
     """
 
     name: str
@@ -72,6 +82,9 @@ class Agent:
     policy: Optional[ToolPolicy] = None
     context: Optional[ContextPolicy] = None
     settings: Optional[ModelSettings] = None
+    hooks: Union[HookSet, Sequence[Hooks]] = ()
+    redact: Optional[Redactor] = field(default_factory=Redactor, repr=False)
+    approval_ttl: Optional[float] = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -85,10 +98,39 @@ class Agent:
             object.__setattr__(self, "tools", Toolset(self.tools))
         if self.output_retries < 0:
             raise ValueError(f"Agent {self.name!r}: output_retries must be 0 or more.")
+        if not isinstance(self.hooks, HookSet):
+            object.__setattr__(self, "hooks", HookSet(self.hooks))
+        if self.approval_ttl is not None and self.approval_ttl <= 0:
+            raise ValueError(
+                f"Agent {self.name!r}: approval_ttl must be positive seconds, or None for no "
+                "expiry."
+            )
 
     def clone(self, **changes: Any) -> "Agent":
         """A copy with ``changes`` applied."""
         return dataclasses.replace(self, **changes)
+
+    def as_tool(
+        self,
+        *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        max_turns: Optional[int] = None,
+        **spec: Any,
+    ) -> Any:
+        """This agent as a tool another agent calls with a ``task``; it
+        answers with its final output, never its transcript. See
+        :func:`operonx_agents.compose.agent_tool`."""
+        from operonx_agents.compose import agent_tool
+
+        return agent_tool(self, name=name, description=description, max_turns=max_turns, **spec)
+
+    def as_op(self, **options: Any) -> Any:
+        """This agent as an operonx op factory, for a graph. See
+        :func:`operonx_agents.compose.agent_op`."""
+        from operonx_agents.compose import agent_op
+
+        return agent_op(self, **options)
 
     def system_prompt(self, ctx: RunContext) -> str:
         text = self.instructions(ctx) if callable(self.instructions) else self.instructions

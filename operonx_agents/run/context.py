@@ -42,6 +42,11 @@ class RunContext(Generic[Deps]):
         session_id: The session the run reads and writes, if any.
         agent: The name of the agent running.
         turn: The turn the call was made in (1-based).
+        store: Where the run is saved, if anywhere: a tool that runs
+            another agent saves that run beside it, so an approval inside
+            it can wait too.
+        approvals: The answers ``Runner.resume`` was given, by
+            interruption id; a sub-agent's resume takes its own.
     """
 
     deps: Deps = None  # type: ignore[assignment]
@@ -52,6 +57,8 @@ class RunContext(Generic[Deps]):
     agent: Optional[str] = None
     turn: int = 0
     meter: Optional["Meter"] = field(default=None, repr=False, compare=False)
+    store: Any = field(default=None, repr=False, compare=False)
+    approvals: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def usage(self) -> Usage:

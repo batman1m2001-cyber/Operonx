@@ -22,6 +22,8 @@ dependencies = [
 [project.optional-dependencies]
 # RedisSession / RedisStateStore (a Redis or a Redis Cluster).
 redis = ["redis>=5.0"]
+# MCPToolset: tools on MCP servers, over stdio and streamable HTTP.
+mcp = ["mcp>=2.0"]
 
 [project.scripts]
 operonx-agents = "operonx_agents.cli:main"
@@ -35,10 +37,12 @@ dev = [
     "pyyaml>=6.0",
     "hypothesis>=6.100",
     "redis>=5.0",
+    "mcp>=2.0",
 ]
 
 [tool.uv.sources]
-# Editable from the sibling checkout. The relative path is why this repo is
+# Editable from the sibling checkout; needs operonx main 10fe40a (#90,
+# child() redact) or later. The relative path is why this repo is
 # not worked on from git worktrees: ../Operon would not resolve there.
 operonx = { path = "../Operon", editable = true }
 

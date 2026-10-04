@@ -12,12 +12,14 @@ from typing import Any, List, Optional
 
 __all__ = [
     "AgentsError",
+    "Interrupted",
     "ModelRetry",
     "ModelError",
     "ModelTimeout",
     "ModelRefused",
     "OutputInvalid",
     "ToolDefinitionError",
+    "Tripwire",
 ]
 
 
@@ -40,6 +42,38 @@ class ModelRetry(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+
+class Tripwire(AgentsError):
+    """Raised by a hook to stop the run: it ends ``status="blocked"`` with
+    ``reason`` as its error, and the turn it cut writes nothing::
+
+        class NoRefundsOver(Hooks):
+            async def before_tool(self, ctx, call):
+                if call.name == "refund" and call.args["amount"] > 500:
+                    raise Tripwire("refund over 500 requested")
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+class Interrupted(AgentsError):
+    """A tool call waits for a human: the run stops ``status="interrupted"``
+    and is continued with ``Runner.resume(..., approvals=...)``.
+
+    The runner raises it for a call that needs approval, and a tool that
+    runs another agent raises it with that agent's interruptions, so an
+    approval deep in a sub-agent surfaces on the run a human can answer.
+    ``interruptions`` holds :class:`~operonx_agents.Interruption`\\ s.
+    """
+
+    def __init__(self, interruptions: List[Any]) -> None:
+        super().__init__(
+            "waiting for a human on " + ", ".join(f"{i.tool!r} ({i.id})" for i in interruptions)
+        )
+        self.interruptions = list(interruptions)
 
 
 class ToolDefinitionError(AgentsError, TypeError):

@@ -210,8 +210,10 @@ class Model:
         tool_choice: Any = None,
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
+        redact: Any = None,
     ) -> ModelResponse:
         """One answer, through the fallback chain, within the deadline.
+        ``redact``: as for :meth:`stream`.
 
         Raises:
             ModelTimeout: the deadline passed.
@@ -225,6 +227,7 @@ class Model:
                 tool_choice=tool_choice,
                 response_format=response_format,
                 settings=settings,
+                redact=redact,
             )
 
     def bounded(self) -> Any:
@@ -241,6 +244,7 @@ class Model:
         tool_choice: Any = None,
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
+        redact: Any = None,
     ) -> ModelResponse:
         """:meth:`request` without the deadline — for code already inside
         :meth:`bounded`."""
@@ -248,10 +252,12 @@ class Model:
         attempts: List[tuple] = []
         spent = Usage()
         refused = 0
+        recorded = {"messages": messages}
         for resource in self.resources:
             llm = self.llm(resource)
             try:
-                async with child("model", inputs={"messages": messages}, op_type="llm") as rec:
+                async with child("model", inputs=recorded, op_type="llm") as rec:
+                    rec.redact = redact  # set first: a failed call is exported too
                     completion, used = await _with_transport_retry(
                         llm, _per_resource(llm, params), messages
                     )
@@ -285,6 +291,7 @@ class Model:
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
         reasoning: bool = False,
+        redact: Any = None,
     ) -> AsyncIterator[Union[str, Reasoning, ModelResponse]]:
         """Text deltas (``str``) as they arrive, then the whole
         :class:`ModelResponse`. A resource is abandoned for the next only
@@ -294,11 +301,17 @@ class Model:
         gateway streams it (``reasoning_content``), as :class:`Reasoning`
         pieces; it never enters the answer's text.
 
+        ``redact`` (``dict -> dict``) scrubs each call's record where the
+        trace leaves the process (operonx ``child()``'s ``redact``: the run
+        stores and consumers apply it, not this loop); the model is sent,
+        and answers, the real text.
+
         Consume it in the task that started it, and do not await other
         work between pieces: the deadline cancels the consuming task, and
         only a cancel that lands inside this generator becomes
         :class:`ModelTimeout`.
         """
+        recorded = {"messages": messages}
         params = self._request_params(settings, tools, tool_choice, response_format)
         attempts: List[tuple] = []
         async with self.bounded():
@@ -307,9 +320,8 @@ class Model:
                 acc = _StreamAcc()
                 emitted = False
                 try:
-                    async with child(
-                        "model", inputs={"messages": messages}, op_type="llm", current=False
-                    ) as rec:
+                    async with child("model", inputs=recorded, op_type="llm", current=False) as rec:
+                        rec.redact = redact
                         async for chunk in llm.stream(
                             messages=messages, **_per_resource(llm, params)
                         ):

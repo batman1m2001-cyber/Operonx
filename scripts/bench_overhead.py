@@ -21,6 +21,9 @@ trace — 1 op record plus per turn a ``turn`` and a ``model`` record and one
 record per tool call. A variant that did different work fails the benchmark.
 
     PYTHONPATH=<operonx main> uv run python scripts/bench_overhead.py --out results/overhead_a3.json
+
+A4 made trace redaction the default (``Agent(redact=Redactor())``):
+``--redact off`` runs the same agent with ``redact=None``.
 """
 
 from __future__ import annotations
@@ -80,13 +83,16 @@ class Scripted:
         return self.completions[sum(1 for m in messages if m.get("role") == "assistant")]
 
 
-def make_agent(turns: int) -> Agent:
-    return Agent(
+def make_agent(turns: int, redact: bool = True) -> Agent:
+    agent = Agent(
         name="bench",
         model=Model("bench"),
         tools=[lookup],
         limits=UsageLimits(turns=turns + 1),
     )
+    # The default redacts what the trace records (A4); --redact off measures
+    # the loop without it.
+    return agent if redact else agent.clone(redact=None)
 
 
 @op
@@ -230,7 +236,7 @@ async def main(args) -> None:
     traces = {}
     for calls in args.calls:
         ResourceHub.set_instance(FakeHub(bench=Scripted(args.turns, calls)))
-        agent = make_agent(args.turns)
+        agent = make_agent(args.turns, redact=args.redact == "on")
         traces[calls] = await trace_check(agent, args.turns, calls)
         for variant in args.variants.split(","):
             one = runner(variant, agent)
@@ -264,6 +270,7 @@ async def main(args) -> None:
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "operonx_file": operonx.__file__,
+        "redact": args.redact,
         "trace_records_per_run": traces,
         "idle_lag_ms": {"p50": statistics.median(idle), "p99": pct(idle, 0.99), "max": max(idle)},
         "rows": rows,
@@ -280,5 +287,6 @@ if __name__ == "__main__":
     p.add_argument("--concurrency", type=int, nargs="+", default=[1, 5, 10, 20])
     p.add_argument("--turns", type=int, default=10)
     p.add_argument("--runs", type=int, default=200)
+    p.add_argument("--redact", choices=["on", "off"], default="on")
     p.add_argument("--out", required=True)
     asyncio.run(main(p.parse_args()))

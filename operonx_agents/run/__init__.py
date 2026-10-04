@@ -4,6 +4,7 @@ layer, which import this package)."""
 
 from operonx_agents.run.context import RunContext
 from operonx_agents.run.events import (
+    ApprovalRequired,
     Compacted,
     Event,
     ReasoningDelta,
@@ -15,6 +16,7 @@ from operonx_agents.run.events import (
     TurnFinished,
     TurnStarted,
 )
+from operonx_agents.run.interruption import Approve, Decision, Deny, Interruption
 from operonx_agents.run.limits import UsageLimits
 from operonx_agents.run.result import RunResult
 from operonx_agents.run.state import PendingTurn, RunState
@@ -26,9 +28,14 @@ from operonx_agents.run.store import (
 )
 
 __all__ = [
+    "ApprovalRequired",
+    "Approve",
     "Compacted",
+    "Decision",
+    "Deny",
     "Event",
     "InMemoryStateStore",
+    "Interruption",
     "PendingTurn",
     "ReasoningDelta",
     "RedisStateStore",

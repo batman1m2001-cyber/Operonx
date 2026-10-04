@@ -12,8 +12,10 @@ Two front doors over one model layer:
   executions in the trace (phase A3).
 
 Phase A2 shipped tools, the model layer, `llm_step` and
-`operonx-agents probe`; phase A3 (this state) the `Runner`, `RunState`,
-`UsageLimits`, the event stream, sessions, state stores and compaction.
+`operonx-agents probe`; phase A3 the `Runner`, `RunState`, `UsageLimits`,
+the event stream, sessions, state stores and compaction; phase A4 (this
+state) approvals as interruptions, `as_tool` / `as_op`, hooks, redaction
+and MCP over stdio and streamable HTTP.
 
 ```python
 from operonx_agents import Choice, Model, ModelSettings, llm_step
@@ -60,6 +62,47 @@ async for event in Runner.stream(support, "And when?", session=session):
 # RunStarted, TurnStarted, TextDelta, ToolCallStarted/Finished, TurnFinished, RunFinished
 ```
 
+```python
+from operonx_agents import (
+    Agent,
+    Approve,
+    MCPServer,
+    MCPToolset,
+    Model,
+    RedactToolOutput,
+    Runner,
+    SQLiteStateStore,
+    tool,
+)
+
+
+@tool(idempotent=False, approval=lambda ctx, args: args["amount"] > 500)
+async def refund(order_id: str, amount: int) -> str:
+    """Refund an order (over 500 needs a human)."""
+    ...
+
+
+billing = Agent(name="billing", model=Model("qwen3.7-plus"), tools=[refund])
+crm = await MCPToolset.connect(
+    MCPServer("crm", url="https://crm.internal/mcp"), allow=["get_customer"]
+)
+support = Agent(
+    name="support",
+    model=Model("qwen3.7-plus"),
+    tools=[order_status, crm, billing.as_tool(name="ask_billing")],
+    hooks=[RedactToolOutput()],  # Agent(redact=...) already scrubs traces
+)
+store = SQLiteStateStore("runs.db")
+res = await Runner.run(support, "refund 900 on A1B2C3D4", store=store)
+# res.status == "interrupted"; res.interruptions[0].path == ("support", "billing")
+res = await Runner.resume(
+    support,
+    res.run_id,
+    store=store,  # any process, any time
+    approvals={i.id: Approve() for i in res.interruptions},
+)
+```
+
 ## Layout
 
 | module | what |
@@ -80,6 +123,11 @@ async for event in Runner.stream(support, "And when?", session=session):
 | `context/session.py` | `Session`: memory, Redis, SQLite; committed turns only |
 | `context/compaction.py` | `ContextPolicy`; the ported exchange-safe planner, persisted summaries, tool-result clearing |
 | `context/prompt.py` | cache-stable assembly and breakpoints, `prefix_is_stable` (ported) |
+| `run/interruption.py` | `Interruption`, `Approve`, `Deny`: approvals as data, ids from operonx's `invocation_key` |
+| `safety/hooks.py` | `Hooks` (before/after model and tool, on_output), `Ask`, `Tripwire` → `blocked` |
+| `safety/redact.py` | `Redactor` (ported), `RunRedaction` (a run's records' export-time `redact`), `RedactToolOutput` |
+| `compose.py` | `Agent.as_tool` (a child run per call) and `Agent.as_op` (`AgentOp`) |
+| `tools/mcp.py` | `MCPServer`, `MCPClient`, `MCPToolset`: stdio and streamable HTTP (ported) |
 
 ## Structured output is declared, never guessed
 
@@ -97,11 +145,12 @@ uv sync
 uv run pytest -m "not live"          # offline
 uv run pytest -m live                # real gateways, credentials from the callbot's .env
 REDIS_URL=redis://127.0.0.1:6391/0 uv run pytest   # also the Redis session/store/crash tests
+uv sync --extra mcp                  # MCPToolset; tests/test_mcp_reference.py also needs npx
 ```
 
 operonx is an editable path dependency on `../Operon`. That relative path
 is why this repo is not worked on from git worktrees. The checkout at
-`../Operon` must contain `child(current=False)` (operonx main `99b1634`, #86, or later); to test
+`../Operon` must contain `child()`'s `redact` (operonx main `10fe40a`, #90, or later); to test
 against another checkout, put it first on `PYTHONPATH`.
 
 ## A2 gate (2026-10-04)
@@ -224,3 +273,99 @@ category (K9), approvals/hooks/as_tool/as_op (A4). `Runner.run` streams the mode
 `stream()` does: a plain-request path for `run()` was tried and dropped, because the
 property test caught its errors reading differently from the stream's (and it bought no
 measurable time).
+
+## A4 gate (2026-10-04)
+
+**The gate (AGENTS_V2_PLAN §4): an approval survives a process restart; a model naming
+another agent's tool gets "unknown tool".** Both hold:
+`tests/test_approvals.py::test_an_approval_survives_a_process_restart[sqlite,redis]` and
+`tests/test_compose.py::TestAgentAsTool::test_isolation_a_tool_another_agent_owns_is_unknown`.
+
+**Approvals are interruptions, with R2's ids.** A call that needs a human does not wait in
+the process: the turn is parked in the `RunState` (`pending`: the calls that finished, the
+`Interruption`s), the run ends `interrupted`, and `Runner.resume(..., approvals={id:
+Approve() | Deny(reason)})` finishes the turn in any process. An interruption's id is
+operonx's `invocation_key(run_id, "<agent>.<tool>", ("turn[n]", call_id))`, the rule
+`InterruptOp` uses since R2, so a resume elsewhere finds it and a re-park keeps it.
+`InterruptOp` itself is not used: it awaits an in-process future, which a restart loses
+(track3 §4.5: "InterruptOp remains for in-graph pauses; not used by the runner").
+
+| plan bullet (AGENTS_V2_PLAN §A4) | test |
+|---|---|
+| an approval survives a restart: persist, new process, `Runner.resume` | `tests/test_approvals.py::test_an_approval_survives_a_process_restart[sqlite,redis]`: a subprocess runs until `refund(900)` parks and exits (result in a file); the test process checks the id is `interruption_id(run, "cashier", "refund", 1, "c_refund")`, the args a human sees are redacted, nothing ran; resumes with `Approve()`; the refund runs once, in the test's pid |
+| deny | `TestDecisions::test_deny_refuses_the_call_with_the_reason` (the model reads the refusal and the human's reason) |
+| expiry | `…::test_an_expired_approval_is_refused_even_if_approved_later`, `…_with_no_answer_is_refused` (`Agent(approval_ttl=)`) |
+| deny ≠ ask | `…::test_deny_is_not_ask_a_policy_refusal_never_reaches_a_human` (an `approval="always"` tool the policy denies: refused, no interruption); `tests/test_hooks.py::TestBeforeTool::test_deny_is_a_refusal_the_model_reads_never_a_question` |
+| argument-dependent approval | `…::test_argument_dependent_approval` (100 runs, 900 parks; resume runs 900 and not 100 again), `…::test_a_waiting_call_holds_the_sequential_calls_after_it` |
+| (also) partial answers, unknown ids, no store, `durability="exit"`, the stream | `…::test_an_unanswered_interruption_keeps_waiting_with_its_id`, `test_answers_for_ids_the_run_does_not_wait_on_are_refused`, `test_without_a_store_the_call_is_refused`, `test_durability_exit_still_saves_an_interrupted_run`, `test_the_stream_says_what_waits` |
+| a child agent's approval surfaces on the parent with a path; resuming completes both | `tests/test_compose.py::TestAgentAsTool::test_a_childs_approval_surfaces_on_the_parent_and_one_resume_finishes_both`: path `("support", "billing")`; the child's run (id `child_run_id(...)`) is `interrupted` in the store; one parent resume runs the refund once, the child and the parent complete, neither model asked twice |
+| isolation regression | `…::test_isolation_a_tool_another_agent_owns_is_unknown` (support's model names `refund`, which billing owns: "no tool named 'refund'. Available tools: ask_billing.") and A2's dispatch-level test |
+| a hook tripwire ends the run `blocked` | `tests/test_hooks.py::TestTripwire` (before_tool: `blocked`, `Tripwire: …`, session and store unchanged, resume returns it; before_model: no model call; the stream) |
+| a `before_tool` replacement is honoured | `TestBeforeTool::test_a_replacement_is_what_the_tool_runs_with` (the tool, `ToolCallStarted` and the model see the replaced args), replacements validated, cannot change the tool, deny > ask merge, cannot loosen the policy |
+| MCP: the stdio tests ported | `tests/test_mcp.py`: operonx's 56 (`test_mcp.py` 50 + `test_mcp_values.py` 6) against the same real fixture servers; registry tests became toolset tests (no registry to leak from); every client- and toolset-level test runs on stdio **and** streamable HTTP (94 items) |
+| MCP: streamable HTTP against the reference server | `tests/test_mcp_reference.py`: `@modelcontextprotocol/server-everything@2026.8.31` via npx, over streamable HTTP and stdio: tools listed, text, structured values, an image block, annotations gating, an agent driving `get-sum` + `echo`, bad arguments stopped before the wire (10 items) |
+| `as_op` events reach `engine.stream(mode="custom")` | `tests/test_compose.py::TestAgentAsOp::test_streamed_events_reach_the_custom_stream` (typed events, `RunStarted` … `RunFinished`), `test_streaming_adds_no_trace_record_per_event`, `test_outputs_bind_downstream`, `test_an_interrupted_run_is_resumed_from_its_state_id` |
+| redaction | `tests/test_redact.py`: the 40 ported `Redactor` tests (both directions), plus: exported records scrubbed by default (tool, model input and answer, compaction) while memory and the model are untouched, a SQLite run store holds no secret, `redact=None`, approval payloads redacted / tool args not, `RedactToolOutput` before truncation |
+
+Every new test file fails on `main` (`7bac63d`) at import (`cannot import name 'Approve'`,
+`'Redactor'`, `No module named 'operonx_agents.tools.mcp'`).
+
+**MCP protocol revisions.** The Python fixture servers (mcp 2.3) negotiate the stateless
+`2026-07-28` revision over both transports (`test_it_speaks_the_stateless_revision_to_a_server_that_does`);
+the reference server negotiates the handshake revision `2025-11-25`. On Node 18 the
+reference server's HTTP transport needs `--experimental-global-webcrypto` (no global
+`crypto`: every request answered `Parse error`); the fixture sets it for Node < 19.
+
+**`as_op` is two ops, not one.** operonx runs a consumer once per frame a producer yields
+(measured: a generator yielding three events then `{"output": ...}` ran its `output`
+consumer four times, three of them failing on a missing input). So `as_op()` is a result op
+whose outputs bind downstream, and `as_op(stream=True)` a transient event stream whose
+`event` port an `EmitOp(..., transient=True)` sends to the custom stream: the trace keeps
+one record for the stream and none per event.
+
+**Trace redaction happens where the trace is exported.** The first cut scrubbed each
+message on the run's loop (once per run, memoised): +0.03–0.05 ms CPU per turn of the
+3-tool bench, +0.2–0.35 ms per turn at 5 concurrent, which put the 3-call row over 2 ms.
+Track3 §4.4.8 asks for redaction "on by default only for trace export", so operonx got
+the hook it lacked: `child()`'s `handle.redact`, applied by every exporter (run stores,
+Local view, Langfuse) through `OpExecution.exported()`. The runner records values as they
+are and sets its `RunRedaction` on each record; `handle.trace` in memory holds them raw.
+The agent op's own record (`AgentOp`, written by core from its inputs and outputs) is not
+covered; `@op(exclude=)` hides those.
+
+**operonx #90** (`10fe40a`): `child()`'s `redact` (export-time scrubbing; failing tests
+first: in memory vs exported, files/SQLite/Mongo/Postgres/ClickHouse stores, the Local view,
+Langfuse) and `OpType` `"agent"`, the type `AgentOp` sets.
+
+**Overhead** (`scripts/bench_overhead.py` → `results/overhead_a4.{log,json}`, tracing on, 30 / 48
+trace records per run as in A3). The machine was shared with other agents' test suites, so
+main (`7bac63d`, the A3 control) and a4 ran interleaved, four rounds; per turn, 5 concurrent,
+p50 ms:
+
+| round | runner 1 call: main / a4 | runner 3 calls: main / a4 | stream 3 calls: main / a4 |
+|---|---|---|---|
+| 1 | 1.18 / 1.29 | 1.60 / 1.75 | 1.99 / 2.15 |
+| 2 | 1.23 / 1.32 | 1.66 / 2.07 (a4 p95 3.9: interference) | 2.05 / 2.12 |
+| 3 | 1.31 / 1.32 | 2.04 / 2.05 | 2.47 / 2.09 |
+| 4 | 1.32 / 1.34 | 2.11 / 2.18 | 2.17 / 2.17 |
+
+A4 adds 0.01–0.11 ms per turn at 1 call and 0.01–0.15 at 3 (one noisy outlier), CPU
++0.002–0.03 ms per turn: the hooks/interruption plumbing; redaction costs the loop nothing
+now. The 1-call row holds < 2 ms in every round (1.29–1.34). The 3-call row tracks main,
+and main itself read 1.60–2.11 as the machine's load moved (A3 recorded 1.85): it holds
+< 2 ms in the quiet round (1.75) and not in the loaded ones, where the A3 code does not
+either.
+
+**Live** (`results/live_a4.txt`): on `qwen3.7-plus`, "Refund 900 on order A1B2C3D4" parks
+after 2.8 s (`'refund' asks for approval for these arguments`), state in SQLite; resumed with
+`Approve()`: the refund runs once, the model answers "Refunded 900 on order A1B2C3D4.
+Reference: R-0001." (2 turns, 846 + 73 tokens). The model also drove the MCP reference
+server's `get-sum` over streamable HTTP (1234 + 4321 → "5555").
+
+**Suites:** operonx-agents `-m "not live"` with `REDIS_URL` (throwaway `redis:7-alpine`):
+522 passed. Live A4: 2 passed. operonx #90: 3664 passed, 50 skipped (Postgres and ClickHouse
+throwaway servers set); callbot refactor: 303 passed, 2 skipped.
+
+**Not done here:** handoffs (track3 lists them for phase 4; AGENTS_V2_PLAN A4 does not, and
+no second conversational agent asks for them yet); guardrails as a named layer (they are
+hooks); MCP elicitation/sampling/resources (track3 "Later").

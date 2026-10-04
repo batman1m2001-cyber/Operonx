@@ -10,6 +10,7 @@ Two front doors over one model layer:
 """
 
 from operonx_agents.agent import Agent
+from operonx_agents.compose import AgentOp, agent_op, agent_tool
 from operonx_agents.context import (
     ContextPolicy,
     InMemorySession,
@@ -19,12 +20,14 @@ from operonx_agents.context import (
 )
 from operonx_agents.errors import (
     AgentsError,
+    Interrupted,
     ModelError,
     ModelRefused,
     ModelRetry,
     ModelTimeout,
     OutputInvalid,
     ToolDefinitionError,
+    Tripwire,
 )
 from operonx_agents.model import (
     Choice,
@@ -37,9 +40,13 @@ from operonx_agents.model import (
     ask,
 )
 from operonx_agents.run import (
+    ApprovalRequired,
+    Approve,
     Compacted,
+    Deny,
     Event,
     InMemoryStateStore,
+    Interruption,
     ReasoningDelta,
     RedisStateStore,
     RunContext,
@@ -57,9 +64,21 @@ from operonx_agents.run import (
     UsageLimits,
 )
 from operonx_agents.run.runner import Runner
+from operonx_agents.safety import (
+    Ask,
+    Hooks,
+    ModelRequest,
+    Redactor,
+    RedactToolOutput,
+    ToolCall,
+)
 from operonx_agents.step import LLMStepOp, llm_step
 from operonx_agents.tools import (
     DEFAULT_POLICY,
+    MCPClient,
+    MCPError,
+    MCPServer,
+    MCPToolset,
     Tool,
     ToolPolicy,
     Toolset,
@@ -73,18 +92,31 @@ __version__ = "0.1.0.dev0"
 
 __all__ = [
     "Agent",
+    "AgentOp",
     "AgentsError",
+    "ApprovalRequired",
+    "Approve",
+    "Ask",
     "Choice",
     "Compacted",
     "ContextPolicy",
     "DEFAULT_POLICY",
+    "Deny",
     "Event",
+    "Hooks",
     "InMemorySession",
     "InMemoryStateStore",
+    "Interrupted",
+    "Interruption",
     "LLMStepOp",
+    "MCPClient",
+    "MCPError",
+    "MCPServer",
+    "MCPToolset",
     "Model",
     "ModelError",
     "ModelRefused",
+    "ModelRequest",
     "ModelResponse",
     "ModelRetry",
     "ModelSettings",
@@ -93,6 +125,8 @@ __all__ = [
     "OutputResult",
     "Reasoning",
     "ReasoningDelta",
+    "RedactToolOutput",
+    "Redactor",
     "RedisSession",
     "RedisStateStore",
     "RunContext",
@@ -107,16 +141,20 @@ __all__ = [
     "StateStore",
     "TextDelta",
     "Tool",
+    "ToolCall",
     "ToolCallFinished",
     "ToolCallStarted",
     "ToolDefinitionError",
     "ToolPolicy",
     "ToolSpec",
     "Toolset",
+    "Tripwire",
     "TurnFinished",
     "TurnStarted",
     "Usage",
     "UsageLimits",
+    "agent_op",
+    "agent_tool",
     "ask",
     "dispatch",
     "llm_step",
