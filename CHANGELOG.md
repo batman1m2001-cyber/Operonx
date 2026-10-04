@@ -220,6 +220,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A subgraph whose branch went around its stream hands on its output.** A subgraph with a
+  generator handed its parent one output per stream context; a run that took a branch around
+  the stream (`if_(misses > 0, each).else_(done)`) had none, so the op after the subgraph
+  never ran, with no `$errors`. Such a run now hands on its one output at its own context. A
+  generator that yields nothing still hands on nothing.
+
 - **An op joining a stream's ops with ops outside the stream runs, once both have landed.**
   An op after a `.collect()` (or after a subgraph whose stream ends in one) that also waits
   for a sibling op never ran: the collect's context counted none of the sibling's arrival,

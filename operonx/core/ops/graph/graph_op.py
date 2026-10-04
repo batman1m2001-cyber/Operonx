@@ -920,7 +920,15 @@ class GraphOp(BaseOp):
                         state, context_id
                     )
 
-            _has_generators = any(op.is_gen for op in self._ops.values())
+            # A graph with a generator hands its parent one output per stream
+            # context. A run in which no stream ran — a branch went around it —
+            # hands on its one output at this context, like a graph without
+            # one, provided its last ops wrote it. A generator that yielded
+            # nothing wrote no output: it still hands on nothing.
+            _streamed = bool(stream_ctxs) or (
+                any(op.is_gen for op in self._ops.values())
+                and all(v is None for v in _outputs.values())
+            )
             if _interrupted:
                 # The invocation was cancelled from inside. `_outputs` is
                 # whatever the cells happened to hold — all-`None` when the
@@ -929,7 +937,7 @@ class GraphOp(BaseOp):
                 # The streaming branch below already skips all-`None` items;
                 # this is the batch equivalent.
                 _outputs = {}
-            elif not stream_ctxs and not _has_generators:
+            elif not _streamed:
                 failed = (
                     self._failed_descendants(state, context_id)
                     if all(v is None for v in _outputs.values())
