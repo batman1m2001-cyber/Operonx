@@ -16,6 +16,8 @@ from operonx import op
 
 from operonx_kb.errors import CatalogError
 from operonx_kb.maintenance import delete_unreferenced_blobs, verify_document_gone
+from operonx_kb.model.collection import LexicalIndexSpec
+from operonx_kb.model.filter import document_payload
 from operonx_kb.model.ids import document_id as make_document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
 
@@ -60,14 +62,18 @@ def finish_delete(
     catalog: str,
     blobs: str,
     deleted: Optional[int] = None,
+    lexical: Optional[dict] = None,
+    lexical_deleted: int = 0,
 ) -> dict:
-    """After the vectors are gone: drop their ledger rows, and with ``purge`` erase the document."""
+    """After the vectors and lexical entries are gone: drop the dense ledger rows, and with
+    ``purge`` erase the document and prove nothing is left in either index's ledger."""
     cat = catalog_of(catalog)
     store_key = full_key(store, "vector_store")
     forgotten = cat.forget_index_entries(store_key, vcollection, chunk_ids)
     report = {
         "document_id": document_id,
         "index_deleted": deleted,
+        "lexical_deleted": lexical_deleted,
         "ledger_forgotten": forgotten,
         "purged": False,
     }
@@ -75,7 +81,11 @@ def finish_delete(
         store_ = blobs_of(blobs)
         result = cat.purge(document_id)
         removed = sum(int(store_.delete(sha)) for sha in result.orphan_blobs)
-        verify_document_gone(cat, store_, document_id, result.orphan_blobs, store_key, vcollection)
+        indexes = [(store_key, vcollection)]
+        if lexical is not None:
+            spec = LexicalIndexSpec.model_validate(lexical)
+            indexes.append((full_key(spec.index, "kb_lexical"), spec.collection or ""))
+        verify_document_gone(cat, store_, document_id, result.orphan_blobs, indexes)
         report.update(purged=True, chunks_purged=len(result.chunk_ids), blobs_deleted=removed)
     cat.log_ingest(collection, key, "purge" if purge else "delete", document_id=document_id)
     return {"report": report}
@@ -112,7 +122,11 @@ def collect_blobs(enabled: bool, grace_seconds: float, catalog: str, blobs: str)
 
 @op(show_keys="report")
 def gc_report(
-    stale: int = 0, deleted: Optional[int] = None, forgotten: int = 0, blobs_deleted: int = 0
+    stale: int = 0,
+    deleted: Optional[int] = None,
+    forgotten: int = 0,
+    blobs_deleted: int = 0,
+    lexical_deleted: int = 0,
 ) -> dict:
     """One summary of a GC run."""
     return {
@@ -120,18 +134,32 @@ def gc_report(
             "stale": stale,
             "index_deleted": deleted,
             "ledger_forgotten": forgotten,
+            "lexical_deleted": lexical_deleted,
             "blobs_deleted": blobs_deleted,
         }
     }
 
 
-@op(bound="cpu", exclude={"trace": ["chunks"]}, show_keys="count")
+@op(bound="cpu", exclude={"trace": ["chunks", "payloads"]}, show_keys="count")
 def plan_rebuild(collection: str, catalog: str) -> dict:
-    """Every chunk an active version of the collection holds, from the catalog alone."""
+    """Every chunk an active version of the collection holds, and each document's
+    index payload, from the catalog alone."""
     cat = catalog_of(catalog)
+    coll = cat.get_collection(collection)
+    if coll is None:
+        raise CatalogError(f"no collection {collection!r}")
     ids = sorted(cat.active_chunk_ids(collection_id=collection))
     chunks = cat.get_chunks(ids)
-    return {"chunks": [chunks[i].model_dump(mode="json") for i in ids], "count": len(ids)}
+    payloads = {
+        d.id: document_payload(coll.spec, d)
+        for d in cat.list_documents(collection)
+        if d.active_version_id
+    }
+    return {
+        "chunks": [chunks[i].model_dump(mode="json") for i in ids],
+        "payloads": payloads,
+        "count": len(ids),
+    }
 
 
 @op(bound="cpu", show_keys="report")

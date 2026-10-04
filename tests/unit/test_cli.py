@@ -71,3 +71,29 @@ def test_cli_reports_a_failed_ingest_with_exit_1(hub, tmp_path, capsys):
     bad.write_bytes(b"nope")
     assert main(["--resources", res, "add", "notes", str(bad)]) == 1
     assert "not a DOCX" in capsys.readouterr().err
+
+
+def test_cli_query_and_eval_on_a_lexical_collection(hub, tmp_path, capsys):
+    res = str(hub.source_path)
+    assert main(["--resources", res, "create", "notes", "--embedder", "fake_embedding:hash",
+                 "--store", "vector_store:kb", "--lexical", "kb_lexical:main", "--analyzer", "vi"]) == 0  # fmt: skip
+    path = DOCS / "quy_trinh_vi.html"
+    assert main(["--resources", res, "add", "notes", str(path)]) == 0
+    capsys.readouterr()
+    assert main(["--resources", res, "query", "notes", "nghỉ phép", "--mode", "lexical"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("  1  ") and "quy_trinh_vi.html" in out and "phép" in out
+    assert main(["--resources", res, "query", "notes", "nghỉ phép", "--mode", "lexical",
+                 "--tag", "nope", "--json"]) == 0  # fmt: skip
+    assert json.loads(capsys.readouterr().out)["hits"] == []
+    assert main(["--resources", res, "query", "notes", "x", "--mode", "lexical",
+                 "--filter", '{"fields": {"dept": "hr"}}']) == 1  # fmt: skip
+    assert "not filterable" in capsys.readouterr().err
+    dataset = tmp_path / "cases.jsonl"
+    dataset.write_text(json.dumps({"id": "a", "input": {"query": "nghỉ phép", "collection": "notes"},
+                                   "expected": {"relevant": [{"doc_key": str(path.resolve()),
+                                                              "quote": "nghỉ phép"}]}}) + "\n",
+                       encoding="utf-8")  # fmt: skip
+    assert main(["--resources", res, "eval", "notes", str(dataset), "--mode", "lexical"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["metrics"]["recall@20"] == 1.0

@@ -26,7 +26,8 @@ from operonx.core.loggings import LOGGER
 from operonx_kb.chunking import materialize
 from operonx_kb.errors import DocumentParseError, SpanInvariantError
 from operonx_kb.model.collection import CollectionSpec
-from operonx_kb.model.document import Chunk, Document, DocumentVersion, VersionChunk
+from operonx_kb.model.document import Chunk, Document, DocumentVersion, VersionChunk, utcnow
+from operonx_kb.model.filter import index_payload
 from operonx_kb.model.ids import document_id as make_document_id
 from operonx_kb.model.ids import sha256_bytes, sha256_text
 from operonx_kb.model.ids import vector_id as make_vector_id
@@ -70,7 +71,11 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
     pipeline (same version id): nothing is parsed or embedded.
 
     Item keys: ``path`` or ``data``; optional ``key`` (default: the path),
-    ``name``, ``mime``, ``title``, ``tags``, ``metadata``.
+    ``name``, ``mime``, ``title``, ``tags``, ``acl``, ``metadata``.
+
+    It also builds the document's index payload (PLAN R3), so a metadata value
+    of the wrong type for a declared ``filterable`` field fails here, before
+    anything is parsed.
     """
     cat = catalog_of(catalog)
     coll = cat.get_collection(collection)
@@ -97,6 +102,14 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
         existing.active_version_id if existing is not None and existing.deleted_at is None else None
     )
     action = "skip" if active == ver_id else ("update" if active else "new")
+    created_at = (existing.created_at if existing is not None else utcnow()).isoformat()
+    tags = list(item.get("tags") or [])
+    acl = list(item.get("acl") or [])
+    metadata = dict(item.get("metadata") or {})
+    payload = index_payload(
+        spec=coll.spec, collection_id=collection, document_id=doc_id, tags=tags, acl=acl,
+        mime=mime, created_at=created_at, metadata=metadata,
+    )  # fmt: skip
     plan = {
         "collection_id": collection,
         "key": key,
@@ -109,11 +122,13 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
         "parser": parser.name,
         "pipeline_fp": pipeline_fp,
         "title": item.get("title"),
-        "tags": list(item.get("tags") or []),
-        "metadata": dict(item.get("metadata") or {}),
+        "tags": tags,
+        "acl": acl,
+        "metadata": metadata,
+        "created_at": created_at,
         "spec": coll.spec.model_dump(mode="json"),
     }
-    return {"plan": plan, "action": action}
+    return {"plan": plan, "action": action, "payloads": {doc_id: payload}}
 
 
 @op(bound="cpu", exclude={"trace": ["parsed"]}, show_keys="stats")
@@ -190,11 +205,22 @@ def chunk_version(tree: dict, plan: dict, catalog: str) -> dict:
     }
 
 
-@op(bound="cpu", exclude={"trace": ["vectors", "todo", "ids"]}, show_keys="staged")
+@op(
+    bound="cpu",
+    exclude={"trace": ["vectors", "todo", "ids", "metadata", "payloads"]},
+    show_keys="staged",
+)
 def stage_index_writes(
-    todo: list, vectors: dict, store: str, vcollection: str, collection: str, catalog: str
+    todo: list,
+    vectors: dict,
+    store: str,
+    vcollection: str,
+    collection: str,
+    catalog: str,
+    payloads: Optional[dict] = None,
 ) -> dict:
-    """Record the new chunks' vector keys in the catalog ledger, then hand them to the upsert.
+    """Record the new chunks' vector keys in the catalog ledger, then hand them to the upsert,
+    each with its document's filter payload (``payloads``: ``document_id -> payload``).
 
     The ledger row comes first, so the ledger always covers the index: a crash
     after this op and before the upsert leaves a row whose vector is missing,
@@ -212,6 +238,7 @@ def stage_index_writes(
     return {
         "ids": [vid for _, vid, _ in entries],
         "vectors": [vectors[c["id"]] for c in todo],
+        "metadata": [(payloads or {}).get(c["document_id"], {}) for c in todo],
         "staged": len(entries),
     }
 
@@ -251,7 +278,9 @@ def commit_version(
         title=plan.get("title") or vt.title,
         mime=plan["mime"],
         tags=plan.get("tags") or [],
+        acl=plan.get("acl") or [],
         metadata=plan.get("metadata") or {},
+        created_at=plan["created_at"],
     )
     version = DocumentVersion(
         id=plan["version_id"],
@@ -308,13 +337,24 @@ def forget_index_writes(
 
 @op(bound="cpu", show_keys="result")
 def skipped(plan: dict, catalog: str) -> dict:
-    """The skip arm: record it and report."""
-    catalog_of(catalog).log_ingest(
+    """The skip arm: the bytes and pipeline are unchanged, so nothing is parsed or indexed.
+
+    Tags, ACL and metadata given with the item still replace the document's in the
+    catalog. Its index entries keep the payload they were written with until they are
+    rewritten (``rebuild``); the hydration gate reads the catalog, so a revoked ACL or
+    a removed tag holds at once, and only a grant waits for the rewrite.
+    """
+    cat = catalog_of(catalog)
+    updated = cat.update_document(
+        plan["document_id"], tags=plan["tags"], acl=plan["acl"], metadata=plan["metadata"]
+    )
+    cat.log_ingest(
         plan["collection_id"],
         plan["key"],
         "skip",
         document_id=plan["document_id"],
         version_id=plan["version_id"],
+        stats={"metadata_updated": updated},
     )
     return {
         "result": {
@@ -322,6 +362,7 @@ def skipped(plan: dict, catalog: str) -> dict:
             "action": "skip",
             "document_id": plan["document_id"],
             "version_id": plan["version_id"],
+            "metadata_updated": updated,
         }
     }
 
@@ -334,6 +375,8 @@ def report(
     embedding: Optional[dict] = None,
     deleted: int = 0,
     skip: Optional[dict] = None,
+    lexical_written: int = 0,
+    lexical_deleted: int = 0,
 ) -> dict:
     """Where the two arms merge: one result per item."""
     if skip is not None:
@@ -348,6 +391,7 @@ def report(
             "embedding": embedding or {},
             "commit": committed or {},
             "gc_deleted": deleted,
+            "lexical": {"written": lexical_written, "deleted": lexical_deleted},
         },
     }
     return {"result": result}

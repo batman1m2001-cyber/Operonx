@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from operonx.core.media_store import MediaStore
 
@@ -33,6 +33,7 @@ class VerifyReport:
     elements: int = 0
     chunks: int = 0
     index_entries: int = 0
+    lexical_entries: int = 0
     problems: List[str] = field(default_factory=list)
 
     @property
@@ -45,10 +46,12 @@ def verify_document_gone(
     blobs: MediaStore,
     document_id: str,
     blob_shas: List[str],
-    store: str,
-    collection: str,
+    indexes: List[Tuple[str, str]],
 ) -> None:
     """Assert a purged document left nothing: no catalog row, no ledger entry, no blob.
+
+    Args:
+        indexes: ``(store key, collection)`` of every index the document was written to.
 
     Raises:
         KBError: Naming what survived.
@@ -58,9 +61,10 @@ def verify_document_gone(
         left.append("catalog document row")
     if catalog.list_versions(document_id):
         left.append("catalog versions")
-    entries = catalog.index_entries(store, collection, document_id=document_id)
-    if entries:
-        left.append(f"{len(entries)} index entries")
+    for store, collection in indexes:
+        entries = catalog.index_entries(store, collection, document_id=document_id)
+        if entries:
+            left.append(f"{len(entries)} index entries in {store}")
     left.extend(f"blob {sha}" for sha in blob_shas if blobs.exists(sha))
     if left:
         raise KBError(f"purge of {document_id} left data behind: " + ", ".join(left))
@@ -89,12 +93,16 @@ def verify(
     collection_id: str,
     store: Optional[str] = None,
     collection: str = "",
+    lexical: Optional[str] = None,
+    lexical_collection: str = "",
 ) -> VerifyReport:
-    """Check a collection's blobs, spans and index ledger against each other.
+    """Check a collection's blobs, spans and index ledgers against each other.
 
     Args:
         store: The dense index's full vector-store key; ``None`` skips the index check.
         collection: The vector store collection (``""`` for the default).
+        lexical: The lexical index's full key; ``None`` skips it.
+        lexical_collection: Its collection (``""`` for the default).
     """
     report = VerifyReport()
     active_all = set()
@@ -123,15 +131,20 @@ def verify(
         except SpanInvariantError as exc:
             report.problems.append(f"{doc.key}: {exc}")
         active_all |= {o.chunk_id for o in occurrences}
-    if store is not None:
-        ledger = set(catalog.index_entries(store, collection, collection_id=collection_id))
-        report.index_entries = len(ledger)
+    for key, coll, attr, what in (
+        (store, collection, "index_entries", "the index"),
+        (lexical, lexical_collection, "lexical_entries", "the lexical index"),
+    ):
+        if key is None:
+            continue
+        ledger = set(catalog.index_entries(key, coll, collection_id=collection_id))
+        setattr(report, attr, len(ledger))
         if active_all - ledger:
             report.problems.append(
-                f"{len(active_all - ledger)} active chunks were never written to the index"
+                f"{len(active_all - ledger)} active chunks were never written to {what}"
             )
         if ledger - active_all:
             report.problems.append(
-                f"{len(ledger - active_all)} index entries belong to no active chunk (run gc)"
+                f"{len(ledger - active_all)} entries of {what} belong to no active chunk (run gc)"
             )
     return report

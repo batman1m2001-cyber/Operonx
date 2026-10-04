@@ -7,12 +7,13 @@ import textwrap
 
 from operonx.core.registry import REGISTRY
 
-from operonx_kb.registry import BlobStoreConfig, CatalogConfig
+from operonx_kb.registry import BlobStoreConfig, CatalogConfig, LexicalIndexConfig
 
 
 def test_categories_are_registered_on_import():
     assert REGISTRY.get_class("kb_catalog") is CatalogConfig
     assert REGISTRY.get_class("kb_blob") is BlobStoreConfig
+    assert REGISTRY.get_class("kb_lexical") is LexicalIndexConfig
 
 
 def test_a_fresh_process_resolves_kb_keys_through_entry_points(tmp_path):

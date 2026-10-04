@@ -8,11 +8,25 @@ catalog and is round-trippable to YAML.
 from __future__ import annotations
 
 import re
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-__all__ = ["ChunkerSpec", "LayoutSpec", "DenseIndexSpec", "CollectionSpec", "Collection"]
+__all__ = [
+    "AnalyzerSpec",
+    "ChunkerSpec",
+    "LayoutSpec",
+    "DenseIndexSpec",
+    "LexicalIndexSpec",
+    "FieldType",
+    "CollectionSpec",
+    "Collection",
+]
+
+#: The type of a field a collection declares filterable (track5 §12.3).
+FieldType = Literal["keyword", "keyword[]", "int", "float", "datetime", "bool"]
+
+_IDENT = re.compile(r"^[a-z_][a-z0-9_]{0,40}$")
 
 
 class _Spec(BaseModel):
@@ -66,21 +80,100 @@ class DenseIndexSpec(_Spec):
         collection: The vector store's collection (FAISS collection, pgvector
             table, Qdrant collection); ``None`` uses the resource's default.
         batch_size: Texts per embedder call.
+        passage_template: How a chunk's text is presented to the embedder;
+            ``{text}`` is the chunk's embed text. E5 models want
+            ``"passage: {text}"``. Part of the embedding cache key.
+        query_template: The same for a query: ``"query: {text}"`` for E5.
     """
 
     embedder: str
     store: str
     collection: Optional[str] = None
     batch_size: int = Field(default=64, ge=1)
+    passage_template: str = "{text}"
+    query_template: str = "{text}"
+
+    @field_validator("passage_template", "query_template")
+    @classmethod
+    def _has_text(cls, value: str) -> str:
+        if "{text}" not in value:
+            raise ValueError(f"template {value!r} must contain {{text}}")
+        return value
+
+
+class AnalyzerSpec(_Spec):
+    """How text becomes lexical tokens (PLAN R2).
+
+    Attributes:
+        kind: ``"simple"`` (NFC, casefold, words of letters and digits) or
+            ``"vi"`` (``simple`` plus the bigrams of adjacent syllables in a
+            phrase: Vietnamese words are mostly two space-separated syllables).
+        fold_diacritics: Strip tone and vowel marks and map ``đ`` to ``d``,
+            so an unaccented query finds accented text (and words that differ
+            only by their marks become one).
+    """
+
+    kind: Literal["simple", "vi"] = "simple"
+    fold_diacritics: bool = False
+
+
+class LexicalIndexSpec(_Spec):
+    """A lexical (BM25-style) index derived from the collection's chunks.
+
+    The index is a ``kb_lexical:`` resource (SQLite FTS5 or Postgres FTS)
+    holding analyzed chunk text and the filter payload under the same int64
+    keys as the dense index, recorded in the same ledger.
+
+    Attributes:
+        index: Resource key of the lexical index. A bare name means
+            ``kb_lexical:<name>``.
+        collection: Table inside the index (a SQL identifier); ``None`` uses
+            ``"default"``.
+        analyzer: How chunk and query text are tokenised.
+    """
+
+    index: str = "kb_lexical:main"
+    collection: Optional[str] = None
+    analyzer: AnalyzerSpec = AnalyzerSpec()
+
+    @field_validator("collection")
+    @classmethod
+    def _identifier(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not _IDENT.match(value):
+            raise ValueError(
+                f"lexical collection {value!r} must be a lowercase SQL identifier "
+                "(letters, digits, '_', at most 41 characters)"
+            )
+        return value
 
 
 class CollectionSpec(_Spec):
-    """Everything that decides how a collection's documents are processed."""
+    """Everything that decides how a collection's documents are processed.
+
+    Attributes:
+        filterable: Document metadata fields a ``KBFilter`` may name, with
+            their types. Their values are copied from a document's
+            ``metadata`` into every index entry (``kb_f_<name>``); a filter
+            on an undeclared field raises.
+    """
 
     chunker: ChunkerSpec = ChunkerSpec()
     layout: LayoutSpec = LayoutSpec()
     dense: Optional[DenseIndexSpec] = None
+    lexical: Optional[LexicalIndexSpec] = None
+    filterable: Dict[str, FieldType] = Field(default_factory=dict)
     language: Optional[str] = None
+
+    @field_validator("filterable")
+    @classmethod
+    def _field_names(cls, value: Dict[str, str]) -> Dict[str, str]:
+        bad = sorted(k for k in value if not _IDENT.match(k))
+        if bad:
+            raise ValueError(
+                f"filterable field names {bad} must be lowercase identifiers: they become "
+                "index columns (kb_f_<name>)"
+            )
+        return value
 
 
 class Collection(BaseModel):

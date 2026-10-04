@@ -180,3 +180,56 @@ def test_ingest_log(cat):
     cat.log_ingest("col", "k", "failed", error="boom")
     log = cat.ingest_log("col", "k")
     assert [r["action"] for r in log] == ["new", "failed"] and log[0]["stats"] == {"chunks": 2}
+
+
+def test_document_acl_round_trips(cat):
+    doc = DOC.model_copy(update={"acl": ["team:hr", "user:7"], "tags": ["policy"]})
+    tree, version, chunks, occ = _version("ver_1", ["alpha"])
+    cat.commit_version(doc, version, tree.elements, tree.pages, chunks, occ)
+    got = cat.get_document("doc_1")
+    assert got.acl == ["team:hr", "user:7"] and got.tags == ["policy"]
+
+
+def test_keys_resolve_to_chunks_of_one_store_and_collection_only(cat):
+    cat.record_index_entries(
+        "vector_store:kb", "", "col", [("ch_a", 1, "doc_1"), ("ch_b", 2, "doc_1")]
+    )
+    cat.record_index_entries("vector_store:kb", "", "other", [("ch_c", 3, "doc_9")])
+    cat.record_index_entries("kb_lexical:main", "", "col", [("ch_a", 1, "doc_1")])
+    assert cat.chunks_for_keys("vector_store:kb", "", "col", [1, 2, 3, 4]) == {1: "ch_a", 2: "ch_b"}
+    assert cat.chunks_for_keys("kb_lexical:main", "", "col", [1, 2]) == {1: "ch_a"}
+    assert cat.chunks_for_keys("vector_store:kb", "", "col", []) == {}
+
+
+def test_active_chunks_is_the_hydration_gate(cat):
+    _, tree = _commit(cat, "ver_1", ["alpha", "beta"])
+    v1 = {o.chunk_id for o in cat.version_chunks("ver_1")}
+    _commit(cat, "ver_2", ["alpha", "gamma"])
+    v2 = {o.chunk_id for o in cat.version_chunks("ver_2")}
+    beta = (v1 - v2).pop()
+    asked = sorted(v1 | v2) + ["ch_missing"]
+    got = cat.active_chunks("col", asked)
+    assert set(got) == v2  # the superseded chunk and the unknown id are gone
+    hit = got[sorted(v2)[0]]
+    assert hit.document.id == "doc_1" and hit.occurrence.version_id == "ver_2"
+    assert hit.chunk.text and hit.occurrence.spans
+    assert cat.active_chunks("other", asked) == {}  # another collection sees nothing
+    assert beta not in got
+    cat.tombstone("doc_1")
+    assert cat.active_chunks("col", asked) == {}  # a deleted document is invisible at once
+
+
+def test_update_document_replaces_tags_acl_metadata_without_a_version(cat):
+    _commit(cat, "ver_1", ["alpha"])
+    assert cat.update_document("doc_1", tags=["a"], acl=["u"], metadata={"x": 1}) is True
+    assert cat.update_document("doc_1", tags=["a"], acl=["u"], metadata={"x": 1}) is False
+    doc = cat.get_document("doc_1")
+    assert (doc.tags, doc.acl, doc.metadata, doc.active_version_id) == (
+        ["a"],
+        ["u"],
+        {"x": 1},
+        "ver_1",
+    )
+    assert len(cat.list_versions("doc_1")) == 1
+    with pytest.raises(CatalogError):
+        cat.update_document("doc_x", tags=[], acl=[], metadata={})

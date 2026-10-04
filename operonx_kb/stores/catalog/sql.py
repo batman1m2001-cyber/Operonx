@@ -33,7 +33,7 @@ from operonx_kb.model.document import (
     VersionChunk,
     utcnow,
 )
-from operonx_kb.stores.catalog.base import Catalog, CommitResult, PurgeResult
+from operonx_kb.stores.catalog.base import ActiveChunk, Catalog, CommitResult, PurgeResult
 
 __all__ = ["SqlCatalog", "Tx", "migrations"]
 
@@ -175,6 +175,7 @@ class SqlCatalog(Catalog):
             title=row["title"],
             mime=row["mime"],
             tags=json.loads(row["tags"]),
+            acl=json.loads(row["acl"]),
             metadata=json.loads(row["metadata"]),
             active_version_id=row["active_version_id"],
             deleted_at=datetime.fromisoformat(row["deleted_at"]) if row["deleted_at"] else None,
@@ -323,6 +324,42 @@ class SqlCatalog(Catalog):
         with self._tx() as c:
             return {r["chunk_id"] for r in c.rows(sql, args)}
 
+    def active_chunks(self, collection_id: str, chunk_ids: Sequence[str]) -> Dict[str, ActiveChunk]:
+        ids = list(dict.fromkeys(chunk_ids))
+        out: Dict[str, ActiveChunk] = {}
+        with self._tx() as c:
+            for start in range(0, len(ids), _BATCH):
+                part = ids[start : start + _BATCH]
+                rows = c.rows(
+                    "SELECT vc.version_id AS vc_version, vc.ordinal AS vc_ordinal, vc.spans AS vc_spans, "
+                    "vc.element_ids AS vc_elements, vc.pages AS vc_pages, ch.id AS ch_id, "
+                    "ch.content_sha AS ch_content_sha, ch.kind AS ch_kind, ch.heading_path AS ch_heading_path, "
+                    "ch.token_count AS ch_token_count, ch.text AS ch_text, ch.embed_text AS ch_embed_text, "
+                    "ch.embed_text_sha AS ch_embed_text_sha, d.* "
+                    "FROM kb_version_chunks vc "
+                    "JOIN kb_documents d ON d.active_version_id = vc.version_id "
+                    "JOIN kb_chunks ch ON ch.id = vc.chunk_id "
+                    "WHERE d.collection_id = ? AND d.deleted_at IS NULL "
+                    f"AND vc.chunk_id IN ({','.join('?' * len(part))})",
+                    [collection_id, *part],
+                )
+                for r in rows:
+                    out[r["ch_id"]] = ActiveChunk(
+                        chunk=Chunk(
+                            id=r["ch_id"], document_id=r["id"], content_sha=r["ch_content_sha"],
+                            kind=r["ch_kind"], heading_path=json.loads(r["ch_heading_path"]),
+                            token_count=r["ch_token_count"], text=r["ch_text"],
+                            embed_text=r["ch_embed_text"], embed_text_sha=r["ch_embed_text_sha"],
+                        ),
+                        occurrence=VersionChunk(
+                            version_id=r["vc_version"], chunk_id=r["ch_id"], ordinal=r["vc_ordinal"],
+                            spans=[tuple(s) for s in json.loads(r["vc_spans"])],
+                            element_ids=json.loads(r["vc_elements"]), pages=json.loads(r["vc_pages"]),
+                        ),
+                        document=self._document(r),
+                    )  # fmt: skip
+        return out
+
     # writes -------------------------------------------------------------------------------
 
     def commit_version(
@@ -362,22 +399,18 @@ class SqlCatalog(Catalog):
                 )
             if row is None:
                 c.run(
-                    "INSERT INTO kb_documents (id, collection_id, key, title, mime, tags, metadata, active_version_id, "
-                    "deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
+                    "INSERT INTO kb_documents (id, collection_id, key, title, mime, tags, acl, metadata, "
+                    "active_version_id, deleted_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)",
                     (document.id, document.collection_id, document.key, document.title, document.mime,
-                     _j(document.tags), _j(document.metadata), _dt(document.created_at)),
+                     _j(document.tags), _j(document.acl), _j(document.metadata), _dt(document.created_at)),
                 )  # fmt: skip
             else:
                 c.run(
-                    "UPDATE kb_documents SET title = ?, mime = ?, tags = ?, metadata = ?, deleted_at = NULL WHERE id = ?",
-                    (
-                        document.title,
-                        document.mime,
-                        _j(document.tags),
-                        _j(document.metadata),
-                        document.id,
-                    ),
-                )
+                    "UPDATE kb_documents SET title = ?, mime = ?, tags = ?, acl = ?, metadata = ?, "
+                    "deleted_at = NULL WHERE id = ?",
+                    (document.title, document.mime, _j(document.tags), _j(document.acl),
+                     _j(document.metadata), document.id),
+                )  # fmt: skip
             if existing is None:
                 ordinal = c.one(
                     "SELECT COALESCE(MAX(ordinal), 0) + 1 AS n FROM kb_versions WHERE document_id = ?",
@@ -454,6 +487,27 @@ class SqlCatalog(Catalog):
             removed_chunk_ids=sorted(old - new),
             added_chunk_ids=sorted(new - old),
         )
+
+    def update_document(
+        self, document_id: str, *, tags: Sequence[str], acl: Sequence[str], metadata: dict
+    ) -> bool:
+        with self._tx(write=True) as c:
+            self._lock_document(c, document_id)
+            row = c.one("SELECT tags, acl, metadata FROM kb_documents WHERE id = ?", (document_id,))
+            if row is None:
+                raise CatalogError(f"no document {document_id!r}")
+            new = (_j(list(tags)), _j(list(acl)), _j(dict(metadata)))
+            if (json.loads(row["tags"]), json.loads(row["acl"]), json.loads(row["metadata"])) == (
+                list(tags),
+                list(acl),
+                dict(metadata),
+            ):
+                return False
+            c.run(
+                "UPDATE kb_documents SET tags = ?, acl = ?, metadata = ? WHERE id = ?",
+                (*new, document_id),
+            )
+        return True
 
     def tombstone(self, document_id: str) -> List[str]:
         with self._tx(write=True) as c:
@@ -571,6 +625,22 @@ class SqlCatalog(Catalog):
             args.append(document_id)
         with self._tx() as c:
             return {r["chunk_id"]: int(r["vector_id"]) for r in c.rows(sql, args)}
+
+    def chunks_for_keys(
+        self, store: str, collection: str, collection_id: str, keys: Sequence[int]
+    ) -> Dict[int, str]:
+        wanted = list(dict.fromkeys(int(k) for k in keys))
+        out: Dict[int, str] = {}
+        with self._tx() as c:
+            for start in range(0, len(wanted), _BATCH):
+                part = wanted[start : start + _BATCH]
+                for r in c.rows(
+                    "SELECT chunk_id, vector_id FROM kb_index_entries WHERE store = ? AND collection = ? "
+                    f"AND collection_id = ? AND vector_id IN ({','.join('?' * len(part))})",
+                    [store, collection, collection_id, *part],
+                ):
+                    out[int(r["vector_id"])] = r["chunk_id"]
+        return out
 
     # caches and log ---------------------------------------------------------------------
 

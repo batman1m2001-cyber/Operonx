@@ -159,7 +159,8 @@ def test_gc_removes_vectors_the_ledger_has_but_no_version_holds(kb):
     )  # a delete that crashed before its index step
     assert not kb.verify("docs").ok
     report = run(kb.gc("docs"))
-    assert report == {"stale": 1, "index_deleted": 1, "ledger_forgotten": 1, "blobs_deleted": 0}
+    assert report == {"stale": 1, "index_deleted": 1, "ledger_forgotten": 1, "lexical_deleted": 0,
+                      "blobs_deleted": 0}  # fmt: skip
     assert vector_id(chunk) not in run(ids_in(kb.store))
     assert kb.verify("docs").ok
 

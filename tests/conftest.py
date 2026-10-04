@@ -28,6 +28,8 @@ kb_catalog:main:
   path: {root}/catalog.db
 kb_blob:main:
   root: {root}/blobs
+kb_lexical:main:
+  path: {root}/lexical.db
 vector_store:kb:
   api_type: faiss
   metric: cosine
@@ -38,6 +40,9 @@ vector_store:kb2:
   dim: 32
 fake_embedding:hash:
   dim: 32
+fake_reranking:overlap: {{}}
+fake_llm:scripted:
+  responses: []
 """
 
 
@@ -75,4 +80,32 @@ def kb(hub):
     )
     kb.embedder = hub.get("fake_embedding:hash")
     kb.store = hub.get("vector_store:kb")
+    return kb
+
+
+@pytest.fixture
+def kbx(hub):
+    """A KnowledgeBase with a 'docs' collection that has a dense and a lexical index and a
+    declared filterable field. The embedder is reached as ``embedding:hash``, an alias of
+    the fake, because operonx's EmbeddingOp (the query side) resolves ``embedding:`` keys only."""
+    from operonx_kb import ChunkerSpec, CollectionSpec, DenseIndexSpec, KnowledgeBase
+    from operonx_kb.model.collection import LexicalIndexSpec
+    from operonx_kb.testing import RecordingConsumer
+
+    hub.alias("embedding:hash", "fake_embedding:hash")
+    recorder = RecordingConsumer()
+    kb = KnowledgeBase(trace=recorder)
+    kb.recorder = recorder
+    kb.create_collection(
+        "docs",
+        CollectionSpec(
+            chunker=ChunkerSpec(max_tokens=120, min_tokens=16),
+            dense=DenseIndexSpec(embedder="hash", store="vector_store:kb"),
+            lexical=LexicalIndexSpec(),
+            filterable={"dept": "keyword"},
+        ),
+    )
+    kb.embedder = hub.get("fake_embedding:hash")
+    kb.store = hub.get("vector_store:kb")
+    kb.lexical = hub.get("kb_lexical:main")
     return kb

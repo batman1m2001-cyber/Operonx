@@ -123,3 +123,45 @@ def test_one_paragraph_edit_in_a_100_page_pdf(kb, tmp_path):
     assert stats["new"] == reembedded and stats["removed"] <= 3
     assert first["stats"]["chunking"]["chunks"] > 100
     assert kb.verify("docs").ok
+
+
+#: Labels that do not resolve because the parse garbles their sentence; each is a defect
+#: of the pipeline, not of the label. When one is fixed this test fails: remove it here.
+KNOWN_UNRESOLVED = {
+    # Two-column PDF: the heuristic layout reads a right-column paragraph line by line
+    # interleaved with the left column's table rows (operonx_kb/pdf/layout.py).
+    "cvi-185-taxi",
+}
+
+
+def test_every_vietnamese_label_resolves_to_one_sentence_of_its_document(kb, tmp_path):
+    """K2: the corpus_vi labels hold in every format the corpus has (md, html, txt, docx,
+    pdf): each quote is found exactly once, in its own document, except the known
+    parse defects."""
+    import json
+
+    from operonx_kb.eval.labels import LabelError, LabelResolver
+
+    gen = _gen()
+    for name, data in gen.corpus(200).items():
+        if int(name[4:7]) % 5 == 0:  # the Vietnamese documents
+            (tmp_path / name).write_bytes(data)
+            run(kb.add("docs", str(tmp_path / name), key=name))
+    cases = [
+        json.loads(line)
+        for line in (GOLDEN.parents[1] / "datasets" / "corpus_vi.jsonl")
+        .read_text("utf-8")
+        .splitlines()
+    ]
+    resolver = LabelResolver()
+    formats, unresolved = set(), set()
+    for case in cases:
+        try:
+            (label,) = resolver.resolve("docs", case["expected"]["relevant"])
+        except LabelError:
+            unresolved.add(case["id"])
+            continue
+        assert len(label) == 1, case["id"]
+        formats.add(case["expected"]["relevant"][0]["doc_key"].rsplit(".", 1)[1])
+    assert len(cases) == 120 and formats == {"md", "html", "txt", "docx", "pdf"}
+    assert unresolved == KNOWN_UNRESOLVED

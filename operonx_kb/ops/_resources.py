@@ -15,8 +15,9 @@ from operonx.core.registry import ResourceHub
 from operonx.providers.vector_stores.base import BaseVectorStore
 
 from operonx_kb.stores.catalog.base import Catalog
+from operonx_kb.stores.lexical.base import LexicalIndex
 
-__all__ = ["resolve", "full_key", "catalog_of", "blobs_of", "vector_store_of"]
+__all__ = ["resolve", "full_key", "catalog_of", "blobs_of", "vector_store_of", "lexical_of"]
 
 
 def full_key(key: str, category: str) -> str:
@@ -46,3 +47,7 @@ def blobs_of(key: str) -> MediaStore:
 
 def vector_store_of(key: str) -> BaseVectorStore:
     return _expect(key, "vector_store", BaseVectorStore, "an operonx vector store")
+
+
+def lexical_of(key: str) -> LexicalIndex:
+    return _expect(key, "kb_lexical", LexicalIndex, "a KB lexical index")
