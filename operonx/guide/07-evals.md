@@ -310,3 +310,104 @@ operonx run labels
 
 `operonx run <eval>` prints the summary and the gate's reasons, and exits
 with the gate's code.
+
+## `operonx eval`: run, compare, report
+
+`operonx eval run` is the eval as one experiment: the record, the gate's
+exit code, and the experiment in the project's score store (`[evals]
+scores`, else the ClickHouse sink of `[tracing]`, else files under the
+runs root; `--no-store` skips it). Flags override the declaration for
+one run: `--repeats`, `--split`/`--tag`/`--cases`/`--sample` (a stable
+sample) choose cases, `--baseline`/`--tolerance`/`--strict` set the gate.
+
+```bash run
+operonx eval list
+operonx eval dataset validate labels
+operonx eval run labels --report md,junit --out out/eval
+operonx eval run labels --cases refund-1,hello --variant "fewer cases" --no-store
+operonx eval run labels --baseline latest --tolerance 0.5 --report md --out out/eval2
+operonx eval power labels --delta 0.1 --discordance 0.2
+```
+
+| Exit | `run` (and `compare --tolerance`) |
+|---|---|
+| 0 | pass, or inconclusive (with a warning) |
+| 1 | failed or regressed |
+| 2 | inconclusive under `--strict`, or the command could not run as asked (unknown eval, bad flag, no baseline at the merge-base, an unopenable store) |
+| 3 | an infrastructure error: retry, the quality is unknown |
+
+`--baseline main` (= `git:origin/main`) compares with the experiment of
+`git merge-base HEAD origin/main` — the commit the branch started from —
+read from the score store. Main's own runs put it there; when there is
+none the command stops before running anything and says how to get one.
+In CI that means a shared store (ClickHouse) and full git history.
+
+The same as a library: any experiment, from its record or the store.
+
+```python
+from operonx.app.evals import compare, load_experiment
+from operonx.app.evals.experiments import experiments_of
+from operonx.app.evals.report import junit, markdown
+
+newer, older = experiments_of("labels", record_dirs=["evals"])[:2]
+print(markdown(newer))  # what CI posts on the merge request
+assert junit(newer).startswith('<?xml version="1.0" encoding="UTF-8"?>')
+
+got = compare(older, newer, tolerance=0.05)  # newer against older, paired
+print(got["verdict"], got["comparison"]["tests"][0]["diff"])
+assert compare(older, newer)["verdict"] is None  # no tolerance: reported, not judged
+assert load_experiment(newer.experiment_id, record_dirs=["evals"]).eval == "labels"
+```
+
+## Calibrate before you pick a tolerance
+
+A tolerance smaller than the eval's own noise makes every run
+`inconclusive`. `calibrate` runs the eval k times on one commit (an A/A
+test), and measures, through the gate itself, the tolerance 95% of A/A
+runs pass at — per number of repeats. `power` says how many cases a drop
+needs.
+
+```bash run
+operonx eval calibrate labels --runs 2 --simulations 50 --tolerance 0.3 --out out/cal
+```
+
+- Three cases that never flip still need a 56-point tolerance: the
+  interval is about the cases, not just the flakes. The note says the
+  30 points asked for cannot be had, and `power` says how many cases it
+  would take.
+- Put the number in `Gate(tolerance=…)` (or `[job.gate]`), where the
+  merge request shows it. `calibrate --experiments a,b,c` reads runs
+  that already exist instead of running.
+
+## A pytest session as an experiment
+
+The plugin is opt-in (`-p operonx.app.evals.pytest_plugin`, or
+`pytest_plugins = [...]` in the root `conftest.py`); installing operonx
+never loads it. Each test that calls `run_case` is one case of the
+session's experiment, and the case's verdict is the test's outcome.
+
+```python file=test_labels.py
+import pytest
+
+from operonx.app.evals import exact
+from operonx.app.evals.pytest_plugin import cases
+
+from labels import flow
+
+
+@pytest.mark.parametrize("case", cases("dataset:labels"))
+def test_label(case, run_case):
+    got = run_case.sync(flow, case, evaluators=[exact("label")], item_input="text")
+    assert got.trace.path() == ["c"]  # ops as the graph names them: `c = classify(...)`
+```
+
+```bash run
+pytest -p operonx.app.evals.pytest_plugin test_labels.py -q --operonx-eval-name labels_pytest --operonx-eval-report junit
+```
+
+- An async test writes `got = await run_case(...)`.
+- A failing check fails its test with the reason; a failing `assert` is
+  recorded on the case. The session's record is
+  `evals/<--operonx-eval-name>/<run_id>`, with the gate and its reports
+  (`--operonx-eval-report md,json,junit`); `--operonx-eval-baseline` and
+  `--operonx-eval-tolerance` compare it like an eval.

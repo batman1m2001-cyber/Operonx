@@ -35,11 +35,14 @@ from .stats import Estimate, benjamini_hochberg, compare_paired, holm, seed_of
 
 __all__ = [
     "CaseOutcome",
+    "comparability",
+    "compare_runs",
     "EXIT_CODES",
     "Gate",
     "PASS_METRIC",
     "VERDICTS",
     "decide",
+    "exit_code",
     "outcomes",
 ]
 
@@ -163,8 +166,10 @@ class Gate:
             ``{metric: floor}``. A metric under its floor fails the run —
             exactly ``Eval(threshold=…)``'s 1.9.0 rule.
         baseline: What to compare against: ``"latest"`` (this eval's last
-            finished run, fixed when the run starts) or a run id under its
-            ``record_dir``.
+            finished run, fixed when the run starts), a run id under its
+            ``record_dir``, or a commit's experiment from the score store:
+            ``"git:<ref>"`` is the one at ``git merge-base HEAD <ref>``,
+            ``"main"`` is ``"git:origin/main"``.
         tolerance: How large a drop matters, per gated metric (a number,
             or ``{metric: number}``). Required with a ``baseline``.
         metrics: The metrics compared against the baseline that can gate
@@ -200,10 +205,10 @@ class Gate:
                 raise ValueError(f"Gate: tolerance for {name!r} is a drop in [0, 1], not {t}")
         if self.baseline is not None:
             text = str(self.baseline)
-            if text in ("main",) or text.startswith("git:"):
+            if text == "git:" or not text.strip():
                 raise ValueError(
-                    f"Gate(baseline={text!r}) needs the experiment store, which does not "
-                    "exist yet; use 'latest' or a run id from this eval's record_dir"
+                    f"Gate(baseline={text!r}) names no baseline: 'latest', a run id, "
+                    "'main' or 'git:<ref>'"
                 )
             missing = [m for m in self.gated() if m not in self._tolerances]
             if missing:
@@ -226,8 +231,10 @@ class Gate:
     def thresholds(self) -> Dict[str, float]:
         return dict(self._thresholds)
 
-    def tolerance_for(self, metric: str) -> float:
-        return self._tolerances[metric]
+    def tolerance_for(self, metric: str) -> Optional[float]:
+        """How large a drop of *metric* matters; ``None`` when the gate does
+        not say (a comparison then reports it without a verdict)."""
+        return self._tolerances.get(metric)
 
     def named_metrics(self) -> List[str]:
         """Every metric name the gate mentions, to check against the eval's."""
@@ -344,6 +351,8 @@ def compare_runs(
     for t in tests:
         if t["gated"]:
             tol = gate.tolerance_for(t["metric"])
+            if tol is None:
+                continue  # compared, not judged: nobody said what drop matters
             if t["diff"] < -tol and t["p_holm"] < gate.alpha:
                 t["verdict"] = REGRESSED
             elif t["ci_lo"] >= -tol:
@@ -362,6 +371,26 @@ def compare_runs(
         "not_compared": skipped,
         "flips": _flips(base, cur, ids),
     }
+
+
+def comparability(
+    base_id: str,
+    base_fp: Optional[Mapping],
+    fingerprint: Optional[Mapping],
+    cases: int,
+) -> List[str]:
+    """What makes two experiments less than directly comparable: a
+    baseline with no fingerprint, or another dataset or evaluator set."""
+    if not base_fp:
+        return [f"baseline {base_id} has no fingerprint: comparable only by case id"]
+    out = []
+    for k in ("dataset_version", "evaluators_hash"):
+        if fingerprint and base_fp.get(k) != fingerprint.get(k):
+            out.append(
+                f"{k} differs from baseline {base_id}: compared on the "
+                f"{cases} shared, unchanged cases"
+            )
+    return out
 
 
 # ── the decision ─────────────────────────────────────────────────────────
@@ -449,17 +478,7 @@ def decide(
             base_id, base_cases, base_fp = baseline
             comparison = compare_runs(gate, base_cases, current, baseline_id=base_id)
             comparison["baseline"] = base_id
-            if not base_fp:
-                warnings.append(
-                    f"baseline {base_id} has no fingerprint: comparable only by case id"
-                )
-            elif fingerprint:
-                for k in ("dataset_version", "evaluators_hash"):
-                    if base_fp.get(k) != fingerprint.get(k):
-                        warnings.append(
-                            f"{k} differs from baseline {base_id}: compared on the "
-                            f"{comparison['cases']} shared, unchanged cases"
-                        )
+            warnings.extend(comparability(base_id, base_fp, fingerprint, comparison["cases"]))
             for t in comparison["tests"]:
                 if not t["gated"]:
                     continue

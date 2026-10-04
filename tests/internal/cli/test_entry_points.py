@@ -70,7 +70,7 @@ def test_the_operonx_command_lists_every_subcommand():
         [str(BIN / "operonx"), "--help"], capture_output=True, text=True, timeout=60
     )
     assert got.returncode == 0
-    for name in ("init", "guide", *ALIASES):
+    for name in ("init", "guide", *ALIASES, "eval"):
         assert f"    {name} " in got.stdout, got.stdout
 
 

@@ -1,6 +1,6 @@
 # Evals — experiments with an identity, repeats, error bars and a gate
 
-Status: **E0 committed 2026-10-04; E1 built on `feat/evals-e1`; E2–E3 on `feat/evals-e2`.**
+Status: **E0 committed 2026-10-04; E1 built on `feat/evals-e1`; E2–E3 on `feat/evals-e2`; E4 on `feat/evals-e4`.**
 Source: `docs/roadmap/ROADMAP.md` §3 and the full design in `docs/roadmap/track4_eval.md`
 (cited below as T4 §n). This file is the working plan: it keeps what T4 decided, resolves
 what T4 left to the implementer, and says what each phase ships and how it is tested.
@@ -55,7 +55,7 @@ rate becomes the *recommended* `repeats`/`tolerance` in the E4 `calibrate` docs.
 | D13 | Bootstrap engine | Resamples the *distinct* units with a multinomial draw (sequential exact binomials) when there are few of them (≤ n/4), else draws the n units directly — the same distribution either way, checked against `random.choices` in the tests. Paired differences of 0/1 or of shares over a few repeats have a handful of distinct values, so a 300-case comparison costs milliseconds instead of 0.17 s (measured: 2000 × 300 `random.choices`) | the A/A and power simulations need 1000 gates each |
 | D14 | Gate | `Gate(threshold, baseline, tolerance, metrics, must_pass_tag, max_error_rate, alpha, strict, bootstrap)`. Verdicts: `pass`, `failed` (an absolute threshold missed — 1.9.0 semantics), `regressed`, `inconclusive`, `error` (infra). Per gated metric vs baseline: REGRESSED when `diff < −tolerance` and Holm-adjusted `p < alpha`; PASS when `ci_lo ≥ −tolerance`; INCONCLUSIVE otherwise. Precedence: error > failed/regressed > inconclusive > pass | T4 §8.3 |
 | D15 | Tolerance default | None: a `Gate` with a `baseline` must say its `tolerance` (a number, or a dict per metric). A zero default would call almost every A/A comparison inconclusive; any other number is a guess. `calibrate` (E4) measures it | T4 §8.3 "never a guess" |
-| D16 | Baseline (E1) | `"latest"` (the eval's last finished run in its `record_dir`, fixed when this run starts) or a run id there. `"main"` and `"git:<ref>"` need the ScoreStore and raise a clear error until E3 | runs exist locally today; nothing invented |
+| D16 | Baseline (E1) | `"latest"` (the eval's last finished run in its `record_dir`, fixed when this run starts) or a run id there. `"main"` and `"git:<ref>"` need the ScoreStore and raise a clear error until then (E4: D40) | runs exist locally today; nothing invented |
 | D17 | Must-pass tier | Cases tagged `must_pass_tag` (`"critical"` by convention). With a baseline: one that passed every repeat there and fails every repeat now → `regressed`. Without one: one that fails every repeat → `failed`. No statistics | T4 §8.3; "already failing" needs a baseline to be known |
 | D18 | Infra | Error rate (items that failed or timed out, over trials) above `max_error_rate` (default 0.05), or a run that did not finish cleanly (source error, stopped) → `error`, exit 3 | "the endpoint was down" ≠ "the prompt got worse" |
 | D19 | Exit codes | `run.json["eval"]["gate"]["exit_code"]`: 0 pass, 1 failed/regressed, 2 inconclusive under `strict`, 3 error; `operonx run` returns it. Inconclusive without `strict` exits 0 and the reasons say why | T4 §8.3 |
@@ -149,7 +149,58 @@ decorator and `Verdict` class, judges as traced graphs and the judge cache's use
 - Measured: evaluator overhead with and without `trace` (`scripts/bench_eval_overhead.py`);
   50 cases × 3 async fake judges, sequential vs gathered.
 
-## 7. Log
+## 7. Decisions (E4)
+
+Branch `feat/evals-e4`, stacked on `feat/evals-e2`. Same rules: what T4 decided is kept;
+what it left open is decided here before the code.
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| D36 | CLI shape | `operonx eval` is a delegated subcommand (`operonx/cli/eval.py`, its own `main(argv)`, one parser with a subparser per command): `run`, `compare`, `report`, `rescore`, `calibrate`, `power`, `list`, `dataset validate\|stats\|diff`. Every command takes `-f/--manifest`; an eval is named as `operonx run` names a job (a declared name, or `module:attr`). `align`, `online`, `import`, `migrate-reviews`, `dataset from-runs` and `--no-cache` arrive with what they drive (judges E5, online and queues E7) | T4 §12; one parser per command (`cli/main.py`) |
+| D37 | Exit codes | `run`: the gate's — 0 pass (and inconclusive), 1 failed or regressed, 2 inconclusive under `--strict`, 3 an infrastructure error. `compare` with a `--tolerance`: the same, from its gated metrics; without one it only reports, 0. A command that cannot run as asked (unknown eval, bad flag, no baseline at the merge-base, a store that cannot be opened) exits 2 with `error: …` on stderr — argparse's convention and `operonx run`'s already. Under `--strict` both 2s mean "not shown to be good, and a retry will not help"; the message says which | T4 §8.3; 3 stays "retry the job" |
+| D38 | Which score store a project uses | `project_score_store(root)` (`operonx/telemetry/scores/project.py`), read from the project's files like `project_stores`, never by importing its code: (1) `[evals] scores = "score_store:<n>"` in `operonx.toml` → that `resources.yaml` entry; (2) else the first `trace_clickhouse:` sink (or `run_store:` with `backend = "clickhouse"`) in the project-wide `[tracing] sinks` → a ClickHouse score store on the same connection (the runs' database, schema v3); (3) else `files` under `<runs root>/scores`, where `local` keeps runs. ClickHouse wins over `local` when both are listed: an experiment is compared across machines (an MR's CI against main's), and a project that traces to ClickHouse has said where shared data lives. `[evals]` has one key, `scores`; any other key raises naming it (a typo must not quietly mean "local") | T4 §6.1, with the T4 key `store` spelled `scores` like `[[job]] scores` and `Eval(scores=)` |
+| D39 | CLI runs are stored | `operonx eval run` and `calibrate` write each experiment to the project's score store unless the eval sets its own `scores` or `--no-store` is given. A store that cannot be opened (an unset `${CLICKHOUSE_HOST}`) is an error naming the variable, not a silent skip. The library `Eval` keeps D34 (unset writes nothing) | an MR can only find main's experiment if main's run was written somewhere shared |
+| D40 | `baseline="main"` / `"git:<ref>"` | `"main"` is `"git:origin/main"` (a repo whose default branch has another name says `git:origin/<branch>`). The baseline is the experiment of `git merge-base HEAD <ref>` (12 hex, as `code_version`), asked at the eval's root, read from the eval's `scores` store, else the project's. Candidates: this eval's experiments at that commit that finished (`ended_at` set), are not `error`, and were run on a clean tree (`version_dirty` false: a dirty run is not that commit's code). The one with this run's `dataset_version` and `evaluators_hash` wins, newest first; else the newest candidate, and the gate's existing warnings say what differs and that it compared the shared, unchanged cases. None → `ValueError` before the record opens (no run, no cost) naming the ref, the sha, the store and the fix (run the eval on main: a scheduled main pipeline keeps baselines warm). A merge-base git cannot compute (a shallow clone, an unfetched ref) is the same error with `git fetch` advice. The comparison records `baseline_ref` (`git:origin/main @ <sha>`) | T4 §14 |
+| D41 | One experiment, two places | `operonx.app.evals.experiments.load_experiment(ref, store=, record_dirs=)`: a record directory, or an id looked up in the record dirs first (they hold expected values and full verdicts), then the store. From the store, a trial is an item plus its item scores (`passed` per check). Either way the result (`ExperimentData`: id, eval, summary in `run.json["eval"]`'s shape, trials, items) feeds the same reports, `compare`, `calibrate` and `power` | experiments run in CI exist only in the store; local ones in both |
+| D42 | Reports | `report.py`: **markdown** (an MR comment: the verdict and exit code first, reasons and warnings, a metric table with CIs, the comparison table — baseline, this run, diff, CI, p, verdict — flips by class, up to 10 failing cases with their failed checks and output snippet, flaky cases, cost and latency); **json** (`ExperimentData.as_dict()`); **JUnit XML**: one `<testsuite name="eval:<name>">`; a `gate` testcase first (`<failure>` for failed/regressed, `<error>` for error, `<skipped>` for inconclusive, a failure under strict); then one testcase per case × check (`classname` `<eval>.<case>`, `name` the check), a `<failure>` unless every repeat passed (`k/n repeats passed`); a case whose trials errored gets a `run` testcase with `<error>`; an eval with no checks gets one `pass` testcase per case. Validated against the Jenkins xunit `junit-10.xsd` (vendored in the tests, MIT) — the shape GitLab's JUnit widget reads; GitHub has no native widget and renders it through a JUnit report action, which the CI docs show | T4 §14 |
+| D43 | `compare A B` | Any two experiments (`load_experiment`), compared by the gate's `compare_runs` with A as the baseline. `--tolerance` optional: without it every metric gets its diff, CI, p (Holm for `--metrics`, BH for the rest) and no verdict; `compare_runs` now leaves a gated metric without a tolerance unjudged instead of raising | exploration needs no gate; a decision does |
+| D44 | `calibrate` | Runs the eval `--runs k` times on this commit (default 3) — or reads `--experiments a,b,c` — and measures the A/A noise: per metric, the run-to-run SD of the means; per case, whether it flipped; the flaky share; the flip rate (P(two trials of a case disagree), `2·c(m−c)/(m(m−1))` averaged). Model: each case passes with its own p_i = c_i/m_i over its k·r trials (a case that never flipped is simulated as deterministic — more runs see rarer flakes). The tolerance is measured **through the gate**: 200 seeded synthetic A/A pairs drawn from the p_i (same clusters) are compared by `compare_runs`, and a gated metric passes exactly when `ci_lo ≥ −tolerance`, so the tolerance 95% of A/A runs pass at is the 95th percentile of `−ci_lo` (rounded up to 0.1 pt). Tabled for r = 1, 2, 3, 5 and the configured repeats. *Changed while building:* the closed form first written here, `(z_{1−α/2}+z_{0.95})·√(2·mean v_i/(n·r))`, counts only the flakes; the gate's interval also carries the case-sampling width (40 cases that always pass cannot rule out an 8.8-point drop — `newcombe_paired(40,0,0,0)`), so the formula promised tolerances the gate never passes. Recommended: the fewest repeats whose tolerance ≤ the target (`--tolerance`, else the eval's gate tolerance), with the A/A pass share at the target per row; none → "too noisy to gate at this size", and `power` says how many cases. Printed, and with `--out` written as `calibration.json`; not read back by a `tolerance="calibrated"` — the number goes into `Gate(tolerance=)`, where the MR reviews it | T4 §8.5, "never a guess" |
+| D45 | `power` | `n ≈ (z_{1−α/2}·√p_d + z_{power}·√(p_d − δ²))² / δ²` (T4 §8.5) for a paired binary metric, and the inverse — the smallest drop the dataset's n detects (bisection). p_d: `--discordance`, else measured from the eval's two newest finished experiments as the share of shared cases whose `pass` differs (mean \|s_B − s_A\| for shares over repeats). Fewer than two → an error asking for `--discordance` or a second run. Checked in the tests by simulating McNemar at the computed n | T4 §8.5 |
+| D46 | pytest plugin | `operonx/app/evals/pytest_plugin.py`, never in `pytest11`; on with `-p operonx.app.evals.pytest_plugin` or `pytest_plugins = [...]`. The **session is one experiment** (name `--operonx-eval-name`, default `pytest`; record under `--operonx-eval-dir`, default `<rootdir>/evals`; variant `pytest`), opened by the first test that uses it. `run_case(graph, case, evaluators=…, item_input=…, inputs=…)` (async fixture-returned callable) runs the graph once, traced with `origin=eval`, through the job runner's own per-item path, judges the case and returns a `CaseRun` (`output`, `outputs`, `trace`, `checks`, `passed`, `why`, sync `check(ev)` for one more check). One test is one item keyed by its node id; a second `run_case` in one test raises (parametrize instead). **The verdict is the test's outcome**: a test whose body passed but whose checks failed is reported failed with `why`; a test whose body failed records an `assert` check with the message. At session end the record is finished with the eval's own `summarize` (the gate-less rule, or `--operonx-eval-baseline`/`--operonx-eval-tolerance`/`--operonx-eval-strict`), the terminal summary prints the verdict and the record's path, `--operonx-eval-report md,json,junit` with `--operonx-eval-out` writes the reports, a non-zero gate makes a passing session exit 1, and `--operonx-eval-store` writes to the project's score store. `cases(dataset, split=, tags=)` gives `pytest.param`s with the case ids. T4's `@pytest.mark.operonx_eval` (gating a declared eval) is not added: a plain test calling `Eval(...).run_sync()` does it, and `operonx eval run` is CI's | T4 §13 |
+| D47 | Dataset selection and checks | `Dataset.select(split=, tags=, ids=, sample=)` returns a dataset view: `split` matches the case field, `tags` any of them, `ids` exactly (an unknown id is an error), `sample=N` the N cases with the smallest `sha256(id)` (stable across runs and machines). The selection is the experiment's dataset, so its `dataset_version` is of the selected cases; `run.json["eval"]` records the selection. `Dataset.problems()` lists what `validate` reports (a line that is not JSON, a duplicate id, `tags` not a list of strings, `split`/`cluster` not a string, a `trajectory` that is not `{ops: [...], tool_calls: [...]}`), each with its line; `operonx eval dataset diff <name> [--against REF]` compares case by case with the file at a git ref (added, removed, changed `case_hash`) | T4 §12 `--split/--tag/--cases/--sample`, `dataset validate/diff/stats` |
+| D48 | Variant and split on the experiment | `Eval(variant="…")` and the selection's `split` land in `run.json["eval"]` and on the `Experiment` row (`variant`, `split`) | T4 §5.1 |
+
+## 8. E4 tests
+
+- `tests/internal/telemetry/test_project_score_store.py`: each resolution rule and its
+  precedence, `${VAR}` from `.env`, an unknown `[evals]` key, an unresolvable sink.
+- `tests/internal/app/evals/test_baseline_git.py`: a real git repo with main and a branch;
+  main's experiment is found through the files store at the merge-base; dirty, errored and
+  other evals' experiments are not; dataset-version preference; none → the error, raised
+  before any case runs (a counter); a shallow/unknown ref → the git error.
+- `test_reports.py`: markdown sections against a hand-built experiment; JSON round trip;
+  JUnit validated with `xmlschema` against `junit-10.xsd`, counts checked by hand, flaky,
+  errored, no-check and gate testcases; the same report from a record and from the store.
+- `test_calibrate.py`: a deterministic eval's tolerance is exactly the Newcombe interval's
+  lower end; the flip rate by hand; the suggested tolerance passes ≥ 92% of fresh A/A pairs
+  (another seed) judged by the gate itself, and half of it < 80%; the recommendation and
+  "too noisy"; `power` gives 312 for p_d = 0.10, δ = 0.05 (and the hand formula), McNemar at
+  that n detects the drop 74–84% of the time (simulation); the inverse round-trips;
+  `compare` with and without a tolerance against McNemar and Newcombe by hand.
+- `test_dataset_select.py`: selection rules, versions of selections, problems, diff.
+- `tests/internal/cli/test_eval_cli.py`: the exit-code matrix through `operonx eval run` —
+  0 pass, 1 failed, 1 regressed (a baseline), 2 inconclusive under `--strict`, 3 error (a
+  graph that raises), 2 usage — plus `compare`, `report`, `rescore`, `calibrate`, `power`,
+  `list`, `dataset`, reports written by `--report`, the experiment in the store, the
+  `--baseline main` path end to end in a git repo.
+- `tests/internal/app/evals/test_pytest_plugin.py` (`pytester`): not loaded without `-p`;
+  session = one experiment with one item per test; parametrised cases; a failing check fails
+  its test; a failing assert is recorded; reports written; gate exit status; second
+  `run_case` refused.
+- Guide: `07-evals.md` gains the CLI (`bash run` snippets), reports and the pytest plugin;
+  `docs/guide/13-evals.md` gains the CLI, CI for GitLab and GitHub, and the plugin.
+
+## 9. Log
 
 **E1 built, 2026-10-04** (`feat/evals-e1`).
 
@@ -205,3 +256,34 @@ decorator and `Verdict` class, judges as traced graphs and the judge cache's use
 - Found on the way: `clickhouse-connect` returns `''` for a `String` column written as
   `''`, so a trace score's empty `case_id` read back as `''`; score ids that a target does
   not need are `Nullable` in the table and written as `NULL`.
+
+**E4 built, 2026-10-04** (`feat/evals-e4`).
+
+- Exit-code matrix through `operonx eval run` (`tests/internal/cli/test_eval_cli.py`): 0
+  pass, 1 failed, 1 regressed, 2 inconclusive under `--strict` (0 without), 3 every case
+  raising, 2 for an unknown eval / a tolerance without a baseline / an unknown report format
+  / an unopenable store / no experiment at the merge-base (nothing runs, no record opens).
+  `--baseline git:main` end to end in a real git repo: refused before main stored an
+  experiment, `regressed` after, the comparison naming `git:main @ <sha>`.
+- JUnit: every report in the tests validates against Jenkins xunit `junit-10.xsd`
+  (`xmlschema`, a dev dependency). A record and its rows in the files store give byte-identical
+  Markdown and JUnit.
+- `calibrate`, checked through the gate (`test_calibrate.py`): 300 cases, 30 flaky at
+  p = 0.6, three runs → suggested tolerance 4.4 pts; 300 fresh A/A pairs (another seed)
+  judged by `compare_runs` pass 96.3% of the time at it and 43.7% at half of it. A
+  deterministic eval's tolerance is exactly `−newcombe_paired(…, 0, 0, …)[0]` (40 always-
+  passing cases: 8.8 pts; the guide's 3 cases: 56.2 pts). Cost per table row at 300 cases and
+  200 simulations: ~0.6 s for one repeat (McNemar), 7–11 s for 2–5 repeats (the bootstrap,
+  B = 2000).
+- `power`: p_d = 0.10, δ = 0.05 → 311.6 → 312 cases (T4's number, and by hand); exact
+  McNemar at n = 312 detects the drop in 77% of 3000 simulated runs — the normal
+  approximation is a little optimistic, as expected of an exact test.
+- Overhead (`scripts/bench_eval_overhead.py`, CPU time, interleaved E3 `1cbd46e` vs E4 on a
+  shared machine): eval over job **+145 / +147 / +91 µs/case** before, **+137 / +155 / +112**
+  after — no measurable change (the verdict refactor into `recorded_verdict`, `p95_ms` and
+  `cost_usd` in the summary).
+- Found on the way: the calibrate formula first written in D44 counted only the flakes and
+  promised tolerances the gate never passes (see D44); the run summary had no `p95_ms` or
+  `cost_usd`, so a report read from a record and from the store differed until
+  `numbers()` computed them; an unknown `--cases` id surfaced as a source error and exit 3
+  (infrastructure) until the CLI checks the selection before the run.

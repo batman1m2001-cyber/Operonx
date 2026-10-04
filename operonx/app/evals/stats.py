@@ -21,6 +21,8 @@ What each answers:
 * :func:`compare_paired` — picks McNemar or the bootstrap for one metric.
 * :func:`holm` / :func:`benjamini_hochberg` — adjusted p-values for
   several metrics at once (gated, and exploratory).
+* :func:`paired_sample_size` / :func:`detectable_drop` — how many cases
+  a drop needs, and what drop a number of cases can see.
 """
 
 from __future__ import annotations
@@ -38,12 +40,14 @@ __all__ = [
     "benjamini_hochberg",
     "clustered_se",
     "compare_paired",
+    "detectable_drop",
     "estimate",
     "holm",
     "mcnemar",
     "mean_se",
     "newcombe_paired",
     "paired_bootstrap",
+    "paired_sample_size",
     "pass_hat_k",
     "seed_of",
     "wilson",
@@ -467,6 +471,60 @@ def compare_paired(
         corr=_corr(a, b),
         units=len(set(clusters)) if grouped else n,  # type: ignore[arg-type]
     )
+
+
+# ── how many cases ───────────────────────────────────────────────────────
+
+
+def _power_args(p_d: float, alpha: float, power: float) -> Tuple[float, float]:
+    if not 0 < p_d <= 1:
+        raise ValueError(f"the discordance rate is a share of cases in (0, 1], not {p_d!r}")
+    if not 0 < alpha < 1 or not 0 < power < 1:
+        raise ValueError("alpha and power are probabilities in (0, 1)")
+    return z_of(1 - alpha), NormalDist().inv_cdf(power)
+
+
+def paired_sample_size(
+    p_d: float, delta: float, *, alpha: float = 0.05, power: float = 0.8
+) -> float:
+    """Cases a paired binary comparison needs to detect a drop of *delta*
+    with probability *power* at two-sided level *alpha*, when a share
+    *p_d* of cases differ between the two runs (McNemar's normal
+    approximation, Connor 1987)::
+
+        n ≈ (z_{1−α/2}·√p_d + z_{power}·√(p_d − δ²))² / δ²
+
+    p_d = 0.10, δ = 0.05 → 311.6, so 312 cases. A drop is a change of
+    *delta* in the discordant cases' balance, so it cannot exceed *p_d*.
+    """
+    za, zb = _power_args(p_d, alpha, power)
+    if not 0 < delta <= p_d:
+        raise ValueError(
+            f"a drop of {delta!r} needs at least that share of cases to change "
+            f"(discordance {p_d!r}): 0 < delta ≤ p_d"
+        )
+    return (za * math.sqrt(p_d) + zb * math.sqrt(p_d - delta * delta)) ** 2 / delta**2
+
+
+def detectable_drop(
+    n: int, p_d: float, *, alpha: float = 0.05, power: float = 0.8
+) -> Optional[float]:
+    """The smallest drop *n* paired cases detect with probability *power*:
+    :func:`paired_sample_size` solved for δ (bisection; it falls with δ).
+    ``None`` when not even a drop of *p_d* (every changed case a loss) is."""
+    _power_args(p_d, alpha, power)
+    if n < 1:
+        raise ValueError("detectable_drop() needs at least one case")
+    if paired_sample_size(p_d, p_d, alpha=alpha, power=power) > n:
+        return None
+    lo, hi = 1e-9, p_d
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if paired_sample_size(p_d, mid, alpha=alpha, power=power) > n:
+            lo = mid
+        else:
+            hi = mid
+    return hi
 
 
 # ── several metrics at once ──────────────────────────────────────────────

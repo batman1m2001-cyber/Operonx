@@ -12,7 +12,8 @@ on the run stores' backends:
 * ``clickhouse`` — the runs' database, schema version 3
 
 ``score_store:`` in ``resources.yaml`` declares one; :func:`open_score_store`
-opens one from a mapping. The contract is in :mod:`.base`.
+opens one from a mapping; :func:`project_score_store` says which one a
+project uses (``[evals]``, else its ``[tracing]`` sinks). The contract is in :mod:`.base`.
 """
 
 from operonx.core.registry import REGISTRY
@@ -33,6 +34,7 @@ from .model import (
     ScoreFilter,
     score_id_of,
 )
+from .project import ScoreStoreSource, project_score_store
 
 __all__ = [
     "BACKENDS",
@@ -50,8 +52,10 @@ __all__ = [
     "ScoreFilter",
     "ScoreStore",
     "ScoreStoreConfig",
+    "ScoreStoreSource",
     "create_score_store",
     "open_score_store",
+    "project_score_store",
     "score_id_of",
 ]
 

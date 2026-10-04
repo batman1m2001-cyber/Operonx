@@ -63,6 +63,10 @@ between it and `trace=` in Python. See [Tracing](../guide/07-tracing.md#switchin
 ::: operonx.app.evals.json_match
 ::: operonx.app.evals.llm_judge
 ::: operonx.app.evals.Gate
+::: operonx.app.evals.compare
+::: operonx.app.evals.calibrate
+::: operonx.app.evals.load_experiment
+::: operonx.app.evals.ExperimentData
 ::: operonx.app.evals.TraceView
 ::: operonx.app.evals.OpRow
 ::: operonx.app.evals.ToolCall
