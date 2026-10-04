@@ -44,6 +44,7 @@ from operonx.telemetry.runs.langfuse import LangfuseRunStore, records_of_langfus
 from operonx.telemetry.runs.model import MAX_SAMPLES
 from operonx.telemetry.runs.retention import plan_retention
 from operonx.telemetry.runs.sqlite import SqliteRunStore
+from tests.internal.telemetry._stores import BACKENDS, open_backend
 
 # -- building traces by hand, so every number is known -----------------------------
 
@@ -258,54 +259,9 @@ def _row(n: OpExecution) -> dict:
 # -- the contract, per backend --------------------------------------------------------
 
 
-#: A real Postgres for the postgres store — e.g. a throwaway container:
-#: docker run --rm -d -p 127.0.0.1:55439:5432 -e POSTGRES_PASSWORD=x pgvector/pgvector:pg16
-#: OPERONX_TEST_PG_DSN=postgresql://postgres:x@127.0.0.1:55439/postgres
-_PG_DSN = os.environ.get("OPERONX_TEST_PG_DSN", "")
-
-
-@pytest.fixture(
-    params=[
-        "files",
-        "sqlite",
-        "mongo",
-        pytest.param(
-            "postgres", marks=pytest.mark.skipif(not _PG_DSN, reason="set OPERONX_TEST_PG_DSN")
-        ),
-        # a throwaway server: see _clickhouse.py; skips when none answers
-        "clickhouse",
-    ]
-)
+@pytest.fixture(params=BACKENDS)
 def store(request, tmp_path):
-    if request.param == "files":
-        s = FilesRunStore(root=tmp_path / "runs", refresh_every=0)
-    elif request.param == "sqlite":
-        s = SqliteRunStore(path=tmp_path / "runs.sqlite")
-    elif request.param == "mongo":
-        mongomock = pytest.importorskip("mongomock")
-        from operonx.telemetry.runs.mongo import MongoRunStore
-
-        s = MongoRunStore(
-            client=mongomock.MongoClient(),
-            database=f"t{uuid.uuid4().hex[:8]}",
-            media_dir=tmp_path / "media",
-        )
-    elif request.param == "clickhouse":
-        from tests.internal.telemetry._clickhouse import open_store
-
-        s = open_store(request, tmp_path)
-    else:
-        from operonx.telemetry.runs.postgres import PostgresRunStore
-
-        prefix = f"t{uuid.uuid4().hex[:8]}_"
-        s = PostgresRunStore(_PG_DSN, prefix=prefix, media_dir=tmp_path / "media")
-
-        def drop():
-            with s.index._tx() as cur:
-                for table in ("runs", "op_rollups", "records"):
-                    cur.execute(f"DROP TABLE IF EXISTS {prefix}{table}")
-
-        request.addfinalizer(drop)
+    s = open_backend(request.param, request, tmp_path)
     for t in _calls():
         s.consume(t)
     return s

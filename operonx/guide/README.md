@@ -22,6 +22,8 @@ websocket, and an **Application** bundles a product's jobs and services.
    `errors="raise"`, `max_concurrency=`, concurrent writers.
 7. [Evals](07-evals.md): cases, repeats, a gate with a baseline, exit codes;
    `operonx eval`, reports, calibrate, the pytest plugin.
+8. [Inside a run](08-runs.md): `run_context()`, `child()`, several stream
+   modes at once and `tasks`, live traces.
 
 ## Install
 
@@ -49,6 +51,7 @@ pointing at it) for coding assistants. It also copies this guide into
 ```python
 from operonx import END, PARENT, SCRATCH, START, EmitOp, InterruptOp, Operon, bootstrap, graph, op
 from operonx import OpFailed, Retry, Timeout  # failure policies (page 6)
+from operonx import TaskFailed, TaskFinished, TaskStarted, child, run_context  # page 8
 from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
 from operonx.agents.ops.model_ops import make_llm_caller
 from operonx.app import Application, Eval, Service, asgi, env, http, schedule, webhook, websocket

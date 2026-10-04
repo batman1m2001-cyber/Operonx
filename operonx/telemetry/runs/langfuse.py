@@ -50,7 +50,7 @@ def records_of_langfuse_trace(detail: Dict[str, Any]) -> Iterator[Dict[str, Any]
             duration = (_epoch(obs["endTime"]) - _epoch(obs["startTime"])) * 1000.0
         status = meta.get("status") or ("error" if obs.get("level") == "ERROR" else "ok")
         start = _epoch(obs.get("startTime"))
-        yield {
+        row = {
             "op_id": obs.get("id"),
             "op_name": obs.get("name"),
             "op_full_name": meta.get("op_full_name") or obs.get("name"),
@@ -67,6 +67,11 @@ def records_of_langfuse_trace(detail: Dict[str, Any]) -> Iterator[Dict[str, Any]
             "outputs": obs.get("output"),
             "upstreams": meta.get("upstreams"),
         }
+        # the keys LangfuseConsumer writes only when they are not the default
+        for key in ("attempt", "attrs", "inputs_from"):
+            if meta.get(key):
+                row[key] = meta[key]
+        yield row
 
 
 class LangfuseRunStore(RunStore):

@@ -216,3 +216,52 @@ class TestHumanInTheLoop:
         prompts, msg = await _dispatch({"id": "1", "name": "echo", "args": {"a": 1}})
         assert prompts == []
         assert msg["status"] == "success"
+
+
+class TestDispatchCallsTheFunction:
+    """K0: ``execute`` runs the tool's own function. It used to build a
+    ``FuncOp`` per call only to call its ``.core`` — the raw function — which
+    cost ~2 ms per call (source parsing and bytecode disassembly) and bought
+    no tracing."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_builds_no_op(self, monkeypatch):
+        from operonx.agents.graphs.dispatch import execute
+        from operonx.core.ops.transform.func_op import FuncOp
+
+        built = []
+        original = FuncOp.__init__
+
+        def spy(self, *args, **kwargs):
+            built.append(kwargs.get("code_fn"))
+            original(self, *args, **kwargs)
+
+        monkeypatch.setattr(FuncOp, "__init__", spy)
+        for a in (1, 2, 3):
+            out = await execute.__wrapped__(
+                call_id=str(a), tool_name="echo", args={"a": a}, auto_decision={"approved": True}
+            )
+            assert '"a": %d' % a in out["tool_message"]["content"]
+        assert built == []
+
+    @pytest.mark.asyncio
+    async def test_argument_named_like_an_op_keyword_reaches_the_tool(self):
+        """``factory(**args)`` read the arguments as op constructor keywords:
+        a tool taking ``concurrency`` failed every call with a TypeError."""
+        from operonx.agents.graphs.dispatch import execute
+
+        @tool(
+            name="crawl",
+            description="Crawl a site.",
+            schema={"type": "object", "properties": {"concurrency": {"type": "integer"}}},
+        )
+        def crawl(concurrency: int) -> dict:
+            return {"workers": concurrency}
+
+        out = await execute.__wrapped__(
+            call_id="c",
+            tool_name="crawl",
+            args={"concurrency": 4},
+            auto_decision={"approved": True},
+        )
+        assert out["tool_message"]["content"] == '{"workers": 4}'

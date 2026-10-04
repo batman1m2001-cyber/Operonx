@@ -272,3 +272,32 @@ class TestFlatKwargsSyntax:
         node = my_func(name="custom", x="ref")
         assert node.name == "custom"
         assert node.inputs["x"].value == "ref"
+
+
+def test_func_op_parses_source_once(monkeypatch):
+    """Building an op reads its function's source; the answer cannot change
+    for the same function, so the second op of it reads nothing. Each read
+    was three ``inspect.getsource`` calls and two ``ast.parse``s — ~1.5 ms
+    on an agent's tool call, every call."""
+    import inspect as _inspect
+
+    from operonx.core.ops.transform import func_op as func_op_module
+
+    @op
+    def score(x: int):
+        """Score x."""
+        return {"y": x + 1}
+
+    first = score(x=1)
+    reads = []
+    original = _inspect.getsource
+    monkeypatch.setattr(
+        func_op_module.inspect, "getsource", lambda f: reads.append(f) or original(f)
+    )
+    again = [score(x=i) for i in range(5)]
+    assert reads == []
+    for node in again:
+        assert set(node.inputs) == {"x"} and set(node.outputs) == {"y"}
+        assert node.outputs["y"] is not first.outputs["y"], "each op owns its Params"
+        assert node._static_outputs == frozenset({"y"})
+        assert node.description == "Score x."

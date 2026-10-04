@@ -5,7 +5,7 @@ Verifies the emit-side of Phase 2's mode="custom" streaming:
     - No subscriber → payload dropped silently (fire-and-forget)
     - Payload is the resolved input value at runtime
     - Channel is per-op configuration
-    - Ctx propagates via _current_op_ctx (V3 tracing plumbing)
+    - Ctx propagates via the invocation's frame (runtime._current_frame)
 
 Scheduler integration (state binding via ContextVar, engine.stream mode)
 lives in the scheduler/engine test suites.

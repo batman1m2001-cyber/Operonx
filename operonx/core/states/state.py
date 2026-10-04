@@ -131,6 +131,10 @@ class MemoryState:
         # shared limit — an op called directly, or an engine left at the
         # defaults. See operonx/core/policy.py.
         "_run_policy",
+        # The run's ids and the caller's `context` (`runtime._RunInfo`), set
+        # by `Operon.start`; what `run_context()` reports. None for an op
+        # driven outside an engine run.
+        "_run_info",
     )
 
     def __init__(
@@ -213,6 +217,7 @@ class MemoryState:
         self._op_errors: Dict[str, Dict[str, Any]] = {}
         self._edge_drops: Dict[str, int] = {}
         self._run_policy = None
+        self._run_info = None
 
         # Apply initial inputs
         if inputs:

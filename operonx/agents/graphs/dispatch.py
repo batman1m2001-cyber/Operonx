@@ -315,10 +315,11 @@ async def execute(
         )
 
     try:
-        call = factory(**(args or {}))
-        # Reuse the op's own execution path so the tool keeps its tracing,
-        # timing and bound routing rather than being called as a raw fn.
-        result = call.core(**(args or {}))
+        # The tool's own function. This used to build an op from the factory
+        # only to call its `core`, which is this function: no tracing, ~2 ms
+        # per call, and the arguments were read as op keywords first, so a
+        # tool taking `concurrency` or `bound` failed every call.
+        result = factory.__wrapped__(**(args or {}))
         # A @tool may be a plain def. Awaiting its dict unconditionally
         # failed every call with "object dict can't be used in 'await'".
         if inspect.isawaitable(result):

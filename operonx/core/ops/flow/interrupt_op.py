@@ -31,12 +31,13 @@ Example::
 """
 
 import asyncio
-import uuid
 from typing import Any
 
 from operonx.core.configs.op_config import OpType
 from operonx.core.ops.base import BaseOp
+from operonx.core.runtime import _current_frame, invocation_key
 from operonx.core.states._scratch_var import _current_state_var
+from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.utils.common import Param
 
 __all__ = ["InterruptOp"]
@@ -52,7 +53,9 @@ class InterruptOp(BaseOp):
 
     Behaviour:
         - Emits ``InterruptEvent(step_id, op, ctx, payload, interrupt_id)``
-          when dispatched.
+          when dispatched. ``interrupt_id`` is
+          :func:`~operonx.core.runtime.invocation_key` of (run, op, ctx):
+          deterministic, the same as the op's ``run_context().idempotency_key``.
         - Awaits ``state._interrupt_responses[interrupt_id]`` (a
           ``dict[str, Future]``) — the caller resolves this future.
         - Returns ``{"response": <value>}`` — downstream refs like
@@ -99,14 +102,19 @@ class InterruptOp(BaseOp):
 
     async def _interrupt_impl(self, payload: Any = None) -> dict:
         """Emit InterruptEvent, block until resume, return the response."""
+        # The id is the invocation's key — run, op, ctx — so the same question
+        # in the same place of the same run always has the same id: what a
+        # resume after a restart (R3) looks it up by. Two interrupts of one
+        # run differ in op or ctx (a loop or a fan-out gives each its own).
+        frame = _current_frame.get()
+        run_id = frame.run.run_id if frame is not None and frame.run is not None else None
+        ctx = frame.ctx if frame is not None else DEFAULT_CONTEXT
+        interrupt_id = invocation_key(run_id, self.full_name, ctx)
         try:
             state = _current_state_var.get()
         except LookupError:
             # Outside a run — no bus, no resume. Return timed_out immediately.
-            interrupt_id = uuid.uuid4().hex
             return {"response": None, "timed_out": True, "interrupt_id": interrupt_id}
-
-        interrupt_id = uuid.uuid4().hex
 
         # Ensure the response bus exists on the state (created lazily so ops
         # that never interrupt don't carry the dict).
@@ -122,15 +130,6 @@ class InterruptOp(BaseOp):
         state._interrupt_responses[interrupt_id] = future
 
         # Emit the InterruptEvent via the state's bus.
-        try:
-            from operonx.core.workflow_trace import _current_op_ctx
-
-            ctx = _current_op_ctx.get()
-        except (ImportError, LookupError):
-            from operonx.core.states.cell import DEFAULT_CONTEXT
-
-            ctx = DEFAULT_CONTEXT
-
         state._notify_interrupt(self.full_name, ctx, payload, interrupt_id)
 
         # Await resume — optionally with timeout.

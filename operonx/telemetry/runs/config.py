@@ -83,6 +83,7 @@ class RunStoreConfig(YamlModel):
     queue_size: int = 1000
     timeout: float = 10.0  # clickhouse: connect timeout, seconds
     media: str = "local"  # clickhouse: where blobs go — local (media_dir) | clickhouse
+    live: bool = True  # sqlite, postgres, clickhouse: write each run while it goes
 
 
 def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
@@ -97,7 +98,7 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
     if backend == "sqlite":
         from .sqlite import SqliteRunStore
 
-        return SqliteRunStore(path=spec.get("path") or "")
+        return SqliteRunStore(path=spec.get("path") or "", live=_flag(spec.get("live", True)))
     if backend == "postgres":
         from .postgres import PostgresRunStore
 
@@ -107,6 +108,7 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
             spec["dsn"],
             prefix=spec.get("prefix") or "operonx_",
             media_dir=spec.get("media_dir") or "",
+            live=_flag(spec.get("live", True)),
         )
     if backend == "mongo":
         from .mongo import MongoRunStore
@@ -147,6 +149,7 @@ def open_run_store(spec: Optional[Dict[str, Any]] = None) -> RunStore:
             queue_size=int(spec.get("queue_size") or 1000),
             timeout=float(spec.get("timeout") or 10.0),
             media=str(spec.get("media") or "local"),
+            live=_flag(spec.get("live", True)),
         )
     raise ValueError(f"unknown run_store backend {backend!r}; one of {', '.join(BACKENDS)}")
 
@@ -184,5 +187,6 @@ def create_run_store(cfg: RunStoreConfig) -> RunStore:
             "queue_size": cfg.queue_size,
             "timeout": cfg.timeout,
             "media": cfg.media,
+            "live": cfg.live,
         }
     )

@@ -14,11 +14,26 @@ worker processes of one service writing the same file.
 from __future__ import annotations
 
 import json
+import shutil
+import zlib
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .model import OpRollup, Page, RunFilter, RunSummary
+from operonx.telemetry.writer import BackgroundWriter
 
-__all__ = ["SUMMARY_COLUMNS", "SqlIndex"]
+from .base import RunStore, _check_by
+from .model import (
+    OpRollup,
+    Page,
+    RunFilter,
+    RunRecord,
+    RunSummary,
+    meta_of_trace,
+    row_of,
+    summarize,
+)
+
+__all__ = ["SUMMARY_COLUMNS", "SqlIndex", "SqlRunStore"]
 
 SUMMARY_COLUMNS: Tuple[str, ...] = (
     "trace_id",
@@ -343,3 +358,250 @@ class _Tx:
         finally:
             self._conn.close()
         return False
+
+
+# ── a run store over SqlIndex ───────────────────────────────────────────
+
+
+class SqlRunStore(RunStore):
+    """A run store on a SQL database — what the SQLite and Postgres stores are.
+
+    Summaries and rollups in :class:`SqlIndex`'s two tables; each finished
+    run's full record (``meta`` and its rows, compressed) in ``records``.
+    Large payloads go to ``media_dir/<trace_id>/media`` as the local
+    consumer writes them, so a record's refs read the same way.
+
+    **Live.** :meth:`on_start` and :meth:`on_execution` queue onto a
+    :class:`~operonx.telemetry.writer.BackgroundWriter`, whose thread
+    inserts the run's summary with status ``running`` and each execution's
+    row into ``live (trace_id, seq, row)``. :meth:`consume` flushes that
+    queue, then writes the record and deletes the run's live rows. A run
+    whose process died stays listed as ``running``, and :meth:`get_run`
+    reads it from its live rows. ``live=False`` writes only finished runs.
+
+    A subclass hands in the connection factory, the placeholder, the JSON
+    accessor, the table prefix and the type of a float column.
+    """
+
+    #: How long :meth:`consume` waits for a live run's queued rows first.
+    live_flush_timeout = 10.0
+    #: Live items (a run's start, one execution) waiting at most; past it
+    #: they are dropped and counted (``live_writer.stats``) — the final
+    #: write still has every row.
+    live_queue_size = 100_000
+
+    def __init__(
+        self,
+        connect: Callable[[], Any],
+        *,
+        media_dir: Any,
+        media_threshold: int = 1024,
+        ph: str = "?",
+        json_get: Callable[[str, str], str] = lambda col, key: f"json_extract({col}, '$.{key}')",
+        prefix: str = "",
+        real_type: str = "REAL",
+        blob_type: str = "BLOB",
+        live: bool = True,
+        config: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(config=config or {})
+        self.media_dir = Path(media_dir)
+        self.media_threshold = int(media_threshold)
+        self.ph = ph
+        self.records = f"{prefix}records"
+        self.live_table = f"{prefix}live"
+        self.index = SqlIndex(connect, ph=ph, json_get=json_get, prefix=prefix, real_type=real_type)
+        self.index.create()
+        with self.index._tx() as cur:
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {self.records} "
+                f"(trace_id TEXT PRIMARY KEY, meta TEXT, nodes {blob_type})"
+            )
+            cur.execute(
+                f"CREATE TABLE IF NOT EXISTS {self.live_table} "
+                "(trace_id TEXT, seq INTEGER, row TEXT, PRIMARY KEY (trace_id, seq))"
+            )
+        self._live_runs: set = set()
+        self.live_writer: Optional[BackgroundWriter] = None
+        if live:
+            self.live_writer = BackgroundWriter(
+                self._write_live,
+                name=f"sql-live:{self.index.runs}",
+                max_queue=self.live_queue_size,
+                batch_size=1000,
+                flush_interval=0.25,
+            )
+
+    # -- write -------------------------------------------------------------
+
+    def _rows(self, trace: Any, nodes: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+        """Rows for *trace* (or some of its *nodes*), media offloaded under
+        the run's own folder, as ``"media/<sha>.<ext>"`` refs."""
+        run_media = self.media_dir / str(trace.trace_id)
+        media = run_media / "media"
+        rows = []
+        for node in trace.nodes if nodes is None else nodes:
+            row = row_of(node, trace)
+            for key in ("inputs", "outputs", "attrs"):
+                if key in row:
+                    value = self.sanitize(row[key])
+                    row[key] = self.offload_media(value, media, self.media_threshold)
+            rows.append(row)
+        if media.is_dir() and not any(media.iterdir()):
+            shutil.rmtree(run_media, ignore_errors=True)
+        return rows
+
+    def consume(self, trace: Any) -> RunSummary:
+        """The finished run: wait for its live rows, then store it whole."""
+        tid = str(trace.trace_id)
+        if tid in self._live_runs:
+            self.live_writer.flush(self.live_flush_timeout)
+            self._live_runs.discard(tid)
+        return self.put_trace(trace)
+
+    def put_trace(self, trace: Any) -> RunSummary:
+        rows = self._rows(trace)
+        meta = meta_of_trace(trace)
+        summary, rollups = summarize(str(trace.trace_id), rows, meta, location=None)
+        blob = zlib.compress(json.dumps(rows, default=str).encode("utf-8"))
+        ph = self.ph
+        self.index.put(summary, rollups)
+        with self.index._tx() as cur:
+            cur.execute(f"DELETE FROM {self.records} WHERE trace_id = {ph}", (summary.trace_id,))
+            cur.execute(
+                f"INSERT INTO {self.records} (trace_id, meta, nodes) VALUES ({ph}, {ph}, {ph})",
+                (summary.trace_id, json.dumps(meta, default=str), blob),
+            )
+            cur.execute(f"DELETE FROM {self.live_table} WHERE trace_id = {ph}", (summary.trace_id,))
+        return summary
+
+    # -- live --------------------------------------------------------------
+
+    @property
+    def live(self) -> bool:
+        return self.live_writer is not None
+
+    def on_start(self, trace: Any) -> None:
+        """Live: queue the run's ``running`` summary row."""
+        self._live_runs.add(str(trace.trace_id))
+        self.live_writer.submit(("start", trace, None))
+
+    def on_execution(self, trace: Any, execution: Any) -> None:
+        """Live: queue one execution's row at its index in ``trace.nodes``."""
+        self.live_writer.submit(("node", trace, (len(trace.nodes) - 1, execution)))
+
+    def _write_live(self, items: List[tuple]) -> None:
+        """The live writer's sink. A run already stored whole (its record
+        exists) is left alone — its final write has every row. A running
+        run's summary counts the executions landed so far."""
+        ph = self.ph
+        starts: Dict[str, RunSummary] = {}
+        rows: List[tuple] = []
+        for kind, trace, payload in items:
+            tid = str(trace.trace_id)
+            if kind == "start":
+                summary, _ = summarize(tid, [], meta_of_trace(trace, running=True))
+                starts[tid] = summary
+            else:
+                seq, execution = payload
+                (row,) = self._rows(trace, [execution])
+                rows.append((tid, seq, json.dumps(row, default=str)))
+        tids = list({*starts, *(r[0] for r in rows)})
+        with self.index._tx() as cur:
+            marks = ", ".join([ph] * len(tids))
+            cur.execute(f"SELECT trace_id FROM {self.records} WHERE trace_id IN ({marks})", tids)
+            done = {r[0] for r in cur.fetchall()}
+            cur.execute(f"SELECT trace_id FROM {self.index.runs} WHERE trace_id IN ({marks})", tids)
+            listed = {r[0] for r in cur.fetchall()}
+        self.index.put_many([(s, []) for t, s in starts.items() if t not in listed])
+        rows = [r for r in rows if r[0] not in done]
+        if rows:
+            with self.index._tx() as cur:
+                for row in rows:
+                    cur.execute(
+                        f"INSERT INTO {self.live_table} (trace_id, seq, row) "
+                        f"VALUES ({ph}, {ph}, {ph}) ON CONFLICT DO NOTHING",
+                        row,
+                    )
+                for tid in {r[0] for r in rows}:
+                    cur.execute(
+                        f"UPDATE {self.index.runs} SET executions = "
+                        f"(SELECT COUNT(*) FROM {self.live_table} WHERE trace_id = {ph}) "
+                        f"WHERE trace_id = {ph} AND status = 'running'",
+                        (tid, tid),
+                    )
+
+    # -- read --------------------------------------------------------------
+
+    def list_runs(
+        self,
+        where: Optional[RunFilter] = None,
+        order: str = "started_desc",
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> Page:
+        return self.index.list(where, order, limit, cursor)
+
+    def get_run(self, trace_id: str) -> Optional[RunRecord]:
+        summary = self.index.get(trace_id)
+        if summary is None:
+            return None
+        ph = self.ph
+        with self.index._tx() as cur:
+            cur.execute(
+                f"SELECT meta, nodes FROM {self.records} WHERE trace_id = {ph}", (trace_id,)
+            )
+            row = cur.fetchone()
+            live = None
+            if row is None:
+                cur.execute(
+                    f"SELECT row FROM {self.live_table} WHERE trace_id = {ph} ORDER BY seq",
+                    (trace_id,),
+                )
+                live = [json.loads(r[0]) for r in cur.fetchall()]
+        run_media = self.media_dir / trace_id
+        media_root = str(run_media) if run_media.is_dir() else None
+        if row is not None:
+            return RunRecord(
+                summary=summary,
+                nodes=json.loads(zlib.decompress(bytes(row[1])).decode("utf-8")),
+                meta=json.loads(row[0] or "{}"),
+                media_root=media_root,
+            )
+        # still running, or its process died: what it finished so far
+        meta = {
+            "trace_id": trace_id,
+            "workflow_name": summary.workflow,
+            "wall_started_at": summary.started_at,
+            "metadata": summary.metadata,
+            "status": "running",
+        }
+        summary, _ = summarize(trace_id, live, meta)
+        return RunRecord(summary=summary, nodes=live, meta=meta, media_root=media_root)
+
+    def groups(
+        self, where: Optional[RunFilter] = None, by: Sequence[str] = ("origin", "name")
+    ) -> List[Dict[str, Any]]:
+        return self.index.groups(where, _check_by(by))
+
+    def rollups(self, where: Optional[RunFilter] = None) -> List[OpRollup]:
+        return self.index.rollups(where)
+
+    # -- housekeeping ------------------------------------------------------
+
+    def delete_runs(self, where: RunFilter) -> int:
+        gone = self.index.delete(where)
+        ph = self.ph
+        with self.index._tx() as cur:
+            for row in gone:
+                cur.execute(f"DELETE FROM {self.records} WHERE trace_id = {ph}", (row["trace_id"],))
+                cur.execute(
+                    f"DELETE FROM {self.live_table} WHERE trace_id = {ph}", (row["trace_id"],)
+                )
+        for row in gone:
+            shutil.rmtree(self.media_dir / row["trace_id"], ignore_errors=True)
+        return len(gone)
+
+    def close(self) -> None:
+        if self.live_writer is not None:
+            self.live_writer.close()

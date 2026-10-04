@@ -7,7 +7,10 @@ stream, a PDF report, a dict for a custom UI, and so on.
 
 Base contract is deliberately small:
 
-* subclasses override :meth:`consume`
+* subclasses override :meth:`consume`, called once the run ends
+* a *live* consumer also overrides :meth:`on_start` and/or
+  :meth:`on_execution`, called as the run starts and as each execution
+  lands, so a store can show a run while it goes
 * :meth:`sanitize`, :meth:`offload_media`, :meth:`truncate` are
   shared utilities every consumer will want but nothing forces you to
   use them
@@ -26,7 +29,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from operonx.core.workflow_trace import WorkflowTrace
+from operonx.core.workflow_trace import OpExecution, WorkflowTrace
 
 __all__ = ["Consumer"]
 
@@ -67,6 +70,33 @@ class Consumer(ABC):
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config: Dict[str, Any] = dict(config or {})
+
+    def on_start(self, trace: WorkflowTrace) -> None:
+        """A run began; ``trace`` is its live trace (no nodes yet). Optional.
+
+        Called on the event loop, inside ``Operon.start``: queue the work
+        and return — a database call here would stall every run in the
+        process. An exception is logged and never reaches the run.
+        """
+
+    def on_execution(self, trace: WorkflowTrace, execution: OpExecution) -> None:
+        """One execution was recorded. Optional.
+
+        Called on the event loop right after ``execution`` is appended to
+        ``trace.nodes``, so its index there — what a store keys the row by,
+        and what the final write keys it by too — is
+        ``len(trace.nodes) - 1`` while this runs. Queue and return, as for
+        :meth:`on_start`. ``consume`` still gets the whole trace at the end.
+        """
+
+    @property
+    def live(self) -> bool:
+        """True when this consumer overrides :meth:`on_start` or
+        :meth:`on_execution`: the engine then hands it the run as it goes."""
+        cls = type(self)
+        return (
+            cls.on_start is not Consumer.on_start or cls.on_execution is not Consumer.on_execution
+        )
 
     @abstractmethod
     def consume(self, trace: WorkflowTrace) -> Any:

@@ -170,6 +170,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `operonx.core.media_store`: `MediaStore`, `LocalMediaStore`,
   `detect_media` and `MediaInfo`, moved from `operonx.telemetry.media`,
   which still exports them.
+- **`run_context()`** (R2). An op body reads the run it is in as a frozen
+  `RunContext`: `run_id` (the trace id), `thread_id` (the `session_id` as
+  given), `op_path`, `ctx`, `attempt`, `deadline`/`remaining` (from
+  `Timeout(run=)`), the caller's `context` (`start`/`run`/`stream(...,
+  context=obj)`), and `idempotency_key`, a hash of run, op and ctx that is the
+  same on every attempt. Information only; `None` outside an op.
+- **`child(name, inputs, op_type=)`** (R2, K1/K2). `async with child(...) as
+  c:` records a step an op runs itself (a model call, a tool call) as an
+  `OpExecution` under the op's record: ctx `parent + "name[n]"`, full name
+  `parent + ".name"`, nested by every consumer and the studio with no stored
+  link. A generator's child hangs under the yield being produced. `c.attrs`
+  fills the new `OpExecution.attrs` (`gen_ai.*`); errors are recorded and
+  re-raised, a cancellation is `cancelled`; the op's trace filter applies.
+- **`engine.stream(mode=[...])` and a `tasks` mode** (R2). A list of modes
+  yields `(mode, chunk)` pairs from one run. `tasks` yields `TaskStarted`,
+  `TaskFinished` and `TaskFailed` (with the attempt; `retrying` when
+  `retry=` runs another) per op invocation and per child execution.
+- **Live traces** (R2). `Consumer.on_start(trace)` and
+  `Consumer.on_execution(trace, execution)` see a run as it goes. The
+  ClickHouse and SQL run stores use them by default (`live: false` turns it
+  off): a run is listed as `running` and its executions land as they finish;
+  a process killed mid-run leaves the run `running` with what it finished.
+- **Guide page 8, "Inside a run"**: `run_context()`, `child()`, stream modes,
+  live traces.
 
 ### Fixed
 
@@ -244,6 +268,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by name and source.
 
 ### Changed
+
+- **A step that failed inside a retried attempt is not the run's failure**
+  (R2): `WorkflowTrace.status`, `summarize` and the run stores skip the
+  child executions of a `retried` attempt (`superseded_ids`). `TraceView`'s
+  trajectory reads (`ops`, `path`, `tool_calls`, `errors`) skip a retried
+  attempt and its steps (`TraceView.counted`); `llm_calls` and the totals
+  keep them. `path()` lists `child()` steps only with `children=True`;
+  `OpRow` gains `attempt`, `attrs` and `is_child`.
+- **An interrupt's id is deterministic** (R2): `invocation_key(run_id,
+  op, ctx)`, the `InterruptOp`'s idempotency key, not a `uuid4`. Still 32 hex
+  characters.
+- **A generator's trace records stop repeating its inputs** (R2). Every
+  record of one generator invocation after the first carries `inputs_from`
+  (the first record's `op_id`) and a stored row omits its inputs: a streamed
+  LLM call with a 12 KB prompt wrote 1.17 MB of trace, 69 KB now. In memory
+  `node.inputs` is unchanged, and every store's `get_run` puts the inputs
+  back; old traces read as before. Rows now also carry `attempt` and `attrs`
+  when they are not the default; ClickHouse migration 3 adds the columns.
+- **`engine.stream()` refuses an unknown mode before the run starts**; it
+  used to start the run, then raise.
+- `SqliteRunStore` and `PostgresRunStore` are one `SqlRunStore` with a
+  different driver, and keep running runs in a `live` table.
+- **Tool dispatch calls the tool's function** (K0) instead of building an op
+  per call to read its `.core`: 1.98 → 0.009 ms per call, and a tool taking
+  an argument named `concurrency` or `bound` no longer fails every call.
+  Building any op from an `@op` factory reads its function's source and its
+  call site's bytecode once (1.52 → 0.08 ms per op).
 
 - `$errors` of a run whose subgraph failed has one more key, the
   subgraph's.

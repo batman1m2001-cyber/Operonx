@@ -24,7 +24,9 @@ from typing import Any, Optional
 
 from operonx.core.configs.op_config import OpType
 from operonx.core.ops.base import BaseOp
+from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
+from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.utils.common import Param
 
 __all__ = ["EmitOp"]
@@ -85,17 +87,9 @@ class EmitOp(BaseOp):
             # Silently swallow — same shape as SCRATCH's outside-run reads.
             return {}
 
-        # Ctx tuple lives on _current_op_ctx (V3 tracing plumbing). Default to
-        # DEFAULT_CONTEXT if we can't resolve one — matches EmitOp's fire-and-
-        # forget contract.
-        try:
-            from operonx.core.workflow_trace import _current_op_ctx
-
-            ctx = _current_op_ctx.get()
-        except (ImportError, LookupError):
-            from operonx.core.states.cell import DEFAULT_CONTEXT
-
-            ctx = DEFAULT_CONTEXT
+        # The invocation's ctx, from its frame. DEFAULT_CONTEXT when there is
+        # none — matches EmitOp's fire-and-forget contract.
+        ctx = _current_ctx() or DEFAULT_CONTEXT
 
         state._notify_custom(self.full_name, ctx, self.channel, payload)
         return {}

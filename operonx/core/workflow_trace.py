@@ -17,16 +17,19 @@ grep-style helpers. Consumer subclasses (`LocalConsumer`,
 
 from __future__ import annotations
 
+import re
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 __all__ = [
     "OpExecution",
     "UpstreamRef",
     "WorkflowTrace",
     "all_edges",
+    "child_parent_id",
+    "superseded_ids",
     "format_ctx",
     "make_op_id",
     # Status constants — narrow vocab so consumers can switch on them.
@@ -40,9 +43,8 @@ __all__ = [
     "set_project_root",
     "project_root",
     "active_project",
-    # Engine-internal ContextVars — not for author use.
+    # Engine-internal ContextVar — not for author use.
     "_current_trace",
-    "_current_op_ctx",
 ]
 
 
@@ -77,6 +79,71 @@ def make_op_id(op_full_name: str, ctx: Tuple[str, ...]) -> str:
     construction, no lookup registry needed.
     """
     return f"{op_full_name}#{format_ctx(ctx)}"
+
+
+#: A child execution's last ctx segment: ``model[0]``. A yield's is a bare
+#: ``[0]``, a loop iteration's ``g.loop#3``; neither matches.
+_CHILD_SEGMENT = re.compile(r"^([^.\[\]#]+)\[(\d+)\]$")
+
+
+def child_parent_id(op_full_name: str, ctx: Tuple[str, ...]) -> Optional[str]:
+    """The canonical ``op_id`` of the execution a child execution was
+    recorded under, or ``None`` when the record is not a child.
+
+    Derived, not stored: a child's ctx and full name each extend its
+    parent's by one step (``... + ("model[0]",)``, ``... + ".model"``), so
+    dropping that step gives the parent's ``make_op_id``. A child of a
+    retried attempt ``n`` hangs under ``f"{that}@{n}"`` when that record
+    exists (see ``operonx.core.runtime.child``).
+    """
+    if len(ctx) < 2 or "." not in op_full_name:
+        return None
+    match = _CHILD_SEGMENT.match(ctx[-1])
+    if match is None:
+        return None
+    parent_full, name = op_full_name.rsplit(".", 1)
+    if name != match.group(1):
+        return None
+    return make_op_id(parent_full, tuple(ctx[:-1]))
+
+
+def superseded_ids(records: Any, field: Callable[[Any, str], Any] = getattr) -> set:
+    """The ``op_id``s of every retried attempt (``status="retried"``) and of
+    every child execution recorded under one, however deep.
+
+    What such an attempt did happened — it stays in the trace — but the
+    attempt after it decides the op: a step that failed inside a retried
+    attempt is not a failure of the run, and a trajectory reads the attempt
+    that counted. *records* are ``OpExecution``s, or rows with *field*
+    ``lambda r, k: r.get(k)``.
+    """
+    items = [
+        (
+            field(r, "op_id"),
+            field(r, "op_full_name") or "",
+            tuple(field(r, "ctx") or ()),
+            int(field(r, "attempt") or 1),
+            field(r, "status"),
+        )
+        for r in records
+    ]
+    out = {op_id for op_id, _, _, _, status in items if status == STATUS_RETRIED}
+    if not out:
+        return out
+    present = {op_id for op_id, *_ in items}
+    for op_id, full, ctx, attempt, _ in items:
+        if op_id in out:
+            continue
+        while True:
+            owner = child_parent_id(full, ctx)
+            if owner is None:
+                break
+            parent = next((c for c in (f"{owner}@{attempt}", owner) if c in present), None)
+            if parent in out:
+                out.add(op_id)
+                break
+            full, ctx = full.rsplit(".", 1)[0], ctx[:-1]
+    return out
 
 
 @dataclass
@@ -173,6 +240,16 @@ class OpExecution:
     # retried has a record of its own, `op_id` suffixed `@<attempt>`; the
     # attempt that ends the op keeps the plain `op_id`.
     attempt: int = 1
+    # Semantic attributes a consumer maps to its own fields
+    # (`gen_ai.operation.name`, `gen_ai.tool.name`, `gen_ai.usage.*`), set
+    # through `child()`'s handle. Empty for most records.
+    attrs: Dict[str, Any] = field(default_factory=dict)
+    # The op_id of the record holding this one's inputs, when they are the
+    # same: every record of one generator invocation after the first (its
+    # later yields, a failure record) shares the first one's inputs. In
+    # memory `inputs` still holds them (the same dict); a stored row names
+    # the record instead of repeating them (`runs.model.row_of`).
+    inputs_from: Optional[str] = None
 
     @property
     def duration_ms(self) -> float:
@@ -216,6 +293,17 @@ class WorkflowTrace:
     # their cheap monotonic clock and a consumer still gets real dates.
     wall_started_at: float = 0.0
     errors: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Engine-internal listeners, not data. `record()` calls the first with
+    # each execution as it lands (live trace consumers); `emit_task()` the
+    # second with each `runtime.Task*` event (`stream(mode="tasks")`). Both
+    # are called on the event loop and must return at once. Empty — one
+    # truth test — unless something listens.
+    _execution_listeners: List[Callable[[OpExecution], None]] = field(
+        default_factory=list, repr=False, compare=False
+    )
+    _task_listeners: List[Callable[[Any], None]] = field(
+        default_factory=list, repr=False, compare=False
+    )
 
     @property
     def duration_ms(self) -> float:
@@ -233,6 +321,22 @@ class WorkflowTrace:
             have = list(self.metadata.get("tags") or [])
             self.metadata["tags"] = have + [t for t in tags if t not in have]
 
+    def record(self, execution: OpExecution) -> None:
+        """Append one execution: the single path every record takes, so a
+        live consumer sees each one as it lands (its index in ``nodes`` is
+        ``len(nodes) - 1`` while its listener runs)."""
+        self.nodes.append(execution)
+        if self._execution_listeners:
+            for listener in self._execution_listeners:
+                listener(execution)
+
+    def emit_task(self, event: Any) -> None:
+        """Hand a ``TaskStarted``/``TaskFinished``/``TaskFailed`` to whoever
+        streams ``mode="tasks"``. Callers build the event only when
+        ``_task_listeners`` is not empty."""
+        for listener in self._task_listeners:
+            listener(event)
+
     @property
     def status(self) -> str:
         """``"error"`` when anything in the run failed, else ``"ok"``.
@@ -241,9 +345,14 @@ class WorkflowTrace:
         run. The record is the one that catches a structured ``LLMOp``
         step whose node is ``ok`` but whose ``error`` output is set.
         """
-        if self.errors or any(n.status == STATUS_ERROR for n in self.nodes):
+        if self.errors:
             return "error"
-        return "ok"
+        failed = [n for n in self.nodes if n.status == STATUS_ERROR]
+        if not failed:
+            return "ok"
+        # a step that failed inside a retried attempt is not the run's failure
+        gone = superseded_ids(self.nodes)
+        return "error" if any(n.op_id not in gone for n in failed) else "ok"
 
     @property
     def run_id(self) -> str:
@@ -304,16 +413,6 @@ def all_edges(
 # no tracing installed → recording is a cheap no-op guard.
 _current_trace: ContextVar[Optional[WorkflowTrace]] = ContextVar(
     "operonx_workflow_trace",
-    default=None,
-)
-
-# Per-op-invocation ctx — set by `BaseOp.run()` to the scheduler's
-# `context_id` tuple (e.g. `("main",)`, `("main", "[0]")` for a streaming
-# sub-context). Read via `format_ctx()` for display. Kept as a
-# ContextVar so downstream tooling can inspect the caller's ctx if
-# needed. Author code never touches this — the engine writes and clears.
-_current_op_ctx: ContextVar[Optional[tuple]] = ContextVar(
-    "operonx_op_ctx",
     default=None,
 )
 

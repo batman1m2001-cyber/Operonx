@@ -104,3 +104,40 @@ async def test_an_op_that_never_succeeds_keeps_its_error(tmp_path):
     )
     run = await job.run()
     assert run.items[0].status == ITEM_FAILED and "down" in run.items[0].error
+
+
+# -- R2: a retried attempt's child executions are superseded with it -----------------
+
+from operonx import child  # noqa: E402
+
+STEPS = {"n": 0}
+
+
+@op(retry=Retry(max_attempts=2, initial=0.01, on=(ConnectionError,)))
+async def agent_step(text: str = "") -> dict:
+    STEPS["n"] += 1
+    async with child("model", inputs={"text": text}, op_type="llm") as m:
+        m.outputs = {"content": "ok"}
+    if STEPS["n"] == 1:
+        async with child("tool", inputs={"q": text}, op_type="tool"):
+            raise ConnectionError("the tool's backend blipped")
+    return {"reply": text}
+
+
+@graph
+def agent_once(text: str = ""):
+    a = agent_step(text=text)
+    START >> a >> END
+
+
+async def test_a_retried_attempts_failed_child_is_not_a_failure_of_the_run():
+    STEPS["n"] = 0
+    handle = Operon(agent_once, params={"text": None}, trace=[]).start({"text": "hi"})
+    out = await handle.collect(unwrap=True)
+    assert out == {"reply": "hi"} and handle.errors == {}
+    trace = handle.trace
+    (tool,) = [n for n in trace.nodes if n.op_name == "tool"]
+    assert tool.status == STATUS_ERROR and tool.attempt == 1  # what happened, kept
+    assert trace.status == "ok", "the attempt it belonged to was run again"
+    summary = _summary(trace)
+    assert summary.status == "ok" and summary.errors == 0 and summary.first_error is None

@@ -3,7 +3,7 @@
 When a run is cancelled while a generator op is suspended at a yield, its
 ``BaseOp.run`` generator is abandoned by the cancelled pump and closed later
 by the event loop's async-generator finalizer, in another task and another
-``contextvars.Context``. ``run()``'s ``finally`` reset its ``_current_op_ctx``
+``contextvars.Context``. ``run()``'s ``finally`` reset its ``_current_op_ctx`` (now ``_current_frame``)
 token there, and ``ContextVar.reset`` refuses a token from another context:
 every such cancellation reported ``ValueError: <Token ...> was created in a
 different Context`` to the loop's exception handler, and the rest of the
@@ -14,7 +14,7 @@ import asyncio
 import gc
 
 from operonx import END, START, GraphOp, Operon, op
-from operonx.core.workflow_trace import _current_op_ctx
+from operonx.core.runtime import _current_frame
 
 
 async def test_generator_closed_by_the_finalizer_reports_nothing():
@@ -56,4 +56,4 @@ async def test_generator_closed_by_the_finalizer_reports_nothing():
         loop.set_exception_handler(previous)
 
     assert [repr(c.get("exception") or c.get("message")) for c in reported] == []
-    assert _current_op_ctx.get() is None  # nothing leaked into the caller's context
+    assert _current_frame.get() is None  # nothing leaked into the caller's context

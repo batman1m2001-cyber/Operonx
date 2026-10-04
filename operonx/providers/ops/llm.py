@@ -18,9 +18,9 @@ from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, should_emit_for_channel, split_shorthand_kwargs
 from operonx.core.policy import mark_retried
+from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
-from operonx.core.workflow_trace import _current_op_ctx
 from operonx.providers.ops._utils import resolve_hub
 from operonx.providers.parsing import (
     ExtractField,
@@ -1080,7 +1080,7 @@ class LLMOp(BaseOp):
         """
         state = _current_state_var.get(None)
         if state is not None:
-            state.record_op_error(self.full_name, error, _current_op_ctx.get())
+            state.record_op_error(self.full_name, error, _current_ctx())
 
     # =========================================================================
     # Core: stream

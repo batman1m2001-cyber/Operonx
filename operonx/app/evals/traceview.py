@@ -16,6 +16,16 @@ sqlite stores do. One difference is by design: a value over a store's
 media threshold is a reference in the stored view and bytes in the live
 one. The totals are :func:`~operonx.telemetry.runs.summarize` over the
 same rows — a view's cost and tokens are the run store's.
+
+Every execution is in :attr:`TraceView.rows`, a retried attempt included.
+What a trajectory reads — :meth:`~TraceView.ops`, :meth:`~TraceView.path`,
+:meth:`~TraceView.tool_calls`, :meth:`~TraceView.errors` — skips a retried
+attempt and every step recorded under it: the attempt after it is the one
+that counted. :meth:`~TraceView.llm_calls` and the totals keep them, since
+those calls were made and paid for. A step an op records with ``child()``
+(``OpRow.is_child``) is in :meth:`~TraceView.ops` by name, and in
+:meth:`~TraceView.path` only with ``children=True``: the path is the
+graph's ops.
 """
 
 from __future__ import annotations
@@ -24,6 +34,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from operonx.core.workflow_trace import child_parent_id, superseded_ids
 from operonx.telemetry.consumer import Consumer
 from operonx.telemetry.runs.model import RunSummary, rows_of_trace, summarize
 
@@ -61,6 +72,15 @@ class OpRow:
     is_yield: bool = False
     #: The perf-counter start the run recorded; orders executions.
     start_time: float = 0.0
+    #: The ``retry=`` attempt, 1-based.
+    attempt: int = 1
+    #: Semantic attributes a ``child()`` step set (``gen_ai.*``).
+    attrs: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_child(self) -> bool:
+        """A step an op recorded itself with ``child()``, not an op."""
+        return child_parent_id(self.op_full_name, self.ctx) is not None
 
     @property
     def is_llm_call(self) -> bool:
@@ -126,6 +146,8 @@ def _row(r: Mapping[str, Any]) -> OpRow:
         duration_ms=float(r.get("duration_ms") or 0.0),
         is_yield=bool(r.get("is_yield")),
         start_time=float(start_time or 0.0),
+        attempt=int(r.get("attempt") or 1),
+        attrs=dict(r.get("attrs") or {}),
     )
 
 
@@ -171,6 +193,7 @@ class TraceView:
         self._meta = dict(meta or {})
         self._trace = trace
         self._rows: Optional[List[OpRow]] = None
+        self._counted: Optional[List[OpRow]] = None
         self._summary: Optional[RunSummary] = None
 
     # -- building ------------------------------------------------------------
@@ -228,6 +251,15 @@ class TraceView:
     def rows(self) -> List[OpRow]:
         """Every execution, in start order."""
         return self._load()
+
+    @property
+    def counted(self) -> List[OpRow]:
+        """The executions that count, in start order: every row but a
+        retried attempt and the steps recorded under one."""
+        if self._counted is None:
+            gone = superseded_ids(self.rows)
+            self._counted = [r for r in self.rows if r.op_id not in gone]
+        return self._counted
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -289,12 +321,13 @@ class TraceView:
         under: Optional[str] = None,
         status: Optional[str] = None,
     ) -> List[OpRow]:
-        """Executions matching every filter given. *name* is an op's name or
-        a dotted tail of its full name (``"handle.classify"``); *under* is
-        an enclosing subgraph's name (the root's name — the variable that
-        held the engine — never matches)."""
+        """Executions that count (:attr:`counted`) matching every filter
+        given. *name* is an op's name or a dotted tail of its full name
+        (``"handle.classify"``); *under* is an enclosing subgraph's name
+        (the root's name — the variable that held the engine — never
+        matches)."""
         out = []
-        for r in self.rows:
+        for r in self.counted:
             if name is not None and not self._named(r, name):
                 continue
             if type is not None and r.op_type != type:
@@ -314,15 +347,24 @@ class TraceView:
         found = self.ops(name)
         return found[-1] if found else None
 
-    def path(self, *, types: Optional[Sequence[str]] = None, collapse: bool = False) -> List[str]:
-        """Op names in start order. Without *types*, every execution but
-        routing and containers (``branch``, ``graph``); with it, only those
-        types. ``collapse`` merges consecutive repeats (a generator's yields)."""
+    def path(
+        self,
+        *,
+        types: Optional[Sequence[str]] = None,
+        collapse: bool = False,
+        children: bool = False,
+    ) -> List[str]:
+        """Op names in start order, of the executions that count. Without
+        *types*, every execution but routing and containers (``branch``,
+        ``graph``); with it, only those types. ``collapse`` merges
+        consecutive repeats (a generator's yields). ``children`` adds the
+        steps ops recorded with ``child()``, in their start order."""
         wanted = set(types) if types is not None else None
         names = [
             r.op_name
-            for r in self.rows
+            for r in self.counted
             if (r.op_type in wanted if wanted is not None else r.op_type not in STRUCTURAL)
+            and (children or not r.is_child)
         ]
         if collapse:
             names = [n for i, n in enumerate(names) if i == 0 or names[i - 1] != n]
@@ -334,15 +376,17 @@ class TraceView:
         return [r for r in self.rows if r.is_llm_call]
 
     def tool_calls(self) -> List[ToolCall]:
-        """Every tool call the LLM calls asked for, in order, with the tool
-        message an op returned for it when one did."""
+        """Every tool call the counted LLM calls asked for, in order, with
+        the tool message an op returned for it when one did."""
         answers: Dict[str, Mapping[str, Any]] = {}
-        for r in self.rows:
+        for r in self.counted:
             msg = r.outputs.get("tool_message") if isinstance(r.outputs, Mapping) else None
             if isinstance(msg, Mapping) and msg.get("tool_call_id"):
                 answers[str(msg["tool_call_id"])] = msg
         out = []
-        for r in self.llm_calls():
+        for r in self.counted:
+            if not r.is_llm_call:
+                continue
             for raw in r.outputs.get("tool_calls") or ():
                 call = _call_of(raw, r.op_id)
                 if call is None:
@@ -361,8 +405,8 @@ class TraceView:
         return out
 
     def errors(self) -> List[OpRow]:
-        """Executions that did not end ``ok``."""
-        return [r for r in self.rows if r.status != "ok"]
+        """Executions that count and did not end ``ok``."""
+        return [r for r in self.counted if r.status != "ok"]
 
     def as_text(self, limit: int = 4000) -> str:
         """The run as a model reads it (a judge's ``trace_summary``): one

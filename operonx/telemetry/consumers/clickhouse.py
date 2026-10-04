@@ -50,6 +50,7 @@ class ClickHouseConsumerConfig(YamlModel):
     queue_size: int = 1000
     timeout: float = 10.0
     media: str = "local"  # local (media_dir) | clickhouse (the media table)
+    live: bool = True  # write each run while it goes (status "running")
 
 
 def _create_clickhouse_consumer(cfg: ClickHouseConsumerConfig) -> Any:
@@ -70,4 +71,5 @@ def _create_clickhouse_consumer(cfg: ClickHouseConsumerConfig) -> Any:
         queue_size=cfg.queue_size,
         timeout=cfg.timeout,
         media=cfg.media or "local",
+        live=cfg.live,
     )

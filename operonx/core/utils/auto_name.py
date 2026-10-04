@@ -23,6 +23,7 @@ Public API:
 import dis
 import inspect
 import uuid
+from functools import lru_cache
 from types import CodeType
 from typing import Optional, Set
 
@@ -116,12 +117,23 @@ def _name_from_bytecode(frame) -> Optional[str]:
     After a CALL instruction, the next meaningful instruction is typically
     ``STORE_FAST``/``STORE_NAME`` if the result is assigned to a simple variable.
     """
+    return _name_at(frame.f_code, frame.f_lasti)
+
+
+@lru_cache(maxsize=4096)
+def _name_at(code: CodeType, offset: int) -> Optional[str]:
+    """The name stored right after the call at ``offset`` in ``code``.
+
+    Memoised: a code object never changes, so neither does the answer for
+    one call site — and disassembling the caller's whole function on every
+    op built there cost ~1 ms in a large one (an agent's tool dispatch built
+    an op per tool call). Bounded, so code compiled at run time (``exec``
+    in a loop) cannot grow it without limit.
+    """
     try:
-        instructions = list(dis.get_instructions(frame.f_code))
+        instructions = list(dis.get_instructions(code))
     except TypeError:
         return None
-
-    offset = frame.f_lasti
 
     # Find the first instruction AFTER the call site
     i = 0

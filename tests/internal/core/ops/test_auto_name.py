@@ -117,3 +117,31 @@ class TestBranchAutoName:
     def test_if_build_auto_name(self):
         checker = Branch().if_(PARENT["x"] > 0, "process").build()
         assert checker.name == "checker"
+
+
+class TestAutoNameCost:
+    def test_auto_name_disassembles_once_per_site(self, monkeypatch):
+        """The name read off a call site is a fact about that site's bytecode,
+        which never changes: an op built in a loop disassembled its caller's
+        whole function every time (~1 ms in a large function)."""
+        import importlib
+
+        auto_name_module = importlib.import_module("operonx.core.utils.auto_name")
+
+        @op
+        def step(x: int):
+            return {"y": x}
+
+        reads = []
+        original = auto_name_module.dis.get_instructions
+        monkeypatch.setattr(
+            auto_name_module.dis,
+            "get_instructions",
+            lambda code: reads.append(code) or original(code),
+        )
+        names = []
+        for i in range(5):
+            node = step(x=i)
+            names.append(node.name)
+        assert names == ["node"] * 5
+        assert len(reads) <= 1

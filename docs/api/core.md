@@ -15,6 +15,19 @@ The two decorators that turn ordinary Python into Operonx ops:
 ::: operonx.core.ops.op
 ::: operonx.core.ops.graph
 
+## Inside a run
+
+What an op body can read about its run, the steps it records, and the
+events `engine.stream(mode="tasks")` yields:
+
+::: operonx.core.runtime.run_context
+::: operonx.core.runtime.RunContext
+::: operonx.core.runtime.child
+::: operonx.core.runtime.ChildExecution
+::: operonx.core.runtime.TaskStarted
+::: operonx.core.runtime.TaskFinished
+::: operonx.core.runtime.TaskFailed
+
 ## Op types
 
 The base classes that compose into a workflow. Most users only touch

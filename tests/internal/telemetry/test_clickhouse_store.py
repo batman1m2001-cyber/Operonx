@@ -254,7 +254,9 @@ def test_schema_is_created_once_and_versioned(tmp_path):
         "ox.experiments", "ox.experiment_items", "ox.scores", "ox.judge_cache",
     ]  # fmt: skip
     assert client.commands[0] == "CREATE DATABASE IF NOT EXISTS ox"
-    assert client.versions == [1, 2, 3]
+    assert client.versions == [1, 2, 3, 4]
+    alters = [c for c in client.commands if c.startswith("ALTER TABLE")]
+    assert [c.split()[8] for c in alters] == ["attempt", "attrs", "inputs_from"]
     # a second process finding version 1 creates nothing new
     again = _store(tmp_path, client=client)
     again.put_trace(_trace("t-3"))
@@ -268,7 +270,7 @@ def test_a_user_granted_only_tables_writes_and_reads(tmp_path):
     store.put_trace(_trace())
     assert not [c for c in client.commands if c.startswith("CREATE DATABASE")]
     assert [t for t, *_ in client.inserts] == ["ox.nodes", "ox.op_rollups", "ox.runs"]
-    assert store.schema_version() == 3
+    assert store.schema_version() == 4
 
 
 def test_batches_go_out_as_one_insert_per_table(tmp_path):
@@ -430,14 +432,14 @@ def _tables(client):
     return [t.split(".")[1] for t, *_ in client.inserts]
 
 
-def test_a_v1_database_upgrades_to_v2_by_creating_only_the_media_table(tmp_path):
+def test_a_v1_database_upgrades_by_creating_only_the_media_table_and_columns(tmp_path):
     client = FakeClient(databases={"ox"}, grants_db=False)
     client.versions = [1]  # runs, nodes and op_rollups already there
     store = _ch(tmp_path, client=client)
     store.put_trace(_trace())
     creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
     assert creates[:2] == ["ox.schema_version", "ox.media"]  # then v3's tables
-    assert client.versions == [1, 2, 3] and store.schema_version() == 3
+    assert client.versions == [1, 2, 3, 4] and store.schema_version() == 4
     ddl = next(c for c in client.commands if "ox.media" in c)
     assert "ReplacingMergeTree(expires_at)" in ddl and "ORDER BY sha" in ddl
     assert "TTL expires_at" in ddl and "PARTITION" not in ddl
@@ -449,19 +451,19 @@ def test_a_v2_database_upgrades_to_v3_by_creating_only_the_score_tables(tmp_path
     client = FakeClient(databases={"ox"}, grants_db=False)  # a user granted only tables
     client.versions = [1, 2]  # a 1.14 database: runs, nodes, op_rollups, media
     store = ClickHouseScoreStore(database="ox", client=client)
-    assert store.schema_version() == 3
+    assert store.schema_version() == 4
     creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
     assert creates == [
         "ox.schema_version", "ox.experiments", "ox.experiment_items", "ox.scores", "ox.judge_cache",
     ]  # fmt: skip
     assert not [c for c in client.commands if c.startswith("CREATE DATABASE")]
-    assert client.versions == [1, 2, 3]
-    # the run store on the same database finds v3 and creates nothing
+    assert client.versions == [1, 2, 3, 4]
+    # the run store on the same database finds the newest and creates nothing
     runs = _ch(tmp_path, client=client)
     runs.put_trace(_trace())
     creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
     assert creates[5:] == ["ox.schema_version"]  # only the version table's IF NOT EXISTS
-    assert client.versions == [1, 2, 3]
+    assert client.versions == [1, 2, 3, 4]
 
 
 def _ddl_columns(client, table):
@@ -840,7 +842,7 @@ def test_storing_a_run_twice_keeps_one_copy(live):
     live.put_trace(_trace("twice"))
     assert live.count(RunFilter(trace_ids=["twice"])) == 1
     assert len(live.get_run("twice").nodes) == 2
-    assert live.schema_version() == 3
+    assert live.schema_version() == 4
 
 
 def test_values_json_cannot_hold_never_sink_a_run(tmp_path):
@@ -876,7 +878,7 @@ def test_live_media_lands_once_in_the_media_table_and_reads_back(request, tmp_pa
     assert not (tmp_path / "media").exists()
 
 
-def test_live_a_v1_database_upgrades_to_v2(request, tmp_path):
+def test_live_a_v1_database_upgrades_to_the_current_version(request, tmp_path):
     from operonx.telemetry.runs import clickhouse as chmod
 
     store = open_store(request, tmp_path, media="clickhouse")
@@ -885,16 +887,24 @@ def test_live_a_v1_database_upgrades_to_v2(request, tmp_path):
     try:
         v1 = _trace("v1")
         v1.nodes = v1.nodes[1:]  # no media: version 1 had nowhere for it
-        store.put_trace(v1)  # a database at version 1, with a run in it
+        # a database at version 1, with a run in it, as a version-1 writer
+        # wrote it: without the columns version 4 added
+        _, run, nodes, rollups = store.build(v1)
+        store._insert("nodes", [n[:-3] for n in nodes], chmod.NODE_COLUMNS[:-3])
+        store._insert("op_rollups", rollups, chmod.ROLLUP_COLUMNS)
+        store._insert("runs", [run], chmod.RUN_COLUMNS)
         assert store.schema_version() == 1
     finally:
         chmod.MIGRATIONS = real
     store._ready = False  # the next process to open it
     store.put_trace(_with_audio("v2", wav(0.2)))
-    assert store.schema_version() == 3  # through v2 to the newest
+    assert store.schema_version() == 4  # through v2 to the newest
     assert {s.trace_id for s in store.list_runs().items} == {"v1", "v2"}
     ref = store.get_run("v2").nodes[0]["outputs"]["audio"]
     assert store.media.get(ref["$media"]) == wav(0.2)
+    (old,) = store.get_run("v1").nodes
+    assert "attempt" not in old and "attrs" not in old and "inputs_from" not in old
+    assert old["inputs"] == v1.nodes[0].inputs
 
 
 def test_live_a_reput_extends_expiry_and_expired_blobs_go(request, tmp_path):
@@ -934,7 +944,12 @@ def test_live_a_v2_database_with_runs_upgrades_to_v3_and_another_host_reads_it(r
     real = chmod.MIGRATIONS
     chmod.MIGRATIONS = real[:2]
     try:
-        runs.put_trace(_trace("before-v3"))  # a 1.14 database, with a run in it
+        # a 1.14 database, with a run in it, as a 1.14 writer wrote it:
+        # without the node columns version 4 added
+        _, run, nodes, rollups = runs.build(_trace("before-v3"))
+        runs._insert("nodes", [n[:-3] for n in nodes], chmod.NODE_COLUMNS[:-3])
+        runs._insert("op_rollups", rollups, chmod.ROLLUP_COLUMNS)
+        runs._insert("runs", [run], chmod.RUN_COLUMNS)
         assert runs.schema_version() == 2
     finally:
         chmod.MIGRATIONS = real
@@ -946,7 +961,7 @@ def test_live_a_v2_database_with_runs_upgrades_to_v3_and_another_host_reads_it(r
     host_a.put_experiment(exp)
     host_a.put_items([ExperimentItem("e1", "a", output={"label": "x"})])
     host_a.put_scores([Score("exact", experiment_id="e1", case_id="a", passed=True)])
-    assert host_a.schema_version() == 3
+    assert host_a.schema_version() == 4
     assert runs.get_run("before-v3") is not None  # the run is still there
 
     host_b = ClickHouseScoreStore(database=runs.database, **clickhouse_spec())  # its own client

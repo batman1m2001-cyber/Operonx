@@ -229,3 +229,64 @@ def test_from_store_says_when_the_run_is_not_there(tmp_path):
     store = FilesRunStore(root=tmp_path / "runs", refresh_every=0)
     with pytest.raises(LookupError, match="no run 'missing'"):
         TraceView.from_store(store, "missing")
+
+
+# ── R2: retried attempts and child executions ───────────────────────────
+
+from operonx import END, START, Retry, child, graph, op  # noqa: E402
+
+_TRIES = {"n": 0}
+
+
+@op(retry=Retry(max_attempts=2, initial=0.01, on=(ConnectionError,)))
+async def agent(text: str = "") -> dict:
+    _TRIES["n"] += 1
+    async with child("model", inputs={"text": text}, op_type="llm") as m:
+        m.outputs = {
+            "content": "",
+            "cost_usd": 0.001,
+            "tool_calls": [{"id": f"c{_TRIES['n']}", "name": "lookup", "args": {"n": _TRIES["n"]}}],
+        }
+    if _TRIES["n"] == 1:
+        async with child("lookup", op_type="tool"):
+            raise ConnectionError("blip")
+    return {"reply": "done"}
+
+
+@op
+def answer(reply: str = "") -> dict:
+    return {"text": reply}
+
+
+@graph
+def retried_agent(text: str = ""):
+    a = agent(text=text)
+    s = answer(reply=a["reply"])
+    START >> a >> s >> END
+
+
+@pytest.mark.parametrize("backend", ["live", "files"])
+async def test_trajectory_reads_skip_a_retried_attempt_and_what_ran_under_it(tmp_path, backend):
+    _TRIES["n"] = 0
+    store = None if backend == "live" else _store("files", tmp_path)
+    handle = Operon(retried_agent, params={"text": None}, trace=[store] if store else []).start(
+        {"text": "x"}
+    )
+    await handle.collect()
+    view = (
+        TraceView.from_trace(handle.trace)
+        if store is None
+        else TraceView.from_store(store, handle.trace.trace_id)
+    )
+    # every execution is still there to read, with its attempt
+    assert sorted((r.op_name, r.attempt) for r in view.rows) == [
+        ("a", 1), ("a", 2), ("lookup", 1), ("model", 1), ("model", 2), ("s", 1),
+    ]  # fmt: skip
+    # the graph's path: one a, no retried attempt, no steps inside an op
+    assert view.path() == ["a", "s"]
+    assert view.path(children=True) == ["a", "model", "s"]  # an op starts before its steps
+    assert view.errors() == [], "a retried attempt and its failed step are not errors"
+    assert [c.args for c in view.tool_calls()] == [{"n": 2}], "the attempt that counted"
+    assert len(view.llm_calls()) == 2, "both calls were made and paid for"
+    assert view.ops("model")[0].is_child and not view.ops("a")[0].is_child
+    assert view.summary.status == "ok"
