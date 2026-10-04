@@ -1,4 +1,4 @@
-"""Listing experiments without reading every item (EVALS_PLAN D49).
+"""Listing experiments without reading every item (EVALS_PLAN D62).
 
 A list shows summaries: from a store that is one ``list_experiments``
 call, not a ``get_experiment`` and a ``scores`` query per experiment; from

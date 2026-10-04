@@ -1,4 +1,4 @@
-"""Editing a case in place, and archiving one (EVALS_PLAN D50, D51).
+"""Editing a case in place, and archiving one (EVALS_PLAN D63, D64).
 
 The JSONL file in git is the dataset's truth: an edit rewrites the one
 line it changes and leaves every other line byte for byte, so the merge
