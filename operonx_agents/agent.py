@@ -1,0 +1,99 @@
+"""``Agent`` — what an agent is, as data. ``Runner`` runs it.
+
+::
+
+    support = Agent(
+        name="support",
+        instructions="You resolve order problems for Edupia.",
+        model=Model("qwen3.7-plus", deadline=30),
+        tools=[lookup_order, refund],
+        output_type=Resolution,
+        limits=UsageLimits(turns=8, tool_calls=20, total_tokens=60_000, wall_s=90),
+        context=ContextPolicy(window=128_000, summarizer=Model("inhouse")),
+    )
+    res = await Runner.run(support, "refund order A1B2C3D4", deps=deps)
+
+There is no base class and no ``run()`` on the agent: a spec is a frozen
+dataclass, so it can be shared between concurrent runs, and changed with
+:meth:`Agent.clone`.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Sequence, Union
+
+from operonx_agents.context.compaction import ContextPolicy
+from operonx_agents.model.model import Model, ModelSettings
+from operonx_agents.run.context import RunContext
+from operonx_agents.run.limits import UsageLimits
+from operonx_agents.tools.policy import ToolPolicy
+from operonx_agents.tools.toolset import Toolset
+
+__all__ = ["Agent"]
+
+#: The agent's standing instructions: text, or built from the run's context
+#: once when the run starts (so the prompt stays byte-stable for the run).
+Instructions = Union[str, Callable[[RunContext], str]]
+
+
+@dataclass(frozen=True)
+class Agent:
+    """An agent spec.
+
+    Attributes:
+        name: Who it is, in traces (``gen_ai.agent.name``) and run states.
+        model: The :class:`~operonx_agents.Model` it thinks with.
+        instructions: The system prompt, or ``(ctx) -> str``.
+        tools: The tools it owns (a :class:`Toolset`, or tools and plain
+            functions to make one from). Only these can run.
+        output_type: ``str`` (default), a pydantic model, or a type
+            pydantic validates. How a typed answer is asked for is the
+            model resource's ``structured_output``: ``tool`` offers a
+            ``final_result`` tool beside the agent's own, ``native`` sends
+            the schema as ``response_format``, ``prompted`` puts it in the
+            system prompt. Every answer is validated.
+        output_retries: Re-asks of an answer that does not validate.
+        limits: :class:`UsageLimits` per run.
+        policy: allow / ask / deny per tool (default: destructive tools
+            ask, and with no one to ask they are refused).
+        context: When to compact the conversation; ``None`` never does.
+        settings: Request knobs over the model's.
+    """
+
+    name: str
+    model: Model
+    instructions: Instructions = ""
+    tools: Union[Toolset, Sequence[Any]] = field(default_factory=Toolset)
+    output_type: Any = str
+    output_retries: int = 1
+    limits: UsageLimits = field(default_factory=UsageLimits)
+    policy: Optional[ToolPolicy] = None
+    context: Optional[ContextPolicy] = None
+    settings: Optional[ModelSettings] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError("Agent name must be a non-empty string: traces and run states use it.")
+        if not isinstance(self.model, Model):
+            raise TypeError(
+                f"Agent {self.name!r}: model must be a Model, got {type(self.model).__name__}. "
+                "Model('qwen3.7-plus') reads the llm:qwen3.7-plus resource."
+            )
+        if not isinstance(self.tools, Toolset):
+            object.__setattr__(self, "tools", Toolset(self.tools))
+        if self.output_retries < 0:
+            raise ValueError(f"Agent {self.name!r}: output_retries must be 0 or more.")
+
+    def clone(self, **changes: Any) -> "Agent":
+        """A copy with ``changes`` applied."""
+        return dataclasses.replace(self, **changes)
+
+    def system_prompt(self, ctx: RunContext) -> str:
+        text = self.instructions(ctx) if callable(self.instructions) else self.instructions
+        if not isinstance(text, str):
+            raise TypeError(
+                f"Agent {self.name!r}: instructions(ctx) returned {type(text).__name__}, not str."
+            )
+        return text
