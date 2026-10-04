@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .manifest import ManifestError, ServeSpec
@@ -50,6 +51,7 @@ __all__ = [
     "check_sinks",
     "parse_tracing",
     "pick",
+    "project_sinks",
     "settle_serves",
     "sink_name",
 ]
@@ -250,6 +252,12 @@ def check_sinks(app: str, services: Sequence[ServeSpec] = (), jobs: Sequence[Any
                 if isinstance(sink, str) and sink != LOCAL:
                     source = getattr(j, "_trace_from", "job")
                     wanted.setdefault((sink, source), []).append(f"job {j.name!r}")
+    _check_wanted(app, wanted)
+
+
+def _check_wanted(app: str, wanted: Dict[Tuple[str, str], List[str]]) -> None:
+    """Raise naming each ``(key, level)`` in *wanted* the hub does not
+    declare, and who uses it."""
     if not wanted:
         return
     from operonx.core.registry import ResourceHub
@@ -278,6 +286,51 @@ def check_sinks(app: str, services: Sequence[ServeSpec] = (), jobs: Sequence[Any
         if have:
             lines.append(f"  trace resources it has: {', '.join(have)}")
     raise ManifestError(f"{app}: a trace sink is missing from the resources:\n" + "\n".join(lines))
+
+
+def project_sinks() -> List[str]:
+    """The sinks ``Operon(trace="project")`` uses: the project's own.
+
+    The project is the one an ``Application`` bootstrapped, else the
+    nearest ``operonx.toml`` at or above the working directory. Its sinks
+    are chosen as a service's or a job's are, minus the levels a script
+    has no name for: ``[tracing] sinks``, else ``[project] trace``, else
+    — as for a job, since a run that asked to be traced must not go
+    untraced by omission — the local consumer. ``sinks = []`` traces
+    nothing. An ``Application(trace=...)`` written in Python is not
+    read: that would import the application from inside an engine.
+
+    Every resource key is checked against the hub here, so a missing one
+    fails naming the key and the level that chose it.
+    """
+    from operonx.core.workflow_trace import active_project
+
+    from .manifest import MANIFEST_FILENAME, Manifest
+
+    root = active_project()
+    if root is None:
+        raise ValueError(
+            f'trace="project" traces where the project says, but there is no project: '
+            f"no {MANIFEST_FILENAME} at or above {Path.cwd()}, and no Application "
+            f'was bootstrapped. Run from inside the project, or pass trace="local" '
+            f"or a list of sinks."
+        )
+    manifest = Manifest.from_file(Path(root) / MANIFEST_FILENAME)
+    sinks, source = pick(
+        overrides=[],
+        own=None,
+        own_label="script",
+        tracing=getattr(manifest, "tracing", None),
+        app=manifest.project.get("trace"),
+    )
+    if sinks is None:
+        sinks, source = [LOCAL], "default"
+    where = str(manifest.source or root)
+    _check_wanted(
+        where,
+        {(s, source): ['trace="project"'] for s in sinks if isinstance(s, str) and s != LOCAL},
+    )
+    return list(sinks)
 
 
 def sink_name(sink: Any) -> str:

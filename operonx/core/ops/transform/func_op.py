@@ -23,6 +23,7 @@ from operonx.core.ops.base import (
     BaseOp,
     split_shorthand_kwargs,
 )
+from operonx.core.policy import Retry, Timeout, op_policy
 from operonx.core.utils.auto_name import register_skip
 from operonx.core.utils.common import Param
 
@@ -39,6 +40,8 @@ def op(
     transient: bool = False,
     show_keys: Optional[Any] = None,
     door: Optional[str] = None,
+    retry: Optional[Retry] = None,
+    timeout: Optional[Timeout] = None,
 ) -> Any:
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -97,9 +100,19 @@ def op(
             or writes to it. ``@op(door="egress")`` on a project's own door
             op is all a service and the studio need to find it; the built-in
             ``ingress()`` / ``egress()`` declare it the same way.
+        retry: ``Retry(...)`` — run the op again when it fails with an error
+            worth another try (by default a timeout, a connection error, an
+            HTTP 429 or 5xx), after a growing pause. A generator is retried
+            only before its first yield.
+        timeout: ``Timeout(run=..., idle=...)`` — a deadline per attempt; an
+            op past it fails with ``TimeoutError``. A plain ``def`` op needs
+            ``bound="cpu"`` for it. ``my_op(x=..., retry=..., timeout=...)``
+            overrides either for one use of the op.
     """
     if door not in (None, "ingress", "egress"):
         raise ValueError(f"@op(door=...) must be 'ingress' or 'egress', got {door!r}")
+    # Checked here so a bad value fails where the op is declared.
+    op_policy(retry, timeout)
     # Validate observability config at decoration time so the raise
     # surfaces where the op is declared, not where it runs.
     from operonx.core.ops.base import _normalise_observability
@@ -141,6 +154,8 @@ def op(
             op_transient = init_kwargs.pop("transient", transient)
             op_show_keys = init_kwargs.pop("show_keys", show_keys)
             op_door = init_kwargs.pop("door", door)
+            op_retry = init_kwargs.pop("retry", retry)
+            op_timeout = init_kwargs.pop("timeout", timeout)
             eff_exclude = call_exclude if call_exclude is not None else exclude
             eff_include = call_include if call_include is not None else include
             return FuncOp(
@@ -153,6 +168,8 @@ def op(
                 transient=op_transient,
                 show_keys=op_show_keys,
                 door=op_door,
+                retry=op_retry,
+                timeout=op_timeout,
                 _mappings=mappings or None,
                 **init_kwargs,
             )

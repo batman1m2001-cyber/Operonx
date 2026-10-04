@@ -123,7 +123,9 @@ asyncio.run(main())
   `"source:name"` resource. `sink`: a list, a path, a function
   `fn(key, item)`, or `"sink:name"`.
 - `key` makes items resumable: `job.run(resume=True)` skips done keys.
-- `on_error`: `"skip"` (default), `"stop"`, `"retry:N"`, or `"record"`.
+- `on_error`: `"skip"` (default), `"stop"`, `"retry:N"` (with a 0.5 s, 1 s,
+  2 s … pause between attempts), or `"record"`. A timed-out item keeps its
+  `trace_id`.
 - `session="stream"` feeds every item through one run instead of one run each.
 - `job.run_sync()` from plain code; `job.main()` turns it into a CLI.
 
@@ -293,7 +295,9 @@ operonx-run --list          # each job, the same
 
 Most specific wins: `[tracing.<services|jobs>.<name>]`, then the service's or
 job's own `trace=`, then `[tracing] sinks`, then `Application(trace=...)`,
-then the default (a job records locally; a service is not traced). Every
+then the default (a job records locally; a service is not traced). A
+script's `Operon(flow, trace="project")` uses the same `[tracing]` sinks
+(local when none are set); `Operon()` without `trace=` records nothing. Every
 sink of one run gets the same trace id, including a caller's `?trace_id=`.
 A typo in `[tracing]` fails at load; a sink missing from `resources.yaml`
 fails when the service or job starts.

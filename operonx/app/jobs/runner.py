@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from operonx.app.serve.protocol import RunRequest
 from operonx.app.serve.runner import RunTimeout, serve_session
 from operonx.core.loggings import LOGGER
+from operonx.core.policy import Retry
 from operonx.core.workflow_trace import STATUS_ERROR
 
 from .record import (
@@ -55,7 +56,7 @@ __all__ = ["ErrorPolicy", "parse_on_error", "run_job", "run_per_item", "run_stre
 @dataclass(frozen=True)
 class ErrorPolicy:
     """``skip`` carries on, ``stop`` starts nothing new, ``retry:N`` tries an
-    item N more times and then carries on. ``record`` carries on too, and a
+    item N more times, with a growing pause between, and then carries on. ``record`` carries on too, and a
     failed item does not fail the run: the failure is data — recorded, and
     handed to the sink — for a job whose next step reads every outcome."""
 
@@ -88,6 +89,11 @@ def parse_on_error(text: str) -> ErrorPolicy:
 #: The outcomes a policy acts on: retried under `retry`, fatal under `stop`.
 _RETRIABLE = (ITEM_FAILED, ITEM_TIMEOUT)
 
+#: The pause between `retry:N` attempts: the default `Retry` backoff (0.5 s,
+#: 1 s, 2 s ... jittered, capped at 30 s). Back to back, every retry of an
+#: item that failed on a busy dependency hit it again within a millisecond.
+_BACKOFF = Retry()
+
 
 def _first_error(trace: Any, handle: Any = None) -> Optional[str]:
     """The first op that errored, as ``op: last line of its error``.
@@ -100,8 +106,8 @@ def _first_error(trace: Any, handle: Any = None) -> Optional[str]:
     for node in getattr(trace, "nodes", None) or ():
         if node.status == STATUS_ERROR:
             return _as_item_error(node.op_name, node.error)
-    for op_name, text in (getattr(handle, "errors", None) or {}).items():
-        return _as_item_error(op_name.rsplit(".", 1)[-1], text)
+    for op_name, record in (getattr(handle, "errors", None) or {}).items():
+        return _as_item_error(op_name.rsplit(".", 1)[-1], record["message"])
     return None
 
 
@@ -227,6 +233,7 @@ async def _attempt(
             key,
             ITEM_TIMEOUT,
             error=str(exc),
+            trace_id=exc.trace_id,
             ms=(perf_counter() - started) * 1000,
             sent=session.sent,
         )
@@ -319,10 +326,12 @@ async def run_per_item(job: "Job", *, resume: bool = False) -> JobRun:
                 result.attempts = attempt
                 if result.status not in _RETRIABLE or attempt == policy.attempts:
                     break
+                delay = _BACKOFF.delay(attempt)
                 LOGGER.warning(
                     f"[job:{job.name}] {key!r} {result.status} ({result.error}); "
-                    f"retry {attempt}/{policy.retries}"
+                    f"retry {attempt}/{policy.retries} in {delay:.2f}s"
                 )
+                await asyncio.sleep(delay)
             judge = getattr(job, "judge", None)  # an Eval judges the case here
             if judge is not None:
                 try:

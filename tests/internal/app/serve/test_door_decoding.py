@@ -160,6 +160,8 @@ def test_http_replies_carry_the_trace_id():
         failed = client.post("/go", json={"a": 1})
     assert failed.status_code == 500
     assert failed.headers["x-operonx-trace-id"]
+    # In the body too: a client that logs only the body can still find the run.
+    assert failed.json()["trace_id"] == failed.headers["x-operonx-trace-id"]
 
 
 def test_a_webhook_refuses_a_malformed_body_and_names_its_run():

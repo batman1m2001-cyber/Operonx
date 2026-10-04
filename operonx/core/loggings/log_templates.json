@@ -2,6 +2,7 @@
   "op_done": "[{request_id}] {op_type} {full_name} [{context}] ({duration_ms}ms) {inputs} -> {outputs}",
   "op_error": "[{request_id}] Error in op {name}:\n{error}",
   "op_slow": "[{request_id}] Slow op {full_name}: {duration_ms}ms",
+  "op_retry": "[{request_id}] Op {full_name} failed (attempt {attempt}/{attempts}), retrying in {delay}s: {error}",
   "workflow_start": "[{request_id}] Running workflow {graph_name}",
   "workflow_done": "[{request_id}] Workflow {graph_name} completed",
   "workflow_stream_start": "[{request_id}] Streaming workflow {graph_name}",

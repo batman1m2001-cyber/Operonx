@@ -207,7 +207,7 @@ async def main():
     engine = Operon(wait_for_ready)
     out = await engine.run(inputs={})
     assert out["n"] == [1, 2, 3, 4, 5]  # stopped at the cap
-    assert "LoopLimitExceeded" in out["$errors"][f"{engine.name}.__loop_0__"]
+    assert out["$errors"][f"{engine.name}.__loop_0__"]["type"] == "LoopLimitExceeded"
 
 
 asyncio.run(main())
@@ -386,7 +386,9 @@ asyncio.run(main())
 - **`PARENT.declare(x=0, reducers={"x": fn})`** makes a graph-level cell:
   loop state, or many writers folded by a reducer
   (`operator.add`, `operonx.reducers.add_messages`). An op that omits a key
-  leaves the cell as it was.
+  leaves the cell as it was. Two ops that may run at once writing a cell
+  without a reducer fail the build; order them, add a reducer, or pass
+  `allow_race=True` (see [Failures](06-failures.md)).
 - **`SCRATCH["k"]`** is a per-run dict for side data. Read and write it
   inside op bodies; seed it with `engine.run(inputs, scratch={...})`. It
   orders nothing.

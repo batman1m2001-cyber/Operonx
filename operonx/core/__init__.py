@@ -41,6 +41,7 @@ from operonx.core.ops import (
     graph,
     op,
 )
+from operonx.core.policy import TRANSIENT, OpFailed, Retry, Timeout
 from operonx.core.registry import (
     REGISTRY,
     CacheEntry,
@@ -70,6 +71,11 @@ __all__ = [
     "ScratchAccessor",
     # Scheduler events
     "Interrupt",
+    # Failure policies
+    "Retry",
+    "Timeout",
+    "TRANSIENT",
+    "OpFailed",
     # Op types
     "GraphOp",
     "BranchOp",

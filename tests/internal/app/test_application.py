@@ -245,8 +245,8 @@ def test_the_graph_ref_compiles_like_a_served_graph(project):
 
     engine = next(g for g in app.graphs if g.name == "other").compile()
     assert isinstance(engine, Operon)
-    assert engine.name == "engine"  # what a served graph is named too: the
-    # root graph takes its compiling variable
+    assert engine.name == "other_flow"  # what a served graph is named too:
+    # after its graph function, not the variable that compiled it
 
 
 def test_the_old_import_paths_still_work_and_warn():

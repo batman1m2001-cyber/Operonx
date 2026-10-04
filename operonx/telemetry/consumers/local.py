@@ -11,7 +11,8 @@ layout designed to be read by humans (``view.txt``) and machines
       evals/<job>/<job_run>/<trace_id>/
       playground/<YYYY-MM-DD>/<trace_id>/
       adhoc/<workflow>/<YYYY-MM-DD>/<trace_id>/
-        meta.json         — workflow name, timings, metadata (origin…)
+        meta.json         — workflow name, timings, metadata (origin…),
+                            status ("ok"/"error") and the run's errors
         nodes.jsonl       — source of truth (one OpExecution per line,
                             media offloaded to refs)
         view.txt          — human-readable chronological rendering
@@ -50,6 +51,7 @@ from typing import Any, Callable, ClassVar, Dict, List, Optional
 from operonx.core.utils.yaml_model import YamlModel
 from operonx.core.workflow_trace import OpExecution, UpstreamRef, WorkflowTrace, format_ctx
 from operonx.telemetry.consumer import Consumer
+from operonx.telemetry.runs.model import meta_of_trace
 
 
 def _upstream_to_dict(u: UpstreamRef) -> Dict[str, str]:
@@ -88,9 +90,9 @@ def resolve_root(configured: Any = "") -> Path:
     :class:`LocalConsumer`."""
     import os
 
-    from operonx.core.workflow_trace import project_root
+    from operonx.core.workflow_trace import active_project
 
-    project = project_root()
+    project = active_project()
     if configured:
         path = Path(str(configured)).expanduser()
         if not path.is_absolute() and project is not None:
@@ -177,10 +179,11 @@ class LocalConsumer(Consumer):
     Config keys (all optional, sensible defaults):
 
     * ``root`` (``str | Path``) — base directory. Unset (or empty), it is
-      ``$OPERONX_RUNS_DIR``, else ``<project>/.operonx/runs`` for a
-      process an `Application` bootstrapped, else
-      ``/tmp/operonx_traces``. A relative root resolves against the
-      project root.
+      ``$OPERONX_RUNS_DIR``, else ``<project>/.operonx/runs`` — the
+      project an `Application` bootstrapped, or the nearest
+      ``operonx.toml`` at or above the working directory (a script run
+      inside a project) — else ``/tmp/operonx_traces``. A relative root
+      resolves against the project root.
     * ``layout`` (``str``) — ``origin`` (default), ``flat``, or a
       template; see the module docstring.
     * ``media_threshold`` (``int``) — bytes; payloads at or above this
@@ -383,16 +386,7 @@ class LocalConsumer(Consumer):
         return f"{'=' * 72}\nSUMMARY  nodes={len(trace.nodes)}  errors={len(errors)}\n{'=' * 72}"
 
     def _meta_dict(self, trace: WorkflowTrace) -> Dict[str, Any]:
-        return {
-            "trace_id": trace.trace_id,
-            "workflow_name": trace.workflow_name,
-            "started_at": trace.started_at,
-            "wall_started_at": trace.wall_started_at,
-            "ended_at": trace.ended_at,
-            "duration_ms": trace.duration_ms,
-            "node_count": len(trace.nodes),
-            "metadata": trace.metadata,
-        }
+        return meta_of_trace(trace)
 
     def _update_latest_symlink(self, root: Path, target: str) -> None:
         """Best-effort ``latest -> <the run's directory>`` symlink.

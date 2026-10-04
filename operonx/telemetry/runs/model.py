@@ -19,6 +19,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED
+
 __all__ = [
     "MAX_SAMPLES",
     "OpRollup",
@@ -328,7 +330,8 @@ def summarize(
         wall = row.get("wall_start")
         if isinstance(wall, (int, float)):
             first_wall = wall if first_wall is None else min(first_wall, wall)
-        if row.get("status") not in (None, "ok"):
+        # A retried attempt is not a failure: the attempt after it decides.
+        if row.get("status") not in (None, STATUS_OK, STATUS_RETRIED):
             r.errors += 1
             s.errors += 1
             if s.first_error is None:
@@ -354,7 +357,17 @@ def summarize(
         r.samples, r.exact = _thin(durations[op], MAX_SAMPLES)
 
     s.ops = len(per_op)
-    s.status = "error" if s.errors else "ok"
+    # The run's own records (`meta.json` "errors") know failures no row
+    # shows: a structured LLM step that returned `error`, a subgraph that
+    # failed around its children, a loop stopped at its cap. They are in
+    # the order the ops failed, so the first is the likeliest cause — the
+    # parse failure, not the `PromptError` it caused downstream.
+    recorded = meta.get("errors") or {}
+    if recorded:
+        op_name, record = next(iter(recorded.items()))
+        text = record.get("message") or record.get("type")
+        s.first_error = f"{op_name.rsplit('.', 1)[-1]}: {_first_line(text)}"
+    s.status = "error" if s.errors or recorded or meta.get("status") == "error" else "ok"
     if meta.get("duration_ms") is not None:
         s.duration_ms = float(meta["duration_ms"])
     elif first_start is not None and last_end is not None:
@@ -424,7 +437,9 @@ def rows_of_trace(
 
 
 def meta_of_trace(trace: Any) -> Dict[str, Any]:
-    """A live trace's ``meta.json`` — the same dict LocalConsumer writes."""
+    """A trace's ``meta.json``: what LocalConsumer writes, and what a live
+    trace is read as. ``status`` is ``"error"`` when a node failed or the
+    run recorded an error; ``errors`` is the run's ``"$errors"``."""
     return {
         "trace_id": trace.trace_id,
         "workflow_name": trace.workflow_name,
@@ -434,4 +449,6 @@ def meta_of_trace(trace: Any) -> Dict[str, Any]:
         "duration_ms": trace.duration_ms,
         "node_count": len(trace.nodes),
         "metadata": trace.metadata,
+        "status": trace.status,
+        "errors": dict(trace.errors),
     }

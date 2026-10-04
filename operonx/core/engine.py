@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional,
 
 from operonx.core.loggings import LOGGER, format_event
 from operonx.core.ops.graph.graph_op import GraphOp
+from operonx.core.policy import ERRORS_MODES, RunPolicy, _FailFast
 from operonx.core.states import StateSchema
 
 if TYPE_CHECKING:
@@ -436,7 +437,16 @@ class Operon:
         ```
     """
 
-    __slots__ = ["graph", "name", "_schema", "_collector", "_trace_consumers", "inputs_expected"]
+    __slots__ = [
+        "graph",
+        "name",
+        "_schema",
+        "_collector",
+        "_trace_consumers",
+        "inputs_expected",
+        "_errors",
+        "_max_concurrency",
+    ]
 
     def __init__(
         self,
@@ -444,6 +454,8 @@ class Operon:
         *,
         params: Optional[Dict[str, Any]] = None,
         trace: Optional[Union[str, "Consumer", List[Union[str, "Consumer"]]]] = None,
+        errors: str = "record",
+        max_concurrency: Optional[int] = None,
     ):
         """Initialize Operon engine with a GraphOp or a graph factory.
 
@@ -466,11 +478,36 @@ class Operon:
                    report, …). Failures are caught + logged per-consumer
                    so one bad backend never affects the call. Requires
                    :func:`operonx.bootstrap` when using string keys.
+                   ``"local"`` is the built-in local consumer: inside a
+                   project (an ``operonx.toml`` at or above the working
+                   directory) it writes to ``<project>/.operonx/runs``.
+                   ``"project"`` is the project's own ``[tracing]`` sinks,
+                   chosen as its services' and jobs' are. Unset, nothing
+                   is traced. A run started inside an op of a running
+                   engine is part of that run and calls no consumer.
                    Examples::
 
                        trace="trace_local:default"
                        trace=CallbotLocalConsumer(config={"root": "/tmp/x"})
                        trace=["trace_langfuse:edupia", MyDebugConsumer()]
+
+            errors: What a run does when an op fails. ``"record"`` (the
+                   default) records it — ``"$errors"``, ``handle.errors`` —
+                   and carries on, so one failing op does not end a live
+                   session. ``"raise"`` ends the run at the first failure no
+                   error edge handles: the ops still running are cancelled
+                   and ``run()``, ``result()``, ``collect()``, iteration and
+                   ``stream()`` raise :class:`OpFailed`. For jobs, tests and
+                   batch scripts, which want the failure rather than a
+                   result with a key missing.
+            max_concurrency: The most ops of one run that may be running at
+                   once, counted across every nested graph. A graph's own
+                   ``concurrency=`` caps that graph only, so nested graphs
+                   multiply (2 subgraphs at ``concurrency=2`` each run 4
+                   ops); this is the one cap for the run. Counts the ops
+                   that run as tasks (async, ``bound="cpu"``); a plain
+                   ``def`` op runs inline and a subgraph holds no slot of
+                   its own. ``None`` (the default): no shared cap.
 
         Raises:
             RuntimeError: If a provider op needs the hub but none has been
@@ -478,9 +515,21 @@ class Operon:
             TypeError: If a ``trace=`` item is neither a str nor a
                 Consumer instance.
         """
+        if errors not in ERRORS_MODES:
+            raise ValueError(f"errors= must be 'record' or 'raise', got {errors!r}")
+        if max_concurrency is not None and (
+            isinstance(max_concurrency, bool)
+            or not isinstance(max_concurrency, int)
+            or max_concurrency < 1
+        ):
+            raise ValueError(
+                f"max_concurrency= takes an int >= 1 (ops running at once), got {max_concurrency!r}"
+            )
         if callable(graph) and not isinstance(graph, GraphOp):
             graph = graph(**(params or {}))
 
+        self._errors = errors
+        self._max_concurrency = max_concurrency
         self.graph = graph
         self.name = graph.name
         self._trace_consumers = self._resolve_trace_consumers(trace)
@@ -508,6 +557,9 @@ class Operon:
         Accepts three call styles for flexibility:
 
         * ``None`` → returns ``[]`` (tracing off).
+        * ``"project"`` → the project's ``[tracing]`` sinks
+          (:func:`operonx.app.tracing.project_sinks`), each resolved as
+          below; a ``ValueError`` outside a project.
         * ``str`` → ResourceHub key, resolved to a shared Consumer
           instance (typical production wiring via ``resources.yaml``).
           ``"local"`` is the built-in local consumer, no key needed.
@@ -535,7 +587,11 @@ class Operon:
         items = trace if isinstance(trace, list) else [trace]
         resolved: List[Any] = []
         for item in items:
-            if item == "local":
+            if item == "project":
+                from operonx.app.tracing import project_sinks
+
+                resolved.extend(Operon._resolve_trace_consumers(project_sinks()))
+            elif item == "local":
                 # The built-in local consumer, by the name `[tracing]` gives
                 # it: what a job records to when nothing is configured. Not a
                 # hub key, so it works without a resources.yaml.
@@ -652,6 +708,18 @@ class Operon:
         if scratch:
             state._scratch.update(scratch)
 
+        # Left None at the defaults, so the scheduler and the failure path
+        # pay one `is None` test for a feature the run does not use.
+        if self._errors != "record" or self._max_concurrency is not None:
+            state._run_policy = RunPolicy(
+                errors=self._errors,
+                limiter=(
+                    asyncio.Semaphore(self._max_concurrency)
+                    if self._max_concurrency is not None
+                    else None
+                ),
+            )
+
         # Phase 2: wire the checkpointer to the state's write funnel BEFORE
         # the scheduler runs, so no writes are missed. Unsubscribe hook is
         # invoked in the run's finally-block to detach cleanly.
@@ -685,6 +753,19 @@ class Operon:
         from operonx.core.workflow_trace import WorkflowTrace, run_metadata
         from operonx.core.workflow_trace import _current_trace as _v3_trace_var
 
+        # A run started inside an op of a running engine (a helper graph a
+        # service op runs per call) is part of that op's run: it records
+        # into its own handle's trace, and calls no consumer — a second
+        # root trace per call is not something its caller asked for.
+        nested_in = _v3_trace_var.get()
+        consumers = [] if nested_in is not None else self._trace_consumers
+        if nested_in is not None and self._trace_consumers:
+            LOGGER.debug(
+                "run of %s inside run %s: its trace consumers are not called",
+                self.name,
+                nested_in.trace_id,
+            )
+
         _wf_trace = WorkflowTrace(
             trace_id=trace_id or request_id,
             workflow_name=self.name,
@@ -700,6 +781,9 @@ class Operon:
                 "session_id": session_id,
                 **({"tags": list(state.tags)} if getattr(state, "tags", None) else {}),
             },
+            # The run's own failure records — the dict `handle.errors`
+            # copies — so a consumer sees what no node shows.
+            errors=state._op_errors,
         )
 
         async def _run() -> None:
@@ -716,6 +800,11 @@ class Operon:
                         LOGGER.exception("checkpointer.on_cancel failed")
                 queue.put_nowait(None)
                 raise
+            except _FailFast as e:
+                # errors="raise": an op failed and the run was stopped. The
+                # carrier is a BaseException only to get past every
+                # `except Exception` on its way up; the caller gets OpFailed.
+                queue.put_nowait(e.failure)
             except BaseException as e:  # includes ObserveBudgetExceeded (Phase 2)
                 queue.put_nowait(e)
                 # Do NOT re-raise a BaseException — the ExecutionHandle re-raises
@@ -746,7 +835,7 @@ class Operon:
                 # `asyncio.to_thread` so a slow HTTP consumer (Langfuse)
                 # doesn't block the event loop; per-consumer try/except
                 # so one broken backend never affects the call.
-                for _consumer in self._trace_consumers:
+                for _consumer in consumers:
                     try:
                         await asyncio.to_thread(_consumer.consume, _wf_trace)
                     except Exception:
@@ -797,9 +886,11 @@ class Operon:
             with the MemoryState for debugging/tracing access, plus
             "$errors" — ``{op_full_name: error_text}`` — when at least one
             op raised. An op that raises does not raise out of the run;
-            its outputs, and those of every op after it, are missing.
-            A ``BaseException`` (``ObserveBudgetExceeded``, a misdirected
-            ``Interrupt``) does raise.
+            its outputs, and those of every op after it, are missing —
+            unless the engine was built with ``errors="raise"``, which
+            raises :class:`OpFailed` instead. A ``BaseException``
+            (``ObserveBudgetExceeded``, a misdirected ``Interrupt``) does
+            raise.
         """
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())

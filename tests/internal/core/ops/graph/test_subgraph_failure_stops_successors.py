@@ -68,11 +68,12 @@ async def test_errors_name_the_subgraph_and_the_op_that_raised():
     name, out = await _run(nested)
     errors = out["$errors"]
 
-    assert "ValueError: boom" in errors[f"{name}.s.b"]
+    assert "ValueError: boom" in errors[f"{name}.s.b"]["message"]
     # The subgraph's own entry points at the op that raised, not at a
     # second copy of its traceback.
-    assert f"{name}.s.b" in errors[f"{name}.s"]
-    assert "Traceback" not in errors[f"{name}.s"]
+    assert errors[f"{name}.s"]["type"] == "SubgraphError"
+    assert f"{name}.s.b" in errors[f"{name}.s"]["message"]
+    assert "Traceback" not in errors[f"{name}.s"]["message"]
 
 
 @graph
@@ -92,7 +93,7 @@ async def test_failure_two_levels_down_stops_successors():
     name, out = await _run(nested_twice)
 
     assert "z" not in out
-    assert f"{name}.s.s.b" in out["$errors"][f"{name}.s"]
+    assert f"{name}.s.s.b" in out["$errors"][f"{name}.s"]["message"]
 
 
 @op
@@ -177,4 +178,8 @@ def test_http_door_answers_500_not_200_null():
         response = client.post("/go", json="hello")
 
     assert response.status_code == 500, response.text
-    assert response.json() == {"error": "the graph produced no output", "endpoint": "d"}
+    assert response.json() == {
+        "error": "the graph produced no output",
+        "endpoint": "d",
+        "trace_id": response.headers["x-operonx-trace-id"],
+    }

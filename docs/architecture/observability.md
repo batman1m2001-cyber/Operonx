@@ -75,6 +75,16 @@ for node in handle.trace.nodes:
     print(node.inputs, node.outputs)      # already filtered
 ```
 
+An op can add to its record what its raw I/O does not show, by
+overriding `normalize_trace_io(inputs, outputs)`; it runs on the filtered
+copies whenever a record is built. `LLMOp` uses it to record the request
+it sent: a template is rendered with the recorded variables into
+`inputs["messages"]`, beside the variables and the template, and image or
+audio blocks become `Media`. The filters hold: `exclude={"trace":
+["messages"]}` hides it, and a template whose variable is hidden is not
+rendered. A generator's yields share one copy of the inputs, so a streamed
+call renders its request once.
+
 One `OpExecution` per invocation for a batch op, and **one per yield** for
 a generator — so `op_id` is unique per yield and a downstream consumer's
 `UpstreamRef` points at the exact yield it consumed. A cancelled or errored

@@ -16,8 +16,11 @@ from operonx.core.configs import OpType
 from operonx.core.exceptions import LLMRefusalError, PromptError
 from operonx.core.media import Media
 from operonx.core.ops import BaseOp
-from operonx.core.ops.base import shorthand, split_shorthand_kwargs
+from operonx.core.ops.base import shorthand, should_emit_for_channel, split_shorthand_kwargs
+from operonx.core.policy import mark_retried
+from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
+from operonx.core.workflow_trace import _current_op_ctx
 from operonx.providers.ops._utils import resolve_hub
 from operonx.providers.parsing import (
     ExtractField,
@@ -117,6 +120,18 @@ def _content_to_text(content: Any) -> str:
                 parts.append(text)
         return "".join(parts)
     return str(content)
+
+
+def _gave_up(error: BaseException, max_retries: int) -> BaseException:
+    """The error the transport retry stops on, marked if it was retried.
+
+    Marked, an op's ``retry=Retry(...)`` around this call does not retry it
+    again: both layers retry a connection failure, and stacked they make
+    ``(max_retries + 1) * max_attempts`` calls. Unmarked when the resource
+    retries nothing (``max_retries: 0``), so the op's retry is the one that
+    runs.
+    """
+    return mark_retried(error) if max_retries > 0 else error
 
 
 def _is_empty_completion(result: Any) -> bool:
@@ -888,7 +903,7 @@ class LLMOp(BaseOp):
                 result = await coro_fn(**kwargs)
             except openai.RateLimitError as e:
                 if attempt >= max_retries:
-                    raise
+                    raise _gave_up(e, max_retries)
                 sleep_time = self._retry_delay(e, base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
                     "[%s] Rate limited (429). Attempt %d/%d. Retrying in %.2fs",
@@ -905,7 +920,7 @@ class LLMOp(BaseOp):
                 openai.InternalServerError,
             ) as e:
                 if attempt >= max_retries:
-                    raise
+                    raise _gave_up(e, max_retries)
                 sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
                     "[%s] %s. Attempt %d/%d. Retrying in %.2fs",
@@ -922,8 +937,10 @@ class LLMOp(BaseOp):
                 # rather than the specific subclass. Retry 5xx, let 4xx
                 # through.
                 status_code = getattr(e, "status_code", None)
-                if not status_code or status_code < 500 or attempt >= max_retries:
+                if not status_code or status_code < 500:
                     raise
+                if attempt >= max_retries:
+                    raise _gave_up(e, max_retries)
                 sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
                     "[%s] %s %s. Attempt %d/%d. Retrying in %.2fs",
@@ -1025,6 +1042,7 @@ class LLMOp(BaseOp):
                 if self.on_failure != "error":
                     raise
                 LOGGER.warning("LLMOp hard failure, reported as error: %s", e)
+                self._record_failure(e)
                 field_nones = {f.output_key: None for f in self._extract_fields}
                 return {**field_nones, "error": f"{type(e).__name__}: {e}"}
 
@@ -1047,8 +1065,22 @@ class LLMOp(BaseOp):
                 last_error,
             )
 
+        self._record_failure(f"ParserError: {last_error}")
         field_nones = {f.output_key: None for f in self._extract_fields}
         return {**last_result, **field_nones, "error": last_error}
+
+    def _record_failure(self, error: Union[BaseException, str]) -> None:
+        """Put a failure this op returns as ``error`` in the run's ``"$errors"``.
+
+        The op does not raise — a downstream op branches on ``error`` — so
+        ``BaseOp.run`` never sees a failure. Without this record the run
+        reported only what failed *because* of it: the next templated
+        step's ``PromptError`` on the ``None`` fields, with the parse
+        failure that caused it sitting unread in this op's ``error`` cell.
+        """
+        state = _current_state_var.get(None)
+        if state is not None:
+            state.record_op_error(self.full_name, error, _current_op_ctx.get())
 
     # =========================================================================
     # Core: stream
@@ -1267,31 +1299,37 @@ class LLMOp(BaseOp):
     # =========================================================================
 
     def normalize_trace_io(self, inputs: Dict[str, Any], outputs: Dict[str, Any]) -> tuple:
-        """Wrap OpenAI chat-format multimodal blocks as ``Media`` for tracing.
+        """Record the request this call sent, as ``messages``, beside its variables.
 
-        Prompt is formatted to messages first (using the current template vars),
-        then multimodal image/audio blocks are wrapped in ``Media`` for the
-        trace-time view. Real op state is untouched.
+        A template (``prompt=``) is rendered with the recorded variables by
+        the op's own rule, so the trace shows the conversation the model
+        received rather than a template a reader has to fill in. A
+        conversation passed as ``messages=`` is already that, and is kept
+        as is. Multimodal blocks (``image_url``, ``input_audio``) are
+        wrapped as ``Media`` for the consumers to offload. Real op state is
+        untouched.
+
+        *inputs* is the trace's filtered copy, so ``exclude=``/``include=``
+        hold: ``messages`` itself can be hidden, and a template whose
+        variable is hidden is not rendered — the rendering would put the
+        hidden value back. A template that does not render failed the op
+        with the same ``PromptError``; that failure is the record.
         """
+        if not should_emit_for_channel(self, "messages", "trace"):
+            return inputs, outputs
         prompt = inputs.get("prompt")
         raw_messages = inputs.get("messages")
-        if prompt is not None or raw_messages is not None:
+        if raw_messages is not None:
+            messages = list(raw_messages)
+        elif prompt is not None:
+            vars = {k: v for k, v in inputs.items() if k not in RESERVED_KEYS}
             try:
-                vars = {k: v for k, v in inputs.items() if k not in RESERVED_KEYS}
-                # messages= is already built; only a template needs formatting.
-                # Reading `prompt` alone here meant a messages= call traced no
-                # media at all.
-                messages = (
-                    list(raw_messages)
-                    if raw_messages is not None
-                    else self._build_messages(prompt, vars)
-                )
-                wrapped = self._wrap_openai_media_blocks(messages)
-                inputs = {**inputs, "messages": wrapped}
-            except Exception:
-                # Tracing must never break execution — swallow formatting errors
-                pass
-        return inputs, outputs
+                messages = self._build_messages(prompt, vars)
+            except PromptError:
+                return inputs, outputs
+        else:
+            return inputs, outputs
+        return {**inputs, "messages": self._wrap_openai_media_blocks(messages)}, outputs
 
     @staticmethod
     def _wrap_openai_media_blocks(messages: Any) -> Any:

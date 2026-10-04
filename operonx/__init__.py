@@ -40,6 +40,7 @@ from operonx.core import (
     PENDING,
     SCRATCH,
     START,
+    TRANSIENT,
     BranchOp,
     EmitOp,
     FuncOp,
@@ -47,6 +48,9 @@ from operonx.core import (
     Interrupt,
     InterruptOp,
     Operon,
+    OpFailed,
+    Retry,
+    Timeout,
     graph,
     op,
 )
@@ -134,6 +138,11 @@ __all__ = [
     "SCRATCH",
     # Scheduler events
     "Interrupt",
+    # Failure policies
+    "Retry",
+    "Timeout",
+    "TRANSIENT",
+    "OpFailed",
     # Logging
     "LOGGER",
     # Setup

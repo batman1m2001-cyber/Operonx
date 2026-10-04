@@ -7,8 +7,13 @@ failure and the fix.
 ## An op that raises is reported in `$errors`, not raised
 
 The run finishes; the failed op's outputs are missing, and so are those
-of every op after it. `run()` adds `"$errors"` — `{"<graph>.<op>":
-error_text}` — only when an op failed, so check for that key.
+of every op after it. `run()` adds `"$errors"` only when an op failed, so
+check for that key. Each entry is `{"<graph>.<op>": {"type", "message",
+"count", "first_ctx"}}`: the exception's class name, the first failure's
+traceback trimmed to your own frames, how many times the op failed (a
+streaming op failing on two items counts 2), and where the first one ran
+(the failed trace node is `f"{op}#{first_ctx}"`). The whole traceback stays
+in the trace and the op's `error` cell.
 
 ```python
 import asyncio
@@ -31,8 +36,9 @@ async def main():
     engine = Operon(flow)
     out = await engine.run(inputs={"x": "not a number"})
     assert "n" not in out  # no exception: the output is just missing
-    error = out["$errors"][f"{engine.name}.p"]  # same text as the op's "error" cell
-    assert "ValueError" in error
+    error = out["$errors"][f"{engine.name}.p"]
+    assert error["type"] == "ValueError" and error["count"] == 1
+    assert error["message"].endswith("invalid literal for int() with base 10: 'not a number'\n")
     assert "$errors" not in await engine.run(inputs={"x": "3"})  # absent when clean
 
 
@@ -40,11 +46,14 @@ asyncio.run(main())
 ```
 
 An op raising inside a subgraph stops the ops after the subgraph too, and
-`$errors` gets a `"<graph>.<sub>"` entry naming the op that raised.
+`$errors` gets a `"<graph>.<sub>"` entry (`type` `"SubgraphError"`) naming
+the op that raised. A structured `LLMOp` step that fails returns `error`
+rather than raising, and is in `$errors` too (`type` `"ParserError"`), so
+the cause shows beside whatever failed downstream of it.
 
 `handle.errors` is the same dict on a started run. Over HTTP a failed run
-is a `500 {"error": "the graph produced no output"}`; the traceback stays
-in the log.
+is a `500 {"error": "the graph produced no output", "trace_id": ...}`; the
+traceback stays in the log and the trace, which that id finds.
 
 ## Return a dict literal; name dynamic keys where the op is used
 
@@ -142,14 +151,15 @@ asyncio.run(main())
 
 ## A Ref does not order anything; `>>` does
 
-`b(x=a["y"])` reads a's output but does not wait for it. Without `a >> b`,
-`b` runs as soon as it can, with its default. And an op that nothing wires
-from `START` never runs at all.
+`b(x=a["y"])` reads a's output but does not wait for it. A read with no
+edge `a >> b` (directly or through other ops) fails the build: `b` would get
+the value or its default depending on timing. Draw the edge.
 
 ```python
 import asyncio
 
 from operonx import END, START, Operon, graph, op
+from operonx.core.ops.graph.validation import GraphValidationError
 
 
 @op
@@ -167,17 +177,8 @@ def use(x: int = -1) -> dict:
 def no_edge():
     a = make()
     b = use(x=a["y"])
-    START >> [a, b]  # b does not wait for a
-    a >> END
-    b >> END
-
-
-@graph
-def unreachable():
-    a = make()
-    b = use(x=a["y"])
-    START >> a >> END
-    b >> END  # nothing leads to b
+    START >> [a, b]  # b would not wait for a
+    [a, b] >> END
 
 
 @graph
@@ -188,13 +189,25 @@ def with_edge():
 
 
 async def main():
-    assert (await Operon(no_edge).run(inputs={}))["z"] == -1  # ran before a finished
-    assert "z" not in await Operon(unreachable).run(inputs={})  # never ran
+    try:
+        Operon(no_edge)
+    except GraphValidationError as e:
+        assert "START >> a >> b" in str(e)  # the message names the edge to draw
+    else:
+        raise AssertionError("expected the build to fail")
     assert (await Operon(with_edge).run(inputs={}))["z"] == 2
 
 
 asyncio.run(main())
 ```
+
+- Reads of `PARENT[...]` (graph inputs, declared cells) and `SCRATCH[...]`
+  order nothing by design and are not checked. To read *whatever value is
+  there* from an op running beside you, share it through a declared cell
+  (`PARENT.declare(y=None)`, `a["y"] >> PARENT["y"]`, read `PARENT["y"]`).
+- An op with no edges at all, in a graph with no `START >>`, runs as an
+  entry, beside every other entry; the build warns. In a graph that has
+  `START >> ...`, an op nothing leads to never runs.
 
 ## Combine conditions with `&` `|` `~`, never `and` `or` `not`
 
@@ -391,7 +404,10 @@ asyncio.run(main())
 ## Names come from variables
 
 An op or graph is named after the variable it is assigned to; an engine's
-root graph after the variable holding the engine. State keys and trace
+root graph after the variable holding the engine. Not assigned to a plain
+variable (`self.engine = Operon(greet)`, `out = await
+Operon(greet).run()`), a `@graph` is named after its function. Jobs and
+services name their runs after the graph's function. State keys and trace
 names follow, so renaming a variable renames them. Pin names that other
 code reads.
 
@@ -417,6 +433,8 @@ async def main():
     assert engine.name == "engine"  # not "greet"
     pinned = Operon(greet(name="greet"))
     assert pinned.name == "greet"
+    engines = {"greet": Operon(greet)}  # no plain variable: the function's name
+    assert engines["greet"].name == "greet"
 
 
 asyncio.run(main())

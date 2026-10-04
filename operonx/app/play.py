@@ -448,7 +448,14 @@ def _op_event(node: Any) -> Dict[str, Any]:
 
 
 def _status(trace: Any) -> Tuple[str, Optional[str]]:
-    """A finished trace's status and its first error, as one line."""
+    """A finished trace's status and its first error, as one line.
+
+    The run's own records first (``trace.errors``, in the order the ops
+    failed): they know a failure no node shows — a structured LLM step
+    that returned ``error`` — and the first is the likeliest cause."""
+    for op_name, record in (getattr(trace, "errors", None) or {}).items():
+        lines = str(record.get("message") or record.get("type") or "").strip().splitlines()
+        return "error", f"{op_name.rsplit('.', 1)[-1]}: {lines[-1] if lines else 'failed'}"
     for node in getattr(trace, "nodes", None) or []:
         if getattr(node, "status", "ok") == "error":
             lines = str(node.error or "").strip().splitlines()

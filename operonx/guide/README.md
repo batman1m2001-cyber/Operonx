@@ -18,6 +18,8 @@ websocket, and an **Application** bundles a product's jobs and services.
 3. [Control flow](03-control-flow.md): streaming, loops, if/else, `~`.
 4. [Gotchas](04-gotchas.md): the failures that raise nothing.
 5. [Project layout](05-project-layout.md): how to lay out a product.
+6. [Failures](06-failures.md): `retry=`, `timeout=`, `on_error`,
+   `errors="raise"`, `max_concurrency=`, concurrent writers.
 
 ## Install
 
@@ -44,6 +46,7 @@ pointing at it) for coding assistants. It also copies this guide into
 
 ```python
 from operonx import END, PARENT, SCRATCH, START, EmitOp, InterruptOp, Operon, bootstrap, graph, op
+from operonx import OpFailed, Retry, Timeout  # failure policies (page 6)
 from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
 from operonx.agents.ops.model_ops import make_llm_caller
 from operonx.app import Application, Eval, Service, asgi, env, http, schedule, webhook, websocket
@@ -64,12 +67,14 @@ from operonx.providers.ops import (
 
 1. **Write ops in `.py` files and return a dict literal.** Its keys are the
    op's outputs.
-2. **`a >> b` orders; `b(x=a["y"])` only reads.** Always draw the edge.
+2. **`a >> b` orders; `b(x=a["y"])` only reads.** Always draw the edge; a
+   read nothing orders fails the build.
 3. **A graph parameter is a runtime input only with
    `Operon(g, params={"x": None})`** — and inside the body it already is
    `PARENT["x"]`: use it by name, never `PARENT["x"]` beside it.
 4. **An op that raises does not raise.** Its outputs are just missing;
-   the run's result has `"$errors"` naming it.
+   the run's result has `"$errors"` naming it. `retry=`, `timeout=`,
+   `op.on_error(handler)` and `errors="raise"` change that (page 6).
 5. **Streaming is sequential per item by default.** `.parallel()` to fan
    out, `.collect()` to gather.
 6. **Loop state lives in `PARENT.declare(...)` cells**, and loops exit to

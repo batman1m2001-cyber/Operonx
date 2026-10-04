@@ -23,7 +23,15 @@ __all__ = ["RunTimeout", "ServeRunner", "serve_session"]
 
 
 class RunTimeout(TimeoutError):
-    """The run did not finish inside ``timeout``; it was cancelled."""
+    """The run did not finish inside ``timeout``; it was cancelled.
+
+    ``trace_id`` is the cancelled run's: its trace is written as the run
+    ends, so the run that hung can still be looked up.
+    """
+
+    def __init__(self, message: str, trace_id: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.trace_id = trace_id
 
 
 async def _drain(handle: Any) -> None:
@@ -100,7 +108,9 @@ async def serve_session(
                 await asyncio.wait_for(_drain(handle), timeout)
             except asyncio.TimeoutError:
                 handle.cancel()
-                raise RunTimeout(f"run exceeded {timeout:g}s") from None
+                raise RunTimeout(
+                    f"run exceeded {timeout:g}s", trace_id=getattr(trace, "trace_id", None)
+                ) from None
     finally:
         # A transport whose `close` raises must not turn a completed run
         # into a failed one. Closing is teardown; its failure is reported

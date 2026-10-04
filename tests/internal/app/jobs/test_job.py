@@ -490,3 +490,43 @@ def test_item_timeout_must_be_positive(tmp_path):
     with pytest.raises(ValueError, match="item_timeout"):
         make_job(tmp_path, item_timeout=0)
     assert make_job(tmp_path, item_timeout=2).describe()["item_timeout"] == 2.0
+
+
+# -- retry:N waits between attempts; a timed-out item keeps its trace (F33) ----
+
+STAMPS: dict = {}  # id -> perf_counter() of each attempt
+
+
+@op(bound="io")
+async def always_fails(item: dict = None) -> dict:
+    import time
+
+    STAMPS.setdefault(item["id"], []).append(time.perf_counter())
+    raise ConnectionError(f"down for {item['id']}")
+    return {"scored": item}  # never reached; names the output
+
+
+@graph
+def failing_flow():
+    src = ingress()
+    f = always_fails(item=src["item"])
+    out = egress(item=f["scored"])
+    START >> src >> f >> out >> END
+
+
+async def test_retry_backs_off_between_attempts(tmp_path):
+    """Retries used to fire back to back: three attempts inside a millisecond."""
+    STAMPS.clear()
+    run = await make_job(tmp_path, graph=failing_flow, source=[ITEMS[0]], on_error="retry:2").run()
+    assert run.items[0].attempts == 3
+    first, second = (b - a for a, b in zip(STAMPS["a"], STAMPS["a"][1:]))
+    # The default Retry: 0.5 s then 1 s, each jittered down to half at most.
+    assert 0.25 <= first <= 0.6, first
+    assert 0.5 <= second <= 1.1, second
+
+
+async def test_a_timed_out_item_keeps_its_trace_id(tmp_path):
+    run = await make_job(tmp_path, graph=slow_flow, item_timeout=0.05).run()
+    assert run.counts["timeout"] == 3
+    ids = [i.trace_id for i in run.items]
+    assert all(ids) and len(set(ids)) == 3  # the hung run can be found

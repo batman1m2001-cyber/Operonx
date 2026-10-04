@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from operonx.core.states.cell import DEFAULT_CONTEXT, Cell
 from operonx.core.states.schema import StateSchema
+from operonx.core.utils.tracebacks import user_traceback
+from operonx.core.workflow_trace import format_ctx
 
 __all__ = ["MemoryState", "ReducerError"]
 
@@ -117,12 +119,18 @@ class MemoryState:
         # scheduler when the iteration's run finishes, popped by the
         # scheduler that owns the loop op on its EOF. Not persisted.
         "_loop_signals",
-        # {op_full_name: error_text} for every op that raised in this run.
-        # Filled by `record_op_error`; read as `handle.errors` / "$errors".
+        # {op_full_name: {type, message, count, first_ctx}} for every op
+        # that failed in this run. Filled by `record_op_error`; read as
+        # `handle.errors` / "$errors" and the trace's `errors`.
         "_op_errors",
         # {"src -> dst": n} items dropped by a full `on_full="drop_oldest"`
         # edge. Written by the scheduler; read as `handle.drops`.
         "_edge_drops",
+        # The run's `RunPolicy` (errors="raise", the shared concurrency
+        # limiter) from `Operon.start`, or None: record and carry on, no
+        # shared limit — an op called directly, or an engine left at the
+        # defaults. See operonx/core/policy.py.
+        "_run_policy",
     )
 
     def __init__(
@@ -201,9 +209,10 @@ class MemoryState:
         self._stream_output_queue = None
         self._loop_signals: Dict[tuple, tuple] = {}
 
-        # Ops that raised, first failure of each. See `record_op_error`.
-        self._op_errors: Dict[str, str] = {}
+        # Ops that failed, one record each. See `record_op_error`.
+        self._op_errors: Dict[str, Dict[str, Any]] = {}
         self._edge_drops: Dict[str, int] = {}
+        self._run_policy = None
 
         # Apply initial inputs
         if inputs:
@@ -363,21 +372,61 @@ class MemoryState:
         self._current_step += 1
         return self._current_step
 
-    def record_op_error(self, op: str, error: str) -> None:
-        """Note that *op* (its full name) raised, with *error* as its text.
+    def record_op_error(
+        self,
+        op: str,
+        error: Union[BaseException, str],
+        ctx: Optional[tuple] = None,
+    ) -> None:
+        """Note that *op* (its full name) failed with *error*, at *ctx*.
 
         An op that raises does not raise out of the run — one failing op
         must not end a live call — so this is how the failure is still
-        seen: ``handle.errors`` and the run's ``"$errors"`` read it back.
-        The op's ``error`` cell holds the same text, but a cell is per
-        context and a transient context's cells are released when it ends;
-        the record has to outlive the item that failed.
+        seen: ``handle.errors``, the run's ``"$errors"`` and the trace's
+        ``errors`` read it back. The op's ``error`` cell holds the text
+        too, but a cell is per context and a transient context's cells are
+        released when it ends; the record has to outlive the item that
+        failed.
 
-        The first failure of each op is kept: it is usually the cause, and
-        a streaming op failing on every item must not grow this per item.
+        One record per op, ``{type, message, count, first_ctx}``:
+
+        * ``type`` — the exception's class name (``"ValueError"``).
+        * ``message`` — the first failure, a traceback trimmed to the
+          user's frames (:func:`~operonx.core.utils.tracebacks.user_traceback`).
+          The whole traceback stays in the trace node and the ``error``
+          cell.
+        * ``count`` — how many times the op failed in this run. A
+          streaming op failing on every item counts each one, and the
+          record stays one entry.
+        * ``first_ctx`` — where the first failure ran, formatted like the
+          trace's ctx: the failed execution's trace ``op_id`` is
+          ``f"{op}#{first_ctx}"``. ``None`` when the caller had no ctx.
+
+        Args:
+            op: The op's full name, ``"<graph>.<op>"``.
+            error: The exception, or — for a failure that is not one (a
+                subgraph whose child raised, a loop at its cap, a structured
+                ``LLMOp`` step's ``error``) — its text, ``"<Type>: <what>"``.
+            ctx: The context the failure ran in.
         """
-        if op not in self._op_errors:
-            self._op_errors[op] = error
+        record = self._op_errors.get(op)
+        if record is not None:
+            # A new dict, not an in-place bump: a `handle.errors` snapshot
+            # a caller already holds must not change under it.
+            self._op_errors[op] = {**record, "count": record["count"] + 1}
+            return
+        if isinstance(error, BaseException):
+            kind, message = type(error).__name__, user_traceback(error)
+        else:
+            message = str(error)
+            head = message.split(":", 1)[0]
+            kind = head if head.isidentifier() else "Error"
+        self._op_errors[op] = {
+            "type": kind,
+            "message": message,
+            "count": 1,
+            "first_ctx": format_ctx(ctx) if ctx is not None else None,
+        }
 
     def resume_interrupt(self, interrupt_id: str, value: Any) -> bool:
         """Resolve a pending InterruptOp with ``value``.

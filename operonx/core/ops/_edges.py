@@ -55,7 +55,13 @@ class DummyOp(BaseOp):
     def __init__(self, name: str):
         super().__init__(name=name)
 
-    def declare(self, *, reducers: "dict | None" = None, **vars: "Any") -> None:
+    def declare(
+        self,
+        *,
+        reducers: "dict | None" = None,
+        allow_race: "bool | list | tuple | set" = False,
+        **vars: "Any",
+    ) -> None:
         """Declare shared vars on the current graph, with optional reducers.
 
         Shared vars persist across all stream contexts within the graph. Normal
@@ -69,6 +75,10 @@ class DummyOp(BaseOp):
                 ``(old, new) -> merged`` reducer applied at cell write time.
                 Every key MUST be one of the vars declared in this call
                 (build-time check).
+            allow_race: Two ops that may run at once writing a declared cell
+                without a reducer fail the build: the cell keeps whichever
+                write lands last. ``True`` says that is intended for every
+                var of this call; a list names some of them.
             **vars: ``var_name=initial_value`` declarations. Same semantics as
                 ``PARENT.shared()``.
 
@@ -114,6 +124,26 @@ class DummyOp(BaseOp):
         if not hasattr(current_graph, "_reducer_vars"):
             current_graph._reducer_vars = {}
         current_graph._reducer_vars.update(reducers)
+
+        if allow_race is True:
+            racy = set(vars)
+        elif allow_race is False:
+            racy = set()
+        elif isinstance(allow_race, (list, tuple, set, frozenset)):
+            racy = set(allow_race)
+            unknown = racy - set(vars)
+            if unknown:
+                raise ValueError(
+                    f"declare() allow_race names undeclared vars: {sorted(unknown)}. "
+                    f"declared vars: {sorted(vars)}"
+                )
+        else:
+            raise TypeError(
+                f"declare() allow_race takes True or a list of var names, got {allow_race!r}"
+            )
+        if not hasattr(current_graph, "_race_vars"):
+            current_graph._race_vars = set()
+        current_graph._race_vars.update(racy)
 
     # NOTE (1.0.0): ``PARENT.shared(**vars)`` was removed. Use
     # ``PARENT.declare(**vars, reducers={...})`` instead — same shared-cell

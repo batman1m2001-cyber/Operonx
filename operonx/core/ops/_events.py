@@ -1,4 +1,4 @@
-"""Scheduler event types — `Frame`, `EOF`, `Interrupt`.
+"""Scheduler event types — `Frame`, `EOF`, `Interrupt`, `Failure`.
 
 Lives outside ``operonx.core.ops.graph`` so importing it doesn't trigger
 ``graph/__init__.py`` (which loads ``graph_op`` -> ``base`` and would create
@@ -97,3 +97,25 @@ class Interrupt:
     SELF: ClassVar[Any] = SELF_CTX
     #: Every context in the run. Destructive, so it must be written out.
     ALL: ClassVar[tuple] = ()
+
+
+#: The handler parameters an error edge feeds, from a `Failure`: the error,
+#: the failed op's full name, and the inputs it was called with.
+ERROR_EDGE_VARS = ("error", "op", "inputs")
+
+
+@dataclass
+class Failure:
+    """An op failed, and it has error edges (``op.on_error(handler)``).
+
+    Yielded by ``BaseOp.run`` in place of a result — only for an op with
+    error edges, after its last attempt — and routed by the scheduler along
+    those edges alone. ``op`` is the op's name in its graph, ``ctx`` the
+    context it failed at, ``error`` the error as ``"TypeName: message"``,
+    ``inputs`` what the op was called with. User code never constructs it.
+    """
+
+    op: str
+    ctx: tuple
+    error: str
+    inputs: dict

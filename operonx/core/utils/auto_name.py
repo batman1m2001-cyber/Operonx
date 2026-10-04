@@ -3,7 +3,11 @@
 When a node is created without an explicit ``name``, this module inspects
 the calling frame to extract the variable name from the assignment statement.
 
-Strategy: bytecode analysis (primary) → source parsing (fallback) → None.
+Strategy: the bytecode right after the call — a ``STORE`` of its result —
+or ``None``. There is no source-line guess: the one there was read the
+lines *above* the call and named a run after whatever was assigned there
+(``params``, ``engine``, ``out``). With ``None`` the caller falls back to
+a name it knows, such as a ``@graph`` function's own name.
 
 Example::
 
@@ -16,11 +20,8 @@ Public API:
     - ``register_skip(fn)`` — register a function for frame skipping
 """
 
-import ast
 import dis
 import inspect
-import linecache
-import re
 import uuid
 from types import CodeType
 from typing import Optional, Set
@@ -60,7 +61,7 @@ def unique_name() -> str:
     return uuid.uuid4().hex[:8]
 
 
-def auto_name(source_fallback: bool = True) -> Optional[str]:
+def auto_name() -> Optional[str]:
     """Extract variable name from the calling assignment statement.
 
     Walks up the call stack, skipping frames that belong to:
@@ -68,13 +69,11 @@ def auto_name(source_fallback: bool = True) -> Optional[str]:
     1. ``__init__`` methods (constructor chain)
     2. Functions registered via ``register_skip()``
 
-    Then tries bytecode analysis first (no source needed, handles multi-line),
-    falling back to AST source parsing.
-
-    Args:
-        source_fallback: Also guess from nearby source lines when the
-            bytecode shows no assignment. The guess can land on a line
-            above the call; pass False when "not assigned" is an answer.
+    Then reads the bytecode after the call: a ``STORE`` of its result is
+    the name (``llm = LLMOp(...)`` → ``"llm"``). Anything else — an
+    attribute or subscript target, a call chained onto the result
+    (``out = await Operon(flow).run()``), no assignment at all — is
+    ``None``.
 
     Returns:
         The variable name if found, or ``None``.
@@ -86,12 +85,7 @@ def auto_name(source_fallback: bool = True) -> Optional[str]:
             frame = frame.f_back
         if frame is None:
             return None
-        # Primary: bytecode analysis
-        name = _name_from_bytecode(frame)
-        if name is not None or not source_fallback:
-            return name
-        # Fallback: source code parsing
-        return _name_from_source(frame.f_code.co_filename, frame.f_lineno)
+        return _name_from_bytecode(frame)
     finally:
         del frame
 
@@ -143,67 +137,4 @@ def _name_from_bytecode(frame) -> Optional[str]:
             continue
         break  # non-trivial instruction → not a simple assignment
 
-    return None
-
-
-# ── Source Parsing (Fallback) ──────────────────────────────────────
-
-
-def _name_from_source(filename: str, lineno: int) -> Optional[str]:
-    """Try to resolve a variable name from source code around the given line.
-
-    Searches up to 6 lines above the current line to handle
-    multi-line expressions where the assignment target is above.
-    """
-    for offset in range(6):
-        line = linecache.getline(filename, lineno - offset)
-        if not line.strip():
-            continue
-        name = _parse_assignment(line.strip())
-        if name is not None:
-            return name
-    return None
-
-
-def _parse_assignment(line: str) -> Optional[str]:
-    """Parse a variable name from a single source line.
-
-    Handles:
-        - Simple assignment: ``name = expr``
-        - Annotated assignment: ``name: Type = expr``
-        - Multi-line (SyntaxError fallback): ``name = (`` via regex
-
-    Rejects:
-        - Comparisons: ``==``, ``>=``, ``!=``
-        - Tuple unpack, augmented assignments, attribute/subscript targets
-        - A line ending in a comma: ``role="agent",`` parses as an assignment
-          but is a keyword argument inside a call that spans lines
-    """
-    if line.endswith(","):
-        return None
-    try:
-        tree = ast.parse(line)
-        if not tree.body:
-            return None
-        stmt = tree.body[0]
-        # Simple assignment: name = ...
-        if (
-            isinstance(stmt, ast.Assign)
-            and len(stmt.targets) == 1
-            and isinstance(stmt.targets[0], ast.Name)
-        ):
-            return stmt.targets[0].id
-        # Annotated assignment: name: Type = ...
-        if (
-            isinstance(stmt, ast.AnnAssign)
-            and isinstance(stmt.target, ast.Name)
-            and stmt.value is not None
-        ):
-            return stmt.target.id
-    except SyntaxError:
-        # Multi-line assignment: "var = (" can't be parsed alone.
-        # Use regex to match "name = " (but not "==", ">=", "!=").
-        m = re.match(r"(\w+)\s*=(?!=)", line)
-        if m and m.group(1).isidentifier():
-            return m.group(1)
     return None

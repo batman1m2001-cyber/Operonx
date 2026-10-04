@@ -147,7 +147,8 @@ asyncio.run(main())
   plus `"$errors"` when an op raised. A key that got several values
   (streaming, loops) holds a list.
 - The graph takes the name of the variable its engine is assigned to
-  (`engine` above). Pin it with `name="..."` when a name matters.
+  (`engine` above), else its function's name (`outer`). Pin it with
+  `name="..."` when a name matters.
 
 ## `LLMOp` — a model call
 

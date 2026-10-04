@@ -173,6 +173,15 @@ class TestForCodingAssistants:
             assert must in agents, must
         assert (root / "CLAUDE.md").read_text().strip() == "@AGENTS.md"
 
+    def test_agents_md_names_every_guide_page(self, project):
+        """It listed pages 01-05 and left out 06, failures, when it shipped."""
+        from operonx.guide import pages
+
+        _, root = project
+        agents = (root / "AGENTS.md").read_text()
+        missing = [p.name for p in pages() if p.name != "README.md" and p.name not in agents]
+        assert missing == []
+
     def test_the_guide_copy_is_the_installed_guide(self, project):
         _, root = project
         copy = root / ".operonx" / "guide"
