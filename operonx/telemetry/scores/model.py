@@ -41,8 +41,9 @@ __all__ = [
 #: Who judged: a deterministic check, a model, a person, an API caller.
 SOURCES = ("code", "judge", "human", "api")
 #: What was judged: an experiment's item, a whole run, one op execution,
-#: a conversation, or two experiments' answers to one case.
-TARGETS = ("item", "trace", "op", "session", "pair")
+#: a conversation, two experiments' answers to one case — or an evaluator
+#: itself (a judge's alignment with human labels, one record per version).
+TARGETS = ("item", "trace", "op", "session", "pair", "evaluator")
 DATA_TYPES = ("bool", "numeric", "categorical")
 
 #: The ids each target needs.
@@ -52,6 +53,7 @@ _NEEDS = {
     "op": ("trace_id", "op_id"),
     "session": ("session_id",),
     "pair": ("experiment_id", "pair_experiment_id", "case_id"),
+    "evaluator": ("evaluator_version",),
 }
 
 
@@ -216,8 +218,9 @@ def score_id_of(s: Score) -> str:
     * pairwise: (experiment, pair experiment, case, score name);
     * human: (what was judged, score name, author) — an edit replaces;
     * an experiment's item: (experiment, case, repeat, score name);
-    * a run, an op, a session (online, rescore): (trace, op, session,
-      score name, evaluator version) — a new evaluator is a new score.
+    * a run, an op, a session (online, rescore), an evaluator (its
+      alignment): (trace, op, session, score name, evaluator version) — a
+      new evaluator is a new score, the same one's record is replaced.
     """
     if s.target == "pair":
         return _sha("pair", s.experiment_id, s.pair_experiment_id, s.case_id, s.score_name)
