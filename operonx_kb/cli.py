@@ -201,10 +201,11 @@ def _cmd_eval(kb: KnowledgeBase, args) -> int:
 
     if args.answers:
         report = asyncio.run(evaluate_answers(kb, args.collection, args.dataset, args.answers,
-                                              mode=args.mode, reranker=args.rerank))  # fmt: skip
+                                              mode=args.mode, reranker=args.rerank,
+                                              repeats=args.repeats))  # fmt: skip
     else:
         report = asyncio.run(evaluate_search(kb, args.collection, args.dataset, mode=args.mode,
-                                             reranker=args.rerank))  # fmt: skip
+                                             reranker=args.rerank, repeats=args.repeats))  # fmt: skip
     report.pop("per_case", None)
     print(json.dumps(report, ensure_ascii=False, indent=1, default=str))
     return 1 if report["errors"] else 0
@@ -299,6 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=list(MODES))
     p.add_argument("--rerank", help="reranking resource name")
     p.add_argument("--answers", metavar="LLM", help="evaluate answers of this llm resource")
+    p.add_argument("--repeats", type=int, default=1, help="runs per case (answers vary)")
     p.set_defaults(fn=_cmd_eval)
     return parser
 

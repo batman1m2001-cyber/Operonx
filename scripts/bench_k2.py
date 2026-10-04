@@ -12,8 +12,9 @@ FTS5 lexical index, then:
    (simple, simple + folding, vi bigrams, vi + folding), on the questions as written
    and with their diacritics stripped (how people often type);
 2. the gate: each retrieval mode on each set, evaluated with operonx ``Eval`` and the
-   KB's evaluators (Recall@5/10/20, MRR, nDCG@10, item latency), plus a paired
-   bootstrap of hybrid − dense Recall@10;
+   KB's evaluators (Recall@5/10/20, MRR, nDCG@10 with 95% intervals, item latency),
+   plus hybrid − dense Recall@10 with operonx's paired test (McNemar / Newcombe for
+   single-label sets);
 3. with ``--pg-dsn``, lexical retrieval on Postgres FTS (ts_rank_cd) beside SQLite FTS5
    (bm25) on the same analyzer;
 4. with ``--answers N``, a small live answer check: N cases of each set answered by
@@ -87,17 +88,6 @@ def unaccented(cases: Path, out: Path) -> Path:
     return out
 
 
-def paired_bootstrap(a: Dict[str, float], b: Dict[str, float], n: int = 2000, seed: int = 7):
-    """Mean of b − a over shared cases, with a 95% percentile bootstrap interval."""
-    keys = sorted(set(a) & set(b))
-    diffs = [b[k] - a[k] for k in keys]
-    rng = random.Random(seed)
-    means = sorted(sum(rng.choice(diffs) for _ in diffs) / len(diffs) for _ in range(n))
-    return {"mean": round(sum(diffs) / len(diffs), 4), "ci95": [round(means[int(0.025 * n)], 4),
-            round(means[int(0.975 * n)], 4)], "cases": len(keys),
-            "better": sum(d > 0 for d in diffs), "worse": sum(d < 0 for d in diffs)}  # fmt: skip
-
-
 async def ingest(kb, name: str, corpus: Path, lexical) -> Dict[str, Any]:
     from operonx_kb import ChunkerSpec, CollectionSpec, DenseIndexSpec
 
@@ -124,11 +114,18 @@ async def ingest(kb, name: str, corpus: Path, lexical) -> Dict[str, Any]:
 
 
 def slim(report: Dict[str, Any]) -> Dict[str, Any]:
+    """A report as the results file keeps it: means for tables, estimates for intervals."""
     return {
-        k: report[k] for k in ("cases", "metrics", "scored", "p50_ms", "p95_ms") if k in report
-    } | {
+        "cases": report["cases"],
+        "metrics": report["means"],
+        "ci": report["metrics"],
+        "scored": {k: v["n"] for k, v in report["metrics"].items()},
+        "p50_ms": report["p50_ms"],
+        "p95_ms": report["p95_ms"],
         "errors": len(report.get("errors") or []),
         "error_samples": (report.get("errors") or [])[:2],
+        "gate": (report.get("summary") or {}).get("gate", {}).get("verdict"),
+        "fingerprint": (report.get("summary") or {}).get("fingerprint"),
     }
 
 
@@ -138,7 +135,7 @@ async def main(args) -> None:
 
     import operonx_kb  # noqa: F401 — registers the kb_* categories
     from operonx_kb import KnowledgeBase, QueryError
-    from operonx_kb.eval import evaluate_answers, evaluate_search
+    from operonx_kb.eval import compare_metric, evaluate_answers, evaluate_search
     from operonx_kb.model.collection import AnalyzerSpec, LexicalIndexSpec
 
     work = args.work.resolve()
@@ -224,8 +221,10 @@ async def main(args) -> None:
             results["gate"].setdefault(name, {})[label] = slim(report)
             per_case.setdefault(name, {})[label] = report["per_case"]
             log(f"  {slim(report)['metrics']}")
-        results["gate"][name]["hybrid_minus_dense_r10"] = paired_bootstrap(
-            per_case[name]["dense"]["recall@10"], per_case[name]["hybrid"]["recall@10"]
+        results["gate"][name]["hybrid_minus_dense_r10"] = compare_metric(
+            {"per_case": per_case[name]["dense"]},
+            {"per_case": per_case[name]["hybrid"]},
+            "recall@10",
         )
     wins = [n for n in SETS if results["gate"][n]["hybrid"]["metrics"]["recall@10"]
             > results["gate"][n]["dense"]["metrics"]["recall@10"]]  # fmt: skip

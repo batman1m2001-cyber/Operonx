@@ -96,4 +96,4 @@ def test_cli_query_and_eval_on_a_lexical_collection(hub, tmp_path, capsys):
                        encoding="utf-8")  # fmt: skip
     assert main(["--resources", res, "eval", "notes", str(dataset), "--mode", "lexical"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert report["metrics"]["recall@20"] == 1.0
+    assert report["means"]["recall@20"] == 1.0

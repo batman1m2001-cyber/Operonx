@@ -32,7 +32,8 @@ __all__ = [
     "grounded_recall",
     "retrieval_evaluators",
     "answer_evaluators",
-    "metric_means",
+    "score_metrics",
+    "compare_metric",
 ]
 
 
@@ -127,17 +128,29 @@ def answer_evaluators(resolver: LabelResolver) -> List[Callable]:
     return [citation_precision(), faithfulness(), grounded_recall(resolver)]
 
 
-def metric_means(run: Any) -> Dict[str, Any]:
-    """Per evaluator, the mean score over a finished eval run's cases (and each case's
-    score, by case id, in ``per_case``); plus case counts, errors and latency
-    percentiles (ms) from the item records.
+def score_metrics(run: Any) -> Dict[str, Any]:
+    """Each evaluator's **score** over a finished eval run, with its 95% interval.
 
-    The 1.14 ``Eval`` summary counts passes per check; the scores are on each item's
-    verdict, and this averages them.
+    operonx's ``Eval`` summarises each check as the share of trials that *passed*
+    (``run.meta["eval"]["metrics"]``, kept under ``summary``). A KB check carries a
+    graded score (MRR, nDCG, a citation share), so here each case's score is
+    averaged over its repeats and the mean over cases is estimated with operonx's
+    own statistics (:func:`operonx.app.evals.stats.estimate`: Wilson for 0/1 scores,
+    the CLT otherwise).
+
+    Returns:
+        ``metrics`` (name → ``{n, mean, se, ci_lo, ci_hi, method}``), ``means``
+        (name → mean, for tables), ``per_case`` (name → case id → score), ``cases``,
+        ``errors``, and the item latency percentiles ``p50_ms``/``p95_ms``.
     """
-    scores: Dict[str, Dict[str, float]] = {}
+    from operonx.app.evals.stats import estimate
+
+    trials: Dict[str, Dict[str, List[float]]] = {}
     errors: List[str] = []
+    cases = set()
     for item in run.items:
+        case = getattr(item, "case", None) or item.key.rsplit("#", 1)[0]
+        cases.add(case)
         verdict: Optional[Mapping[str, Any]] = item.verdict
         if not verdict or verdict.get("error"):
             errors.append(str((verdict or {}).get("error") or item.status))
@@ -146,14 +159,31 @@ def metric_means(run: Any) -> Dict[str, Any]:
             if check.get("error"):
                 errors.append(f"{name}: {check['error']}")
             elif check.get("score") is not None:
-                scores.setdefault(name, {})[item.key] = float(check["score"])
+                trials.setdefault(name, {}).setdefault(case, []).append(float(check["score"]))
+    per_case = {n: {c: mean(v) for c, v in by.items()} for n, by in trials.items()}
+    metrics = {
+        n: estimate(list(v.values()), bounds=(0.0, 1.0)).as_dict(4) for n, v in per_case.items()
+    }
     ms = sorted(i.ms for i in run.items if i.ms)
     return {
-        "cases": len(run.items),
+        "cases": len(cases),
         "errors": errors,
-        "metrics": {name: round(mean(v.values()), 4) for name, v in scores.items()},
-        "scored": {name: len(v) for name, v in scores.items()},
-        "per_case": scores,
+        "metrics": metrics,
+        "means": {n: m["mean"] for n, m in metrics.items()},
+        "per_case": per_case,
         "p50_ms": ms[len(ms) // 2] if ms else None,
         "p95_ms": ms[min(len(ms) - 1, int(0.95 * len(ms)))] if ms else None,
     }
+
+
+def compare_metric(
+    base: Mapping[str, Any], candidate: Mapping[str, Any], metric: str
+) -> Dict[str, Any]:
+    """``candidate`` against ``base`` on one metric, paired over the cases both scored,
+    with operonx's paired test (:func:`operonx.app.evals.stats.compare_paired`: exact
+    McNemar and Newcombe's interval for 0/1 scores, a seeded paired bootstrap otherwise)."""
+    from operonx.app.evals.stats import compare_paired
+
+    a, b = base["per_case"][metric], candidate["per_case"][metric]
+    shared = sorted(set(a) & set(b))
+    return compare_paired([a[c] for c in shared], [b[c] for c in shared]).as_dict(4)

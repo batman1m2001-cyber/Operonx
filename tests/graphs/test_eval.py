@@ -47,14 +47,32 @@ def loaded(kbx, tmp_path):
 def test_search_metrics_per_mode(loaded, mode):
     report = run(evaluate_search(loaded, "docs", loaded.dataset, mode=mode))
     assert report["cases"] == 3 and report["errors"] == []
-    m = report["metrics"]
-    assert set(m) == {"recall@5", "recall@10", "recall@20", "mrr", "ndcg@10"}
+    assert set(report["metrics"]) == {"recall@5", "recall@10", "recall@20", "mrr", "ndcg@10"}
+    mrr = report["metrics"]["mrr"]  # an estimate, never a bare number
+    assert mrr["n"] == 3 and mrr["ci_lo"] <= mrr["mean"] <= mrr["ci_hi"]
+    m = report["means"]
     assert (
         m["recall@20"] == 1.0
         and 0 < m["mrr"] <= 1
         and m["recall@5"] <= m["recall@10"] <= m["recall@20"]
     )
     assert report["p50_ms"] is not None
+
+
+def test_repeats_gate_and_a_paired_comparison(loaded):
+    from operonx.app.evals import Gate
+
+    from operonx_kb.eval import compare_metric
+
+    dense = run(evaluate_search(loaded, "docs", loaded.dataset, mode="dense", repeats=2,
+                                gate=Gate(threshold=0.5)))  # fmt: skip
+    summary = dense["summary"]
+    assert summary["trials"] == 6 and summary["cases"] == 3
+    assert summary["gate"]["verdict"] in ("pass", "failed") and "fingerprint" in summary
+    assert set(dense["per_case"]["mrr"]) == {"leave", "taxi", "note"}  # repeats averaged
+    hybrid = run(evaluate_search(loaded, "docs", loaded.dataset, mode="hybrid"))
+    diff = compare_metric(dense, hybrid, "recall@20")
+    assert diff["n"] == 3 and diff["method"] == "mcnemar" and diff["diff"] == 0
 
 
 def test_reranked_search_is_evaluated_too(loaded, hub):
@@ -81,7 +99,7 @@ def test_answer_metrics_with_a_scripted_model(loaded, hub):
     hub.get("fake_llm:scripted").script = quoting()
     report = run(evaluate_answers(loaded, "docs", loaded.dataset, "answerer", mode="hybrid", k=4))
     assert report["errors"] == []
-    m = report["metrics"]
+    m = report["means"]
     assert m["citation_precision"] == 1.0 and 0 < m["faithfulness"] <= 1
     assert 0 <= m["grounded_recall"] <= 1
 
