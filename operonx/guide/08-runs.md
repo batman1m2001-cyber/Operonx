@@ -129,6 +129,10 @@ asyncio.run(main())
   cancellation is recorded as `cancelled`.
 - The op's `@op(exclude=/include=)` applies to its children's inputs and
   outputs too.
+- **`c.redact = fn`** (`dict -> dict`) scrubs the step's inputs and outputs
+  where the trace leaves the process: every run store, the Local and Langfuse
+  consumers write them through it. `handle.trace` keeps them as recorded, and
+  the run's event loop does none of the work.
 - Inside the block, `run_context()` describes the child: each step has its
   own `idempotency_key`.
 - Held open across an async generator's `yield` (a streamed model call), pass

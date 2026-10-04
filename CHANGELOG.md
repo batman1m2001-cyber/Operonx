@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`child()`'s handle takes `redact`** (`dict -> dict`), applied to the
+  step's inputs and outputs by every exporter — `row_of` (every run store),
+  the Local consumer's view and the Langfuse consumer — through
+  `OpExecution.exported()`. The record in memory keeps its values. For a
+  step that saw a credential: `operonx-agents` scrubs its traces this way, at
+  the cost of the exporter, where scrubbing on the event loop cost
+  0.03–0.05 ms per turn of its 0.3–0.45 ms budget.
+
+- **`OpType` names `"agent"`**, the type `operonx-agents`' `AgentOp`
+  (`Agent.as_op()`) sets, so the Literal agrees with the ops that use it.
+
 - **`child(..., current=False)`** records a step held open across an async
   generator's `yield` (a streamed model call) without making it the current
   frame. The consumer's code runs between the yields in the same context;

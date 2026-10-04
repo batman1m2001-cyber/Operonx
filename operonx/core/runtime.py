@@ -32,7 +32,7 @@ import traceback
 from contextvars import ContextVar
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from operonx.core.workflow_trace import (
     STATUS_CANCELLED,
@@ -185,16 +185,24 @@ _CHILD_NAME = re.compile(r"^[^.\[\]#]+$")
 
 class ChildExecution:
     """The handle :func:`child` yields. Set :attr:`outputs` (a dict; any
-    other value is recorded as ``{"_": value}``) and :attr:`attrs`
-    (semantic attributes such as ``gen_ai.operation.name``) before the
-    block ends."""
+    other value is recorded as ``{"_": value}``), :attr:`attrs` (semantic
+    attributes such as ``gen_ai.operation.name``) and :attr:`redact` before
+    the block ends.
 
-    __slots__ = ("name", "outputs", "attrs")
+    ``redact`` is ``(values: dict) -> dict``: every exporter (the run
+    stores, the Local and Langfuse consumers) writes the record's inputs
+    and outputs through it; the record in memory keeps them as recorded.
+    For a credential a step saw that must not leave the process, scrubbed
+    where the trace is written instead of on the run's event loop.
+    """
+
+    __slots__ = ("name", "outputs", "attrs", "redact")
 
     def __init__(self, name: str) -> None:
         self.name = name
         self.outputs: Any = {}
         self.attrs: Dict[str, Any] = {}
+        self.redact: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
 
 
 def child(
@@ -337,6 +345,7 @@ class _ChildScope:
                 op_type=self._op_type,
                 attempt=frame.attempt,
                 attrs=dict(handle.attrs),
+                redact=handle.redact,
             )
         )
         if trace._task_listeners:

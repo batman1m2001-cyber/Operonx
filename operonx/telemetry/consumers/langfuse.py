@@ -262,9 +262,10 @@ class LangfuseConsumer(Consumer):
             rec: Optional[OpExecution] = node["record"]
             kind = "span"
             if rec is not None:
+                inputs, outputs = rec.exported()
                 if rec.inputs_from is None:
                     body["input"] = self.offload_media(
-                        self.sanitize(rec.inputs), media_dir, cfg["media_threshold"]
+                        self.sanitize(inputs), media_dir, cfg["media_threshold"]
                     )
                 else:
                     # a generator's later record: its inputs are the first one's
@@ -274,7 +275,7 @@ class LangfuseConsumer(Consumer):
                 if rec.attrs:
                     body["metadata"]["attrs"] = self.sanitize(rec.attrs)
                 body["output"] = self.offload_media(
-                    self.sanitize(rec.outputs), media_dir, cfg["media_threshold"]
+                    self.sanitize(outputs), media_dir, cfg["media_threshold"]
                 )
                 body["level"] = _LEVELS.get(rec.status, "DEFAULT")
                 body["statusMessage"] = rec.error
@@ -293,7 +294,7 @@ class LangfuseConsumer(Consumer):
                 )
                 if rec.op_type == "llm":
                     kind = "generation"
-                    out = rec.outputs if isinstance(rec.outputs, dict) else {}
+                    out = outputs if isinstance(outputs, dict) else {}
                     body["model"] = out.get("model_used")
                     usage = out.get("usage") or {}
                     if isinstance(usage, dict) and usage:

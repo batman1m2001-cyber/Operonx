@@ -250,10 +250,26 @@ class OpExecution:
     # memory `inputs` still holds them (the same dict); a stored row names
     # the record instead of repeating them (`runs.model.row_of`).
     inputs_from: Optional[str] = None
+    # Applied by every exporter (`runs.model.row_of`, the Langfuse and
+    # Local consumers) to `inputs` and `outputs` before they leave the
+    # process: the scrubbing the code that recorded the step chose
+    # (`child()`'s `handle.redact`). The record in memory keeps the values
+    # as recorded, and the work happens where the trace is written — not
+    # on the event loop of the run that recorded it. `None` for most.
+    redact: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = field(
+        default=None, repr=False, compare=False
+    )
 
     @property
     def duration_ms(self) -> float:
         return (self.end_time - self.start_time) * 1000.0
+
+    def exported(self) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """``(inputs, outputs)`` as an exporter writes them: through
+        :attr:`redact` when the record has one."""
+        if self.redact is None:
+            return self.inputs, self.outputs
+        return self.redact(self.inputs), self.redact(self.outputs)
 
 
 @dataclass
