@@ -220,6 +220,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An op joining a stream's ops with ops outside the stream runs, once both have landed.**
+  An op after a `.collect()` (or after a subgraph whose stream ends in one) that also waits
+  for a sibling op never ran: the collect's context counted none of the sibling's arrival,
+  and the run reported nothing. A per-item op waiting for a sibling outside the stream ran
+  as soon as its item arrived, before a slow sibling had finished, without its value. A
+  context below another now counts the parent's arrivals from ops outside its stream, those
+  already in and those still to come.
+
 - **A loop entered from a branch arm runs.** `START >> g >> if_(g["go"] == True, step).else_(skip)`,
   where `step` starts a loop (`if_(..., ...).else_(step)` below it), never ran the loop:
   the cycle rewrite moved `step` into the hidden loop, but the branch kept routing to

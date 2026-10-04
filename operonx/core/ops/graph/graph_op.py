@@ -594,10 +594,12 @@ class GraphOp(BaseOp):
             child._error_routes = name in err_adj
 
         # ── Phase 2: stream-context ready counts per generator ────────────────────
-        # When generator G emits frame [0], downstream ops run in a new stream ctx.
-        # Batch ops (not reachable from G) already ran before G started — they will
-        # NOT fire EOFs at item contexts, so their ready-count contributions must be
-        # pre-subtracted when seeding item-context ready counts.
+        # When generator G emits frame [0], downstream ops run in a new stream ctx,
+        # and batch ops (not reachable from G) do not fire there. These counts
+        # pre-subtract them. The scheduler no longer seeds item contexts from them
+        # (it counts each batch op's actual arrival, `Scheduler._join_edges`, since
+        # a batch op may still be running when the first item arrives); they stay
+        # because `serialize()` emits them and fingerprints hash that output.
         stream_initial = {}
         for gen_name, gen_op in self._ops.items():
             if not gen_op.is_gen:
