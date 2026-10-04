@@ -339,6 +339,28 @@ def test_a_graph_evaluator_is_a_traced_judge(tmp_path):
     assert run.meta["eval"]["judges"]["order_check"]["calls"] == 2
 
 
+@op(bound="sync")
+def checker_down(output: dict = None) -> dict:
+    raise ConnectionError("judge backend unreachable")
+
+
+@graph
+def broken_check(output):
+    m = checker_down(output=output)
+    START >> m >> END
+
+
+def test_a_judge_whose_graph_fails_names_the_op_and_its_error(tmp_path):
+    """The failure is read from the run's ``$errors`` record — ``{type,
+    message, count, first_ctx}`` — as the job runner reads an item's: the
+    op's name and the last line of its message, not the record's repr."""
+    run = _eval(tmp_path, [broken_check], rows=CASES[:1]).run_sync()
+    check = run.items[0].verdict["checks"]["broken_check"]
+    assert check["passed"] is False
+    assert check["error"] == "m: ConnectionError: judge backend unreachable", check
+    assert run.meta["eval"]["judges"]["broken_check"]["errors"] == 1
+
+
 @graph
 def wants_secret(secret):
     m = mentions_order(output=secret)

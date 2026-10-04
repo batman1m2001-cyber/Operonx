@@ -299,8 +299,10 @@ async def run_judge(
         out = await handle.collect(unwrap=True)
     errors = out.get("$errors") or {}
     if errors:
-        where, text = next(iter(errors.items()))
-        lines = str(text).strip().splitlines()
+        # The first record, `{type, message, count, first_ctx}`, read the
+        # way a job reads an item's failure: the op and its message's last line.
+        where, record = next(iter(errors.items()))
+        lines = str(record.get("message") or record.get("type") or "").strip().splitlines()
         verdict: Dict[str, Any] = {
             "passed": False,
             "error": f"{str(where).rsplit('.', 1)[-1]}: {lines[-1] if lines else 'error'}",
