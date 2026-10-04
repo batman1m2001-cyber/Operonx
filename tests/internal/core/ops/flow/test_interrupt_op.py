@@ -137,6 +137,45 @@ class TestSuspendResumeProtocol:
         assert {r1["response"], r2["response"]} == {"answer0", "answer1"}
 
 
+class TestDeterministicId:
+    """R2: an interrupt's id is ``invocation_key(run_id, op, ctx)``, not a
+    ``uuid4``: the same question in the same place of the same run has the
+    same id, which a durable resume (R3) needs to find it again."""
+
+    @staticmethod
+    def _engine():
+        from operonx.core import Operon
+
+        with GraphOp(name="g") as g:
+            approve = InterruptOp(name="approve", payload="ok?")
+            START >> approve >> END
+        return Operon(g)
+
+    async def _ask(self, trace_id):
+        from operonx.checkpoint import InterruptEvent
+
+        events, out = [], None
+        async for chunk in self._engine().stream({}, mode="updates", trace_id=trace_id):
+            if isinstance(chunk, InterruptEvent):
+                events.append(chunk)
+                chunk.resume("yes")
+            elif "g.approve" in chunk:
+                out = chunk["g.approve"]
+        return events, out
+
+    async def test_interrupt_id_deterministic(self):
+        from operonx.core.runtime import invocation_key
+
+        (first,), out = await self._ask("run-a")
+        assert first.interrupt_id == invocation_key("run-a", "g.approve", ("main",))
+        assert out["interrupt_id"] == first.interrupt_id
+        assert out["response"] == "yes", "resuming by the id still answers the op"
+        (again,), _ = await self._ask("run-a")
+        assert again.interrupt_id == first.interrupt_id
+        (other,), _ = await self._ask("run-b")
+        assert other.interrupt_id != first.interrupt_id
+
+
 class TestResumeAPI:
     def test_resume_unknown_id_returns_false(self):
         state = _minimal_state()

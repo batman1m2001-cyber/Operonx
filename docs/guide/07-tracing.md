@@ -214,6 +214,12 @@ engine = Operon(graph, trace=["trace_local:default", SlowOps()])
 The base offers `sanitize`, `offload_media` and `truncate` for payloads
 that must survive JSON or a size limit. See [operonx.telemetry](../api/telemetry.md).
 
+A consumer that also overrides `on_start(trace)` or `on_execution(trace,
+execution)` sees the run as it goes: the engine calls them as the run
+starts and as each execution lands, on the event loop — queue the work and
+return. The ClickHouse and SQL run stores do this to list a run as
+`running` before it ends.
+
 ## Where to go next
 
 - Keep, query and alert on runs: [Runs: stores, retention and alerts](11-runs.md).

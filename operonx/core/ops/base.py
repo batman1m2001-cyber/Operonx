@@ -27,6 +27,7 @@ from operonx.core.ops import _cache
 from operonx.core.ops._events import Failure, Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
 from operonx.core.policy import _Deadline, fail_fast, op_policy
+from operonx.core.runtime import TaskFailed, TaskFinished, TaskStarted, _current_frame, _Frame
 from operonx.core.states.cell import DEFAULT_CONTEXT
 
 #: Output name for an op whose function returns a bare value rather than
@@ -45,7 +46,6 @@ from operonx.core.workflow_trace import (
     STATUS_RETRIED,
     OpExecution,
     UpstreamRef,
-    _current_op_ctx,
     _current_trace,
     make_op_id,
 )
@@ -1065,7 +1065,7 @@ class BaseOp(ABC):
     async def _exec_with_policy(
         self,
         inputs: Dict[str, Any],
-        attempt_box: List[int],
+        frame: _Frame,
         state: "MemoryState",
         wf_trace: Any,
         upstreams: List[UpstreamRef],
@@ -1076,9 +1076,10 @@ class BaseOp(ABC):
         One attempt is one pass over ``_exec_core``. A failed attempt is
         retried when the policy says so and nothing has been yielded yet —
         a generator's items have already been handed on, and a second
-        attempt would hand them on again. ``attempt_box[0]`` is the attempt
-        running, for the trace node ``run`` writes; each attempt that is
-        retried gets a node of its own here (``_record_retry``).
+        attempt would hand them on again. ``frame.attempt`` and
+        ``frame.deadline`` are the attempt running and its deadline, for the
+        trace node ``run`` writes and for ``run_context()``; each attempt
+        that is retried gets a node of its own here (``_record_retry``).
 
         Every deadline is entered and left around one ``__anext__``, never
         across a ``yield``: a deadline still armed while the consumer holds
@@ -1091,9 +1092,13 @@ class BaseOp(ABC):
         loop = asyncio.get_running_loop()
         attempt = 1
         while True:
-            attempt_box[0] = attempt
             started = perf_counter()
             run_at = loop.time() + run_s if run_s is not None else None
+            frame.attempt = attempt
+            frame.deadline = run_at
+            frame.counts = None
+            if attempt > 1 and wf_trace is not None and wf_trace._task_listeners:
+                wf_trace.emit_task(TaskStarted(self.full_name, ctx, attempt))
             source = self._exec_core(inputs)
             yielded = False
             try:
@@ -1293,14 +1298,15 @@ class BaseOp(ABC):
         )
         if wf_trace is None:
             return
-        wf_trace.nodes.append(
+        ended = perf_counter()
+        wf_trace.record(
             OpExecution(
                 op_id=f"{make_op_id(self.full_name, ctx)}@{attempt}",
                 op_name=self.name,
                 op_full_name=self.full_name,
                 ctx=ctx,
                 start_time=started,
-                end_time=perf_counter(),
+                end_time=ended,
                 inputs=self._trace_inputs(inputs),
                 outputs={},
                 upstreams=upstreams,
@@ -1310,6 +1316,17 @@ class BaseOp(ABC):
                 attempt=attempt,
             )
         )
+        if wf_trace._task_listeners:
+            wf_trace.emit_task(
+                TaskFailed(
+                    self.full_name,
+                    ctx,
+                    attempt,
+                    (ended - started) * 1000.0,
+                    error=f"{type(error).__name__}: {error}",
+                    retrying=True,
+                )
+            )
 
     async def run(
         self,
@@ -1353,10 +1370,12 @@ class BaseOp(ABC):
         _inputs = {}
         _outputs = {}
         error_msg = None
+        # "TypeName: message" of the op's own failure, for a TaskFailed.
+        error_text = ""
 
-        # The value `_current_op_ctx` had before this op set it; _MISSING
-        # until it does. See the restore in `finally`.
-        prev_op_ctx = _MISSING
+        # The frame `_current_frame` held before this op set its own;
+        # _MISSING until it does. See the restore in `finally`.
+        prev_frame = _MISSING
         idx = 0
         op_started = False
         op_cancelled = False
@@ -1374,10 +1393,18 @@ class BaseOp(ABC):
         # of one per yield; these carry the count to that span.
         _transient_yields = 0
         _transient_last_ctx = None
-        # A generator's trace inputs, built at its first yield (see there).
+        # A generator's trace inputs, built at its first yield (see there),
+        # and the op_id of the record that holds them: every later record of
+        # this invocation names it instead of repeating them.
         _trace_in = None
-        # The attempt running, 1 unless `retry=` started another one.
-        _attempt = [1]
+        _trace_in_at = None
+        # This invocation as its body sees it (`run_context()`): its ctx, the
+        # attempt running, the deadline. Set once the inputs resolve.
+        frame = _Frame(self.full_name, ctx_for_end, self, _wf_trace, state._run_info)
+        if self.is_gen and not self.transient:
+            # A step the body records while producing item i hangs under
+            # that item's yield record. A transient generator has one record.
+            frame.item = 0
 
         try:
             if self.delay > 0:
@@ -1396,11 +1423,13 @@ class BaseOp(ABC):
             perf_start = perf_counter()
 
             op_started = True
-            # V3 tracing: expose this op invocation's ctx via ContextVar
-            # so overlap_classifier + any other reader can access the
-            # scheduler's ctx tuple without threading it through inputs.
-            prev_op_ctx = _current_op_ctx.get()
-            _current_op_ctx.set(ctx_for_end)
+            # The body reads this invocation through `_current_frame`:
+            # `run_context()`, and the ctx InterruptOp, EmitOp and LLMOp
+            # stamp on what they emit.
+            prev_frame = _current_frame.get()
+            _current_frame.set(frame)
+            if _wf_trace is not None and _wf_trace._task_listeners:
+                _wf_trace.emit_task(TaskStarted(self.full_name, ctx_for_end, 1))
 
             # Cache check
             if self.cache is not None:
@@ -1418,7 +1447,7 @@ class BaseOp(ABC):
                 _source = self._exec_core(_inputs)
             else:
                 _source = self._exec_with_policy(
-                    _inputs, _attempt, state, _wf_trace, _v3_upstreams, ctx_for_end
+                    _inputs, frame, state, _wf_trace, _v3_upstreams, ctx_for_end
                 )
             async for result in _source:
                 ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
@@ -1427,6 +1456,8 @@ class BaseOp(ABC):
                 if isinstance(result, Interrupt):
                     yield ctx, result
                     idx += 1
+                    if frame.item is not None:
+                        frame.item, frame.counts = idx, None
                     _yield_start = perf_counter()
                     continue
                 self.store_result(state, result, ctx)
@@ -1463,11 +1494,13 @@ class BaseOp(ABC):
                     _transient_yields += 1
                     _transient_last_ctx = ctx
                 elif _wf_trace is not None and self.is_gen:
+                    _yield_id = make_op_id(self.full_name, ctx)
+                    _inputs_from = _trace_in_at
                     if _trace_in is None:
-                        _trace_in = self._trace_inputs(_inputs)
-                    _wf_trace.nodes.append(
+                        _trace_in, _trace_in_at = self._trace_inputs(_inputs), _yield_id
+                    _wf_trace.record(
                         OpExecution(
-                            op_id=make_op_id(self.full_name, ctx),
+                            op_id=_yield_id,
                             op_name=self.name,
                             op_full_name=self.full_name,
                             ctx=ctx,
@@ -1480,8 +1513,9 @@ class BaseOp(ABC):
                             # anything at all. The inputs are one per
                             # invocation: every yield shares them, and an
                             # LLM stream renders its request once, not
-                            # once per frame.
+                            # once per frame — and stores it once.
                             inputs=_trace_in,
+                            inputs_from=_inputs_from,
                             outputs=self._trace_outputs(result)
                             if isinstance(result, dict)
                             else {"_": result},
@@ -1489,11 +1523,13 @@ class BaseOp(ABC):
                             status=STATUS_OK,
                             op_type=str(self.type),
                             is_yield=True,
-                            attempt=_attempt[0],
+                            attempt=frame.attempt,
                         )
                     )
                 yield ctx, result
                 idx += 1
+                if frame.item is not None:
+                    frame.item, frame.counts = idx, None
                 _yield_start = perf_counter()
 
         except asyncio.CancelledError:
@@ -1529,6 +1565,7 @@ class BaseOp(ABC):
                 ),
             )
             state.record_op_error(self.full_name, sys.exc_info()[1], ctx_for_end)
+            error_text = f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             # Recorded first, so "$errors" and the trace show it either way.
             # Then an error edge handles it — `errors="raise"` leaves a
             # handled failure alone — or a fail-fast run ends here.
@@ -1607,7 +1644,7 @@ class BaseOp(ABC):
                         # One span for the stream. `items` is the payload —
                         # the values themselves were summarised or never
                         # copied, which is the whole point.
-                        _wf_trace.nodes.append(
+                        _wf_trace.record(
                             OpExecution(
                                 op_id=make_op_id(self.full_name, ctx_for_end),
                                 op_name=self.name,
@@ -1625,7 +1662,7 @@ class BaseOp(ABC):
                                 status=v3_status,
                                 error=error_msg,
                                 op_type=str(self.type),
-                                attempt=_attempt[0],
+                                attempt=frame.attempt,
                             )
                         )
                     # A transient op in a stream emits no per-item node on
@@ -1638,7 +1675,7 @@ class BaseOp(ABC):
                         (not self.is_gen) and not self.transient
                     ) or v3_status != STATUS_OK
                     if should_emit:
-                        _wf_trace.nodes.append(
+                        _wf_trace.record(
                             OpExecution(
                                 op_id=make_op_id(self.full_name, ctx_for_end),
                                 op_name=self.name,
@@ -1646,7 +1683,10 @@ class BaseOp(ABC):
                                 ctx=ctx_for_end,
                                 start_time=perf_start,
                                 end_time=perf_start + duration_ms / 1000.0,
-                                inputs=_trace_in or self._trace_inputs(_inputs),
+                                inputs=_trace_in
+                                if _trace_in is not None
+                                else self._trace_inputs(_inputs),
+                                inputs_from=_trace_in_at,
                                 outputs=self._trace_outputs(_outputs)
                                 if isinstance(_outputs, dict)
                                 else {},
@@ -1654,9 +1694,27 @@ class BaseOp(ABC):
                                 status=v3_status,
                                 error=error_msg,
                                 op_type=str(self.type),
-                                attempt=_attempt[0],
+                                attempt=frame.attempt,
                             )
                         )
+                    if _wf_trace._task_listeners:
+                        if v3_status == STATUS_OK:
+                            _wf_trace.emit_task(
+                                TaskFinished(
+                                    self.full_name, ctx_for_end, frame.attempt, duration_ms
+                                )
+                            )
+                        else:
+                            _wf_trace.emit_task(
+                                TaskFailed(
+                                    self.full_name,
+                                    ctx_for_end,
+                                    frame.attempt,
+                                    duration_ms,
+                                    error=error_text,
+                                    cancelled=op_cancelled,
+                                )
+                            )
             # Restored by value, not with `ContextVar.reset(token)`: this
             # `finally` does not always run in the context that set it. A
             # generator abandoned by a cancelled pump is closed later by the
@@ -1666,8 +1724,8 @@ class BaseOp(ABC):
             # exception handler on every such cancellation. Setting the
             # previous value reads the same in the right context and is
             # harmless in the finalizer's throwaway one.
-            if prev_op_ctx is not _MISSING:
-                _current_op_ctx.set(prev_op_ctx)
+            if prev_frame is not _MISSING:
+                _current_frame.set(prev_frame)
 
             if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
                 LOGGER.warning(

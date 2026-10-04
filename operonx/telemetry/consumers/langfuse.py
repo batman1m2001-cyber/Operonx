@@ -57,6 +57,7 @@ from operonx.core.workflow_trace import (
     STATUS_RETRIED,
     OpExecution,
     WorkflowTrace,
+    child_parent_id,
     format_ctx,
 )
 from operonx.telemetry.consumer import Consumer
@@ -97,8 +98,25 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
         None,
     )
 
+    def owner_of(r: OpExecution) -> Optional[str]:
+        """The record a child execution was recorded under, walking up past
+        any ancestor not in the trace (a run still being written)."""
+        full, ctx = r.op_full_name, tuple(r.ctx)
+        while True:
+            owner = child_parent_id(full, ctx)
+            if owner is None:
+                return None
+            # a child of retried attempt n hangs under that attempt's record
+            for cand in (f"{owner}@{r.attempt}", owner):
+                if cand in by_id:
+                    return cand
+            full, ctx = full.rsplit(".", 1)[0], ctx[:-1]
+
     def parent_of(r: OpExecution) -> Tuple[Optional[str], str]:
         ctx = tuple(r.ctx)
+        owner = owner_of(r)
+        if owner is not None:
+            return owner, "child"
         if len(ctx) == 1:
             return None, "root"
         resolved = [by_id[u.from_op_id] for u in r.upstreams if u.from_op_id in by_id]
@@ -139,7 +157,9 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
         # sibling member keeps that sibling as its parent.
         parts = r.op_full_name.split(".")
         graphs = parts[1:-1]
-        if graphs:
+        # A child execution sits under the op that ran it, never in a
+        # container named after that op.
+        if graphs and child_parent_id(r.op_full_name, ctx) is None:
             parent_rec = by_id.get(parent) if parent else None
             sibling = parent_rec is not None and parent_rec.op_full_name.split(".")[1:-1] == graphs
             if not sibling:
@@ -242,9 +262,17 @@ class LangfuseConsumer(Consumer):
             rec: Optional[OpExecution] = node["record"]
             kind = "span"
             if rec is not None:
-                body["input"] = self.offload_media(
-                    self.sanitize(rec.inputs), media_dir, cfg["media_threshold"]
-                )
+                if rec.inputs_from is None:
+                    body["input"] = self.offload_media(
+                        self.sanitize(rec.inputs), media_dir, cfg["media_threshold"]
+                    )
+                else:
+                    # a generator's later record: its inputs are the first one's
+                    body["metadata"]["inputs_from"] = ext(rec.inputs_from)
+                if rec.attempt != 1:
+                    body["metadata"]["attempt"] = rec.attempt
+                if rec.attrs:
+                    body["metadata"]["attrs"] = self.sanitize(rec.attrs)
                 body["output"] = self.offload_media(
                     self.sanitize(rec.outputs), media_dir, cfg["media_threshold"]
                 )

@@ -14,7 +14,9 @@ layout designed to be read by humans (``view.txt``) and machines
         meta.json         — workflow name, timings, metadata (origin…),
                             status ("ok"/"error") and the run's errors
         nodes.jsonl       — source of truth (one OpExecution per line,
-                            media offloaded to refs)
+                            media offloaded to refs; a generator's later
+                            records name the first in ``inputs_from``
+                            instead of repeating its inputs)
         view.txt          — human-readable chronological rendering
                             (regeneratable from nodes.jsonl at any time)
         media/            — content-addressed offload store
@@ -49,23 +51,9 @@ from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Optional
 
 from operonx.core.utils.yaml_model import YamlModel
-from operonx.core.workflow_trace import OpExecution, UpstreamRef, WorkflowTrace, format_ctx
+from operonx.core.workflow_trace import OpExecution, WorkflowTrace, format_ctx
 from operonx.telemetry.consumer import Consumer
-from operonx.telemetry.runs.model import meta_of_trace
-
-
-def _upstream_to_dict(u: UpstreamRef) -> Dict[str, str]:
-    """Explicit serializer — cheaper than `dataclasses.asdict` (no
-    deepcopy fallback) and side-steps the same Cython-handle failure
-    mode that made us hand-build the node row."""
-    return {
-        "from_op_id": u.from_op_id,
-        "from_op_name": u.from_op_name,
-        "from_op_full_name": u.from_op_full_name,
-        "from_key": u.from_key,
-        "to_key": u.to_key,
-    }
-
+from operonx.telemetry.runs.model import meta_of_trace, row_of
 
 __all__ = ["LocalConsumer", "FORMATTERS", "default_arrow", "resolve_root", "run_path"]
 
@@ -225,42 +213,19 @@ class LocalConsumer(Consumer):
             encoding="utf-8",
         )
 
-        # 2. nodes.jsonl — sanitize + media offload per row.
-        # Hand-build the row instead of `asdict(node)` because asdict()
-        # does a `copy.deepcopy` on every non-dataclass value; real op
-        # inputs can contain Cython handles (Triton client, ONNX
-        # sessions, etc.) that reject deepcopy with a cryptic
-        # "no default __reduce__" error. sanitize() would strip these
-        # to markers, but only if it runs FIRST on the raw dict.
+        # 2. nodes.jsonl — one row per execution (`row_of`), values
+        # sanitised and offloaded. The row is hand-built rather than
+        # `asdict(node)`: asdict deep-copies every value, and real op inputs
+        # can hold Cython handles (Triton clients, ONNX sessions) that reject
+        # deepcopy; sanitize() strips those to markers, but only if it runs
+        # first on the raw value.
+        threshold = cfg["media_threshold"]
         with (tmp / "nodes.jsonl").open("w", encoding="utf-8") as f:
             for node in trace.nodes:
-                clean_in = self.offload_media(
-                    self.sanitize(node.inputs),
-                    media_dir,
-                    cfg["media_threshold"],
-                )
-                clean_out = self.offload_media(
-                    self.sanitize(node.outputs),
-                    media_dir,
-                    cfg["media_threshold"],
-                )
-                row = {
-                    "op_id": node.op_id,
-                    "op_name": node.op_name,
-                    "op_full_name": node.op_full_name,
-                    "ctx": list(node.ctx),
-                    "start_time": node.start_time,
-                    "end_time": node.end_time,
-                    "wall_start": trace.wall_of(node.start_time),
-                    "duration_ms": node.duration_ms,
-                    "op_type": node.op_type,
-                    "is_yield": node.is_yield,
-                    "status": node.status,
-                    "error": node.error,
-                    "inputs": clean_in,
-                    "outputs": clean_out,
-                    "upstreams": [_upstream_to_dict(u) for u in node.upstreams],
-                }
+                row = row_of(node, trace)
+                for key in ("inputs", "outputs", "attrs"):
+                    if key in row:
+                        row[key] = self.offload_media(self.sanitize(row[key]), media_dir, threshold)
                 f.write(json.dumps(row, default=str) + "\n")
 
         # 3. view.txt — human-readable render (subclasses override
@@ -313,7 +278,9 @@ class LocalConsumer(Consumer):
                 f"  {node.duration_ms:6.0f}ms  {arrow}"
             )
             if show_io:
-                if node.inputs:
+                if node.inputs_from is not None:
+                    rows.append(f"              in  (as {node.inputs_from})")
+                elif node.inputs:
                     rows.append(self._format_kv(node.inputs, prefix="              in  "))
                 if node.outputs:
                     rows.append(self._format_kv(node.outputs, prefix="              out "))

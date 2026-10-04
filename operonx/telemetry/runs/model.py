@@ -19,7 +19,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED
+from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED, superseded_ids
 
 __all__ = [
     "MAX_SAMPLES",
@@ -31,6 +31,8 @@ __all__ = [
     "RunSummary",
     "percentile",
     "meta_of_trace",
+    "resolve_inputs",
+    "row_of",
     "rows_of_trace",
     "summarize",
 ]
@@ -69,6 +71,8 @@ class RunSummary:
     origin: str = "adhoc"
     #: The origin's own name: the service, the job, else the workflow.
     name: str = ""
+    #: "ok", "error", or "running": a live store's run that has not ended
+    #: (or whose process died before it did).
     status: str = "ok"
     started_at: float = 0.0  # epoch seconds
     duration_ms: float = 0.0
@@ -168,12 +172,20 @@ class OpStats:
 class RunRecord:
     """One run in full: the summary, the trace-level metadata, and every
     execution as the row a consumer wrote (inputs and outputs included,
-    media as references relative to ``media_root``)."""
+    media as references relative to ``media_root``).
+
+    A row stored with ``inputs_from`` (a later record of a generator
+    invocation, see :func:`row_of`) reads with its invocation's inputs:
+    every store's ``get_run`` builds one of these, so every reader gets
+    them, by reference, never copied."""
 
     summary: RunSummary
     nodes: List[Dict[str, Any]] = field(default_factory=list)
     meta: Dict[str, Any] = field(default_factory=dict)
     media_root: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        resolve_inputs(self.nodes)
 
 
 @dataclass
@@ -307,6 +319,9 @@ def summarize(
         trace_id=trace_id, workflow=str(meta.get("workflow_name") or ""), location=location
     )
 
+    rows = list(rows)
+    # steps that failed inside a retried attempt: the attempt after it decides
+    gone = superseded_ids(rows, lambda r, k: r.get(k))
     for row in rows:
         op = str(row.get("op_name") or row.get("op_full_name") or "?")
         dur = float(row.get("duration_ms") or 0.0)
@@ -331,7 +346,10 @@ def summarize(
         if isinstance(wall, (int, float)):
             first_wall = wall if first_wall is None else min(first_wall, wall)
         # A retried attempt is not a failure: the attempt after it decides.
-        if row.get("status") not in (None, STATUS_OK, STATUS_RETRIED):
+        if (
+            row.get("status") not in (None, STATUS_OK, STATUS_RETRIED)
+            and row.get("op_id") not in gone
+        ):
             r.errors += 1
             s.errors += 1
             if s.first_error is None:
@@ -367,7 +385,11 @@ def summarize(
         op_name, record = next(iter(recorded.items()))
         text = record.get("message") or record.get("type")
         s.first_error = f"{op_name.rsplit('.', 1)[-1]}: {_first_line(text)}"
-    s.status = "error" if s.errors or recorded or meta.get("status") == "error" else "ok"
+    if meta.get("status") == "running":
+        # not ended: what failed so far is counted, the verdict waits
+        s.status = "running"
+    else:
+        s.status = "error" if s.errors or recorded or meta.get("status") == "error" else "ok"
     if meta.get("duration_ms") is not None:
         s.duration_ms = float(meta["duration_ms"])
     elif first_start is not None and last_end is not None:
@@ -390,12 +412,60 @@ def summarize(
     return s, list(per_op.values())
 
 
+def row_of(node: Any, trace: Any) -> Dict[str, Any]:
+    """One execution as the row every store keeps — ``nodes.jsonl``'s
+    shape. Values are left as recorded; the caller cleans them.
+
+    Keys a record leaves at their default are omitted, so a row written
+    before they existed reads the same: ``attempt`` (1), ``attrs`` (empty)
+    and ``inputs_from``. A generator invocation's records share one inputs
+    dict: the first row holds it, and every later row of that invocation
+    names that row's ``op_id`` in ``inputs_from`` instead of repeating it
+    (:func:`resolve_inputs` puts it back on read). A streamed LLM call with
+    a 12 KB prompt was 1.17 MB of repeated inputs that way.
+    """
+    row: Dict[str, Any] = {
+        "op_id": node.op_id,
+        "op_name": node.op_name,
+        "op_full_name": node.op_full_name,
+        "ctx": list(node.ctx),
+        "start_time": node.start_time,
+        "end_time": node.end_time,
+        "wall_start": trace.wall_of(node.start_time),
+        "duration_ms": node.duration_ms,
+        "op_type": node.op_type,
+        "is_yield": node.is_yield,
+        "status": node.status,
+        "error": node.error,
+    }
+    if node.inputs_from is None:
+        row["inputs"] = node.inputs
+    else:
+        row["inputs_from"] = node.inputs_from
+    row["outputs"] = node.outputs
+    row["upstreams"] = [
+        {
+            "from_op_id": u.from_op_id,
+            "from_op_name": u.from_op_name,
+            "from_op_full_name": u.from_op_full_name,
+            "from_key": u.from_key,
+            "to_key": u.to_key,
+        }
+        for u in node.upstreams
+    ]
+    if node.attempt != 1:
+        row["attempt"] = node.attempt
+    if node.attrs:
+        row["attrs"] = node.attrs
+    return row
+
+
 def rows_of_trace(
     trace: Any, consumer: Any, media_dir: Any = None, threshold: int = 1024
 ) -> List[Dict[str, Any]]:
-    """A live ``WorkflowTrace`` as the rows a consumer writes — values
-    sanitised to JSON by *consumer* (any :class:`Consumer`), and large
-    payloads offloaded to *media_dir* when one is given."""
+    """A live ``WorkflowTrace`` as the rows a consumer writes (:func:`row_of`)
+    — values sanitised to JSON by *consumer* (any :class:`Consumer`), and
+    large payloads offloaded to *media_dir* when one is given."""
 
     def clean(values: Any) -> Any:
         out = consumer.sanitize(values)
@@ -405,50 +475,44 @@ def rows_of_trace(
 
     rows = []
     for n in trace.nodes:
-        rows.append(
-            {
-                "op_id": n.op_id,
-                "op_name": n.op_name,
-                "op_full_name": n.op_full_name,
-                "ctx": list(n.ctx),
-                "start_time": n.start_time,
-                "end_time": n.end_time,
-                "wall_start": trace.wall_of(n.start_time),
-                "duration_ms": n.duration_ms,
-                "op_type": n.op_type,
-                "is_yield": n.is_yield,
-                "status": n.status,
-                "error": n.error,
-                "inputs": clean(n.inputs),
-                "outputs": clean(n.outputs),
-                "upstreams": [
-                    {
-                        "from_op_id": u.from_op_id,
-                        "from_op_name": u.from_op_name,
-                        "from_op_full_name": u.from_op_full_name,
-                        "from_key": u.from_key,
-                        "to_key": u.to_key,
-                    }
-                    for u in n.upstreams
-                ],
-            }
-        )
+        row = row_of(n, trace)
+        for key in ("inputs", "outputs", "attrs"):
+            if key in row:
+                row[key] = clean(row[key])
+        rows.append(row)
     return rows
 
 
-def meta_of_trace(trace: Any) -> Dict[str, Any]:
+def resolve_inputs(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Give each row stored with ``inputs_from`` the inputs of the row it
+    names — the same object, not a copy. Rows without it (every row
+    written before it existed) are left alone. Returns *rows*."""
+    by_id: Optional[Dict[Any, Dict[str, Any]]] = None
+    for row in rows:
+        ref = row.get("inputs_from")
+        if ref and row.get("inputs") is None:
+            if by_id is None:
+                by_id = {r.get("op_id"): r for r in rows}
+            source = by_id.get(ref)
+            row["inputs"] = source.get("inputs") if source is not None else None
+    return rows
+
+
+def meta_of_trace(trace: Any, running: bool = False) -> Dict[str, Any]:
     """A trace's ``meta.json``: what LocalConsumer writes, and what a live
     trace is read as. ``status`` is ``"error"`` when a node failed or the
-    run recorded an error; ``errors`` is the run's ``"$errors"``."""
+    run recorded an error; ``errors`` is the run's ``"$errors"``. With
+    *running* (a live store writing a run that has not ended), ``status``
+    is ``"running"`` and there is no end or duration yet."""
     return {
         "trace_id": trace.trace_id,
         "workflow_name": trace.workflow_name,
         "started_at": trace.started_at,
         "wall_started_at": trace.wall_started_at,
-        "ended_at": trace.ended_at,
-        "duration_ms": trace.duration_ms,
+        "ended_at": None if running else trace.ended_at,
+        "duration_ms": None if running else trace.duration_ms,
         "node_count": len(trace.nodes),
         "metadata": trace.metadata,
-        "status": trace.status,
+        "status": "running" if running else trace.status,
         "errors": dict(trace.errors),
     }

@@ -50,9 +50,15 @@ from operonx.core import (
     Operon,
     OpFailed,
     Retry,
+    RunContext,
+    TaskFailed,
+    TaskFinished,
+    TaskStarted,
     Timeout,
+    child,
     graph,
     op,
+    run_context,
 )
 from operonx.core.registry import (
     BOOTSTRAP_ENV_PATHS,
@@ -143,6 +149,14 @@ __all__ = [
     "Timeout",
     "TRANSIENT",
     "OpFailed",
+    # What an op body can know about its run
+    "RunContext",
+    "run_context",
+    "child",
+    # engine.stream(mode="tasks") events
+    "TaskStarted",
+    "TaskFinished",
+    "TaskFailed",
     # Logging
     "LOGGER",
     # Setup

@@ -89,4 +89,27 @@ One `OpExecution` per invocation for a batch op, and **one per yield** for
 a generator — so `op_id` is unique per yield and a downstream consumer's
 `UpstreamRef` points at the exact yield it consumed. A cancelled or errored
 op appends a final record carrying the failure, so the attempt is visible
-rather than merely absent.
+rather than merely absent. Every record of one generator invocation after
+the first sets `inputs_from` to the first record's `op_id`: in memory
+`node.inputs` is still the shared dict, and a stored row names the record
+instead of repeating the inputs (a streamed 12 KB-prompt LLM call: 1.17 MB
+→ 69 KB). Every store's `get_run` gives them back, by reference.
+
+An op records the steps it runs itself with `child()` (see the agent guide,
+page 8): each is an `OpExecution` whose ctx is its parent's plus
+`"<name>[n]"` and whose full name is its parent's plus `".<name>"`, so
+`build_tree` (Langfuse, the studio) nests it with no stored link.
+`OpExecution.attrs` holds semantic attributes (`gen_ai.*`) a child sets,
+and `attempt` is the R1 attempt; rows carry both only when they are not
+the default.
+
+## Live traces
+
+A consumer that overrides `on_start(trace)` or `on_execution(trace,
+execution)` is *live*: the engine calls the first when the run starts and
+the second as each record lands (`WorkflowTrace.record`), on the event
+loop, so it queues and returns. The ClickHouse and SQL (SQLite, Postgres)
+stores are live by default (`live: false` turns it off): they list the run
+as `running` and append its executions; the final write replaces both. A
+process killed mid-run leaves its run listed as `running`, with what it
+finished. The files store, Mongo and Langfuse write when the run ends.

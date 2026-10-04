@@ -27,12 +27,14 @@ import json
 import sys
 import time
 import uuid
+from collections import deque
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
 
 from operonx.core.loggings import LOGGER, format_event
 from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.policy import ERRORS_MODES, RunPolicy, _FailFast
+from operonx.core.runtime import _RunInfo
 from operonx.core.states import StateSchema
 
 if TYPE_CHECKING:
@@ -47,6 +49,40 @@ _MISSING = object()
 #: is not an output: merged into a result it became a key no graph
 #: declares, holding an object `json.dumps` rejects.
 _INTERRUPT_TAG = "__interrupt__"
+
+#: What ``Operon.stream(mode=...)`` takes, alone or as a list.
+STREAM_MODES = ("updates", "values", "frames", "custom", "interrupts", "tasks")
+
+
+def _go_live(consumer: "Consumer", trace: Any) -> None:
+    """Hand a live consumer the run as it goes: ``on_start`` now, then
+    ``on_execution`` from every ``trace.record``. Either raising is logged
+    once per run and never reaches it."""
+    failed = []
+
+    def report(hook: str) -> None:
+        if not failed:
+            failed.append(hook)
+            LOGGER.exception(
+                "live trace consumer %r failed in %s on trace %s; its other calls in this "
+                "run are not logged",
+                type(consumer).__name__,
+                hook,
+                trace.trace_id,
+            )
+
+    try:
+        consumer.on_start(trace)
+    except Exception:
+        report("on_start")
+
+    def on_execution(execution: Any) -> None:
+        try:
+            consumer.on_execution(trace, execution)
+        except Exception:
+            report("on_execution")
+
+    trace._execution_listeners.append(on_execution)
 
 
 class ExecutionHandle:
@@ -475,8 +511,11 @@ class Operon:
                    a :class:`Consumer` instance, or a list of either.
                    Each consumer gets ``handle.trace`` at the end of
                    every run and writes its own view (disk, Langfuse,
-                   report, …). Failures are caught + logged per-consumer
-                   so one bad backend never affects the call. Requires
+                   report, …); a live one (the ClickHouse and SQL stores)
+                   also gets the run as it starts and each execution as it
+                   lands, and lists the run as ``running`` meanwhile.
+                   Failures are caught + logged per-consumer so one bad
+                   backend never affects the call. Requires
                    :func:`operonx.bootstrap` when using string keys.
                    ``"local"`` is the built-in local consumer: inside a
                    project (an ``operonx.toml`` at or above the working
@@ -669,6 +708,7 @@ class Operon:
         trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
         checkpointer=None,
+        context: Any = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
@@ -689,11 +729,20 @@ class Operon:
                 Equivalent to writing ``handle.scratch[k] = v`` before the first
                 ``await`` after ``start()``, but guaranteed to be visible to
                 entry ops.
+            context: Any object the run's ops may read as
+                ``run_context().context`` — a tenant, a feature flag set, a
+                typed dataclass of what the caller knows. Information only:
+                stored as given, never read by operonx.
+
+        The run's ``run_context().run_id`` is its trace id (``trace_id``,
+        else ``request_id``), and ``thread_id`` is ``session_id`` as given
+        (``None`` when not given).
 
         Returns:
             ExecutionHandle — async-iterable, supports ``await handle["op","var"]``
             and ``await handle.collect()``
         """
+        thread_id = session_id
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
@@ -793,6 +842,11 @@ class Operon:
             errors=state._op_errors,
         )
 
+        state._run_info = _RunInfo(_wf_trace.run_id, thread_id, context)
+        for _consumer in consumers:
+            if _consumer.live:
+                _go_live(_consumer, _wf_trace)
+
         async def _run() -> None:
             v3_token = _v3_trace_var.set(_wf_trace)
             try:
@@ -868,6 +922,7 @@ class Operon:
         trace_id: Optional[str] = None,
         scratch: Optional[Dict[str, Any]] = None,
         checkpointer=None,
+        context: Any = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -887,6 +942,8 @@ class Operon:
             session_id: Optional session identifier (auto-generated if not provided)
             request_id: Optional request identifier (auto-generated if not provided)
             scratch: Optional initial values for per-call scratch space.
+            context: What the run's ops read as ``run_context().context``
+                (see :meth:`start`).
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -899,10 +956,6 @@ class Operon:
             (``ObserveBudgetExceeded``, a misdirected ``Interrupt``) does
             raise.
         """
-        user_id = user_id or str(uuid.uuid4())
-        session_id = session_id or str(uuid.uuid4())
-        request_id = request_id or str(uuid.uuid4())
-
         handle = self.start(
             inputs,
             user_id=user_id,
@@ -911,6 +964,7 @@ class Operon:
             trace_id=trace_id,
             scratch=scratch,
             checkpointer=checkpointer,
+            context=context,
         )
 
         try:
@@ -941,11 +995,11 @@ class Operon:
                 return op_name, var
         return "?", "?"
 
-    async def stream(  # noqa: C901 — routing on mode; keeps engine surface compact
+    async def stream(
         self,
         inputs: Dict[str, Any],
         *,
-        mode: str = "updates",
+        mode: Union[str, List[str], tuple] = "updates",
         channels: Optional[List[str]] = None,
         checkpointer: Optional[Any] = None,
         **kwargs: Any,
@@ -954,14 +1008,18 @@ class Operon:
 
         Args:
             inputs: workflow inputs (same as ``run``/``invoke``)
-            mode: one of
+            mode: one mode, or a list of them. A string yields that mode's
+                chunks; a list yields ``(mode, chunk)`` pairs from one run,
+                in the order they arrive. The modes:
+
                 - ``"updates"`` — yields ``{op_name: {var: value, ...}}`` per op
                   completion (matches LangGraph's ``stream_mode="updates"``).
                   Covers **every** op, including generators in the middle of
                   the graph, and delivers each write as it lands. When an
                   :class:`~operonx.InterruptOp` suspends, also yields its
                   :class:`~operonx.checkpoint.InterruptEvent`, in order with
-                  the updates; answer with ``event.resume(value)``.
+                  the updates, unless ``"interrupts"`` is also streamed;
+                  answer with ``event.resume(value)``.
                 - ``"interrupts"`` — yields only those ``InterruptEvent`` objects.
                 - ``"values"`` — yields the full state snapshot per step;
                   requires a checkpointer (auto-created in-memory if omitted)
@@ -972,111 +1030,97 @@ class Operon:
                 - ``"custom"`` — yields :class:`~operonx.checkpoint.CustomEvent`
                   emitted by any :class:`~operonx.EmitOp`, optionally filtered
                   by ``channels=[...]``
+                - ``"tasks"`` — yields :class:`~operonx.TaskStarted`,
+                  :class:`~operonx.TaskFinished` and :class:`~operonx.TaskFailed`:
+                  one start and one end per op invocation (a generator's end
+                  comes after its last item) and per ``child()`` execution,
+                  each with its attempt.
             channels: for ``mode="custom"`` only — restrict to these channel names
             checkpointer: for ``mode="values"``; auto-created InMemory if None
             **kwargs: forwarded to ``start()`` (user_id, session_id, etc.)
 
         Yields:
-            mode-specific chunks (see above).
+            mode-specific chunks, or ``(mode, chunk)`` for a list of modes.
 
         Raises:
+            ValueError: an unknown mode, one given twice, or an empty list —
+                before anything runs.
             BaseException: whatever ``run()`` raises — a fatal error such as
                 ``ObserveBudgetExceeded`` — in every mode, after the chunks
                 that landed before it. An op that raises is not fatal: the
                 stream ends normally, as ``run()`` returns normally.
         """
-        import asyncio
+        paired = not isinstance(mode, str)
+        modes = tuple(mode) if paired else (mode,)
+        unknown = [m for m in modes if m not in STREAM_MODES]
+        if unknown or not modes or len(set(modes)) != len(modes):
+            if not modes:
+                problem = "takes at least one mode"
+            elif unknown:
+                problem = f"has no mode {unknown[0]!r}"
+            else:
+                problem = "names a mode more than once"
+            raise ValueError(
+                f"engine.stream(mode={mode!r}) {problem} — valid modes: "
+                + ", ".join(repr(m) for m in STREAM_MODES)
+                + "; pass a list for several at once"
+            )
+        async for name, chunk in self._stream_modes(inputs, modes, channels, checkpointer, kwargs):
+            yield (name, chunk) if paired else chunk
 
+    async def _stream_modes(  # noqa: C901 — one pacing loop for every mode
+        self,
+        inputs: Dict[str, Any],
+        modes: tuple,
+        channels: Optional[List[str]],
+        checkpointer: Optional[Any],
+        start_kwargs: Dict[str, Any],
+    ) -> "asyncio.AsyncGenerator[tuple, None]":
+        """One run, every requested mode, ``(mode, chunk)`` in arrival order.
+
+        Each mode feeds the same pacing loop:
+
+        - ``updates`` / ``values`` ride the state's write bus and are
+          released by completed step (a step is complete once the counter
+          has moved past it), so every op invocation yields exactly once;
+        - an ``InterruptEvent`` follows the updates that landed before its
+          op suspended, under ``interrupts`` if that mode is streamed, else
+          under ``updates`` — the consumer has to see the question, or the
+          run waits on an answer nobody can give;
+        - ``custom`` and ``tasks`` events and ``frames`` are delivered as they
+          arrive.
+
+        The frames are drained in the background either way: the scheduler
+        needs its output queue consumed to make progress.
+        """
         from operonx.checkpoint import InMemoryCheckpointer
         from operonx.checkpoint.base import CustomEvent
         from operonx.checkpoint.bridge import bind_custom_bus, bind_interrupt_bus
 
-        # Only "values" mode strictly needs a checkpointer. Create an in-memory
-        # one on demand so callers don't have to plumb it manually.
-        if mode == "values" and checkpointer is None:
+        if "values" in modes and checkpointer is None:
             checkpointer = InMemoryCheckpointer()
+        handle = self.start(inputs, checkpointer=checkpointer, **start_kwargs)
+        state = handle.state
+        # A wakeup per event; `ready` holds what is delivered as it arrives.
+        signal: asyncio.Queue = asyncio.Queue()
+        ready: deque = deque()
+        undo: List[Callable[[], None]] = []
 
-        # For mode="custom", subscribe to the state's custom bus and buffer
-        # events into a local queue. Handle is used for its scheduler task.
-        if mode == "custom":
-            queue: asyncio.Queue = asyncio.Queue()
+        def _arrived(name: str, chunk: Any) -> None:
+            ready.append((name, chunk))
+            signal.put_nowait(None)
 
-            def _sink(evt: CustomEvent):
-                if channels is None or evt.channel in channels:
-                    queue.put_nowait(evt)
-
-            handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
-            op_registry = self._all_ops_registry()
-            _unbind = bind_custom_bus(handle.state, _sink, op_registry=op_registry)
-            drainer = None
-            getter = None
-            try:
-                # Drain the frame queue in the background so scheduler can
-                # progress; we ignore frames here — only custom events.
-                async def _drain_frames():
-                    async for _ in handle:
-                        pass
-
-                drainer = asyncio.create_task(_drain_frames())
-                while not (drainer.done() and queue.empty()):
-                    getter = asyncio.create_task(queue.get())
-                    done, _pending = await asyncio.wait(
-                        {getter, drainer},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if getter in done:
-                        yield getter.result()
-                    else:
-                        getter.cancel()
-                        # Drain any remaining events after scheduler done.
-                        while not queue.empty():
-                            yield queue.get_nowait()
-                        break
-                # The drainer ends when the run does, including when it dies:
-                # `done()` alone reads a fatal error as a clean finish, and
-                # the exception was never retrieved. Raise it, as `run()`
-                # and `mode="frames"` do.
-                drainer.result()
-            finally:
-                _unbind()
-                # Phase 2b3 B3: cancel the scheduler on caller break/error so
-                # long-running ops (LLM calls, DB writes) don't keep burning
-                # resources with no consumer.
-                handle.cancel()
-                if drainer and not drainer.done():
-                    drainer.cancel()
-                if getter and not getter.done():
-                    getter.cancel()
-            return
-
-        # For "updates" and "values" we need per-op-completion granularity,
-        # not just the scheduler's output-frame stream (which only fires for
-        # ops that push to PARENT / END). We piggy-back on the state's write
-        # bus so every op invocation yields exactly once. "interrupts" shares
-        # the pacing loop and records no writes.
-        if mode in ("updates", "values", "interrupts"):
-            if mode == "values" and checkpointer is None:
-                checkpointer = InMemoryCheckpointer()
-            handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
-            state = handle.state
-
-            # Reverse index built once.
+        # Buffered per step: {step: {op_name: {var: value}}}. A write
+        # signals the pacer. This loop used to be driven by `async for _ in
+        # handle`, which only ticks on *output* frames — so a graph whose
+        # single output lands at the end buffered every intermediate update
+        # and released them all at once (four generator yields 150 ms apart,
+        # all delivered together after the run).
+        step_updates: Dict[int, Dict[str, Dict[str, Any]]] = {}
+        if "updates" in modes:
             idx_to_key = {
                 idx: (op_name, var) for (op_name, var), idx in state.schema._var_to_idx.items()
             }
-
-            # Buffer per-step writes into a list of updates. Each element
-            # in step_updates is {op_name: {var: value, ...}} for one step.
-            step_updates: Dict[int, Dict[str, Dict[str, Any]]] = {}
-
-            # A write signals the pacer. This loop used to be driven by
-            # ``async for _ in handle``, which only ticks on *output*
-            # frames — so a graph whose single output lands at the end
-            # buffered every intermediate update and released them all at
-            # once. Measured: four generator yields 150ms apart, all
-            # delivered together after the run. Streaming an LLM into a
-            # consumer is exactly that shape.
-            signal: asyncio.Queue = asyncio.Queue()
 
             def _record(idx: int, ctx_key: tuple, value):
                 op_name, var = idx_to_key.get(idx, ("?", "?"))
@@ -1084,106 +1128,111 @@ class Operon:
                 step_updates.setdefault(step, {}).setdefault(op_name, {})[var] = value
                 signal.put_nowait(step)
 
-            # An InterruptOp waits for an answer the consumer gives. The
-            # consumer has to see the question, or the stream blocks on the
-            # suspended op with nothing to show for it — which is what
-            # "updates" did while its docstring promised the event.
-            interrupts: List[Any] = []
+            state.subscribe_writes(_record)
+            undo.append(lambda: state.unsubscribe_writes(_record))
+
+        interrupt_mode = (
+            "interrupts" if "interrupts" in modes else "updates" if "updates" in modes else None
+        )
+        interrupts: List[Any] = []
+        if interrupt_mode is not None:
 
             def _interrupted(event) -> None:
                 interrupts.append(event)
                 signal.put_nowait(None)
 
-            def _flush(upto: int, last: int):
-                """Yield completed steps in ``(last, upto]``; return the new last."""
-                out = []
-                while last < upto:
-                    last += 1
-                    if mode == "updates":
-                        batch = step_updates.pop(last, {})
-                        if batch:
-                            out.append(batch)
-                    elif mode == "values" and checkpointer is not None:
-                        try:
-                            out.append(checkpointer.get_state(last))
-                        except Exception:
-                            pass
-                return out, last
+            undo.append(
+                bind_interrupt_bus(state, _interrupted, op_registry=self._all_ops_registry())
+            )
+        if "custom" in modes:
 
-            if mode != "interrupts":
-                state.subscribe_writes(_record)
-            _unbind_interrupts = None
-            if mode != "values":
-                _unbind_interrupts = bind_interrupt_bus(
-                    state, _interrupted, op_registry=self._all_ops_registry()
-                )
-            drainer = None
-            getter = None
-            try:
-                # The scheduler still needs its frames consumed to make
-                # progress; that just isn't the pacer any more.
-                async def _drain_frames():
-                    async for _ in handle:
+            def _custom(evt: CustomEvent) -> None:
+                if channels is None or evt.channel in channels:
+                    _arrived("custom", evt)
+
+            undo.append(bind_custom_bus(state, _custom, op_registry=self._all_ops_registry()))
+        if "tasks" in modes and handle.trace is not None:
+
+            def _task(evt: Any) -> None:
+                _arrived("tasks", evt)
+
+            handle.trace._task_listeners.append(_task)
+            undo.append(lambda: handle.trace._task_listeners.remove(_task))
+
+        stepped = "updates" in modes or "values" in modes
+
+        def _flush(upto: int, last: int):
+            """The completed steps in ``(last, upto]``, and the new last."""
+            out = []
+            while last < upto:
+                last += 1
+                if "updates" in modes:
+                    batch = step_updates.pop(last, {})
+                    if batch:
+                        out.append(("updates", batch))
+                if "values" in modes:
+                    try:
+                        out.append(("values", checkpointer.get_state(last)))
+                    except Exception:
                         pass
+            return out, last
 
-                drainer = asyncio.create_task(_drain_frames())
-                last_yielded = -1
-                while not (drainer.done() and signal.empty()):
-                    getter = asyncio.create_task(signal.get())
-                    done, _pending = await asyncio.wait(
-                        {getter, drainer},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if getter not in done:
-                        getter.cancel()
-                    # A step is only complete once the counter has moved
-                    # past it, so flush up to current - 1 while running.
-                    batches, last_yielded = _flush(state._current_step - 1, last_yielded)
-                    for batch in batches:
-                        yield batch
-                    # After the updates that landed before the op suspended:
-                    # every op that committed before it has bumped the step.
-                    while interrupts:
-                        yield interrupts.pop(0)
-                    while not signal.empty():
-                        signal.get_nowait()
-                # The run is over, so the last step is complete too.
-                batches, last_yielded = _flush(state._current_step, last_yielded)
-                for batch in batches:
-                    yield batch
-                # Over, or dead: the updates that landed are delivered first,
-                # then a fatal error is raised as `run()` raises it. Reading
-                # only `done()` ended the stream cleanly instead.
-                drainer.result()
-            finally:
-                if mode != "interrupts":
-                    state.unsubscribe_writes(_record)
-                if _unbind_interrupts is not None:
-                    _unbind_interrupts()
-                # Phase 2b3 B3: cancel scheduler on caller break so a partial
-                # consume doesn't leave the graph running with no listener.
-                handle.cancel()
-                if drainer is not None and not drainer.done():
-                    drainer.cancel()
-                if getter is not None and not getter.done():
+        frames = "frames" in modes
+
+        async def _drain_frames():
+            async for frame in handle:
+                if frames:
+                    _arrived("frames", frame)
+
+        drainer = None
+        getter = None
+        try:
+            drainer = asyncio.create_task(_drain_frames())
+            last = -1
+            while not (drainer.done() and signal.empty()):
+                getter = asyncio.create_task(signal.get())
+                done, _pending = await asyncio.wait(
+                    {getter, drainer},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if getter not in done:
                     getter.cancel()
-            return
-
-        handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
-
-        if mode == "frames":
-            try:
-                async for frame in handle:
-                    yield frame
-            finally:
-                # Phase 2b3 B3: cancel on caller break/error.
-                handle.cancel()
-            return
-
-        raise ValueError(
-            f"engine.stream(mode={mode!r}) — valid modes: 'updates', 'values', 'frames', "
-            f"'custom', 'interrupts'"
-        )
+                if stepped:
+                    batches, last = _flush(state._current_step - 1, last)
+                    for item in batches:
+                        yield item
+                # After the updates that landed before the op suspended:
+                # every op that committed before it has bumped the step.
+                while interrupts:
+                    yield interrupt_mode, interrupts.pop(0)
+                while ready:
+                    yield ready.popleft()
+                while not signal.empty():
+                    signal.get_nowait()
+            # The run is over, so the last step is complete too.
+            if stepped:
+                batches, last = _flush(state._current_step, last)
+                for item in batches:
+                    yield item
+            while interrupts:
+                yield interrupt_mode, interrupts.pop(0)
+            while ready:
+                yield ready.popleft()
+            # Over, or dead: what landed is delivered first, then a fatal
+            # error is raised as `run()` raises it. Reading only `done()`
+            # ended the stream cleanly instead.
+            drainer.result()
+        finally:
+            for fn in undo:
+                fn()
+            # Phase 2b3 B3: cancel the scheduler on caller break/error so
+            # long-running ops (LLM calls, DB writes) don't keep burning
+            # resources with no consumer.
+            handle.cancel()
+            if drainer is not None and not drainer.done():
+                drainer.cancel()
+            if getter is not None and not getter.done():
+                getter.cancel()
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Callable syntax for running the workflow.

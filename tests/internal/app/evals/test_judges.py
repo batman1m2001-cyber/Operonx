@@ -175,7 +175,9 @@ def test_the_prompt_is_binary_and_one_criterion(tmp_path, hub_reset):
     assert verdicts["order"]["passed"] is True and verdicts["hello"]["passed"] is False
     assert verdicts["hello"]["label"] == "FAIL"
 
-    system, user = _messages(_judge_requests(server)[0])
+    # the two cases are judged at the same time: find the order case's request
+    asked = [_messages(r) for r in _judge_requests(server)]
+    system, user = next((m for m in asked if "order 42" in m[1]), asked[0])
     assert "The reply answers what the user asked." in system
     assert "PASS" in system and "FAIL" in system and '"reason"' in system
     assert "where is order 42" in user and "Your order 42 has shipped." in user

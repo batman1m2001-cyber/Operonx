@@ -8,6 +8,17 @@ inserts in batches. A slow or down ClickHouse costs a run nothing. Past
 the queue's bound, runs are dropped and counted (see
 :mod:`operonx.telemetry.writer`).
 
+It is also *live* (``live=False`` turns it off):
+:meth:`~ClickHouseRunStore.on_start` queues a ``runs`` row with status
+``running``, and :meth:`~ClickHouseRunStore.on_execution` each
+execution's ``nodes`` row at its final ``seq``, on a second bounded queue
+of their own, so a burst of executions can never crowd a finished run out
+of the first. The final write rewrites the same keys, which
+``ReplacingMergeTree`` collapses: a live node row holds the same values,
+and the running row is written at version 0 (``written_at`` 1970), so the
+final row replaces it whichever lands first. A run whose process died
+stays listed as ``running`` with the executions it finished.
+
 Tables (in ``database``, created on first use, versioned in
 ``schema_version``):
 
@@ -51,6 +62,7 @@ import threading
 import time
 from collections import OrderedDict
 from contextlib import contextmanager, nullcontext
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
@@ -75,6 +87,7 @@ from .model import (
     RunRecord,
     RunSummary,
     meta_of_trace,
+    row_of,
     summarize,
 )
 from .retention import DEFAULT_RETENTION
@@ -88,6 +101,7 @@ __all__ = [
     "ClickHouseRunStore",
     "expires_at",
     "migrate",
+    "node_row",
     "node_rows",
     "rollup_rows",
     "run_row",
@@ -354,6 +368,15 @@ MIGRATIONS: List[Tuple[int, str, List[str]]] = [
         "experiments, experiment_items, scores, judge_cache",
         [_DDL_EXPERIMENTS, _DDL_EXPERIMENT_ITEMS, _DDL_SCORES, _DDL_JUDGE_CACHE],
     ),
+    (
+        4,
+        "nodes: attempt, attrs, inputs_from",
+        [
+            "ALTER TABLE {db}.nodes ADD COLUMN IF NOT EXISTS attempt UInt16 DEFAULT 1",
+            "ALTER TABLE {db}.nodes ADD COLUMN IF NOT EXISTS attrs String DEFAULT '' CODEC(ZSTD(3))",
+            "ALTER TABLE {db}.nodes ADD COLUMN IF NOT EXISTS inputs_from String DEFAULT ''",
+        ],
+    ),
 ]
 
 
@@ -389,12 +412,12 @@ NODE_COLUMNS: Tuple[str, ...] = (
     "trace_id", "seq", "run_started", "origin", "name", "op_id", "op_name",
     "op_full_name", "op_type", "ctx", "start_time", "end_time", "wall_start",
     "duration_ms", "is_yield", "status", "error", "inputs", "outputs",
-    "upstreams", "expires_at",
+    "upstreams", "expires_at", "attempt", "attrs", "inputs_from",
 )  # fmt: skip
 _NODE_READ = (
     "op_id", "op_name", "op_full_name", "ctx", "start_time", "end_time",
     "wall_start", "duration_ms", "op_type", "is_yield", "status", "error",
-    "inputs", "outputs", "upstreams",
+    "inputs", "outputs", "upstreams", "attempt", "attrs", "inputs_from",
 )  # fmt: skip
 ROLLUP_COLUMNS: Tuple[str, ...] = (
     "trace_id", "op", "op_type", "run_started", "origin", "name", "count",
@@ -500,35 +523,43 @@ def node_rows(
     """A run's rows (the shape ``nodes.jsonl`` holds) as ``nodes`` rows.
     Values are serialised here, with *default* for what JSON cannot hold
     (:func:`~operonx.telemetry.media.json_default` offloads blobs)."""
-    out = []
-    for seq, r in enumerate(rows):
-        end, wall = r.get("end_time"), r.get("wall_start")
-        out.append(
-            [
-                summary.trace_id,
-                seq,
-                float(summary.started_at or 0.0),
-                summary.origin or "",
-                summary.name or "",
-                str(r.get("op_id") or ""),
-                str(r.get("op_name") or ""),
-                str(r.get("op_full_name") or ""),
-                str(r.get("op_type") or ""),
-                [str(c) for c in (r.get("ctx") or [])],
-                float(r.get("start_time") or 0.0),
-                float(end) if isinstance(end, (int, float)) else None,
-                float(wall) if isinstance(wall, (int, float)) else None,
-                float(r.get("duration_ms") or 0.0),
-                bool(r.get("is_yield")),
-                str(r.get("status") or "ok"),
-                None if r.get("error") is None else str(r.get("error")),
-                _to_json(r.get("inputs"), default),
-                _to_json(r.get("outputs"), default),
-                _to_json(r.get("upstreams") or [], default),
-                expires,
-            ]
-        )
-    return out
+    return [node_row(summary, seq, r, expires, default) for seq, r in enumerate(rows)]
+
+
+def node_row(
+    summary: RunSummary, seq: int, r: Dict[str, Any], expires: int, default: Any = str
+) -> List[Any]:
+    """One row (the shape ``nodes.jsonl`` holds) as a ``nodes`` row at *seq*:
+    its index in the run's ``nodes``, so a row written while the run goes
+    and the same row in the final insert share a key and collapse."""
+    end, wall = r.get("end_time"), r.get("wall_start")
+    attrs = r.get("attrs")
+    return [
+        summary.trace_id,
+        seq,
+        float(summary.started_at or 0.0),
+        summary.origin or "",
+        summary.name or "",
+        str(r.get("op_id") or ""),
+        str(r.get("op_name") or ""),
+        str(r.get("op_full_name") or ""),
+        str(r.get("op_type") or ""),
+        [str(c) for c in (r.get("ctx") or [])],
+        float(r.get("start_time") or 0.0),
+        float(end) if isinstance(end, (int, float)) else None,
+        float(wall) if isinstance(wall, (int, float)) else None,
+        float(r.get("duration_ms") or 0.0),
+        bool(r.get("is_yield")),
+        str(r.get("status") or "ok"),
+        None if r.get("error") is None else str(r.get("error")),
+        "" if "inputs" not in r else _to_json(r.get("inputs"), default),
+        _to_json(r.get("outputs"), default),
+        _to_json(r.get("upstreams") or [], default),
+        expires,
+        int(r.get("attempt") or 1),
+        _to_json(attrs, default) if attrs else "",
+        str(r.get("inputs_from") or ""),
+    ]
 
 
 def rollup_rows(summary: RunSummary, rollups: Sequence[OpRollup], expires: int) -> List[List[Any]]:
@@ -566,12 +597,23 @@ def summary_of(row: Sequence[Any]) -> RunSummary:
 
 
 def node_of(row: Sequence[Any]) -> Dict[str, Any]:
+    """A ``nodes`` row back as the row every store returns: the keys a
+    record left at their default (``attempt``, ``attrs``, ``inputs_from``)
+    absent, as :func:`~.model.row_of` writes them."""
     d = dict(zip(_NODE_READ, row))
     d["ctx"] = list(d["ctx"] or [])
     d["is_yield"] = bool(d["is_yield"])
     for key in ("inputs", "outputs"):
         d[key] = _loads(d[key])
     d["upstreams"] = _loads(d["upstreams"]) or []
+    attempt, attrs, inputs_from = d.pop("attempt"), d.pop("attrs"), d.pop("inputs_from")
+    if attempt and int(attempt) != 1:
+        d["attempt"] = int(attempt)
+    if attrs:
+        d["attrs"] = _loads(attrs)
+    if inputs_from:
+        d["inputs_from"] = inputs_from
+        d.pop("inputs", None)
     return d
 
 
@@ -871,6 +913,23 @@ class ClickHouseConnection:
 # ── the store ───────────────────────────────────────────────────────────
 
 
+class _Live:
+    """A live run's start, or one of its executions, on the writer's queue."""
+
+    __slots__ = ("kind", "trace", "seq", "execution")
+
+    def __init__(self, kind: str, trace: Any, seq: int = 0, execution: Any = None):
+        self.kind = kind
+        self.trace = trace
+        self.seq = seq
+        self.execution = execution
+
+
+#: A running row's ``written_at``: the ``ReplacingMergeTree`` version every
+#: final row beats, whichever is inserted first.
+_VERSION_ZERO = datetime.fromtimestamp(0, tz=timezone.utc)
+
+
 class ClickHouseRunStore(ClickHouseConnection, RunStore):
     """See the module docstring.
 
@@ -884,7 +943,14 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
     same batches as the runs (``media_dir`` is then unused, and
     ``media_batch_bytes`` caps the blob bytes one insert carries); or a
     :class:`~operonx.core.media_store.MediaStore` of your own.
+
+    ``live`` (the default) writes a run while it goes, on ``live_writer``
+    (bounded at :attr:`live_queue_size` items; past it, live rows are
+    dropped and counted, and the final write still has them all).
     """
+
+    #: Live items (a run's start, one execution) waiting at most.
+    live_queue_size = 100_000
 
     def __init__(
         self,
@@ -905,6 +971,7 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
         media: Any = "local",
         client: Any = None,
         media_batch_bytes: int = 32 << 20,
+        live: bool = True,
     ):
         if ttl_days is not None and float(ttl_days) < 0:
             raise ValueError(f"ttl_days is {ttl_days}; must be >= 0, or unset")
@@ -930,6 +997,10 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
         elif not isinstance(media, MediaStore):
             raise ValueError(f"media is {media!r}; one of 'local', 'clickhouse', or a MediaStore")
         self.media: MediaStore = media
+        # The two writer threads take turns: a blob both a live row and the
+        # final write reference is then put once (the second sees it in the
+        # media store's `seen`), and inserts never interleave on the client.
+        self._write_lock = threading.Lock()
         self.writer = BackgroundWriter(
             self._write_batch,
             name=f"clickhouse:{self.host}/{database}",
@@ -938,6 +1009,15 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
             flush_interval=flush_interval,
             weight=lambda trace: len(getattr(trace, "nodes", ()) or ()) + 1,
         )
+        self.live_writer: Optional[BackgroundWriter] = None
+        if live:
+            self.live_writer = BackgroundWriter(
+                self._write_live,
+                name=f"clickhouse-live:{self.host}/{database}",
+                max_queue=self.live_queue_size,
+                batch_size=batch_size,
+                flush_interval=flush_interval,
+            )
 
     # -- write -------------------------------------------------------------------
 
@@ -947,6 +1027,18 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
         ``writer.stats``)."""
         return self.writer.submit(trace)
 
+    @property
+    def live(self) -> bool:
+        return self.live_writer is not None
+
+    def on_start(self, trace: Any) -> None:
+        """Live: queue the run's ``running`` row."""
+        self.live_writer.submit(_Live("start", trace))
+
+    def on_execution(self, trace: Any, execution: Any) -> None:
+        """Live: queue one execution's row at its index in ``trace.nodes``."""
+        self.live_writer.submit(_Live("node", trace, len(trace.nodes) - 1, execution))
+
     def build(self, trace: Any) -> Tuple[RunSummary, List[Any], List[List[Any]], List[List[Any]]]:
         """A finished trace as its rows: ``(summary, run row, node rows,
         rollup rows)``. Blobs go to :attr:`media` on the way."""
@@ -954,27 +1046,7 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
         # whose default= hook sanitises and offloads: a sanitize walk, an
         # offload walk and a dumps cost ~60 us per execution in Python, and
         # that CPU is taken from the event loop running the next call.
-        wall_of = trace.wall_of
-        rows = [
-            {
-                "op_id": n.op_id,
-                "op_name": n.op_name,
-                "op_full_name": n.op_full_name,
-                "ctx": n.ctx,
-                "start_time": n.start_time,
-                "end_time": n.end_time,
-                "wall_start": wall_of(n.start_time),
-                "duration_ms": n.duration_ms,
-                "op_type": n.op_type,
-                "is_yield": n.is_yield,
-                "status": n.status,
-                "error": n.error,
-                "inputs": n.inputs,
-                "outputs": n.outputs,
-                "upstreams": [u.__dict__ for u in n.upstreams],
-            }
-            for n in trace.nodes
-        ]
+        rows = [row_of(n, trace) for n in trace.nodes]
         meta = meta_of_trace(trace)
         summary, rollups = summarize(str(trace.trace_id), rows, meta, location=None)
         exp = expires_at(summary.started_at, summary.origin, self.ttl_days)
@@ -1014,12 +1086,69 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
 
     _built_errors = 0
 
+    def _build_live(self, item: "_Live", started: Dict[str, Any]) -> List[List[Any]]:
+        """A live item's ``nodes`` rows (none for a start). *started*
+        collects each run's running summary for the batch, which writes
+        one running row per run (at version 0) counting the executions
+        landed so far."""
+        trace = item.trace
+        tid = str(trace.trace_id)
+        got = started.get(tid)
+        if got is None:
+            meta = meta_of_trace(trace, running=True)
+            summary, _ = summarize(tid, [], meta, location=None)
+            exp = expires_at(summary.started_at, summary.origin, self.ttl_days)
+            got = started[tid] = (summary, meta, exp)
+        summary, meta, exp = got
+        if isinstance(self.media, ClickHouseMediaStore):
+            self.media.expire_with(exp)
+        if item.kind == "start":
+            return []
+        row = node_row(
+            summary,
+            item.seq,
+            row_of(item.execution, trace),
+            exp,
+            json_default(self.media, self.media_threshold),
+        )
+        return [row]
+
+    def _write_live(self, items: List["_Live"]) -> None:
+        """The live writer's sink: running rows at version 0, node rows at
+        their final ``seq``; blobs, then nodes, then runs."""
+        nodes: List[List[Any]] = []
+        started: Dict[str, Any] = {}
+        with self._write_lock, self._media_batch():
+            for item in items:
+                try:
+                    n = self._build_live(item, started)
+                except Exception as exc:  # noqa: BLE001 — one odd row never sinks the batch
+                    self._built_errors += 1
+                    if self._built_errors == 1:
+                        LOGGER.warning(
+                            "clickhouse: could not turn a live row of trace %s into rows "
+                            "(%s: %s); skipped",
+                            getattr(item.trace, "trace_id", "?"),
+                            type(exc).__name__,
+                            exc,
+                        )
+                    continue
+                nodes.extend(n)
+                if item.kind == "node":
+                    summary = started[str(item.trace.trace_id)][0]
+                    summary.executions = max(summary.executions, item.seq + 1)
+            runs = [run_row(s, meta, exp) + [_VERSION_ZERO] for s, meta, exp in started.values()]
+            if isinstance(self.media, ClickHouseMediaStore):
+                self.media.flush()
+            self._insert("nodes", nodes, NODE_COLUMNS)
+            self._insert("runs", runs, RUN_COLUMNS + ("written_at",))
+
     def _write_batch(self, traces: List[Any]) -> None:
         """The writer thread's sink: build every trace, insert once per table."""
         runs: List[List[Any]] = []
         nodes: List[List[Any]] = []
         rollups: List[List[Any]] = []
-        with self._media_batch():
+        with self._write_lock, self._media_batch():
             for trace in traces:
                 try:
                     _, run, n, r = self.build(trace)
@@ -1041,11 +1170,14 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
             self._insert_all(runs, nodes, rollups)
 
     def flush(self, timeout: Optional[float] = None) -> bool:
-        """Wait for queued runs to be written (or dropped)."""
-        return self.writer.flush(timeout)
+        """Wait for queued runs (and live rows) to be written (or dropped)."""
+        live = self.live_writer is None or self.live_writer.flush(timeout)
+        return self.writer.flush(timeout) and live
 
     def _settle(self) -> None:
-        """Reads see this process's own runs: wait for the queue first."""
+        """Reads see this process's own runs: wait for the queues first."""
+        if self.live_writer is not None:
+            self.live_writer.flush(self.read_timeout)
         self.writer.flush(self.read_timeout)
 
     # -- read --------------------------------------------------------------------
@@ -1268,5 +1400,7 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
         return sum(1 for sha in orphans if self.media.delete(sha))
 
     def close(self) -> None:
+        if self.live_writer is not None:
+            self.live_writer.close()
         self.writer.close()
         self._close_client()

@@ -1,9 +1,12 @@
 """FuncOp — execute a Python function as a workflow op."""
 
 import ast
+import copy
 import inspect
 import textwrap
 import warnings
+import weakref
+from dataclasses import dataclass
 from functools import wraps
 from typing import (
     Any,
@@ -11,6 +14,7 @@ from typing import (
     Dict,
     List,
     Optional,
+    Tuple,
     get_origin,
 )
 
@@ -437,6 +441,71 @@ def static_output_keys(func: Callable) -> Optional[frozenset]:
     return frozenset(keys) if found else None
 
 
+@dataclass(frozen=True)
+class _FunctionShape:
+    """What a function's code says about the op built from it.
+
+    A pure function of the function object, so it is read once per function
+    (:func:`_shape_of`) and every op built from it copies the ``Param``s.
+    Reading it took three ``inspect.getsource`` calls and two
+    ``ast.parse``s — ~1.5 ms an op, paid on every tool call of an agent
+    when dispatch built an op per call.
+    """
+
+    inputs: Tuple[Tuple[str, Any, bool, Any], ...]  # (name, type, required, default)
+    outputs: Dict[str, Param]  # from the return/yield dict literals
+    static_outputs: Optional[frozenset]
+    scalar: Optional[Param]  # the one output of a function returning a bare value
+    source: str
+
+
+_SHAPES: "weakref.WeakKeyDictionary[Callable, _FunctionShape]" = weakref.WeakKeyDictionary()
+
+
+def _shape_of(code_fn: Callable) -> _FunctionShape:
+    """The memoised :class:`_FunctionShape` of ``code_fn``."""
+    try:
+        return _SHAPES[code_fn]
+    except (KeyError, TypeError):
+        pass
+    sig = inspect.signature(code_fn)
+    inputs = tuple(
+        (
+            name,
+            param.annotation if param.annotation != inspect.Parameter.empty else None,
+            param.default == inspect.Parameter.empty,
+            param.default if param.default != inspect.Parameter.empty else None,
+        )
+        for name, param in sig.parameters.items()
+    )
+    outputs = extract_return_schema(code_fn)
+    static_outputs = static_output_keys(code_fn)
+    # A function that returns a bare value — `return n <= CAP` — has no
+    # dict literal to read keys from, so the AST pass finds nothing and
+    # the op would declare no outputs at all. Give it one, named
+    # `SCALAR_OUTPUT`, so a predicate can be written as the boolean it
+    # is instead of a dict with a single key nobody reads.
+    #
+    # Only when the annotation says the return is not a mapping. An
+    # unannotated function keeps the old empty-schema behaviour: we
+    # cannot tell a bare return from a dict built dynamically, and
+    # inventing an output for the latter would shadow its real keys.
+    scalar = None
+    if not outputs and _returns_scalar(code_fn):
+        ann = sig.return_annotation
+        scalar = Param(type=None if ann is inspect.Signature.empty else ann)
+    try:
+        source = inspect.getsource(code_fn)
+    except (OSError, TypeError):
+        source = str(code_fn)
+    shape = _FunctionShape(inputs, outputs, static_outputs, scalar, source)
+    try:
+        _SHAPES[code_fn] = shape
+    except TypeError:  # not weak-referenceable (a builtin): read every time
+        pass
+    return shape
+
+
 class FuncOp(BaseOp):
     """Op that executes a Python function.
 
@@ -516,11 +585,7 @@ class FuncOp(BaseOp):
         self._static_outputs = static_outputs
         self._set_core(code_fn)
 
-        # Lấy source code
-        try:
-            self.source = inspect.getsource(code_fn) if code_fn else ""
-        except:
-            self.source = str(code_fn) if code_fn else ""
+        self.source = _shape_of(code_fn).source if code_fn else ""
 
         # Set description từ docstring nếu chưa có
         if not self.description and code_fn and code_fn.__doc__:
@@ -541,44 +606,18 @@ class FuncOp(BaseOp):
         if code_fn is None:
             return {}, {}, None
 
-        # Parse inputs từ function parameters
-        inputs = {}
-        sig = inspect.signature(code_fn)
-
-        for param_name, param in sig.parameters.items():
-            param_type = param.annotation if param.annotation != inspect.Parameter.empty else None
-            has_default = param.default != inspect.Parameter.empty
-            default_val = param.default if has_default else None
-
-            inputs[param_name] = Param(
-                type=param_type, required=not has_default, default=default_val
-            )
-
-        # Parse outputs: return_keys explicit > AST parsing
+        shape = _shape_of(code_fn)
+        inputs = {
+            name: Param(type=ann, required=required, default=default)
+            for name, ann, required, default in shape.inputs
+        }
+        # return_keys explicit > the code's own dict literals
         if return_keys:
-            outputs = {key: Param() for key in return_keys}
-            static_outputs = None
-        else:
-            # Parse return schema từ source code (với type hints và descriptions)
-            outputs = extract_return_schema(code_fn)
-            static_outputs = static_output_keys(code_fn)
-
-        # A function that returns a bare value — `return n <= CAP` — has no
-        # dict literal to read keys from, so the AST pass finds nothing and
-        # the op would declare no outputs at all. Give it one, named
-        # `SCALAR_OUTPUT`, so a predicate can be written as the boolean it
-        # is instead of a dict with a single key nobody reads.
-        #
-        # Only when the annotation says the return is not a mapping. An
-        # unannotated function keeps the old empty-schema behaviour: we
-        # cannot tell a bare return from a dict built dynamically, and
-        # inventing an output for the latter would shadow its real keys.
-        if not outputs and _returns_scalar(code_fn):
-            ann = inspect.signature(code_fn).return_annotation
-            outputs = {SCALAR_OUTPUT: Param(type=None if ann is inspect.Signature.empty else ann)}
-            static_outputs = frozenset({SCALAR_OUTPUT})
-
-        return inputs, outputs, static_outputs
+            return inputs, {key: Param() for key in return_keys}, None
+        if shape.scalar is not None:
+            return inputs, {SCALAR_OUTPUT: copy.copy(shape.scalar)}, frozenset({SCALAR_OUTPUT})
+        outputs = {key: copy.copy(param) for key, param in shape.outputs.items()}
+        return inputs, outputs, shape.static_outputs
 
     def _cache_identity(self) -> Any:
         """The function and a hash of its code, so an edited body misses."""

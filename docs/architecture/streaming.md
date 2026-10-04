@@ -113,6 +113,12 @@ async for batch in engine.stream({"x": 1}, mode="updates"):
 | `"values"` | full state snapshot per step | every op (needs a checkpointer; one is created if omitted) |
 | `"custom"` | `CustomEvent` from `EmitOp` | whatever you emit, filterable by `channels=` |
 | `"interrupts"` | `InterruptEvent` when an `InterruptOp` pauses | every `InterruptOp`; `"updates"` yields the same events among its updates |
+| `"tasks"` | `TaskStarted` / `TaskFinished` / `TaskFailed`, with the attempt | one start and one end per op invocation and per `child()` execution; a generator ends after its last item |
+
+`mode` also takes a list: `engine.stream(inputs, mode=["updates", "tasks"])`
+yields `(mode, chunk)` pairs from one run, in arrival order. With both
+`"updates"` and `"interrupts"`, an `InterruptEvent` arrives once, under
+`"interrupts"`. An unknown or repeated mode is refused before the run starts.
 
 ### Why `"frames"` sees less
 

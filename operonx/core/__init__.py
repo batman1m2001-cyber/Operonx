@@ -53,6 +53,15 @@ from operonx.core.registry import (
     ResourceHub,
     YamlConfigStorage,
 )
+from operonx.core.runtime import (
+    ChildExecution,
+    RunContext,
+    TaskFailed,
+    TaskFinished,
+    TaskStarted,
+    child,
+    run_context,
+)
 from operonx.core.states import Cell, MemoryState, Ref, ScratchRef, StateSchema
 from operonx.core.utils import Param
 
@@ -76,6 +85,15 @@ __all__ = [
     "Timeout",
     "TRANSIENT",
     "OpFailed",
+    # What an op body can know about its run
+    "RunContext",
+    "run_context",
+    "child",
+    "ChildExecution",
+    # engine.stream(mode="tasks") events
+    "TaskStarted",
+    "TaskFinished",
+    "TaskFailed",
     # Op types
     "GraphOp",
     "BranchOp",
