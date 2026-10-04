@@ -317,16 +317,36 @@ def _extract_dict_keys(dict_node: ast.Dict, comment_map: Dict[str, str]) -> Dict
 _MAPPING_ANNOTATIONS = (dict, Dict)
 
 
-def _returns_scalar(func: Callable) -> bool:
-    """True when the return annotation promises something that is not a dict.
+def _return_annotation(func: Callable) -> Any:
+    """``func``'s return annotation, evaluated if it was written as a string.
 
-    Conservative on purpose. No annotation, `Any`, or anything dict-shaped
-    returns False, leaving the AST-derived schema untouched.
+    Under ``from __future__ import annotations`` (PEP 563) every annotation
+    reaches ``inspect.signature`` as source text: ``-> dict`` is ``"dict"``.
+    Only the return annotation is evaluated, in the function's globals, the
+    way ``inspect.signature(eval_str=True)`` would — so a parameter's forward
+    reference cannot make it fail. A name that does not resolve gives
+    ``inspect.Signature.empty``: unknown, as if unannotated.
     """
     try:
         ann = inspect.signature(func).return_annotation
     except (TypeError, ValueError):
-        return False
+        return inspect.Signature.empty
+    if isinstance(ann, str):
+        try:
+            ann = eval(ann, getattr(inspect.unwrap(func), "__globals__", {}))  # noqa: S307
+        except Exception:  # noqa: BLE001 — a forward reference: unknown, not an error
+            return inspect.Signature.empty
+    return ann
+
+
+def _returns_scalar(func: Callable) -> bool:
+    """True when the return annotation promises something that is not a dict.
+
+    Conservative on purpose. No annotation, `Any`, an annotation that does
+    not resolve, or anything dict-shaped returns False, leaving the
+    AST-derived schema untouched.
+    """
+    ann = _return_annotation(func)
     if ann is inspect.Signature.empty or ann is Any:
         return False
     if ann in _MAPPING_ANNOTATIONS:
@@ -492,8 +512,7 @@ def _shape_of(code_fn: Callable) -> _FunctionShape:
     # inventing an output for the latter would shadow its real keys.
     scalar = None
     if not outputs and _returns_scalar(code_fn):
-        ann = sig.return_annotation
-        scalar = Param(type=None if ann is inspect.Signature.empty else ann)
+        scalar = Param(type=_return_annotation(code_fn))
     try:
         source = inspect.getsource(code_fn)
     except (OSError, TypeError):
