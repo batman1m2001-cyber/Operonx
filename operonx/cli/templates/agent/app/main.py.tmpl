@@ -1,35 +1,29 @@
-"""{{name}}: one HTTP service in front of a ReAct agent.
+"""{{name}}: one HTTP service in front of an agent.
 
-POST /ask:8000 {"question": ...} ──► assistant_flow ──► {answer, stopped_early}
-                                        └── agent: llm:assistant ⇄ word_count tool
+POST /ask:8000 {"input": ...} ──► assistant ──► {status, output, run_id, ...}
+                                   └── llm:assistant ⇄ word_count tool
+POST /ask/resume {"run_id", "approvals"}: answers a run that waits for a human.
 
 Every service and job of the project is declared here; operonx.toml only
 points at `APP`.
 """
 
-from operonx.app import Application, Service, env, http
+from operonx.app import Application, env, http
+from operonx_agents import SQLiteStateStore, agent_service
 
-from assistant.graph import assistant_flow
+from assistant.graph import ASSISTANT
 
 APP = Application(
     "{{name}}",
     description="{{summary}}",
     services=[
-        Service(
-            "assistant",
+        agent_service(
+            ASSISTANT,
             http("POST", "/ask", port=env("PORT", 8000)),
-            graph=assistant_flow,
-            description="POST {question}, get the agent's {answer, stopped_early}.",
+            # where a run that waits for an approval is kept until its resume
+            store=SQLiteStateStore(".operonx/agent_runs.db"),
+            description="POST {input}: the agent's reply. Accept: text/event-stream for "
+            "its events as they happen.",
         ),
-        # The same agent on an event nobody waits for (a new email, a Slack
-        # message): a webhook answers 202 at once and the run goes on in the
-        # background. Add `webhook` to the import above to turn it on.
-        #
-        # Service(
-        #     "assistant_events",
-        #     webhook("/events", port=env("PORT", 8000)),
-        #     graph=assistant_flow,
-        #     max_inflight=16,  # answer 429 beyond 16 pending runs
-        # ),
     ],
 )

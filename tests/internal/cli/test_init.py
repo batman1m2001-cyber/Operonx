@@ -19,6 +19,7 @@ import pytest
 
 import operonx
 from operonx import guide
+from operonx.cli.init import plan
 from operonx.cli.main import TEMPLATES, main
 
 pytestmark = pytest.mark.unit
@@ -70,6 +71,17 @@ def test_every_template_is_declared_here():
     assert sorted(TEMPLATES) == sorted(DECLARED)
 
 
+#: What a template's generated code needs besides operonx: its tests and
+#: CLIs run only where that is installed (core cannot depend on it).
+NEEDS = {"agent": "operonx_agents"}
+
+
+def _installed(module: str) -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec(module) is not None
+
+
 @pytest.fixture(scope="module", params=sorted(DECLARED))
 def project(request, tmp_path_factory):
     """One fresh project per template, made through the CLI's entry point."""
@@ -78,14 +90,39 @@ def project(request, tmp_path_factory):
     return request.param, root
 
 
+def _needs_its_package(template: str) -> None:
+    module = NEEDS.get(template)
+    if module and not _installed(module):
+        pytest.skip(f"the {template} template's code imports {module}, which is not installed")
+
+
+def test_the_agent_template_is_built_on_operonx_agents(tmp_path):
+    """`operonx init --template agent` writes the operonx-agents API (D3):
+    the package is declared, and nothing imports the deprecated
+    `operonx.agents`."""
+    root = tmp_path / "bot"
+    assert main(["init", str(root), "--template", "agent"]) == 0
+    pyproject = (root / "pyproject.toml").read_text()
+    assert '"operonx-agents>=' in pyproject
+    code = {p.relative_to(root).as_posix(): p.read_text() for p in root.rglob("*.py")}
+    assert not [p for p, text in code.items() if "operonx.agents" in text]
+    assert "agent_service(" in code["app/main.py"]
+    assert "Agent(" in code["src/assistant/graph.py"]
+    assert "operonx_agents.testing" in code["tests/test_assistant.py"]
+    for other in ("hello", "http", "chat"):
+        assert b"operonx-agents" not in plan(other, "x")["pyproject.toml"]
+
+
 class TestTheGeneratedProject:
     def test_its_own_tests_pass(self, project):
-        _, root = project
+        template, root = project
+        _needs_its_package(template)
         got = _run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], root)
         assert " passed" in got.stdout and "failed" not in got.stdout
 
     def test_the_clis_list_every_service_and_job(self, project):
         template, root = project
+        _needs_its_package(template)
         # what the app declares, read the way the CLIs load it
         described = _run(
             [
@@ -147,7 +184,7 @@ class TestTheGeneratedProject:
             assert "print(" not in path.read_text(), path
 
     def test_ruff_finds_nothing(self, project):
-        _, root = project
+        template, root = project
         if subprocess.run([sys.executable, "-m", "ruff", "--version"]).returncode != 0:
             pytest.skip("ruff is not installed")
         _run([sys.executable, "-m", "ruff", "check", "--no-cache", "."], root)

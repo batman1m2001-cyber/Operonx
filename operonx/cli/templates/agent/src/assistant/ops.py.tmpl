@@ -1,37 +1,26 @@
-"""The assistant feature's logic: the agent's tool, and the ops around it.
+"""The assistant's tools: functions the model may call.
 
-A `@tool` is a function the model may call; its `schema` is what the model
-is shown. Every op returns a dict literal: its keys are the op's outputs.
+`@tool` (operonx-agents) reads what the model is shown from the signature
+and the docstring, and validates the model's arguments before the function
+runs. A tool is still a plain function: call it to test it.
 """
 
-from operonx import op
-from operonx.agents import tool
-from operonx.core.loggings import LOGGER
+from operonx_agents import tool
 
 
-@tool(
-    name="word_count",
-    description="Count the words in a text.",
-    schema={
-        "type": "object",
-        "properties": {"text": {"type": "string"}},
-        "required": ["text"],
-    },
-    readonly=True,  # no side effects: runs without asking for approval
-)
-def word_count(text: str) -> dict:
-    words = len(text.split())
-    LOGGER.debug("word_count: %d words", words)
-    return {"words": words}
+@tool(readonly=True)  # no side effects: it never waits for an approval
+def word_count(text: str) -> int:
+    """Count the words in a text.
+
+    Args:
+        text: The text to count.
+    """
+    return len(text.split())
 
 
-@op
-def ask(body: dict) -> dict:
-    """The request body's `question` as the conversation the agent starts from."""
-    return {"messages": [{"role": "user", "content": str(body.get("question", ""))}]}
-
-
-@op
-def reply(final: dict = None, stopped_early: bool = False) -> dict:
-    """The agent's answer; `None` when it never answered."""
-    return {"reply": {"answer": (final or {}).get("content"), "stopped_early": stopped_early}}
+# A tool with side effects can wait for a human: the run ends
+# `interrupted`, and `POST /ask/resume` answers it (see README.md).
+#
+# @tool(idempotent=False, approval=lambda ctx, args: args["amount"] > 500)
+# def refund(order_id: str, amount: int) -> str:
+#     """Refund an order."""
