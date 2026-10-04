@@ -15,6 +15,7 @@ store, then resumes the run in its own process with ``block=False``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -69,7 +70,8 @@ def backends(directory: Path, kind: str):
         db = directory / "runs.db"
         return SQLiteSession("chat", db), SQLiteStateStore(db)
     url = os.environ["REDIS_URL"]
-    prefix = f"crash-test:{directory.name}:"
+    # The run's directory is unique per test run; both processes derive it.
+    prefix = f"crash-test:{hashlib.sha1(str(directory).encode()).hexdigest()[:16]}:"
     return (
         RedisSession("chat", url=url, prefix=prefix + "session:"),
         RedisStateStore(url=url, prefix=prefix + "run:"),

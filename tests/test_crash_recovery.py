@@ -111,3 +111,6 @@ async def test_sigkill_mid_turn_then_resume(tmp_path, kind, hub):
         "assistant",
     ]
     assert (await store.load(crash_agent.RUN_ID)).status == "completed"
+    if kind == "redis":
+        for key in await store.client.keys(session.key.rsplit("session:", 1)[0] + "*"):
+            await store.client.delete(key)
