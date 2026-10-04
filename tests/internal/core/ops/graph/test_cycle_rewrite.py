@@ -287,6 +287,42 @@ class TestSyntheticLoopTermination:
         check_idx = state.schema.get_index(f"{g.full_name}.{hidden.name}.check", "end_time")
         assert len(state._cells[check_idx].contexts) == 2
 
+    async def test_loop_entered_from_a_branch_arm_runs(self):
+        """A branch outside the loop whose arm is the loop's entry: the rewrite
+        moves the entry into the hidden loop, and the branch must route to the
+        loop. It used to keep the entry's old name as its target, so the loop
+        never started, nothing after it ran, and the run reported no error."""
+
+        @op
+        def gate(go: bool):
+            return {"go": go}
+
+        @op
+        def step(n: int):
+            return {"n": n + 1, "done": n + 1 >= 3}
+
+        @op
+        def finish(n: int = -1):
+            return {"result": n}
+
+        @graph
+        def flow(go):
+            PARENT.declare(n=0)
+            g = gate(go=go)
+            s = step(n=PARENT["n"])
+            s["n"] >> PARENT["n"]
+            f = finish(n=PARENT["n"])
+            START >> g >> if_(g["go"] == True, s).else_(f)  # noqa: E712
+            s >> if_(s["done"] == True, f).else_(s)  # noqa: E712
+            f >> END
+
+        engine = Operon(flow, params={"go": None})
+        out = await engine.run(inputs={"go": True})
+        assert "$errors" not in out
+        assert out["n"] == [1, 2, 3] and out["result"] == 3
+        out = await engine.run(inputs={"go": False})
+        assert out["result"] == 0 and "n" not in out
+
     async def test_loop_respects_max_iterations_cap(self):
         """No exit path → the synthetic loop's max_iterations cap eventually
         stops it (default 1000 in the cycle_rewrite synthesizer)."""
