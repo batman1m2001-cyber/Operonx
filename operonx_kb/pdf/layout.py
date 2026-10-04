@@ -1199,7 +1199,10 @@ class HeuristicLayout(LayoutModel):
         hyphen) and the second starts with a letter. docling also lets two
         blocks side by side on one row merge (author blocks of a title page);
         here the first must end its column and the second must open one: no
-        block of about their width below the first or above the second.
+        block of about their width below the first or above the second, and on
+        one page the second must start at least a line and a half above where
+        the first ends (a column break goes up; labels side by side on one row,
+        "C corporation  S corporation", do not).
         """
         skip = {"page_header", "page_footer", "table", "figure", "caption", "footnote"}
         flow = [b for b in blocks if b.kind not in skip]
@@ -1227,8 +1230,9 @@ class HeuristicLayout(LayoutModel):
         for b in blocks:
             if b.kind == "paragraph" and pending is not None:
                 (p_page, p_box), (b_page, b_box) = pending.regions[-1], b.regions[0]
+                line = 1.5 * max(pending.size, 1.0)
                 if (
-                    (b_page != p_page or p_box[2] < b_box[0])
+                    (b_page != p_page or (p_box[2] < b_box[0] and b_box[1] < p_box[3] - line))
                     and alone(p_page, p_box, "below")
                     and alone(b_page, b_box, "above")
                     and continues(pending.text, b.text)

@@ -158,3 +158,18 @@ def test_bullets_set_apart_from_their_text_start_list_items():
     items = _texts(blocks, "list_item")
     assert "Pro 1RF:" in items and "Pro No Oscillation: -provides larger window of" in items
     assert not [t for t in _texts(blocks, "heading") if t.startswith("•")]
+
+
+def test_side_by_side_checkbox_labels_are_not_a_continued_paragraph():
+    """IRS W-9 p1: 'Individual/sole proprietor  C corporation  S corporation ...' on one
+    row each end in a lower-case letter, and each next one is strictly to the right:
+    docling's cross-column merge test alone joins them. A continuation must start
+    above where the paragraph it continues ends (a column break goes up)."""
+    blocks = _layout("w9_checkbox_row")
+    assert _texts(blocks) == [
+        "Individual/sole proprietor",
+        "C corporation",
+        "S corporation",
+        "Partnership",
+        "Trust/estate",
+    ]

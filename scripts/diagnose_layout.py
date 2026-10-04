@@ -1,9 +1,10 @@
 """Why a layout misses reference blocks and emits spurious ones, with counts.
 
     PYTHONPATH=<operonx branch> uv run python scripts/diagnose_layout.py \\
-        [--docling-tests <docling>/tests/data/pdf] [--examples 3]
+        [--docling-tests <docling>/tests/data/pdf] [--examples 3] [--layout model] [--page form-irs-w9]
 
-Scores the heuristic layout like scripts/eval_layout.py (hand reference, and
+Scores a layout (the heuristic by default; ``model`` needs the ``layout``
+extra) like scripts/eval_layout.py (hand reference, and
 docling's outputs with ``--docling-tests``) and sorts every unmatched block into
 one cause. Texts are compared after lower-casing and removing whitespace and
 hyphens, so a block cut at a line break still counts as a piece of its block.
@@ -133,6 +134,10 @@ def main() -> int:
     ap.add_argument("--reference", type=Path, default=REFERENCE)
     ap.add_argument("--docling-tests", type=Path)
     ap.add_argument("--examples", type=int, default=3)
+    ap.add_argument("--layout", choices=("heuristic", "model"), default="heuristic")
+    ap.add_argument(
+        "--page", action="append", help="only these hand-reference page ids (skips docling's set)"
+    )
     args = ap.parse_args()
 
     from operonx_kb.pdf.parser import PdfParser
@@ -143,10 +148,15 @@ def main() -> int:
         truth_from_docling,
     )
 
-    parser = PdfParser()
+    if args.layout == "model":
+        from operonx_kb.pdf.models import HeronDetector, ModelLayout, TableFormer
+
+        parser = PdfParser(layout=ModelLayout(detector=HeronDetector(), tables=TableFormer()))
+    else:
+        parser = PdfParser()
     hand: Dict[str, List] = defaultdict(list)
     for page in load_reference(args.reference, args.docling_tests):
-        if page["path"] is None:
+        if page["path"] is None or (args.page and page["id"] not in args.page):
             continue
         doc = parser.parse(page["path"].read_bytes())
         blocks = page_blocks(doc.blocks, page["page"], page.get("scope"))
@@ -154,7 +164,7 @@ def main() -> int:
         for side in out:
             hand[side].extend(out[side])
     report("Hand reference", hand, args.examples)
-    if args.docling_tests:
+    if args.docling_tests and not args.page:
         ref: Dict[str, List] = defaultdict(list)
         for path in sorted((args.docling_tests / "groundtruth").glob("*.json")):
             if path.name.endswith(".pages.meta.json"):

@@ -184,9 +184,15 @@ regression test replayed from a crop of the real page, `tests/unit/test_layout_r
 - **Pieces that remain**: author blocks (name and affiliation differ in size), forms (the W-9 grid
   is a "table"), the Korean brief (half the reference blocks).
 - **Right-to-left** text is still not reordered (neither layout does).
-- `ModelLayout` now uses the same rule-based reading order and the column-end merge rule. On the
-  docling reference it moved 0.93 → 0.94; on the hand reference 0.93 → 0.90, all of it on the W-9
-  form (0.92 → 0.83; every other page is unchanged), not investigated further here.
+- `ModelLayout` now uses the same rule-based reading order and the column-end merge rule. At
+  `2f48c21` that cost it 0.93 → 0.90 on the hand reference, all on the W-9 page (0.92 → 0.83):
+  `diagnose_layout.py --layout model --page form-irs-w9` showed 4 merges and 7 joined misses,
+  "C corporation S corporation Partnership Trust/estate" (checkbox labels on one row, each ending
+  in a lower-case letter, each strictly right of the last: docling's merge test alone accepts
+  them) and the rotated side label joined to "or". The old model path never merged them because
+  gutter columns were equal on that page. Fixed in `layout-model-w9` for both layouts: on one
+  page a continuation must start at least 1.5 lines above where the paragraph it continues ends
+  (a column break goes up). Model: hand 0.93 / 0.85, docling 0.94 / 0.92 (§6).
 - Speed: the heuristic stays CPU-cheap at 0.10–0.15 s/page (from 0.08–0.14); no Rust or ML needed.
 
 ## 5 · Recommendation
@@ -197,3 +203,20 @@ text recall 0.69 on the hand reference and 0.72 against docling's outputs, from 
 option with usable table structure. Recommend `PdfParser(layout=ModelLayout())` (extra `layout`)
 for papers, forms and table-heavy PDFs; the heuristic is adequate for born-digital prose, reports,
 manuals, slides and listings, and for bulk ingestion where 2.5–3.6 s/page is too slow.
+
+## 6 · Follow-up: same-row merges (`layout-model-w9`)
+
+| reference | layout | `2f48c21` recall / kind / spurious | after recall / kind / spurious |
+|---|---|---|---|
+| golden (3 docs) | heuristic | 1.00 / 1.00 / 0 | 1.00 / 1.00 / 0 |
+| golden (3 docs) | model | 1.00 / 0.70–1.00 / 0 | 1.00 / 0.70–1.00 / 0 |
+| hand (12 pages) | heuristic | 0.69 / 0.58 / 78 | 0.69 / 0.58 / 80 |
+| hand (12 pages) | model | 0.90 / 0.82 / 60 | 0.93 / 0.85 / 59 |
+| docling (97 pages) | heuristic | 0.72 / 0.63 / 869 | 0.72 / 0.63 / 880 |
+| docling (97 pages) | model | 0.94 / 0.92 / 152 | 0.94 / 0.92 / 152 |
+
+The heuristic finds the same blocks (docling: 1 more); its spurious count rises because merges
+that were wrong in both versions are undone, leaving their pieces as separate unmatched blocks:
+table header cells ("Model Dataset Simple TEDS Complex", "Train Test Val Simple Simple") and
+figure labels ("Flexloc nut Elastic stop nut the most common ranges ...") that the old rule
+chained across a row.
