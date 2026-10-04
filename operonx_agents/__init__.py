@@ -28,6 +28,7 @@ from operonx_agents.model import (
     ask,
 )
 from operonx_agents.run import RunContext
+from operonx_agents.step import LLMStepOp, llm_step
 from operonx_agents.tools import (
     DEFAULT_POLICY,
     Tool,
@@ -45,6 +46,7 @@ __all__ = [
     "AgentsError",
     "Choice",
     "DEFAULT_POLICY",
+    "LLMStepOp",
     "Model",
     "ModelError",
     "ModelRefused",
@@ -63,6 +65,7 @@ __all__ = [
     "Usage",
     "ask",
     "dispatch",
+    "llm_step",
     "tool",
     "tool_message",
 ]
