@@ -390,6 +390,15 @@ def check_loop_caps(graph: "GraphOp") -> None:
             )
 
 
+def _retarget_branch(branch, old: str, new: str) -> None:
+    """Make ``branch`` route to ``new`` wherever it routed to ``old``."""
+    branch.cases = [(cond, new if target == old else target) for cond, target in branch.cases]
+    if branch.default == old:
+        branch.default = new
+    if branch.given_candidates:
+        branch.given_candidates = [new if c == old else c for c in branch.given_candidates]
+
+
 def _fresh_loop_name(graph: "GraphOp", idx: int) -> str:
     """Pick a unique hidden-loop op name inside ``graph._ops``."""
     base = f"__loop_{idx}__"
@@ -542,6 +551,11 @@ def _synthesize_loop(
         outer.prevs[dst].remove(src)
         if src == "__START__":
             entry_had_start_marker = True
+        # A branch routes by target *name*: one whose arm entered the loop
+        # still names the moved op, and the scheduler follows only the edge
+        # to the target it picked, so the loop would never start.
+        if src in outer._ops and outer._ops[src].type == "branch":
+            _retarget_branch(outer._ops[src], dst, loop_name)
         # Point at the hidden loop's name instead.
         new_key = (src, loop_name)
         if new_key not in outer._edges:

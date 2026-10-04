@@ -220,6 +220,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A loop entered from a branch arm runs.** `START >> g >> if_(g["go"] == True, step).else_(skip)`,
+  where `step` starts a loop (`if_(..., ...).else_(step)` below it), never ran the loop:
+  the cycle rewrite moved `step` into the hidden loop, but the branch kept routing to
+  the name `step`, so nothing after the branch ran and the run reported no error. The
+  rewrite now retargets an outside branch's arm to the loop it enters.
+
 - **The Anthropic backend no longer drops `response_format`.** A
   `json_schema` request came back unconstrained with no error; it now
   raises `ValueError` naming the alternative (`structured_output: tool`).
