@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -230,6 +231,9 @@ def build_app(
 
     from operonx.app.tracing import check_sinks
 
+    # A door's resume route is a door of its own (`ServeSpec.resume_spec`):
+    # its own engine, runner and runs, filed under `<name>.resume`.
+    specs = tuple(x for spec in specs for x in (spec, spec.resume_spec()) if x is not None)
     # before any engine is compiled: a missing sink named with the level
     # that chose it, not a KeyError from inside the first `Operon(...)`
     check_sinks("serve", specs)
@@ -343,31 +347,85 @@ async def _read_body(request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, 
         return None, JSONResponse({"error": str(exc), "endpoint": spec.name}, status_code=400)
 
 
+#: The media type a caller accepts to read an http door's run as it happens.
+EVENT_STREAM = "text/event-stream"
+
+
+def wants_stream(request: Any) -> bool:
+    """The caller accepts ``text/event-stream``: it reads the run's items as
+    server-sent events, one per item, as they are sent."""
+    return EVENT_STREAM in request.headers.get("accept", "")
+
+
+def sse_frame(item: Any) -> str:
+    """One item as one server-sent event: its JSON on a ``data:`` line —
+    the same encoding a JSON reply gives it."""
+    return f"data: {json.dumps(item, ensure_ascii=False, default=str)}\n\n"
+
+
+def _no_output(spec: ServeSpec, trace_id: Optional[str], JSONResponse):
+    # The plan's requirement, and the reason this branch exists: a run
+    # that fails must not answer 200 with an empty body. An op exception
+    # is recorded on the run (`handle.errors`) and logged rather than
+    # raised, so "produced nothing" is what a failure looks like from out
+    # here — and for one caller waiting on one request, nothing is a
+    # failure. The error text stays in the log and the trace: it is a
+    # traceback, and it goes nowhere near a client. The run's id does: it
+    # is how the client's report finds the trace (also in
+    # `x-operonx-trace-id`, for a client that keeps only the body).
+    LOGGER.error(f"[serve:{spec.name}] run produced no output; answering 500")
+    body = {"error": "the graph produced no output", "endpoint": spec.name}
+    if trace_id:
+        body["trace_id"] = trace_id
+    return JSONResponse(body, status_code=500, headers=_trace_headers(trace_id))
+
+
+async def _stream_reply(
+    spec: ServeSpec, transport: HttpTransport, payload: Any, meta, JSONResponse
+):
+    """The run's items as server-sent events, each written as it is sent.
+
+    The response starts with the run's first item, so a run that sends
+    nothing is still the 500 a JSON caller gets — never a stream that
+    opens and ends empty. A caller that leaves mid-stream does not stop
+    the run (a disconnect never does, `operonx.app.serve.protocol`); what
+    the run sends after that is dropped and reported as not delivered.
+    """
+    from starlette.responses import StreamingResponse
+
+    session = transport.open_stream(payload, meta=meta)
+    frames = session.frames()
+    try:
+        first = await frames.__anext__()
+    except StopAsyncIteration:
+        return _no_output(spec, session.trace_id, JSONResponse)
+
+    async def body():
+        try:
+            yield sse_frame(first)
+            async for item in frames:
+                yield sse_frame(item)
+        finally:
+            session.gone = True
+
+    headers = {**_trace_headers(session.trace_id), "cache-control": "no-cache"}
+    return StreamingResponse(body(), media_type=EVENT_STREAM, headers=headers)
+
+
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
         payload, refusal = await _read_body(request, spec, JSONResponse)
         if refusal is not None:
             return refusal
+        meta = _meta_from_request(request)
+        if wants_stream(request):
+            return await _stream_reply(spec, transport, payload, meta, JSONResponse)
 
-        session = await transport.handle(payload, meta=_meta_from_request(request))
+        session = await transport.handle(payload, meta=meta)
         headers = _trace_headers(session.trace_id)
 
         if not session.replies:
-            # The plan's requirement, and the reason this branch exists: a
-            # run that fails must not answer 200 with an empty body. An op
-            # exception is recorded on the run (`handle.errors`) and logged
-            # rather than raised, so "produced nothing" is what a failure
-            # looks like from out here — and for one caller waiting on one
-            # request, nothing is a failure. The error text stays in the
-            # log and the trace: it is a traceback, and it goes nowhere
-            # near a client. The run's id does: it is how the client's
-            # report finds the trace (also in `x-operonx-trace-id`, for a
-            # client that keeps only the body).
-            LOGGER.error(f"[serve:{spec.name}] run produced no output; answering 500")
-            body = {"error": "the graph produced no output", "endpoint": spec.name}
-            if session.trace_id:
-                body["trace_id"] = session.trace_id
-            return JSONResponse(body, status_code=500, headers=headers)
+            return _no_output(spec, session.trace_id, JSONResponse)
         return JSONResponse(session.reply, headers=headers)
 
     return endpoint

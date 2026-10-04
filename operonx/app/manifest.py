@@ -45,7 +45,7 @@ always.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -169,6 +169,12 @@ class ServeSpec:
             that may already be gone.
         app: For ``kind = "asgi"``: the foreign app to mount. Health,
             CRUD and admin routes stay someone else's code.
+        resume: For an ``http`` door whose runs can stop for a human (an
+            agent waiting on an approval): the graph that continues one.
+            The door then also answers ``POST <path>/resume`` with it —
+            same codec, hooks and streaming as the door itself
+            (:meth:`resume_spec`). A websocket door resumes on its own
+            connection and takes none.
     """
 
     name: str
@@ -186,6 +192,7 @@ class ServeSpec:
     on_session: Any = None
     on_close: Any = None
     app: Any = None
+    resume: Any = None
     description: str = ""
     options: Dict[str, Any] = field(default_factory=dict)
     # One door, several compiled graphs: each variant binds the graph's
@@ -210,6 +217,22 @@ class ServeSpec:
     @property
     def is_stream(self) -> bool:
         return self.kind in STREAM_KINDS
+
+    def resume_spec(self) -> Optional["ServeSpec"]:
+        """The door ``resume`` adds: ``POST <path>/resume`` running the
+        resume graph, named ``<name>.resume``, with this door's codec,
+        hooks, trace and address. ``None`` when there is no resume graph."""
+        if self.resume is None:
+            return None
+        return replace(
+            self,
+            name=f"{self.name}.resume",
+            graph=self.resume,
+            path=self.path.rstrip("/") + "/resume",
+            method="POST",
+            resume=None,
+            description=f"resumes {self.name}'s runs",
+        )
 
     @property
     def listener(self) -> Tuple[str, int]:
@@ -471,6 +494,26 @@ def with_default_trace(serves: Tuple["ServeSpec", ...], trace: Any) -> Tuple["Se
 # -- parsing helpers -----------------------------------------------------
 
 
+def check_resume(resume: Any, kind: str, variants: Any, label: str) -> None:
+    """``resume`` belongs to a plain ``http`` door: a websocket door resumes
+    on its own connection, and a door with variants would need a resume
+    graph per variant, which nothing declares."""
+    if resume is None:
+        return
+    if kind != "http":
+        raise ManifestError(
+            f"{label} has resume= on a {kind} door; resume= is for an http door "
+            "(POST <path>/resume) — a websocket door resumes on its own connection"
+        )
+    if variants:
+        raise ManifestError(
+            f"{label} has resume= and variants; a door with variants cannot take one "
+            "resume graph for all of them — declare a door per variant"
+        )
+    if isinstance(resume, str) and not _ENTRY_RE.match(resume):
+        raise ManifestError(f"{label} resume {resume!r} is not a `module:attr` entry point")
+
+
 def _variants(raw: Any, where: str, label: str, kind: str) -> Dict[str, Dict[str, Any]]:
     """`[serve.variants]`: a table of tables, each binding the factory."""
     if raw is None:
@@ -585,6 +628,10 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         raise ManifestError(f"{where}: {label} has port {port}, outside the range 1-65535")
 
     variants = _variants(block.get("variants"), where, label, kind)
+    resume = block.get("resume")
+    if resume is not None:
+        resume = str(resume)
+    check_resume(resume, kind, variants, f"{where}: {label}")
     if "inputs" in block:
         raise ManifestError(
             f"{where}: {label} `inputs` is gone — the graph's own runtime parameters are "
@@ -630,6 +677,7 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         "on_session",
         "on_close",
         "app",
+        "resume",
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
@@ -656,6 +704,7 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         on_startup=tuple(str(h) for h in on_startup),
         on_close=(str(block["on_close"]) if block.get("on_close") else None),
         app=(str(app) if app else None),
+        resume=resume,
         description=str(block.get("description") or ""),
         options=options,
         trace_own=trace_own,

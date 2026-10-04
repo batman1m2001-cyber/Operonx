@@ -97,22 +97,50 @@ class HttpSession(BoundedSession):
     """One request in, whatever `egress` writes out.
 
     The degenerate case of a session: exactly one inbound item, available
-    before the run starts, and a reply collected rather than streamed.
+    before the run starts, and a reply collected rather than streamed —
+    unless the caller asked for a stream (``stream=True``: the request
+    accepts ``text/event-stream``). Then each item is also handed to
+    :meth:`frames` as the run sends it, and the endpoint writes it out as
+    one server-sent event while the run goes on.
     """
 
-    def __init__(self, payload: Any, meta: Optional[Dict[str, Any]] = None):
+    def __init__(self, payload: Any, meta: Optional[Dict[str, Any]] = None, stream: bool = False):
         super().__init__(meta=meta, max_inflight=None)
         self.replies: List[Any] = []
         self.finished = asyncio.Event()
+        self.stream = stream
+        # Unbounded on purpose: a per-request run is bounded by its own
+        # work, and the run is never paced by a slow reader — a reader
+        # that leaves stops the queue growing (`gone`), not the run.
+        self._frames: Optional[asyncio.Queue] = asyncio.Queue() if stream else None
+        self.gone = False
         self.feed_nowait(payload)
         self.end_input()
 
     async def _send(self, item: Any) -> bool:
         self.replies.append(item)
+        if self._frames is None:
+            return True
+        if self.gone:
+            return False
+        self._frames.put_nowait(item)
         return True
+
+    async def frames(self) -> AsyncIterator[Any]:
+        """Each item the run sends, as it sends it, until the run ends.
+        Only for a session made with ``stream=True``."""
+        if self._frames is None:
+            raise RuntimeError("frames() needs an HttpSession made with stream=True")
+        while True:
+            item = await self._frames.get()
+            if item is _END:
+                return
+            yield item
 
     async def close(self) -> None:
         await super().close()
+        if self._frames is not None and not self.finished.is_set():
+            self._frames.put_nowait(_END)
         self.finished.set()
 
     @property
@@ -123,6 +151,10 @@ class HttpSession(BoundedSession):
         return self.replies[0] if len(self.replies) == 1 else self.replies
 
 
+#: The end of an `HttpSession`'s frames.
+_END = object()
+
+
 class HttpTransport(AsgiTransport):
     """`session = "per_request"`: one request, one run, one response."""
 
@@ -130,6 +162,13 @@ class HttpTransport(AsgiTransport):
         session = HttpSession(payload, meta=meta)
         self.offer(session)
         await session.finished.wait()
+        return session
+
+    def open_stream(self, payload: Any, meta: Optional[Dict[str, Any]] = None) -> HttpSession:
+        """Start the run for one request whose caller reads it as a stream;
+        read what it sends from ``session.frames()``."""
+        session = HttpSession(payload, meta=meta, stream=True)
+        self.offer(session)
         return session
 
 

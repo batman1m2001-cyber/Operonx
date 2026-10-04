@@ -41,6 +41,7 @@ from .manifest import (
     ServeSpec,
     _default_session,
     check_codec,
+    check_resume,
 )
 from .tracing import sink_name
 
@@ -188,6 +189,7 @@ def Service(  # noqa: N802 — reads as a declaration
     on_session: Any = None,
     on_close: Any = None,
     on_startup: Sequence[Any] = (),
+    resume: Any = None,
     description: str = "",
     key_ops: Optional[Sequence[str]] = None,
     playground: Any = None,
@@ -212,6 +214,11 @@ def Service(  # noqa: N802 — reads as a declaration
     with (:class:`operonx.app.play.Codec`, or ``"module:attr"``) — needed
     only when the door's protocol is its own; http and websocket doors have
     built-in ones.
+
+    ``resume`` is the graph that continues a run this ``http`` door left
+    waiting for a human (an agent's approval): the door also answers
+    ``POST <path>/resume`` with it, with the door's own codec, hooks and
+    streaming. A websocket door resumes on its connection and takes none.
 
     ``replay=True`` records what clients send this door — text and JSON as
     they are, audio and bytes only counted — on each run, so a real session
@@ -251,6 +258,7 @@ def Service(  # noqa: N802 — reads as a declaration
         if not isinstance(bind, Mapping):
             raise ManifestError(f"{label} variant {v_name!r} must be a mapping of parameters")
         variants_out[str(v_name)] = dict(bind)
+    check_resume(resume, kind, variants_out, label)
 
     opts: Dict[str, Any] = {**listener.options, **dict(options)}
     if concurrency is not None:
@@ -278,6 +286,7 @@ def Service(  # noqa: N802 — reads as a declaration
         on_session=on_session,
         on_close=on_close,
         app=app,
+        resume=resume,
         description=description,
         options=opts,
         variants=variants_out,
@@ -395,6 +404,7 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "on_session": ref_name(s.on_session) if s.on_session else None,
         "on_close": ref_name(s.on_close) if s.on_close else None,
         "app": ref_name(s.app) if s.app else None,
+        "resume": ref_name(s.resume) if s.resume else None,
         "description": s.description,
         "key_ops": list(s.options.get("key_ops") or []),
         "playground": ref_name(s.options["playground"]) if s.options.get("playground") else None,
