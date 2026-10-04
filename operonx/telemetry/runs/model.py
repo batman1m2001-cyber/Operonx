@@ -416,6 +416,9 @@ def row_of(node: Any, trace: Any) -> Dict[str, Any]:
     """One execution as the row every store keeps — ``nodes.jsonl``'s
     shape. Values are left as recorded; the caller cleans them.
 
+    Inputs and outputs go through the record's ``redact`` when it has one
+    (``OpExecution.exported``): this is where a trace leaves the process.
+
     Keys a record leaves at their default are omitted, so a row written
     before they existed reads the same: ``attempt`` (1), ``attrs`` (empty)
     and ``inputs_from``. A generator invocation's records share one inputs
@@ -438,11 +441,12 @@ def row_of(node: Any, trace: Any) -> Dict[str, Any]:
         "status": node.status,
         "error": node.error,
     }
+    inputs, outputs = node.exported()
     if node.inputs_from is None:
-        row["inputs"] = node.inputs
+        row["inputs"] = inputs
     else:
         row["inputs_from"] = node.inputs_from
-    row["outputs"] = node.outputs
+    row["outputs"] = outputs
     row["upstreams"] = [
         {
             "from_op_id": u.from_op_id,

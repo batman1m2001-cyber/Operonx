@@ -278,12 +278,13 @@ class LocalConsumer(Consumer):
                 f"  {node.duration_ms:6.0f}ms  {arrow}"
             )
             if show_io:
+                inputs, outputs = node.exported()
                 if node.inputs_from is not None:
                     rows.append(f"              in  (as {node.inputs_from})")
-                elif node.inputs:
-                    rows.append(self._format_kv(node.inputs, prefix="              in  "))
-                if node.outputs:
-                    rows.append(self._format_kv(node.outputs, prefix="              out "))
+                elif inputs:
+                    rows.append(self._format_kv(inputs, prefix="              in  "))
+                if outputs:
+                    rows.append(self._format_kv(outputs, prefix="              out "))
 
         summary = self._render_summary(trace)
         return f"{header}\nTIMELINE  (chronological)\n\n" + "\n".join(rows) + f"\n\n{summary}\n"

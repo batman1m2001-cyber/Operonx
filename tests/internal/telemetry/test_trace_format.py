@@ -236,3 +236,83 @@ async def test_children_and_attrs_round_trip_langfuse():
     streams = [r for r in rec.nodes if r["op_full_name"].endswith(".s")]
     assert [r["inputs"]["prompt"] for r in streams] == [PROMPT] * 3
     assert sorted(int(r.get("attempt") or 1) for r in rec.nodes if r["op_name"] == "f") == [1, 2]
+
+
+# -- a child's redact= applies where the trace leaves the process ------------------------
+
+SECRET = "sk-live-0123456789"
+
+
+def _scrub(values: Dict[str, Any]) -> Dict[str, Any]:
+    return json.loads(json.dumps(values).replace(SECRET, "[redacted]"))
+
+
+@op
+async def keyholder(prompt: str) -> dict:
+    async with child("tool", inputs={"key": SECRET, "prompt": prompt}, op_type="tool") as call:
+        call.outputs = {"message": f"the key is {SECRET}"}
+        call.redact = _scrub
+    return {"answer": "ok"}
+
+
+@graph
+def keyed(prompt):
+    k = keyholder(prompt=prompt)
+    START >> k >> END
+
+
+async def _keyed(trace=None, trace_id="redact"):
+    handle = Operon(keyed, params={"prompt": None}, trace=trace).start(
+        {"prompt": "hi"}, trace_id=trace_id
+    )
+    await handle.collect()
+    return handle
+
+
+@pytest.mark.asyncio
+async def test_redact_applies_on_export_and_the_record_in_memory_keeps_its_values():
+    handle = await _keyed()
+    (tool,) = [n for n in handle.trace.nodes if n.op_name == "tool"]
+    assert tool.inputs["key"] == SECRET, "in memory, as recorded"
+    assert tool.exported() == (
+        {"key": "[redacted]", "prompt": "hi"},
+        {"message": "the key is [redacted]"},
+    )
+    rows = {r["op_name"]: r for r in rows_of_trace(handle.trace, LocalConsumer())}
+    assert SECRET not in json.dumps(rows["tool"]) and rows["tool"]["inputs"]["key"] == "[redacted]"
+
+
+@pytest.mark.parametrize("kind", BACKENDS)
+@pytest.mark.asyncio
+async def test_redact_holds_in_every_store(kind, request, tmp_path):
+    store = open_backend(kind, request, tmp_path)
+    handle = await _keyed(trace=store, trace_id=f"redact-{kind}")
+    rec = store.get_run(handle.trace.trace_id)
+    (tool,) = [r for r in rec.nodes if r["op_name"] == "tool"]
+    assert tool["inputs"] == {"key": "[redacted]", "prompt": "hi"}
+    assert SECRET not in json.dumps(rec.nodes, default=str)
+
+
+@pytest.mark.asyncio
+async def test_redact_holds_in_the_local_view_and_langfuse(tmp_path):
+    store = FilesRunStore(root=tmp_path / "runs", refresh_every=0)
+    handle = await _keyed(trace=store)
+    run_dir = store.run_dir(handle.trace.trace_id)
+    for name in ("nodes.jsonl", "view.txt"):
+        assert SECRET not in (run_dir / name).read_text(), name
+
+    batches: List[List[Dict[str, Any]]] = []
+
+    class Client:
+        def ingest(self, batch, timeout: int = 30):
+            batches.append(json.loads(json.dumps(batch, default=str)))
+            return {}
+
+        def trace_url(self, trace_id):
+            return f"https://lf.test/{trace_id}"
+
+    await _keyed(trace=LangfuseConsumer(config={"client": Client()}))
+    (batch,) = batches
+    assert SECRET not in json.dumps(batch)
+    (tool,) = [e["body"] for e in batch if e["body"].get("name") == "tool"]
+    assert tool["input"]["key"] == "[redacted]"
