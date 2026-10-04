@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`OpType` names `"agent"`**, the type `operonx-agents`' `AgentOp`
+  (`Agent.as_op()`) sets, so the Literal agrees with the ops that use it.
+
 - **`child(..., current=False)`** records a step held open across an async
   generator's `yield` (a streamed model call) without making it the current
   frame. The consumer's code runs between the yields in the same context;

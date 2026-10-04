@@ -28,6 +28,7 @@ OpType = Literal[
     "dummy",
     "tool-executor",
     "mcp",
+    "agent",
 ]
 """Các loại node được hỗ trợ trong workflow graph.
 
@@ -45,6 +46,8 @@ Removed in 1.2.0:
 Added after 1.14.0:
     ``vector-upsert`` / ``vector-delete`` — ``VectorUpsertOp`` /
         ``VectorDeleteOp``, the write half of ``vector-search``.
+    ``agent`` — ``operonx_agents.AgentOp`` (``Agent.as_op()``): a whole
+        agent run, its turns, model and tool calls child executions.
 
 Added in 1.2.0:
     ``interrupt`` / ``emit`` — set by ``InterruptOp`` / ``EmitOp`` since
