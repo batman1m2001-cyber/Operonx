@@ -343,3 +343,81 @@ async def test_child_scalar_outputs_are_wrapped():
     await handle.result()
     (calc,) = _by_name(handle.trace, "calc")
     assert calc.outputs == {"_": 42}
+
+
+# A step that stays open across an async generator's yields: a streamed
+# model call. The consumer's code runs between the yields, in the same
+# context, so the step must not become the current frame there.
+
+
+async def streamed_model(chunks):
+    async with child("model", inputs={"n": len(chunks)}, op_type="llm", current=False) as c:
+        seen = []
+        for chunk in chunks:
+            seen.append(chunk)
+            yield chunk
+        c.outputs = {"content": "".join(seen)}
+
+
+BETWEEN: list = []
+
+
+@op
+async def stream_consumer() -> dict:
+    BETWEEN.clear()
+    async for chunk in streamed_model(["a", "b"]):
+        BETWEEN.append(run_context().op_path)
+        async with child("emit", inputs={"chunk": chunk}):
+            pass
+    return {"ok": True}
+
+
+@graph
+def stream_consumed():
+    s = stream_consumer()
+    START >> s >> END
+
+
+@pytest.mark.asyncio
+async def test_child_held_across_yields_is_a_sibling_of_the_consumers_steps():
+    handle = Operon(stream_consumed).start({})
+    assert (await handle.result())["ok"] is True
+    trace = handle.trace
+    (model,) = _by_name(trace, "model")
+    assert model.ctx == ("main", "model[0]") and model.outputs == {"content": "ab"}
+    emits = _by_name(trace, "emit")
+    assert [e.ctx for e in emits] == [("main", "emit[0]"), ("main", "emit[1]")], (
+        "the consumer's steps nested under the open stream"
+    )
+    assert BETWEEN == ["stream_consumed.s", "stream_consumed.s"]
+    parents = _parents(trace)
+    (op_rec,) = _by_name(trace, "s")
+    assert {parents[model.op_id], *(parents[e.op_id] for e in emits)} == {op_rec.op_id}
+
+
+@op
+async def stream_abandoned() -> dict:
+    stream = streamed_model(["a", "b", "c"])
+    async for _ in stream:
+        break  # abandoned, never closed here: the loop finalizes it later
+    async with child("after"):
+        pass
+    await stream.aclose()
+    return {"ok": True}
+
+
+@graph
+def abandoned_g():
+    s = stream_abandoned()
+    START >> s >> END
+
+
+@pytest.mark.asyncio
+async def test_abandoned_stream_leaves_the_op_current_and_is_marked_cancelled():
+    handle = Operon(abandoned_g).start({})
+    assert (await handle.result())["ok"] is True
+    trace = handle.trace
+    (after,) = _by_name(trace, "after")
+    assert after.ctx == ("main", "after[0]"), "a later step nested under the dead stream"
+    (model,) = _by_name(trace, "model")
+    assert model.status == "cancelled"

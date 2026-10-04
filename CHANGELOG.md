@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`child(..., current=False)`** records a step held open across an async
+  generator's `yield` (a streamed model call) without making it the current
+  frame. The consumer's code runs between the yields in the same context;
+  with the default it ran inside the step, so its own `child()` blocks nested
+  under the stream, and an abandoned, unclosed stream left every later step
+  of the op nested under a dead record.
+
 - **K7: provider contract for `operonx-agents`.**
   - `LLMOp`'s `tool_calls` output is one shape whichever provider answered:
     `{"id", "name", "args"}`, with `args` a dict, or the model's text when it
