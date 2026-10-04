@@ -136,6 +136,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An opt-in pytest plugin, `operonx.app.evals.pytest_plugin` (never in
   `pytest11`): a session is one experiment, `run_case` runs a case, its
   verdict is the test's outcome, reports and the gate at the end.
+- `Dataset.update(case_id, changes)` edits one case in place (`expected`,
+  `tags`, `split`, `cluster`, `trajectory`, `note`, `status`), every other
+  line byte for byte; `add()` and `update()` lock the dataset's folder.
+  A case with `status: "archived"` stays in the file and is out of every
+  run and of `dataset_version` (`docs/EVALS_PLAN.md` D63, D64).
+- `experiments_of(…, items=False)` and `ExperimentData.from_experiment`:
+  experiment summaries for a list, from one store query and each record's
+  `run.json` (`JobRun.load(path, items=False)`) (D62).
 
 - **`BaseVectorStore.delete(ids=None, filter=None, collection=None)`**,
   for FAISS (by id, on an id-mapped or IVF index), pgvector (by id or the

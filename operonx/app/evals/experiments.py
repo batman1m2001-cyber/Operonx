@@ -174,48 +174,9 @@ class ExperimentData:
         )
 
     @classmethod
-    def from_store(cls, store: ScoreStore, experiment_id: str) -> Optional["ExperimentData"]:
-        """An experiment's rows in *store*: the experiment, its items, and
-        each item's scores as its checks. ``None`` when it is not there."""
-        record = store.get_experiment(experiment_id)
-        if record is None:
-            return None
-        exp = record.experiment
-        checks: Dict[tuple, Dict[str, Any]] = {}
-        limit = max(1, len(record.items)) * max(1, len(exp.metrics)) + 1
-        for s in store.scores(ScoreFilter(experiment_id=experiment_id, target="item"), limit):
-            check: Dict[str, Any] = {"passed": s.passed}
-            if s.data_type == "numeric":
-                check["score"] = s.value
-            if s.label is not None:
-                check["label"] = s.label
-            if s.reason:
-                check["reason"] = s.reason
-            if s.op_id:
-                check["op"] = s.op_id
-            if s.cost_usd is not None:
-                check["cost_usd"] = s.cost_usd
-            check.update(s.metadata or {})
-            checks.setdefault((s.case_id, int(s.repeat or 0)), {})[s.score_name] = check
-        items = [
-            {
-                "key": it.case_id if exp.repeats <= 1 else f"{it.case_id}#{it.repeat}",
-                "case": it.case_id,
-                "repeat": it.repeat,
-                "status": it.status,
-                "passed": bool(it.passed),
-                "checks": checks.get((it.case_id, it.repeat), {}),
-                "error": it.error,
-                "output": it.output,
-                "tags": list(it.tags or []),
-                "cluster": it.cluster,
-                "case_hash": it.case_hash or None,
-                "trace_id": it.trace_id,
-                "ms": it.ms,
-                "cost_usd": it.cost_usd,
-            }
-            for it in record.items
-        ]
+    def from_experiment(cls, exp: Experiment) -> "ExperimentData":
+        """One store row as an experiment with its summary and no items —
+        what a list shows, read without the items and scores."""
         meta = exp.metadata or {}
         summary: Dict[str, Any] = {
             "dataset": meta.get("dataset_path") or exp.dataset,
@@ -256,9 +217,54 @@ class ExperimentData:
             started=_iso(exp.started_at),
             ended=_iso(exp.ended_at),
             summary=summary,
-            items=items,
             source="store",
         )
+
+    @classmethod
+    def from_store(cls, store: ScoreStore, experiment_id: str) -> Optional["ExperimentData"]:
+        """An experiment's rows in *store*: the experiment, its items, and
+        each item's scores as its checks. ``None`` when it is not there."""
+        record = store.get_experiment(experiment_id)
+        if record is None:
+            return None
+        exp = record.experiment
+        checks: Dict[tuple, Dict[str, Any]] = {}
+        limit = max(1, len(record.items)) * max(1, len(exp.metrics)) + 1
+        for s in store.scores(ScoreFilter(experiment_id=experiment_id, target="item"), limit):
+            check: Dict[str, Any] = {"passed": s.passed}
+            if s.data_type == "numeric":
+                check["score"] = s.value
+            if s.label is not None:
+                check["label"] = s.label
+            if s.reason:
+                check["reason"] = s.reason
+            if s.op_id:
+                check["op"] = s.op_id
+            if s.cost_usd is not None:
+                check["cost_usd"] = s.cost_usd
+            check.update(s.metadata or {})
+            checks.setdefault((s.case_id, int(s.repeat or 0)), {})[s.score_name] = check
+        out = cls.from_experiment(exp)
+        out.items = [
+            {
+                "key": it.case_id if exp.repeats <= 1 else f"{it.case_id}#{it.repeat}",
+                "case": it.case_id,
+                "repeat": it.repeat,
+                "status": it.status,
+                "passed": bool(it.passed),
+                "checks": checks.get((it.case_id, it.repeat), {}),
+                "error": it.error,
+                "output": it.output,
+                "tags": list(it.tags or []),
+                "cluster": it.cluster,
+                "case_hash": it.case_hash or None,
+                "trace_id": it.trace_id,
+                "ms": it.ms,
+                "cost_usd": it.cost_usd,
+            }
+            for it in record.items
+        ]
+        return out
 
 
 def load_experiment(
@@ -382,23 +388,31 @@ def experiments_of(
     store: Optional[ScoreStore] = None,
     record_dirs: Sequence[Union[str, Path]] = (),
     limit: int = 50,
+    items: bool = True,
 ) -> List[ExperimentData]:
     """*eval_name*'s finished experiments, newest first: its records, and
-    those only the store holds (run elsewhere)."""
+    those only the store holds (run elsewhere). ``items=False`` reads the
+    summaries only — each record's ``run.json``, and the store's rows in
+    one ``list_experiments`` call — for a list."""
     from ..jobs.record import RUN_RUNNING, runs_of
 
     out: Dict[str, ExperimentData] = {}
     for d in record_dirs:
         for path in reversed(runs_of(d, eval_name)):
-            run = JobRun.load(path)
+            run = JobRun.load(path, items=items)
             if run.status != RUN_RUNNING and run.ended and isinstance(run.meta.get("eval"), dict):
                 out.setdefault(run.run_id, ExperimentData.from_run(run))
     if store is not None:
         page = store.list_experiments(ExperimentFilter(eval=eval_name), limit=limit)
         for e in page.items:
-            if e.experiment_id not in out and e.ended_at is not None:
-                got = ExperimentData.from_store(store, e.experiment_id)
-                if got is not None:
-                    out[e.experiment_id] = got
+            if e.experiment_id in out or e.ended_at is None:
+                continue
+            got = (
+                ExperimentData.from_store(store, e.experiment_id)
+                if items
+                else ExperimentData.from_experiment(e)
+            )
+            if got is not None:
+                out[e.experiment_id] = got
     ordered = sorted(out.values(), key=lambda d: (d.started or "", d.experiment_id), reverse=True)
     return ordered[:limit]

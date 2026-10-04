@@ -43,6 +43,7 @@ __all__ = [
     "VERDICTS",
     "decide",
     "exit_code",
+    "flip_class",
     "outcomes",
 ]
 
@@ -279,26 +280,37 @@ def _worst(verdicts: Iterable[str]) -> str:
 # ── comparing two runs ───────────────────────────────────────────────────
 
 
+#: How a case moved between two runs, by its stability across repeats.
+FLIP_CLASSES = ("regressed", "fixed", "destabilised", "stabilised")
+
+
+def flip_class(base: CaseOutcome, cur: CaseOutcome) -> Optional[str]:
+    """How one case moved from *base* to *cur*: ``regressed`` (always
+    passed, now always fails), ``fixed`` (the reverse), ``destabilised``
+    (always passed, now not always), ``stabilised`` (not always, now
+    always); ``None`` when it did not move — the same stability, or flaky
+    on both sides (noise)."""
+    a, b = base.stability, cur.stability
+    if a == STABLE_PASS and b == STABLE_FAIL:
+        return "regressed"
+    if a == STABLE_FAIL and b == STABLE_PASS:
+        return "fixed"
+    if a == STABLE_PASS and b != STABLE_PASS:
+        return "destabilised"
+    if a != STABLE_PASS and b == STABLE_PASS:
+        return "stabilised"
+    return None
+
+
 def _flips(
     base: Mapping[str, CaseOutcome], cur: Mapping[str, CaseOutcome], ids: Sequence[str]
 ) -> Dict[str, Any]:
     """Cases that changed, classed by stability across repeats."""
-    classes: Dict[str, List[str]] = {
-        "regressed": [],
-        "fixed": [],
-        "destabilised": [],
-        "stabilised": [],
-    }
+    classes: Dict[str, List[str]] = {k: [] for k in FLIP_CLASSES}
     for c in ids:
-        a, b = base[c].stability, cur[c].stability
-        if a == STABLE_PASS and b == STABLE_FAIL:
-            classes["regressed"].append(c)
-        elif a == STABLE_FAIL and b == STABLE_PASS:
-            classes["fixed"].append(c)
-        elif a == STABLE_PASS and b != STABLE_PASS:
-            classes["destabilised"].append(c)
-        elif a != STABLE_PASS and b == STABLE_PASS:
-            classes["stabilised"].append(c)
+        moved = flip_class(base[c], cur[c])
+        if moved is not None:
+            classes[moved].append(c)
     out: Dict[str, Any] = {k: len(v) for k, v in classes.items()}
     out["cases"] = {k: v[:FLIP_LIST_MAX] for k, v in classes.items() if v}
     # one trial each side cannot tell a flip from a flake

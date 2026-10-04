@@ -48,6 +48,15 @@ theirs. `operonx eval dataset validate` checks a file line by line
 (JSON, duplicate ids, field types); `diff --against main` says which
 cases were added, removed or changed.
 
+`Dataset(path).update("c1", {"expected": "19:30", "tags": ["schedule"]})`
+edits one case in place — `expected`, `tags`, `split`, `cluster`,
+`trajectory`, `note` or `status`; `None` removes a key — rewriting its
+line and leaving every other line as it was, so the merge request shows
+the edit and nothing else. An input is not edited: a different input is
+a different case. `{"status": "archived"}` keeps a case in the file, so
+its history across experiments stays readable, and takes it out of every
+run (and of `dataset_version`); `all_rows()` still lists it.
+
 ## Evaluators
 
 An evaluator is a function — plain, async, or an `@op` (called for its
