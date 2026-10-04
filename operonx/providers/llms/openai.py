@@ -23,7 +23,7 @@ class OpenAISDKModel(BaseLLM):
     def __init__(self, config: OpenAIConfig):
         super().__init__(config)
 
-        self.http_client = create_http_client(proxy=config.proxy)
+        self.http_client = create_http_client(proxy=config.proxy, timeout=config.timeout)
 
         # Initialize OpenAI client
         if hasattr(config, "base_url"):

@@ -35,6 +35,7 @@ from operonx.providers.llms.base import (
     create_http_client,
     estimate_tokens,
     lift_cache_control,
+    normalize_tool_call,
 )
 from operonx.providers.llms.config import LLMConfig
 
@@ -49,22 +50,14 @@ def _text_blocks(content: Any) -> list:
 
 
 def _tool_use_block(call: Dict[str, Any]) -> Dict[str, Any]:
-    """An OpenAI tool call (nested ``function`` or flat) → a ``tool_use`` block."""
-    fn = call.get("function") or {}
-    arguments = fn.get("arguments", call.get("arguments"))
-    if isinstance(arguments, str):
-        try:
-            arguments = json.loads(arguments) if arguments.strip() else {}
-        except json.JSONDecodeError:
-            # Anthropic wants an object; keep what the model wrote rather
-            # than lose it, so the history still says what was asked.
-            arguments = {"_raw": arguments}
-    return {
-        "type": "tool_use",
-        "id": call.get("id") or call.get("tool_call_id") or "",
-        "name": fn.get("name") or call.get("name") or "",
-        "input": arguments if isinstance(arguments, dict) else {},
-    }
+    """A tool call in any shape :func:`normalize_tool_call` reads → a ``tool_use`` block."""
+    norm = normalize_tool_call(call)
+    args = norm["args"]
+    if not isinstance(args, dict):
+        # Anthropic wants an object; keep what the model wrote rather
+        # than lose it, so the history still says what was asked.
+        args = {"_raw": args}
+    return {"type": "tool_use", "id": norm["id"], "name": norm["name"], "input": args}
 
 
 def _tool_result_block(message: Dict[str, Any]) -> Dict[str, Any]:
@@ -156,7 +149,7 @@ class AnthropicModel(BaseLLM):
 
     def __init__(self, config: LLMConfig) -> None:
         super().__init__(config)
-        self.client = create_http_client()
+        self.client = create_http_client(timeout=config.timeout)
         self.base_url = getattr(config, "base_url", "https://api.anthropic.com").rstrip("/")
         self.api_key = config.api_key
         self.model = config.model
@@ -526,6 +519,16 @@ class AnthropicModel(BaseLLM):
         cache_ttl: Optional[str] = None,
         **kwargs,
     ) -> Dict[str, Any]:
+        response_format = kwargs.get("response_format")
+        if response_format and (response_format or {}).get("type", "text") != "text":
+            # Dropping it would return an unconstrained answer that reads
+            # as a constrained one — the caller would never know.
+            raise ValueError(
+                f"The anthropic backend cannot send response_format "
+                f"{response_format.get('type')!r}: this request would come back unconstrained. "
+                "For a schema-shaped answer force a tool call instead (declare "
+                "structured_output: tool on the resource), or describe the shape in the prompt."
+            )
         system, anthropic_messages = self._convert_messages(messages)
         body: Dict[str, Any] = {
             "model": self.model,
@@ -623,6 +626,7 @@ class AnthropicModel(BaseLLM):
             stop=stop,
             tools=tools,
             tool_choice=kwargs.get("tool_choice"),
+            response_format=response_format,
         )
         url = f"{self.base_url}/v1/messages"
         resp = await self.client.post(url, headers=self._headers(), json=body)
@@ -665,6 +669,7 @@ class AnthropicModel(BaseLLM):
             stop=stop,
             tools=tools,
             tool_choice=kwargs.get("tool_choice"),
+            response_format=response_format,
         )
         url = f"{self.base_url}/v1/messages"
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"

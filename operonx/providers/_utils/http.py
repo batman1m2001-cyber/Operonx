@@ -17,11 +17,22 @@ def create_http_client(
     proxy: Optional[str] = None,
     read_timeout: float = 120.0,
     max_connections: int = 100,
+    timeout: Optional[float] = None,
 ) -> httpx.AsyncClient:
-    """Shared HTTP client factory for SDK-backed providers."""
+    """Shared HTTP client factory for SDK-backed providers.
+
+    ``timeout`` is a resource's own bound (``timeout:`` on an ``llm:``
+    block): when set, it is every phase's limit — connect, write, pool
+    and each read — and replaces ``read_timeout`` and the defaults.
+    """
+    limits = (
+        httpx.Timeout(timeout)
+        if timeout is not None
+        else httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0)
+    )
     return httpx.AsyncClient(
         proxy=proxy,
         verify=verify,
-        timeout=httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0),
+        timeout=limits,
         limits=httpx.Limits(max_connections=max_connections, max_keepalive_connections=10),
     )

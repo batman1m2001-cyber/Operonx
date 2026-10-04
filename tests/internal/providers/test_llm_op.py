@@ -519,7 +519,7 @@ class TestLLMOpTools:
         # Model should call the weather function
         if result["tool_calls"]:
             print(f"Tool calls: {result['tool_calls']}")
-            assert result["tool_calls"][0]["function"]["name"] == "get_weather"
+            assert result["tool_calls"][0]["name"] == "get_weather"
         print(f"Content: {result['content']}")
 
     @pytest.mark.asyncio
@@ -566,7 +566,7 @@ class TestLLMOpTools:
             pass
         assert "tool_calls" in result
         if result["tool_calls"]:
-            assert result["tool_calls"][0]["function"]["name"] == "calculate"
+            assert result["tool_calls"][0]["name"] == "calculate"
             print(f"Forced tool call: {result['tool_calls']}")
 
 

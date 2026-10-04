@@ -1,8 +1,13 @@
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar, Dict, Optional, Sequence, Union
+from typing import ClassVar, Dict, Literal, Optional, Sequence, Union
+
+from pydantic import model_validator
 
 from operonx.core.utils import YamlModel
+
+#: How a resource produces an answer that must match a schema.
+StructuredOutput = Literal["native", "tool", "prompted"]
 
 
 class LLMType(Enum):
@@ -92,6 +97,43 @@ class LLMConfig(YamlModel):
     # rejects a request carrying both `temperature` and `top_p`, so it
     # declares `top_p: null`.
     generation_extras: Optional[Dict] = None
+
+    # ---- Request timeout ---------------------------------------------------
+    #
+    # Seconds any one network wait of a request may take: connecting,
+    # sending, and each read. A non-streamed answer arrives in one read, so
+    # this bounds the whole request; a stream gets it per chunk, not over
+    # the whole answer — a deadline over a stream belongs to the caller.
+    # It fails as the SDK's timeout error, which the transport retry above
+    # and a fallback chain treat like any other. None keeps the shared
+    # client's limits (a 120 s read), which is what a gateway that accepts
+    # and never answers costs.
+    timeout: Optional[float] = None
+
+    # ---- Structured output -------------------------------------------------
+    #
+    # How this resource gives an answer that must match a schema, declared
+    # because gateways disagree and fail silently (docs/AGENTS_V2_PLAN.md
+    # §2c): one enforces `response_format: json_schema`, another constrains
+    # a valid schema and ignores an invalid one, another 404s.
+    #   native    send `response_format: {type: json_schema, ...}`
+    #   tool      force a call to one tool whose parameters are the schema
+    #   prompted  describe the shape in the prompt and parse the text
+    # Whichever is used, the caller still validates the answer: a forced
+    # tool's arguments were measured unchecked on a live gateway. The
+    # default is the one every gateway can do. `operonx-agents probe
+    # <resource>` measures an endpoint and prints what to declare.
+    structured_output: StructuredOutput = "prompted"
+
+    @model_validator(mode="after")
+    def _structured_output_supported(self) -> "LLMConfig":
+        if self.api_type == LLMType.ANTHROPIC and self.structured_output == "native":
+            raise ValueError(
+                "structured_output: native is not available on an anthropic resource: its "
+                "backend sends no response_format. Declare structured_output: tool (a forced "
+                "tool call) or prompted."
+            )
+        return self
 
     @classmethod
     def create_config(cls, config_data: Dict) -> "LLMConfig":

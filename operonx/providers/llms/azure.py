@@ -15,7 +15,9 @@ class AzureSDKModel(OpenAISDKModel):
     def __init__(self, config: AzureConfig):
         super().__init__(config)
 
-        self.http_client = create_http_client(verify=False, proxy=config.proxy)
+        self.http_client = create_http_client(
+            verify=False, proxy=config.proxy, timeout=config.timeout
+        )
         # Initialize OpenAI client
         self.client = AsyncAzureOpenAI(
             azure_endpoint=config.azure_endpoint,
@@ -49,6 +51,8 @@ class AzureSDKModel(OpenAISDKModel):
             "response_format",
             "tools",
             "tool_choice",
+            "logprobs",
+            "top_logprobs",
         }
 
         # Start with base parameters
