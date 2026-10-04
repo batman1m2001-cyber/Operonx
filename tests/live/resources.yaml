@@ -1,0 +1,24 @@
+# The gateways the live tests use, as the callbot declares them
+# (callbot-wt/refactor/resources.yaml) plus what `operonx-agents probe`
+# measured. Values come from the environment (the callbot's .env, loaded
+# read-only by tests/live/conftest.py); nothing secret is stored here.
+llm:
+  inhouse:
+    api_type: openai
+    api_key: ${LLM_API_KEY}
+    base_url: ${LLM_API_URL:https://llm-callbot.edupia.com.vn:8689/v1}
+    model: ${LLM_MODEL_NAME:google/gemma-4-E2B-it}
+    structured_output: native   # probe: json_schema enforced, invalid schema rejected
+    timeout: 5
+  qwen3.7-plus:
+    api_type: openai
+    api_key: ${QWEN_API_KEY}
+    base_url: ${QWEN_API_URL:https://llm.siraya.ai/v1}
+    model: qwen3.7-plus
+    structured_output: tool     # probe: forced tool works, arguments unchecked
+    timeout: 30
+  qwen-turbo:
+    api_type: openai
+    api_key: ${QWEN_API_KEY}
+    base_url: ${QWEN_API_URL:https://llm.siraya.ai/v1}
+    model: qwen-turbo

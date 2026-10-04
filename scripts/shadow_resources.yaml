@@ -1,0 +1,12 @@
+# The callbot's inhouse resource exactly as refactor/operonx-studio declares
+# it (no timeout, no transport retry), plus the structured_output `probe`
+# measured for it. Values from the callbot's .env.
+llm:
+  inhouse:
+    api_type: openai
+    api_key: ${LLM_API_KEY}
+    base_url: ${LLM_API_URL:https://llm-callbot.edupia.com.vn:8689/v1}
+    model: ${LLM_MODEL_NAME:google/gemma-4-E2B-it}
+    cost_per_input_token: 0
+    cost_per_output_token: 0
+    structured_output: native

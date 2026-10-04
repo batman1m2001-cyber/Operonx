@@ -1,0 +1,113 @@
+{
+ "inhouse": {
+  "model": "google/gemma-4-E2B-it",
+  "plain": {
+   "status": 200,
+   "finish_reason": "stop",
+   "content": "intent: banana",
+   "logprobs": true,
+   "ok": true,
+   "ms": 700
+  },
+  "schema": {
+   "status": 200,
+   "finish_reason": "stop",
+   "content": "{\"intent\": \"agree\"}",
+   "ok": true,
+   "ms": 842
+  },
+  "tool": {
+   "status": 400,
+   "error": "tool_choice=\"function=ChatCompletionNamedFunction(name='classify') type='function'\" requires --tool-call-parser to be set",
+   "ok": false,
+   "ms": 4
+  },
+  "bad-schema": {
+   "status": 400,
+   "error": "Grammar error: Invalid type: no-such-type",
+   "ok": true,
+   "ms": 16
+  },
+  "bad-tool": {
+   "status": 400,
+   "error": "1 validation error:\n  {'type': 'value_error', 'loc': ('body',), 'msg': 'Value error, The tool specified in `tool_choice` does not match any of the specified `tools`', 'input': {'model': 'google/gemma-",
+   "ok": true,
+   "ms": 4
+  }
+ },
+ "qwen-turbo": {
+  "model": "qwen-turbo",
+  "plain": {
+   "status": 404,
+   "error": "no vendors found for model: qwen-turbo",
+   "ok": false,
+   "ms": 424
+  },
+  "schema": {
+   "status": 404,
+   "error": "no vendors found for model: qwen-turbo",
+   "ok": false,
+   "ms": 80
+  },
+  "tool": {
+   "status": 404,
+   "error": "no vendors found for model: qwen-turbo",
+   "ok": false,
+   "ms": 79
+  },
+  "bad-schema": {
+   "status": 404,
+   "error": "no vendors found for model: qwen-turbo",
+   "ok": true,
+   "ms": 79
+  },
+  "bad-tool": {
+   "status": 404,
+   "error": "no vendors found for model: qwen-turbo",
+   "ok": true,
+   "ms": 79
+  }
+ },
+ "qwen3.7-plus": {
+  "model": "qwen3.7-plus",
+  "plain": {
+   "status": 200,
+   "finish_reason": "stop",
+   "content": "banana",
+   "logprobs": true,
+   "ok": true,
+   "ms": 1467
+  },
+  "schema": {
+   "status": 200,
+   "finish_reason": "stop",
+   "content": "{\n  \"intent\": \"busy\"\n}",
+   "ok": true,
+   "ms": 1763
+  },
+  "tool": {
+   "status": 200,
+   "finish_reason": "stop",
+   "tool_call": {
+    "name": "classify",
+    "arguments": "{\"intent\": \"banana\"}"
+   },
+   "ok": false,
+   "ms": 1880
+  },
+  "bad-schema": {
+   "status": 200,
+   "finish_reason": "stop",
+   "ok": false,
+   "content": "{\n  \"intent\": \"banana\"\n}",
+   "tool_call": null,
+   "ms": 8124
+  },
+  "bad-tool": {
+   "status": 400,
+   "error": "The tool specified in `tool_choice` does not match any of the specified `tools`",
+   "ok": true,
+   "ms": 2444
+  }
+ }
+}
