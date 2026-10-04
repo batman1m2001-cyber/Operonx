@@ -5,12 +5,17 @@ The guide shows the real ``resources.yaml`` shape (``api_type: openai``,
 Its answers are deterministic: a judge prompt gets a verdict (``PASS``
 when the output says ``refund``; a pairwise one, ``TIE``), a prompt asking
 for an ``<intent>`` gets one, anything else is echoed back, and
-``stream=true`` is honoured.
+``stream=true`` is honoured. Offered ``tools``, it calls the one whose
+name's words the user's message holds (``order_status``: "status" and
+"order"), its arguments read off the message — an ``A1``-style id for a
+string, the first number for a number — and answers a tool's result with
+``Done: <result>``.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -45,22 +50,66 @@ def _answer(messages: list) -> str:
     return f"Echo: {last.get('content', '')}"
 
 
+def _tool_call(body: dict):
+    """The call a request offering ``tools`` gets, or ``None``."""
+    messages = body.get("messages") or []
+    if not body.get("tools") or not messages or messages[-1].get("role") != "user":
+        return None
+    text = str(messages[-1].get("content") or "")
+    words = set(re.findall(r"[a-z]+", text.lower()))
+    for spec in body["tools"]:
+        fn = spec.get("function") or {}
+        if not set(fn.get("name", "").lower().split("_")) <= words:
+            continue
+        args = {}
+        for name, prop in ((fn.get("parameters") or {}).get("properties") or {}).items():
+            if prop.get("type") in ("integer", "number"):
+                found = re.search(r"\b\d+\b", text)
+                args[name] = int(found.group()) if found else 0
+            else:
+                found = re.search(r"\b[A-Z]\d+\b", text)
+                args[name] = found.group() if found else text
+        return {
+            "id": "call_0",
+            "type": "function",
+            "function": {"name": fn["name"], "arguments": json.dumps(args)},
+        }
+    return None
+
+
+def _reply(body: dict):
+    """``(content, tool_call or None)`` for one request."""
+    messages = body.get("messages") or []
+    if messages and messages[-1].get("role") == "tool":
+        return f"Done: {messages[-1].get('content')}", None
+    call = _tool_call(body)
+    if call is not None:
+        return "", call
+    return _answer(messages), None
+
+
 class _Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # quiet
         pass
 
     def do_POST(self):  # noqa: N802 — http.server's naming
         body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
-        content = _answer(body.get("messages") or [])
+        content, call = _reply(body)
+        finish = "tool_calls" if call else "stop"
         model = body.get("model") or "stand-in"
         usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
         if body.get("stream"):
             self.send_response(200)
             self.send_header("content-type", "text/event-stream")
             self.end_headers()
-            words = content.split(" ")
-            for i, word in enumerate(words):
-                delta = {"content": word + (" " if i < len(words) - 1 else "")}
+            words = content.split(" ") if content else []
+            deltas = [
+                {"content": word + (" " if i < len(words) - 1 else "")}
+                for i, word in enumerate(words)
+            ]
+            if call:
+                deltas.append({"tool_calls": [{"index": 0, **call}]})
+            for delta in deltas:
                 chunk = {
                     "id": "c",
                     "object": "chat.completion.chunk",
@@ -74,7 +123,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "object": "chat.completion.chunk",
                 "created": int(time.time()),
                 "model": model,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
                 "usage": usage,
             }
             self.wfile.write(f"data: {json.dumps(end)}\n\ndata: [DONE]\n\n".encode())
@@ -87,8 +136,12 @@ class _Handler(BaseHTTPRequestHandler):
             "choices": [
                 {
                     "index": 0,
-                    "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": content},
+                    "finish_reason": finish,
+                    "message": {
+                        "role": "assistant",
+                        "content": content,
+                        **({"tool_calls": [call]} if call else {}),
+                    },
                 }
             ],
             "usage": usage,

@@ -233,76 +233,10 @@ asyncio.run(main())
 
 ## Agents — a model that calls tools
 
-`build_react_agent` loops model → tools → model until the model is done.
-Tools are `@tool` functions.
-
-```yaml file=resources.yaml
-llm:assistant:
-  api_type: openai
-  api_key: ${LLM_API_KEY}
-  base_url: ${LLM_BASE_URL}
-  model: gpt-4o-mini
-```
-
-```python
-import asyncio
-
-import operonx
-from operonx import Operon
-from operonx.agents import agent_result, build_react_agent, get_tool_definitions, tool
-from operonx.agents.ops.model_ops import make_llm_caller
-
-
-@tool(
-    name="add",
-    description="Add two numbers.",
-    schema={
-        "type": "object",
-        "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
-        "required": ["a", "b"],
-    },
-    readonly=True,
-)
-def add(a: float, b: float) -> dict:
-    return {"sum": a + b}
-
-
-async def main():
-    operonx.bootstrap(resources="resources.yaml")
-    agent = build_react_agent(
-        call_model=make_llm_caller("assistant", tools=get_tool_definitions()),
-        max_turns=8,
-    )(messages=None)
-    out = await Operon(agent).run(
-        inputs={"messages": [{"role": "user", "content": "What is 2 + 3?"}]}
-    )
-    result = agent_result(out, agent)  # messages, turns, final, stopped_early, truncated, ...
-    assert result["final"]
-
-
-asyncio.run(main())
-```
-
-- Read the answer with `agent_result(out, agent)`; never index
-  `out["messages"]` (it holds one list per turn). `stopped_early` is True
-  when the budget ran out or the last response was cut off (`truncated`,
-  with `finish_reason`); `final` is `None` if the model never answered.
-- **An agent is a node.** Inside a graph, the op after it reads
-  `agent["final"]` (the answer) and `agent["messages"]` (the whole
-  conversation): `research = build_react_agent(...)(messages=ask["messages"])`,
-  then `brief(answer=research["final"])`, wired `ask >> research >> brief`.
-  The node is named after its variable (`research`) and shows `final`; one
-  turn inside it is three zones — `context` (compaction, memory, skills,
-  the prompt), `model`, `tools` (one tool message per call) — then back.
-  Every call is answered: one whose dispatch failed before the tool ran
-  (an approval sink that raises, say) gets an error tool message, the
-  cause goes to `$errors`, and the model takes the next turn.
-- On the budget's last turn `make_llm_caller` sends `tool_choice="none"`,
-  so the model must answer in text. A hand-written `call_model` gets the
-  same signal by declaring `last_turn: bool = False`.
-- `destructive=True` tools pause for approval through an `InterruptOp`;
-  `AgentSession(agent).send(text, on_approval=...)` handles the loop.
-- In tests, pass a scripted `call_model` op instead of a real model.
+Agents are the **operonx-agents** package: an `Agent` spec, `Runner`, and
+`agent.as_op()` for a graph — see [agents](09-agents.md). The older
+`operonx.agents` (`build_react_agent`, `@tool(schema=...)`) is deprecated:
+it warns on import and `MIGRATION.md` maps it to the new API.
 
 ## Flow ops
 
