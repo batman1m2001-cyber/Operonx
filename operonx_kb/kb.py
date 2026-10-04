@@ -35,6 +35,7 @@ from operonx_kb.graphs.retrieve import (
     lexical_retriever,
     reranked,
     search_graph,
+    tree_retriever,
 )
 from operonx_kb.maintenance import VerifyReport, verify
 from operonx_kb.model.collection import (
@@ -50,8 +51,9 @@ from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
 
 __all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
 
-#: Retrieval modes of :meth:`KnowledgeBase.search`.
-MODES = ("dense", "lexical", "hybrid")
+#: Retrieval modes of :meth:`KnowledgeBase.search`. ``tree`` needs the collection's
+#: ``tree`` spec (PLAN E7) and is seeded by the collection's default mode.
+MODES = ("dense", "lexical", "hybrid", "tree")
 #: The mode a search uses unless told otherwise, for a collection that has both a
 #: dense and a lexical index. Hybrid beat dense on Recall@10 on all three K2 eval
 #: sets (the PLAN gate asks for two of three; the table is in ``docs/bench/k2.md``).
@@ -222,9 +224,15 @@ class KnowledgeBase:
                                 "mime": mime, "title": title, "tags": list(tags or []), "acl": list(acl or []),
                                 "metadata": metadata or {}}  # fmt: skip
         doc_key = key or (str(path) if path is not None else "")
+        dense, spec = self._dense(collection_id), self.collection(collection_id).spec
+
+        def factory():
+            return build_ingest_graph(dense, lexical=spec.lexical, contextual=spec.contextual,
+                                      tree=spec.tree, catalog=self.catalog_key, blobs=self.blobs_key)  # fmt: skip
+
         try:
-            return await self._run("ingest_document", collection_id, build_ingest_graph,
-                                   {"item": item, "collection": collection_id}, "result")  # fmt: skip
+            return await self._run_graph("ingest_document", collection_id, factory, spec.model_dump_json(),
+                                         {"item": item, "collection": collection_id}, "result")  # fmt: skip
         except IngestError as exc:
             self.catalog.log_ingest(
                 collection_id, doc_key, "failed",
@@ -262,8 +270,9 @@ class KnowledgeBase:
         return "dense" if spec.dense is not None else "lexical"
 
     def retriever(self, collection_id: str, mode: Optional[str] = None):
-        """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``;
-        default :meth:`default_mode`). An explicit mode the collection cannot serve raises.
+        """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``,
+        ``tree``; default :meth:`default_mode`). An explicit mode the collection cannot
+        serve raises.
 
         Raises:
             QueryError: Unknown mode, or the collection lacks the index it needs.
@@ -272,6 +281,14 @@ class KnowledgeBase:
         mode = mode or self.default_mode(collection_id)
         if mode not in MODES:
             raise QueryError(f"unknown retrieval mode {mode!r}; use one of {list(MODES)}")
+        if mode == "tree":
+            if spec.tree is None:
+                raise QueryError(
+                    f"collection {collection_id!r} has no tree index for mode 'tree'; set "
+                    "CollectionSpec(tree=TreeSpec(llm=...)) and re-add its documents"
+                )
+            seed = self.retriever(collection_id, self.default_mode(collection_id))
+            return tree_retriever(seed, spec.tree, catalog=self.catalog_key)
         if mode in ("dense", "hybrid") and spec.dense is None:
             raise QueryError(f"collection {collection_id!r} has no dense index for mode {mode!r}")
         if mode in ("lexical", "hybrid") and spec.lexical is None:
@@ -316,7 +333,7 @@ class KnowledgeBase:
 
         Args:
             filter: A :class:`~operonx_kb.model.filter.KBFilter` or its dict.
-            mode: ``dense``, ``lexical`` or ``hybrid`` (default :meth:`default_mode`).
+            mode: ``dense``, ``lexical``, ``hybrid`` or ``tree`` (default :meth:`default_mode`).
             reranker: A ``reranking:`` resource name to rerank with.
             trace_id: The run's trace id (default: a new one), for a caller that links
                 to the run's trace.

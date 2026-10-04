@@ -2,6 +2,7 @@
 
     operonx-kb collections
     operonx-kb create handbook --embedder bge-m3 --store vector_store:kb
+    operonx-kb create manuals --embedder bge-m3 --lexical kb_lexical:main --tree-llm gpt-4o-mini
     operonx-kb add handbook raw/ --recursive
     operonx-kb list handbook
     operonx-kb status handbook
@@ -9,6 +10,7 @@
     operonx-kb gc handbook --blobs
     operonx-kb verify handbook            # exit 1 when a problem is found
     operonx-kb query handbook "how many days of leave" --mode hybrid --tag hr
+    operonx-kb query manuals "which clause covers refunds" --mode tree
     operonx-kb query handbook "how many days of leave" --answer assistant
     operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
 
@@ -34,8 +36,10 @@ from operonx_kb.model.collection import (
     AnalyzerSpec,
     ChunkerSpec,
     CollectionSpec,
+    ContextualSpec,
     DenseIndexSpec,
     LexicalIndexSpec,
+    TreeSpec,
 )
 
 __all__ = ["main"]
@@ -79,6 +83,8 @@ def _cmd_create(kb: KnowledgeBase, args) -> int:
         if args.lexical
         else None,
         language=args.language,
+        contextual=ContextualSpec(llm=args.contextual_llm) if args.contextual_llm else None,
+        tree=TreeSpec(llm=args.tree_llm) if args.tree_llm else None,
     )
     kb.create_collection(args.collection, spec)
     print(f"created {args.collection}")
@@ -239,6 +245,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--analyzer", choices=["simple", "vi"], default="simple")
     p.add_argument("--fold", action="store_true", help="fold diacritics in the lexical index")
     p.add_argument("--language")
+    p.add_argument(
+        "--contextual-llm", help="llm resource that writes chunk contexts (contextual enrichment)"
+    )
+    p.add_argument(
+        "--tree-llm", help="llm resource that builds the tree index (summaries, tables of contents)"
+    )
     p.set_defaults(fn=_cmd_create)
 
     p = sub.add_parser("add", help="ingest files or directories")

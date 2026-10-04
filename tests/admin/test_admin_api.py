@@ -89,6 +89,17 @@ def test_a_collection_shows_its_spec_modes_and_counts(client):
     assert res.status_code == 404 and "GET /collections" in res.json()["error"]
 
 
+def test_a_collection_with_a_tree_index_serves_tree_mode(client):
+    from operonx_kb import TreeSpec
+
+    spec = client.kb.collection("docs").spec
+    client.kb.create_collection("docs", spec.model_copy(update={"tree": TreeSpec(llm="answerer")}))
+    got = ok(client.get("/collections/docs"))
+    assert (
+        got["modes"] == ["dense", "lexical", "hybrid", "tree"] and got["default_mode"] == "hybrid"
+    )
+
+
 def test_health_is_verify(client):
     got = ok(client.get("/collections/docs/health"))
     report = client.kb.verify("docs")

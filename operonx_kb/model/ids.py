@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 
 from operonx_kb.text.normalize import normalize_inline
 
@@ -27,6 +27,7 @@ __all__ = [
     "version_id",
     "element_id",
     "chunk_id",
+    "node_id",
     "vector_id",
     "canonical_json",
     "fingerprint",
@@ -85,10 +86,28 @@ def element_id(version_id: str, path: str) -> str:
     return make_id("el", version_id, path)
 
 
-def chunk_id(document_id: str, chunker_fp: str, content_sha: str, occurrence: int) -> str:
+def chunk_id(
+    document_id: str,
+    chunker_fp: str,
+    content_sha: str,
+    occurrence: int,
+    context: Optional[str] = None,
+) -> str:
     """Stable across versions: an unchanged chunk keeps its id, its embedding and
-    its index entries. ``occurrence`` tells identical chunks of one document apart."""
-    return make_id("ch", document_id, chunker_fp, content_sha, occurrence)
+    its index entries. ``occurrence`` tells identical chunks of one document apart.
+
+    ``context`` is what else the chunk's embedded text depends on: the hash of its
+    contextual enrichment's input (PLAN E3). A chunk whose context input changed
+    is a new chunk; without enrichment the id is what it always was.
+    """
+    if context is None:
+        return make_id("ch", document_id, chunker_fp, content_sha, occurrence)
+    return make_id("ch", document_id, chunker_fp, content_sha, occurrence, context)
+
+
+def node_id(version_id: str, path: str) -> str:
+    """A tree node of a version (PLAN E5), positional like an element."""
+    return make_id("tn", version_id, path)
 
 
 def vector_id(chunk_id: str) -> int:

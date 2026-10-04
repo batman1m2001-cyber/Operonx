@@ -99,7 +99,8 @@ reordered (see `docs/bench/k1d_layout.md` §4).
 | **K2** ✔ | Lexical index (SQLite FTS5, Postgres FTS, Vietnamese-aware analyzer), `KBFilter` compiled per backend, dense/lexical/hybrid retrievers, hydration gate, `RerankOp`, context builder, cite-by-span answers with verified citations, eval datasets and metrics, CLI `query`/`eval` (§6) | Recorded in `docs/bench/k2.md`: hybrid beats dense on Recall@10 on 3 of 3 sets (significant on `xquad_vi` +0.020 and `corpus_vi` +0.034, noise on `xquad_en` +0.003), so **hybrid is the default**; rerank (multilingual MiniLM) does not pay and stays opt-in; Vietnamese wants `vi`+folding (unaccented questions 0.64 → 1.00 R@10 at no cost to accented ones); Postgres `ts_rank_cd` trails FTS5 `bm25` by 0.09-0.39 R@10. Tenant-leak conformance passes on FAISS, pgvector, Qdrant, SQLite FTS5 and Postgres FTS. **Open:** live citation precision 0.83 on 30 answers (gate 0.9) and the human check of those 30 |
 | **D5** ✔ | The first real corpus: Vietnamese public documents with checked licenses (MLQA vi / Wikipedia CC BY-SA 3.0, 511 human-written QA cases; 63 official legal PDFs, not copyright-protected), pinned download script | Recorded in `docs/bench/d5.md`: hybrid beats dense by +0.069 Recall@10 (McNemar p < 0.001) and stays the default; rerank +0.055 MRR (opt-in, ~5 s/query on CPU); live citation precision 29/30. **Open:** OCR (68% of crawled legal PDFs are scans), the human check of the 30 answers, no licensed legal QA set yet |
 | **K3** | track5 §18 P3: the admin API `operonx-kb/1` (§8) and Studio's Knowledge tab (operonx-studio): collections, documents, a viewer with bbox overlays, the chunk inspector, a query playground with clickable citations, trace deep links, save as eval case | Recorded in `docs/bench/k3.md`: screenshots of every view at desktop and phone width (light and dark); a cited answer opens the correct page and box on 20/20 sampled citations (checked in the browser and against pdfium's own text layer) |
-| K4+ | track5 §18 P4-P7 (enrichment; visual; graph) | track5 gates |
+| **K4** (built; gate open) | track5 §18 P4 (§9 below): contextual chunk enrichment at section scope, section and document summaries, the tree index (headings, or an LLM table of contents for heading-less documents) and beam tree search; every LLM step an `LLMOp` cached by content | Incrementality met (tests: re-ingest = 0 `LLMOp` spans and 0 model calls; delete and re-add answered by the cache; an edit re-contextualizes one window, re-summarizes one section). Recorded in `docs/bench/k4.md`: on `xquad_en` contextual gives no significant lift in any mode (hybrid ΔMRR +0.001, p = 0.93); cost $0.58/1k pages contextual, $0.16/1k pages tree, $0.00013 per tree query. **Open:** the run stopped at $1.18 when the OpenAI account ran out of credits; `vi_public`, `xquad_vi`, `corpus_vi` and the 100-case tree comparisons resume from the cache. Nothing is default-on. |
+| K5+ | track5 §18 P5-P7 (visual; graph) | track5 gates |
 
 ## 6 · K2: retrieval, citations, eval (track5 §9, §10, §12.3, §15.3)
 
@@ -140,3 +141,59 @@ and committed.
 | S3 | **Side-by-side lists are separate runs.** A playground query runs one search per asked mode (dense, lexical, hybrid, and the default mode reranked), and the answer as its own run, concurrently, each under its own trace id (`KnowledgeBase.search/ask(trace_id=)`). | No graph grows an output for the UI's sake; each list is exactly what that mode returns, and each opens in Studio's Runs (the app traces with `trace="project"`). A failed run's error carries its trace id. |
 | S4 | **An eval case is the KB's row, written by Studio.** `POST /collections/{c}/eval-case` builds the dataset row (`operonx_kb.eval.cases.eval_case`) from the question and the verified citations kept (labels are their canonical quotes, resolved before the row is returned; id = H(collection, normalised question)); Studio saves it with its dataset rows API (operonx `Dataset.add`, deduped by id). The answer becomes `expected.answer` only when the reviewer ticks it. | A saved case is never stale at birth, and the same question is one case. |
 | S5 | Not built in K3 (track5 §16.2 lists them; no K3 gate needs them): upload, delete and reindex routes (writes go through the CLI and Jobs), the version diff, the `kb.yaml` spec editor, eval scores on the collection card, "query neighbours" in the chunk inspector, index presence of other generations. | The tab is read-mostly plus query. Each is one route and one panel on the same contract when it is needed. |
+
+## 9 · K4: enrichment and the tree index (track5 §7.5, §9.5, §11.4, §18 P4)
+
+### Decisions
+
+| # | Decision | Consequence |
+|---|---|---|
+| E1 | **Every LLM step of ingest is an `LLMOp` behind a content cache.** One stage shape (`graphs/enrich.py`, `llm_stage`): `lookup` reads `kb_enrichment_cache` (`(enricher_fp, input_sha) → value`, plus the call's tokens and cost), a generator yields only the misses, `LLMOp` answers them (`.parallel(max=N)`), `store` writes them back. A stage with no miss makes no model call and no `LLMOp` span (the generator and the model op do not run: `if_(misses > 0, …)`). `enricher_fp = H(kind, prompt version, settings, model)`; the model is the `llm:` resource's config without credentials (as `embedder_fingerprint` does). Requests are ready `messages` (`LLMOp(messages=)`), so document text never meets template formatting. | Re-ingest of unchanged content, a delete and re-add, a new collection over the same files and a pipeline change that leaves a section alone cost 0 model calls. The cache is not the operonx op cache (track5 §11.3). |
+| E2 | **`contextual` is section-scoped with a bounded window** (track5 §11.4). A chunk's input: the document title, its heading path, the **window** of its section that holds it (the section's chunks packed in order up to `window_tokens`, default 1500) and the chunk. The model writes 1-2 sentences situating the chunk (Anthropic's recipe); the context is prepended to the chunk's `embed_text`, so it feeds both dense and lexical (track5 §2) and never the chunk's text, spans or citations (principle 2). The window comes first and the chunk last, so chunks of one window share a prompt prefix (OpenAI's automatic prompt cache, half price on cached input over 1024 tokens; recorded as `cached_tokens`). | A document summary is **not** part of the input, unlike §11.4: it would make every context depend on the whole document, which is what section scope exists to avoid. A long heading-less document is cut into windows instead of being sent whole per chunk. OpenAI Batch (`LLMOp(batch_mode=True)`) is not used: an `add()` would wait hours for its batch. |
+| E3 | **A contextual chunk's id includes its context input**: `ch_ = H(document, chunker_fp, content_sha, occurrence, H(contextual_fp, input_sha))`. | The chunk diff stays an id diff: a chunk whose window changed is a new chunk (contextualized, embedded, indexed) and the old one is removed and collected; a chunk whose window did not change keeps its id, context, vector and index entries. A one-paragraph edit re-contextualizes the chunks of one window. Collections without `contextual` keep their ids. |
+| E4 | **Enrichment failures fail the ingest** (principle 7 says fail-soft). | A version is never committed half enriched, which would mix two pipelines' embed texts in one version with nothing in its fingerprint to say so. What succeeded is cached, so the retry pays only for what failed; transport retries are the `llm:` resource's `max_retries`. |
+| E5 | **The tree index is part of the version** (`kb_tree_nodes`, committed with it). Nodes: the document root, then the element tree's sections (headings); a document with no heading and at least `toc_min_tokens` (600) gets **synthesized sections**: the model reads its blocks, numbered, and returns `[{title, first_block, level}]` (the PageIndex approach on our elements, in windows of `toc_window_tokens`). A node holds `{id, parent, level, title, span, pages, summary, source}`; its span is canonical text, so its chunks are the version's chunks inside it. | The tree is versioned like everything else and needs no ledger: nothing derived outside the catalog. |
+| E6 | **Summaries are one parallel pass** (track5 §9.5 has them bottom-up). A node's summary input is its text when the text fits `summary_input_tokens` (2000), else its opening text and the outline of its children's titles. The root's summary is the document summary. | No node waits for another; an edit re-summarizes the nodes whose own input changed, where bottom-up re-summarizes every ancestor. |
+| E7 | **Tree search (`mode="tree"`) is a bounded beam loop seeded by the collection's default retriever.** Documents: the first `docs` (5) distinct documents among the seed's top `seed_depth` (30) hits. Each iteration shows the children of the frontier (document title, heading path, summary) to the navigator (`LLMOp`, JSON `{choose: [ids], enough: bool}`); chosen leaves are picked, chosen inner nodes become the frontier; it stops on `enough`, an empty frontier, `max_depth` (4) or the loop cap. Hits: the chunks inside the picked nodes (pick order; inside a node by seed rank, then document order), then the seed's other hits up to `k`. | Documents are selected by their passages, not by a separate doc-summary dense index (§9.5): one less derived index to keep consistent with deletes, GC and `verify`. The navigator's calls, tokens and picks are in the trace (`LLMOp` spans). |
+| E8 | **The pipeline fingerprint includes the enabled enrichers.** | Turning `contextual` or `tree` on makes the next ingest of each document a new version (contexts change chunk ids; the tree is built); the fingerprint of a collection without them is unchanged, so existing versions stay valid. |
+| E9 | **RAPTOR is not built in K4.** | It is optional in P4; a clustered summary tree only has a case if the structural tree with summaries lifts retrieval, which the gate below decides first. |
+| E10 | An upstream gap found while building the tree loop: a loop entered from a branch arm never ran and reported nothing (the cycle rewrite left the branch routing to the moved op). Fixed in operonx (PR, with a test), not worked around. | The tree graph enters its loop from `if_(any candidate, …)`. |
+
+### Comparisons
+
+Each technique against the K2/D5 default (`hybrid`; `vi`+fold analyzer on Vietnamese, `simple` on
+English; `multilingual-e5-small`), with the same documents, chunker and embedder, through operonx
+`Eval` and the KB's evaluators (PLAN R8), model `gpt-4o-mini` (the cheapest capable model in
+Operon's `resources.yaml`, the D5 answer model):
+
+1. **Contextual**: a second collection of each set ingested with `contextual`; dense, lexical and
+   hybrid on all cases of `vi_public` (511), `xquad_vi` (397), `xquad_en` (397), `corpus_vi` (120).
+   No model call at query time, so no subsample.
+2. **Tree**: the baseline collection with `tree`; `tree` against `hybrid` on 100 cases of each set
+   drawn with a fixed seed (query-time model calls), paired on the same cases.
+3. **Cost**: tokens and USD of every ingest stage from the cache rows (gpt-4o-mini list prices:
+   $0.15/M input, $0.075/M cached input, $0.60/M output), per 1k pages (the legal PDFs of
+   `vi_public`, 970 pages) and per 1M corpus tokens; per query for `tree` (calls, tokens, USD,
+   p50/p95 latency). Spend is capped at $8 and reported.
+
+### Gate
+
+- Recall@10 (McNemar, exact, on single-label sets) and MRR (paired bootstrap) of each technique
+  against hybrid, with 95% intervals, per set (`stats.compare_paired`).
+- **A technique becomes default-on for a collection type only with a significant lift** (p < 0.05
+  on Recall@10 or MRR, and no significant loss on the other) on that type's sets; types:
+  short heading-less articles (`xquad_vi`, `xquad_en`), templated business documents
+  (`corpus_vi`), a mixed real corpus (`vi_public`: Wikipedia paragraphs and legal PDFs).
+  Otherwise it stays opt-in and the table is published (`docs/bench/k4.md`).
+- Incrementality, as tests on the real graphs with `ScriptedLLM` and trace span counts:
+  re-ingest of unchanged documents = 0 `LLMOp` spans and 0 model calls; delete and re-add = 0
+  model calls (cache); a one-paragraph edit in a 60-section document re-contextualizes only that
+  window's chunks and re-summarizes only that section; span invariant, `verify` and citations
+  unchanged.
+
+### Status
+
+Built and tested; requires operonx main at or after #89 (#87 a loop entered from a branch arm,
+#88 an op joining a stream with an op outside it, #89 a subgraph whose branch went around its
+stream — each a silent failure the K4 graphs hit). Gate numbers and the stop are in
+`docs/bench/k4.md`: contextual and tree stay opt-in until the resumed run measures a lift.

@@ -24,8 +24,10 @@ from operonx_kb.model.collection import (
     ChunkerSpec,
     Collection,
     CollectionSpec,
+    ContextualSpec,
     DenseIndexSpec,
     LayoutSpec,
+    TreeSpec,
 )
 from operonx_kb.model.document import (
     Chunk,
@@ -44,6 +46,7 @@ __all__ = [
     "ChunkerSpec",
     "Collection",
     "CollectionSpec",
+    "ContextualSpec",
     "DenseIndexSpec",
     "Document",
     "DocumentVersion",
@@ -51,6 +54,7 @@ __all__ = [
     "LayoutSpec",
     "Page",
     "Region",
+    "TreeSpec",
     "VersionChunk",
     "DEFAULT_MODE",
     "IngestError",

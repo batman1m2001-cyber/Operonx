@@ -8,7 +8,7 @@ convention of operonx's ``VectorSearchOp``.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 
 from operonx.core.media_store import MediaStore
 from operonx.core.registry import ResourceHub
@@ -17,7 +17,18 @@ from operonx.providers.vector_stores.base import BaseVectorStore
 from operonx_kb.stores.catalog.base import Catalog
 from operonx_kb.stores.lexical.base import LexicalIndex
 
-__all__ = ["resolve", "full_key", "catalog_of", "blobs_of", "vector_store_of", "lexical_of"]
+__all__ = [
+    "resolve",
+    "full_key",
+    "catalog_of",
+    "blobs_of",
+    "vector_store_of",
+    "lexical_of",
+    "backend_settings",
+    "llm_fingerprint",
+]
+
+_SECRET_HINTS = ("key", "token", "secret", "password", "url", "header")
 
 
 def full_key(key: str, category: str) -> str:
@@ -51,3 +62,25 @@ def vector_store_of(key: str) -> BaseVectorStore:
 
 def lexical_of(key: str) -> LexicalIndex:
     return _expect(key, "kb_lexical", LexicalIndex, "a KB lexical index")
+
+
+def backend_settings(backend: Any) -> Dict[str, Any]:
+    """A model backend's config as it shapes outputs: credentials and endpoints left
+    out, so rotating a key or moving a gateway changes no fingerprint."""
+    config = getattr(backend, "config", None)
+    if config is None or not hasattr(config, "model_dump"):
+        return {}
+    return {
+        k: v
+        for k, v in config.model_dump(mode="json").items()
+        if v is not None and not any(h in k.lower() for h in _SECRET_HINTS)
+    }
+
+
+def llm_fingerprint(name: str) -> str:
+    """The fingerprint of the ``llm:<name>`` resource's model (PLAN E1)."""
+    from operonx_kb.model.ids import fingerprint
+
+    backend = resolve(f"llm:{name}", "llm")
+    cls = type(backend)
+    return fingerprint(f"{cls.__module__}.{cls.__qualname__}", "1", backend_settings(backend))

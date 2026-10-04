@@ -233,3 +233,41 @@ def test_update_document_replaces_tags_acl_metadata_without_a_version(cat):
     assert len(cat.list_versions("doc_1")) == 1
     with pytest.raises(CatalogError):
         cat.update_document("doc_x", tags=[], acl=[], metadata={})
+
+
+def test_enrichment_cache_round_trips_answers_and_their_cost(cat):
+    from operonx_kb.stores.catalog.base import CachedAnswer
+
+    cat.put_enrichments("fp", "contextual", {
+        "a": CachedAnswer(value="Situates the chunk.", model="m", prompt_tokens=120,
+                          completion_tokens=12, cached_tokens=64, cost_usd=0.5),
+        "b": CachedAnswer(value=[{"title": "Intro", "first_block": 1}]),
+    })  # fmt: skip
+    got = cat.get_enrichments("fp", ["a", "b", "c"])
+    assert set(got) == {"a", "b"}
+    assert got["a"] == CachedAnswer(value="Situates the chunk.", model="m", prompt_tokens=120,
+                                    completion_tokens=12, cached_tokens=64, cost_usd=0.5)  # fmt: skip
+    assert got["b"].value == [{"title": "Intro", "first_block": 1}] and got["b"].cost_usd is None
+    cat.put_enrichments("fp", "contextual", {"a": CachedAnswer(value="another answer")})
+    assert cat.get_enrichments("fp", ["a"])["a"].value == "Situates the chunk."  # kept
+    assert cat.get_enrichments("other", ["a"]) == {}
+
+
+def test_tree_nodes_commit_with_the_version_and_purge_with_it(cat):
+    from operonx_kb.model.tree import TreeNode
+
+    tree, version, chunks, occ = _version("ver_1", ["alpha", "beta"])
+    nodes = [
+        TreeNode(id="tn_root", version_id="ver_1", path="0", ordinal=0, depth=0, title="Doc",
+                 span=(0, len(tree.canonical)), source="document", summary="All of it."),
+        TreeNode(id="tn_b", version_id="ver_1", path="0.1", parent_id="tn_root", ordinal=1, depth=1,
+                 title="Beta", span=occ[1].spans[0], pages=[2], source="toc", summary_sha="s"),
+        TreeNode(id="tn_a", version_id="ver_1", path="0.0", parent_id="tn_root", ordinal=0, depth=1,
+                 title="Alpha", span=occ[0].spans[0], source="toc"),
+    ]  # fmt: skip
+    cat.commit_version(DOC, version, tree.elements, tree.pages, chunks, occ, nodes)
+    assert [n.id for n in cat.tree_nodes("ver_1")] == ["tn_root", "tn_a", "tn_b"]
+    assert cat.tree_nodes("ver_1")[2] == nodes[1]
+    assert cat.tree_nodes("ver_2") == []
+    cat.purge("doc_1")
+    assert cat.tree_nodes("ver_1") == []

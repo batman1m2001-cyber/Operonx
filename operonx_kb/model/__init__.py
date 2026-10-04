@@ -4,8 +4,10 @@ from operonx_kb.model.collection import (
     ChunkerSpec,
     Collection,
     CollectionSpec,
+    ContextualSpec,
     DenseIndexSpec,
     LayoutSpec,
+    TreeSpec,
 )
 from operonx_kb.model.document import (
     CONTAINER_KINDS,
@@ -20,6 +22,7 @@ from operonx_kb.model.document import (
     Span,
     VersionChunk,
 )
+from operonx_kb.model.tree import TreeNode
 
 __all__ = [
     "CONTAINER_KINDS",
@@ -28,6 +31,7 @@ __all__ = [
     "ChunkerSpec",
     "Collection",
     "CollectionSpec",
+    "ContextualSpec",
     "DenseIndexSpec",
     "Document",
     "DocumentVersion",
@@ -37,5 +41,7 @@ __all__ = [
     "Page",
     "Region",
     "Span",
+    "TreeNode",
+    "TreeSpec",
     "VersionChunk",
 ]

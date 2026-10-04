@@ -9,6 +9,7 @@ graph::
     dense   = dense_retriever(spec.dense)                 # EmbeddingOp ─► VectorSearchOp ─► dense_hits
     lexical = lexical_retriever(spec.lexical)             # lexical_search
     hybrid  = hybrid_retriever(dense, lexical)            # both, concurrently ─► rrf
+    tree    = tree_retriever(hybrid, spec.tree)           # seed ─► beam loop over the tree index (LLMOp)
     search  = search_graph(hybrid)                        # retriever ─► hydrate (the catalog gate)
     best    = reranked(search, reranker="bge-reranker")   # search(depth) ─► RerankOp ─► apply_rerank
     flow    = build_search_flow(best)                     # behind doors: a Job, an Eval, a Service
@@ -19,12 +20,13 @@ pages), ``documents`` (what a reranker reads) and ``stats``.
 
 from __future__ import annotations
 
-from operonx import END, START, graph
+from operonx import END, PARENT, START, graph
 from operonx.app.serve import egress, ingress
-from operonx.providers.ops import EmbeddingOp, RerankOp, VectorSearchOp
+from operonx.core.ops import if_
+from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
 
 from operonx_kb.errors import KBError
-from operonx_kb.model.collection import DenseIndexSpec, LexicalIndexSpec
+from operonx_kb.model.collection import DenseIndexSpec, LexicalIndexSpec, TreeSpec
 from operonx_kb.ops.retrieve import (
     apply_rerank,
     dense_hits,
@@ -36,11 +38,13 @@ from operonx_kb.ops.retrieve import (
     rrf,
 )
 from operonx_kb.ops.serve import search_request, search_result
+from operonx_kb.ops.tree import tree_advance, tree_candidates, tree_hits, tree_options
 
 __all__ = [
     "dense_retriever",
     "lexical_retriever",
     "hybrid_retriever",
+    "tree_retriever",
     "search_graph",
     "reranked",
     "build_search_flow",
@@ -148,6 +152,63 @@ def hybrid_retriever(first, second, *, rrf_k: int = 60, depth: int = 50):
         fused >> END
 
     return hybrid_retrieve
+
+
+def tree_retriever(seed, tree: TreeSpec, *, catalog: str = "kb_catalog:main"):
+    """Tree search (PLAN E7): ``seed`` (a retriever) names the candidate documents,
+    a navigator walks their tree index in a bounded beam loop, and the picked
+    sections' chunks come first, then the seed's other hits.
+
+    ::
+
+        seed ─► tree_candidates ─► if any ─► tree_options ─► LLMOp (navigator) ─► tree_advance ─┐
+                                    │              ▲                                            │
+                                    │              └──────────────── not done ◄─────────────────┤
+                                    └─ else ───────────────────────────────► tree_hits ◄─ done ─┘
+    """
+
+    @graph
+    def tree_retrieve(query, collection, filter, k):
+        PARENT.declare(roots=None, frontier=None, picked=None, depth=0)
+        size = fusion_depth(k=k, depth=tree.seed_depth)
+        found = seed(query=query, collection=collection, filter=filter, k=size["depth"])
+        start = tree_candidates(
+            hits=found["hits"], collection=collection, docs=tree.docs, catalog=catalog
+        )
+        start["roots"] >> PARENT["roots"]
+        step = tree_options(
+            query=query,
+            roots=PARENT["roots"],
+            frontier=PARENT["frontier"],
+            beam=tree.beam,
+            catalog=catalog,
+        )
+        nav = LLMOp.of(
+            resource=tree.navigator_llm,
+            messages=step["messages"],
+            fields=["choose: list", "enough: bool"],
+            parser="json",
+            max_retries=1,
+        )
+        move = tree_advance(
+            options=step["options"],
+            choose=nav["choose"],
+            enough=nav["enough"],
+            picked=PARENT["picked"],
+            depth=PARENT["depth"],
+            beam=tree.beam,
+            max_depth=tree.max_depth,
+        )
+        move["frontier"] >> PARENT["frontier"]
+        move["picked"] >> PARENT["picked"]
+        move["depth"] >> PARENT["depth"]
+        hits = tree_hits(seed=found["hits"], picked=PARENT["picked"], k=k, catalog=catalog)
+        START >> size >> found >> start >> if_(start["any"] == True, step).else_(hits)  # noqa: E712
+        step >> nav >> move
+        move >> if_(move["done"] == True, hits, max_iterations=tree.max_depth).else_(step)  # noqa: E712
+        hits >> END
+
+    return tree_retrieve
 
 
 def search_graph(retriever, *, catalog: str = "kb_catalog:main"):

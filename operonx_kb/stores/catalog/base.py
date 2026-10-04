@@ -14,12 +14,13 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from operonx_kb.model.collection import Collection
 from operonx_kb.model.document import Chunk, Document, DocumentVersion, Element, Page, VersionChunk
+from operonx_kb.model.tree import TreeNode
 
-__all__ = ["Catalog", "CommitResult", "PurgeResult", "ActiveChunk"]
+__all__ = ["Catalog", "CommitResult", "PurgeResult", "ActiveChunk", "CachedAnswer"]
 
 
 @dataclass
@@ -57,6 +58,24 @@ class ActiveChunk:
     chunk: Chunk
     occurrence: VersionChunk
     document: Document
+
+
+@dataclass
+class CachedAnswer:
+    """A model answer an enrichment stage paid for (PLAN E1), and what it cost.
+
+    Attributes:
+        value: The answer (text, or the parsed field of a structured answer).
+        model: The model that served it.
+        cost_usd: ``None`` when the ``llm:`` resource carries no prices.
+    """
+
+    value: Any
+    model: Optional[str] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    cost_usd: Optional[float] = None
 
 
 class Catalog(ABC):
@@ -129,9 +148,11 @@ class Catalog(ABC):
         pages: Sequence[Page],
         chunks: Sequence[Chunk],
         occurrences: Sequence[VersionChunk],
+        nodes: Sequence[TreeNode] = (),
     ) -> CommitResult:
-        """In one transaction: upsert the document, insert the version and its rows,
-        make it active, and mark the previous active version superseded.
+        """In one transaction: upsert the document, insert the version and its rows
+        (with its tree ``nodes``, when the collection has a tree index), make it
+        active, and mark the previous active version superseded.
 
         Idempotent: committing the version that is already active writes nothing.
 
@@ -214,6 +235,22 @@ class Catalog(ABC):
 
     @abstractmethod
     def put_embeddings(self, embedder_fp: str, vectors: Dict[str, List[float]]) -> None: ...
+
+    @abstractmethod
+    def get_enrichments(
+        self, enricher_fp: str, input_shas: Iterable[str]
+    ) -> Dict[str, CachedAnswer]:
+        """The cached answers of an enrichment stage for these inputs; misses are absent."""
+
+    @abstractmethod
+    def put_enrichments(
+        self, enricher_fp: str, kind: str, answers: Dict[str, CachedAnswer]
+    ) -> None:
+        """Cache answers by input hash (an existing row is kept: same input, same answer)."""
+
+    @abstractmethod
+    def tree_nodes(self, version_id: str) -> List[TreeNode]:
+        """A version's tree index in path order; empty when it has none."""
 
     @abstractmethod
     def log_ingest(

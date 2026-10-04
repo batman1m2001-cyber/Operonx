@@ -3,7 +3,8 @@
 Every message says what went wrong and what to do about it, the way operonx
 errors do. Integrity errors (a span that does not round-trip, a catalog write
 that failed) are raised, never logged and swallowed: track5 principle 7,
-"fail-soft enrichment, fail-loud integrity".
+"fail-loud integrity". Enrichment fails loud too (PLAN E4): a version is never
+committed half enriched.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ __all__ = [
     "UnsupportedFormatError",
     "DocumentParseError",
     "CatalogError",
+    "EnrichmentError",
     "FilterError",
     "MissingExtraError",
 ]
@@ -58,6 +60,14 @@ class DocumentParseError(KBError):
 
 class CatalogError(KBError):
     """The catalog refused an operation (missing collection, conflicting version, schema)."""
+
+
+class EnrichmentError(KBError):
+    """A model answer an enrichment stage needs is missing or unusable (PLAN E4).
+
+    The version is not committed; the answers that came back are cached, so the
+    next ingest asks the model only for the rest.
+    """
 
 
 class FilterError(KBError, ValueError):

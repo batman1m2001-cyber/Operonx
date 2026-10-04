@@ -18,6 +18,8 @@ __all__ = [
     "LayoutSpec",
     "DenseIndexSpec",
     "LexicalIndexSpec",
+    "ContextualSpec",
+    "TreeSpec",
     "FieldType",
     "CollectionSpec",
     "Collection",
@@ -147,6 +149,85 @@ class LexicalIndexSpec(_Spec):
         return value
 
 
+def _llm_name(value: str) -> str:
+    """An ``llm:`` resource as ``LLMOp`` names it: ``"gpt-4o-mini"``, not ``"llm:gpt-4o-mini"``."""
+    category, _, name = value.rpartition(":")
+    if category not in ("", "llm") or not name:
+        raise ValueError(
+            f"{value!r} is not an llm: resource; name it as LLMOp does (e.g. 'gpt-4o-mini' "
+            "for llm:gpt-4o-mini). A fake or another category is reached through "
+            "ResourceHub.alias('llm:<name>', '<key>')"
+        )
+    return name
+
+
+class ContextualSpec(_Spec):
+    """Contextual chunk enrichment (PLAN E2): a model writes a sentence or two
+    situating each chunk in its section, prepended to what is embedded and indexed.
+
+    Attributes:
+        llm: The ``llm:`` resource, by the name ``LLMOp`` takes (``"gpt-4o-mini"``).
+        window_tokens: The most section text shown with a chunk: a section is cut
+            into windows of whole chunks up to this many tokens, and a chunk sees
+            the window that holds it.
+        max_tokens: The model's answer limit.
+        parallel: Model calls in flight at once.
+    """
+
+    llm: str
+    window_tokens: int = Field(default=1500, ge=64)
+    max_tokens: int = Field(default=160, ge=16)
+    parallel: int = Field(default=8, ge=1)
+
+    @field_validator("llm")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        return _llm_name(value)
+
+
+class TreeSpec(_Spec):
+    """The tree index and tree search (PLAN E5-E7).
+
+    Attributes:
+        llm: The ``llm:`` resource that writes summaries and tables of contents.
+        navigator: The ``llm:`` resource that walks the tree at query time
+            (default: ``llm``).
+        summary_input_tokens: A node's whole text is summarized when it fits;
+            a longer node is summarized from its opening and its children's titles.
+        toc_min_tokens: A document without headings gets a synthesized table of
+            contents from this length on.
+        toc_window_tokens: The most text one table-of-contents call reads.
+        max_tokens: The answer limit of a summary.
+        parallel: Model calls in flight at once while ingesting.
+        docs: Documents tree search walks: the first ``docs`` distinct documents
+            among the seed retriever's hits.
+        seed_depth: Hits the seed retriever returns.
+        beam: Nodes the navigator may choose per step.
+        max_depth: Navigator steps per query, at most.
+    """
+
+    llm: str
+    navigator: Optional[str] = None
+    summary_input_tokens: int = Field(default=2000, ge=64)
+    toc_min_tokens: int = Field(default=600, ge=1)
+    toc_window_tokens: int = Field(default=6000, ge=256)
+    max_tokens: int = Field(default=200, ge=16)
+    parallel: int = Field(default=8, ge=1)
+    docs: int = Field(default=5, ge=1)
+    seed_depth: int = Field(default=30, ge=1)
+    beam: int = Field(default=3, ge=1)
+    max_depth: int = Field(default=4, ge=1)
+
+    @field_validator("llm", "navigator")
+    @classmethod
+    def _names(cls, value: Optional[str]) -> Optional[str]:
+        return None if value is None else _llm_name(value)
+
+    @property
+    def navigator_llm(self) -> str:
+        return self.navigator or self.llm
+
+
 class CollectionSpec(_Spec):
     """Everything that decides how a collection's documents are processed.
 
@@ -155,6 +236,10 @@ class CollectionSpec(_Spec):
             their types. Their values are copied from a document's
             ``metadata`` into every index entry (``kb_f_<name>``); a filter
             on an undeclared field raises.
+        contextual: Contextual chunk enrichment; ``None`` (default) embeds
+            chunks as they are.
+        tree: The tree index (section summaries, tables of contents) and the
+            ``tree`` retrieval mode; ``None`` (default) builds none.
     """
 
     chunker: ChunkerSpec = ChunkerSpec()
@@ -163,6 +248,8 @@ class CollectionSpec(_Spec):
     lexical: Optional[LexicalIndexSpec] = None
     filterable: Dict[str, FieldType] = Field(default_factory=dict)
     language: Optional[str] = None
+    contextual: Optional[ContextualSpec] = None
+    tree: Optional[TreeSpec] = None
 
     @field_validator("filterable")
     @classmethod

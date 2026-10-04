@@ -18,12 +18,13 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from operonx import op
 from operonx.core.loggings import LOGGER
 
 from operonx_kb.chunking import materialize
+from operonx_kb.enrich.contextual import context_request, windows
 from operonx_kb.errors import DocumentParseError, SpanInvariantError
 from operonx_kb.model.collection import CollectionSpec
 from operonx_kb.model.document import Chunk, Document, DocumentVersion, VersionChunk, utcnow
@@ -32,12 +33,14 @@ from operonx_kb.model.ids import document_id as make_document_id
 from operonx_kb.model.ids import sha256_bytes, sha256_text
 from operonx_kb.model.ids import vector_id as make_vector_id
 from operonx_kb.model.ids import version_id as make_version_id
+from operonx_kb.model.tree import TreeNode
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
+from operonx_kb.ops.enrich import pipeline_enrichers, stage_fingerprints
 from operonx_kb.parsing.base import ParsedDoc
 from operonx_kb.parsing.router import sniff_mime
 from operonx_kb.pipeline import Pipeline, tree_from_dict, tree_to_dict
 from operonx_kb.structure.build import build_version
-from operonx_kb.text.spans import check_chunks, check_elements
+from operonx_kb.text.spans import check_chunks, check_elements, chunk_text
 
 __all__ = [
     "plan_ingest",
@@ -68,7 +71,9 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
     """Hash the source, store its bytes, and decide: ``skip``, ``new`` or ``update``.
 
     ``skip`` when the document's active version has the same bytes and the same
-    pipeline (same version id): nothing is parsed or embedded.
+    pipeline (same version id): nothing is parsed, enriched or embedded.
+    ``enrichers`` holds the fingerprint of each enabled enrichment stage (the
+    cache key of its answers, PLAN E1); the pipeline fingerprint includes them.
 
     Item keys: ``path`` or ``data``; optional ``key`` (default: the path),
     ``name``, ``mime``, ``title``, ``tags``, ``acl``, ``metadata``.
@@ -94,7 +99,8 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
     pipeline = Pipeline(coll.spec)
     mime = item.get("mime") or sniff_mime(data, name) or "application/octet-stream"
     parser = pipeline.parser_for(data, name=name, mime=mime)
-    pipeline_fp = pipeline.fingerprint(parser)
+    enrichers = stage_fingerprints(coll.spec)
+    pipeline_fp = pipeline.fingerprint(parser, pipeline_enrichers(coll.spec, enrichers))
     doc_id = make_document_id(collection, key)
     ver_id = make_version_id(doc_id, raw_sha, pipeline_fp)
     existing = cat.get_document(doc_id)
@@ -128,7 +134,7 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
         "created_at": created_at,
         "spec": coll.spec.model_dump(mode="json"),
     }
-    return {"plan": plan, "action": action, "payloads": {doc_id: payload}}
+    return {"plan": plan, "action": action, "payloads": {doc_id: payload}, "enrichers": enrichers}
 
 
 @op(bound="cpu", exclude={"trace": ["parsed"]}, show_keys="stats")
@@ -165,23 +171,45 @@ def build_tree(parsed: dict, plan: dict) -> dict:
     return {"tree": tree_to_dict(tree), "stats": stats}
 
 
-@op(bound="cpu", exclude={"trace": ["chunks", "occurrences", "todo"]}, show_keys="stats")
-def chunk_version(tree: dict, plan: dict, catalog: str) -> dict:
+@op(
+    bound="cpu",
+    exclude={"trace": ["chunks", "occurrences", "todo", "requests", "keys"]},
+    show_keys="stats",
+)
+def chunk_version(tree: dict, plan: dict, catalog: str, enrichers: Optional[dict] = None) -> dict:
     """Chunk the version and diff it against the active one.
 
     ``todo`` holds the chunks the active version does not have: only they are
-    embedded and written to the index. Unchanged chunks keep their ids
+    enriched, embedded and written to the index. Unchanged chunks keep their ids
     (content-addressed), so they are reused as they are.
+
+    With contextual enrichment, each chunk's context request is built here
+    (its section window, PLAN E2), because its key is part of the chunk's id
+    (PLAN E3): ``requests`` are those of the new chunks, ``keys`` maps each new
+    chunk to its request's key.
     """
     vt = tree_from_dict(tree)
-    pipeline = Pipeline(CollectionSpec.model_validate(plan["spec"]))
+    spec = CollectionSpec.model_validate(plan["spec"])
+    pipeline = Pipeline(spec)
     drafts = pipeline.chunker.draft(vt)
+    requests: List[Dict[str, Any]] = []
+    salts: Optional[List[str]] = None
+    if spec.contextual is not None:
+        title = vt.title or plan.get("title") or plan.get("name") or plan["key"]
+        wins = windows(vt, drafts, spec.contextual.window_tokens, pipeline.chunker.tokenizer)
+        requests = [
+            context_request(title, d.heading_path, w, chunk_text(vt.canonical, d.spans))
+            for d, w in zip(drafts, wins)
+        ]
+        stage = (enrichers or {})["contextual"]
+        salts = [f"{stage}:{r['key']}" for r in requests]
     chunks, occurrences = materialize(
         vt,
         drafts,
         document_id=plan["document_id"],
         version_id=plan["version_id"],
         chunker=pipeline.chunker,
+        contexts=salts,
     )
     check_chunks(vt.canonical, occurrences, {c.id: c.content_sha for c in chunks})
     active = (
@@ -197,10 +225,14 @@ def chunk_version(tree: dict, plan: dict, catalog: str) -> dict:
         "reused": len(ids & active),
         "removed": len(active - ids),
     }
+    new = {c.id for c in todo}
+    keys = {c.id: r["key"] for c, r in zip(chunks, requests) if c.id in new}
     return {
         "chunks": [c.model_dump(mode="json") for c in chunks],
         "occurrences": [o.model_dump(mode="json") for o in occurrences],
         "todo": [c.model_dump(mode="json") for c in todo],
+        "requests": [r for c, r in zip(chunks, requests) if c.id in new],
+        "keys": keys,
         "stats": stats,
     }
 
@@ -243,7 +275,7 @@ def stage_index_writes(
     }
 
 
-@op(bound="cpu", exclude={"trace": ["tree", "chunks", "occurrences"]}, show_keys="version")
+@op(bound="cpu", exclude={"trace": ["tree", "chunks", "occurrences", "nodes"]}, show_keys="version")
 def commit_version(
     plan: dict,
     tree: dict,
@@ -252,11 +284,13 @@ def commit_version(
     catalog: str,
     blobs: str,
     written: int,
+    nodes: Optional[list] = None,
 ) -> dict:
     """Store the canonical text, re-check the invariant, and flip the active version.
 
     It runs after the vector upsert; ``written`` is the upsert's count (0 when
     the version brought no new chunk: an empty batch is a no-op upstream).
+    ``nodes`` is the version's tree index, committed with it (PLAN E5).
     """
     vt = tree_from_dict(tree)
     chunk_models = [Chunk.model_validate(c) for c in chunks]
@@ -266,6 +300,12 @@ def commit_version(
     ]
     check_elements(vt.canonical, vt.elements)
     check_chunks(vt.canonical, occ_models, {c.id: c.content_sha for c in chunk_models})
+    tree_nodes = [TreeNode.model_validate({**n, "span": tuple(n["span"])}) for n in nodes or []]
+    for n in tree_nodes:
+        if not (0 <= n.span[0] <= n.span[1] <= len(vt.canonical)):
+            raise SpanInvariantError(
+                "a tree node's span lies outside the canonical text", {"node": n.id, "span": n.span}
+            )
     text_sha = blobs_of(blobs).put(vt.canonical.encode("utf-8"))
     if text_sha != sha256_text(vt.canonical):
         raise SpanInvariantError(
@@ -295,10 +335,13 @@ def commit_version(
             "elements": len(vt.elements),
             "pages": len(vt.pages),
             "indexed": written,
+            "tree_nodes": len(tree_nodes),
         },
     )
     cat = catalog_of(catalog)
-    result = cat.commit_version(document, version, vt.elements, vt.pages, chunk_models, occ_models)
+    result = cat.commit_version(
+        document, version, vt.elements, vt.pages, chunk_models, occ_models, tree_nodes
+    )
     cat.log_ingest(
         plan["collection_id"],
         plan["key"],
@@ -377,6 +420,8 @@ def report(
     skip: Optional[dict] = None,
     lexical_written: int = 0,
     lexical_deleted: int = 0,
+    contextual: Optional[dict] = None,
+    tree: Optional[dict] = None,
 ) -> dict:
     """Where the two arms merge: one result per item."""
     if skip is not None:
@@ -392,6 +437,8 @@ def report(
             "commit": committed or {},
             "gc_deleted": deleted,
             "lexical": {"written": lexical_written, "deleted": lexical_deleted},
+            "contextual": contextual or {},
+            "tree": tree or {},
         },
     }
     return {"result": result}

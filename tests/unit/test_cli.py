@@ -97,3 +97,13 @@ def test_cli_query_and_eval_on_a_lexical_collection(hub, tmp_path, capsys):
     assert main(["--resources", res, "eval", "notes", str(dataset), "--mode", "lexical"]) == 0
     report = json.loads(capsys.readouterr().out)
     assert report["means"]["recall@20"] == 1.0
+
+
+def test_cli_create_with_enrichment_stores_the_specs(hub, capsys):
+    from operonx_kb import KnowledgeBase
+
+    res = str(hub.source_path)
+    assert main(["--resources", res, "create", "manuals", "--embedder", "fake_embedding:hash",
+                 "--contextual-llm", "llm:gpt-4o-mini", "--tree-llm", "gpt-4o-mini"]) == 0  # fmt: skip
+    spec = KnowledgeBase().collection("manuals").spec
+    assert spec.contextual.llm == "gpt-4o-mini" and spec.tree.llm == "gpt-4o-mini"

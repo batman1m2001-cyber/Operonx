@@ -1,14 +1,14 @@
 """The per-collection pipeline: which parser, structurer and chunker, and their fingerprint.
 
 ``pipeline_fp`` combines the fingerprints of the parser chosen for the file,
-the structurer/serializer and the chunker (track5 §6.3). A version's id
-includes it, so changing any of them makes the next ingest a new version
-instead of silently mixing outputs.
+the structurer/serializer, the chunker and the enabled enrichers (track5 §6.3,
+PLAN E8). A version's id includes it, so changing any of them makes the next
+ingest a new version instead of silently mixing outputs.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from operonx_kb.chunking import Chunker, chunker_from_spec
 from operonx_kb.model.collection import CollectionSpec
@@ -40,11 +40,14 @@ class Pipeline:
                 return parser
         raise KeyError(f"no parser named {name!r}")
 
-    def fingerprint(self, parser: Parser) -> str:
+    def fingerprint(self, parser: Parser, enrichers: Optional[Mapping[str, str]] = None) -> str:
+        """``pipeline_fp``. ``enrichers`` maps each enabled enrichment stage to its
+        fingerprint; a collection without enrichment has the fingerprint it always had."""
         return combine_fingerprints(
             parser=parser.fingerprint(),
             structure=structure_fingerprint(),
             chunker=self.chunker.fingerprint(),
+            **{f"enrich_{k}": v for k, v in sorted((enrichers or {}).items())},
         )
 
 

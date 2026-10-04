@@ -12,7 +12,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx_kb.model.document import CONTAINER_KINDS, Chunk, Element, Span, VersionChunk
 from operonx_kb.model.ids import chunk_id, fingerprint, sha256_text
@@ -133,11 +133,14 @@ def materialize(
     document_id: str,
     version_id: str,
     chunker: Chunker,
+    contexts: Optional[Sequence[str]] = None,
 ) -> Tuple[List[Chunk], List[VersionChunk]]:
     """Ids, texts and occurrences for ``drafts``.
 
     Identical chunk texts in one document are told apart by their occurrence
     number (first, second, …), so an edit elsewhere does not change their ids.
+    ``contexts`` holds, per draft, what its embedded text depends on besides its
+    own text (its contextual enrichment's input, PLAN E3); it enters the id.
     """
     chunker_fp = chunker.fingerprint()
     seen: Counter = Counter()
@@ -151,7 +154,10 @@ def materialize(
         content_sha = sha256_text(text)
         occurrence = seen[content_sha]
         seen[content_sha] += 1
-        cid = chunk_id(document_id, chunker_fp, content_sha, occurrence)
+        cid = chunk_id(
+            document_id, chunker_fp, content_sha, occurrence,
+            contexts[ordinal] if contexts is not None else None,
+        )  # fmt: skip
         element_ids = draft.element_ids or [
             e.id for span in spans for e in elements_in_span(leaf_elements, span)
         ]

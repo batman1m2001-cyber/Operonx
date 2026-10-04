@@ -20,26 +20,16 @@ from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
 
 from operonx_kb.model.ids import fingerprint
-from operonx_kb.ops._resources import catalog_of, resolve
+from operonx_kb.ops._resources import backend_settings, catalog_of, resolve
 
 __all__ = ["EmbedChunksOp", "embedder_fingerprint"]
-
-_SECRET_HINTS = ("key", "token", "secret", "password", "url", "header")
 
 
 def embedder_fingerprint(resource_key: str, backend: Any, template: str = "{text}") -> str:
     """``H(model, settings, template)`` of an embedding backend; credentials and endpoints
     excluded, so rotating a key does not re-embed the corpus. The default template adds
     nothing, so caches written before templates existed stay valid."""
-    config = getattr(backend, "config", None)
-    data: Dict[str, Any] = {}
-    if config is not None and hasattr(config, "model_dump"):
-        dump = config.model_dump(mode="json")
-        data = {
-            k: v
-            for k, v in dump.items()
-            if v is not None and not any(h in k.lower() for h in _SECRET_HINTS)
-        }
+    data: Dict[str, Any] = backend_settings(backend)
     if template != "{text}":
         data["template"] = template
     return fingerprint(f"{type(backend).__module__}.{type(backend).__qualname__}", "1", data)

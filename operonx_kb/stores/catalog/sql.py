@@ -33,7 +33,14 @@ from operonx_kb.model.document import (
     VersionChunk,
     utcnow,
 )
-from operonx_kb.stores.catalog.base import ActiveChunk, Catalog, CommitResult, PurgeResult
+from operonx_kb.model.tree import TreeNode
+from operonx_kb.stores.catalog.base import (
+    ActiveChunk,
+    CachedAnswer,
+    Catalog,
+    CommitResult,
+    PurgeResult,
+)
 
 __all__ = ["SqlCatalog", "Tx", "migrations"]
 
@@ -370,6 +377,7 @@ class SqlCatalog(Catalog):
         pages: Sequence[Page],
         chunks: Sequence[Chunk],
         occurrences: Sequence[VersionChunk],
+        nodes: Sequence[TreeNode] = (),
     ) -> CommitResult:
         with self._tx(write=True) as c:
             self._lock_document(c, document.id)
@@ -462,6 +470,12 @@ class SqlCatalog(Catalog):
                     [(version.id, o.chunk_id, o.ordinal, _j([list(s) for s in o.spans]), _j(o.element_ids), _j(o.pages))
                      for o in occurrences],
                 )  # fmt: skip
+                c.many(
+                    "INSERT INTO kb_tree_nodes (version_id, id, parent_id, path, ordinal, depth, title, span_start, "
+                    "span_end, pages, source, summary, summary_sha) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(version.id, n.id, n.parent_id, n.path, n.ordinal, n.depth, n.title, n.span[0], n.span[1],
+                      _j(n.pages), n.source, n.summary, n.summary_sha) for n in nodes],
+                )  # fmt: skip
             else:
                 c.run("UPDATE kb_versions SET status = 'committed' WHERE id = ?", (version.id,))
             if previous is not None:
@@ -539,7 +553,7 @@ class SqlCatalog(Catalog):
                 r["id"]
                 for r in c.rows("SELECT id FROM kb_chunks WHERE document_id = ?", (document_id,))
             ]
-            for table in ("kb_version_chunks", "kb_elements", "kb_pages"):
+            for table in ("kb_version_chunks", "kb_elements", "kb_pages", "kb_tree_nodes"):
                 c.many(f"DELETE FROM {table} WHERE version_id = ?", [(v,) for v in versions])
             c.run("DELETE FROM kb_chunks WHERE document_id = ?", (document_id,))
             c.run("DELETE FROM kb_versions WHERE document_id = ?", (document_id,))
@@ -665,6 +679,60 @@ class SqlCatalog(Catalog):
                 "ON CONFLICT (embedder_fp, text_sha) DO UPDATE SET dim = excluded.dim, vector = excluded.vector",
                 [(embedder_fp, sha, len(v), array("f", v).tobytes()) for sha, v in vectors.items()],
             )
+
+    def get_enrichments(
+        self, enricher_fp: str, input_shas: Iterable[str]
+    ) -> Dict[str, CachedAnswer]:
+        shas = list(dict.fromkeys(input_shas))
+        out: Dict[str, CachedAnswer] = {}
+        with self._tx() as c:
+            for start in range(0, len(shas), _BATCH):
+                part = shas[start : start + _BATCH]
+                for r in c.rows(
+                    "SELECT * FROM kb_enrichment_cache WHERE enricher_fp = ? "
+                    f"AND input_sha IN ({','.join('?' * len(part))})",
+                    [enricher_fp, *part],
+                ):
+                    out[r["input_sha"]] = CachedAnswer(
+                        value=json.loads(r["value"]), model=r["model"],
+                        prompt_tokens=r["prompt_tokens"], completion_tokens=r["completion_tokens"],
+                        cached_tokens=r["cached_tokens"], cost_usd=r["cost_usd"],
+                    )  # fmt: skip
+        return out
+
+    def put_enrichments(
+        self, enricher_fp: str, kind: str, answers: Dict[str, CachedAnswer]
+    ) -> None:
+        with self._tx(write=True) as c:
+            c.many(
+                "INSERT INTO kb_enrichment_cache (enricher_fp, input_sha, kind, value, model, prompt_tokens, "
+                "completion_tokens, cached_tokens, cost_usd, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (enricher_fp, input_sha) DO NOTHING",
+                [(enricher_fp, sha, kind, _j(a.value), a.model, a.prompt_tokens, a.completion_tokens,
+                  a.cached_tokens, a.cost_usd, _dt(utcnow())) for sha, a in answers.items()],
+            )  # fmt: skip
+
+    def tree_nodes(self, version_id: str) -> List[TreeNode]:
+        with self._tx() as c:
+            rows = c.rows("SELECT * FROM kb_tree_nodes WHERE version_id = ?", (version_id,))
+        nodes = [
+            TreeNode(
+                id=r["id"],
+                version_id=r["version_id"],
+                path=r["path"],
+                parent_id=r["parent_id"],
+                ordinal=r["ordinal"],
+                depth=r["depth"],
+                title=r["title"],
+                span=(r["span_start"], r["span_end"]),
+                pages=json.loads(r["pages"]),
+                source=r["source"],
+                summary=r["summary"],
+                summary_sha=r["summary_sha"],
+            )  # fmt: skip
+            for r in rows
+        ]
+        return sorted(nodes, key=lambda n: _path_key(n.path))
 
     def log_ingest(
         self,
