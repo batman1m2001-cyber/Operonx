@@ -41,7 +41,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-# Editable from the sibling checkout. The relative path is why this repo is
+# Editable from the sibling checkout; needs operonx main 10fe40a (#90,
+# child() redact) or later. The relative path is why this repo is
 # not worked on from git worktrees: ../Operon would not resolve there.
 operonx = { path = "../Operon", editable = true }
 
