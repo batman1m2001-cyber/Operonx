@@ -160,10 +160,13 @@ class KnowledgeBase:
         out = await engine.run(inputs=inputs)
         expected = [*required, *([output] if output is not None else [])]
         if "$errors" in out or any(name not in out for name in expected):
-            errors = out.get("$errors") or {kind: "the run produced no result"}
-            op, text = next(iter(errors.items()))
+            errors = out.get("$errors") or {kind: {"message": "the run produced no result"}}
+            # Records arrive in the order the ops failed: the first is the cause, the
+            # others are ops downstream of it that ran without its outputs.
+            op, record = next(iter(errors.items()))
+            text = record.get("message", "") if isinstance(record, dict) else str(record)
             raise error(
-                f"{kind} in {collection_id!r} failed in {op}: {_exception_text(str(text))}",
+                f"{kind} in {collection_id!r} failed in {op}: {_exception_text(text)}",
                 {"ops": sorted(errors)},
             )
         return out[output] if output is not None else out

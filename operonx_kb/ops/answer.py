@@ -78,9 +78,8 @@ def check_answer(
     passages: list,
     catalog: str,
     blobs: str,
-    answer: Optional[str] = None,
+    answer: str,
     citations: Optional[list] = None,
-    error: Optional[str] = None,
     usage: Optional[dict] = None,
 ) -> dict:
     """Verify every citation against its source and resolve the verified ones to
@@ -90,13 +89,9 @@ def check_answer(
         passages: The context's sources (``build_context``'s ``sources``; the input
             is not called ``sources``, a reserved operonx op keyword).
 
-    Raises:
-        ValueError: The model's reply did not parse as ``{answer, citations}``.
+    A reply that does not parse never reaches this op: ``LLMOp`` fails with a
+    ``ParserError`` (operonx's ``on_failure="raise"``), and that is the error a run reports.
     """
-    if error or answer is None:
-        raise ValueError(
-            f"the model's reply is not an answer with citations: {error or 'no answer field'}"
-        )
     cat = catalog_of(catalog)
     versions = list(dict.fromkeys(s["version_id"] for s in passages))
     canonicals = {v: _canonical(cat, blobs, v) for v in versions}

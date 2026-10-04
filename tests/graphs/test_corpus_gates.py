@@ -127,11 +127,9 @@ def test_one_paragraph_edit_in_a_100_page_pdf(kb, tmp_path):
 
 #: Labels that do not resolve because the parse garbles their sentence; each is a defect
 #: of the pipeline, not of the label. When one is fixed this test fails: remove it here.
-KNOWN_UNRESOLVED = {
-    # Two-column PDF: the heuristic layout reads a right-column paragraph line by line
-    # interleaved with the left column's table rows (operonx_kb/pdf/layout.py).
-    "cvi-185-taxi",
-}
+#: (``cvi-185-taxi`` was one until 92ed18e: the two-column doc_185.pdf read a paragraph
+#: interleaved with the other column's table rows.)
+KNOWN_UNRESOLVED: set = set()
 
 
 def test_every_vietnamese_label_resolves_to_one_sentence_of_its_document(kb, tmp_path):
@@ -165,3 +163,5 @@ def test_every_vietnamese_label_resolves_to_one_sentence_of_its_document(kb, tmp
         formats.add(case["expected"]["relevant"][0]["doc_key"].rsplit(".", 1)[1])
     assert len(cases) == 120 and formats == {"md", "html", "txt", "docx", "pdf"}
     assert unresolved == KNOWN_UNRESOLVED
+    resolved = {c["id"] for c in cases} - unresolved
+    assert "cvi-185-taxi" in resolved  # regression: the two-column interleave of doc_185.pdf

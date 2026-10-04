@@ -86,9 +86,13 @@ def test_a_fabricated_citation_is_dropped_and_its_sentence_flagged(loaded, llm):
 
 
 def test_a_reply_that_does_not_parse_fails_loudly(loaded, llm):
+    """The model's own parse failure is what the error names, not a step after it."""
     llm.script = lambda messages: "I think the answer is twelve."
-    with pytest.raises(QueryError, match="not an answer with citations"):
+    with pytest.raises(QueryError) as caught:
         run(loaded.ask("docs", "anything", "answerer", k=2))
+    message = str(caught.value)
+    assert "failed in answer.model: ParserError: Parse error (json)" in message
+    assert "{'type'" not in message  # the record is read, not printed
 
 
 @pytest.mark.skipif(not HAS_PDF, reason="needs the pdf extra")

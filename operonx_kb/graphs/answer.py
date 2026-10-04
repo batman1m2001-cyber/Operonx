@@ -63,7 +63,6 @@ def answer_graph(
             blobs=blobs,
             answer=model["answer"],
             citations=model["citations"],
-            error=model["error"],
             usage=model["usage"],
         )
         START >> found >> context >> model >> checked >> END
