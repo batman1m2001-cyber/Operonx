@@ -59,7 +59,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
-import operator
 import time
 import uuid
 from contextlib import nullcontext
@@ -396,9 +395,6 @@ class _Run:
         )
         self.hooks = agent.hooks if agent.hooks else None
         self.redact = RunRedaction(agent.redact) if agent.redact is not None else None
-        # What the trace records of the conversation: the messages, their
-        # redacted copies, and how many copies differ (see _trace_view).
-        self.traced: Tuple[List[dict], List[dict], int] = ([], [], 0)
         # The interruptions the parked turn waits on, by id.
         self.waiting: Dict[str, Interruption] = {}
         if state.pending is not None:
@@ -703,11 +699,6 @@ class _Run:
             request = await hooks.model_request(self.ctx, ModelRequest(convo, tools or None))
             convo, tools = request.messages, request.tools
         messages = assemble(self.system, convo)
-        traced = None
-        if self.redact is not None:
-            view = self._trace_view(convo)
-            if view is not convo:  # something was redacted: record the copy
-                traced = assemble(self.system, view)
         reply: Optional[ModelResponse] = None
         async for piece in agent.model.stream(
             messages,
@@ -716,7 +707,6 @@ class _Run:
             response_format=response_format,
             settings=agent.settings,
             reasoning=self.emit is not None,
-            trace_messages=traced,
             redact=self.redact,
         ):
             if isinstance(piece, ModelResponse):
@@ -734,29 +724,6 @@ class _Run:
             reply = await hooks.model_response(self.ctx, reply)
         return reply
 
-    def _trace_view(self, convo: List[dict]) -> List[dict]:
-        """``convo`` as the trace records it, each message redacted once;
-        ``convo`` itself when no message needed it (the common case, which
-        then costs no second list).
-
-        A turn's conversation is the last one's plus what the turn added
-        (the same message objects), so the redacted copy is extended, not
-        rebuilt: checking the shared prefix is one C-level pass. Anything
-        else (compaction, a hook's replacement) starts it over.
-        """
-        source, view, changed = self.traced
-        n = len(source)
-        if n > len(convo) or not all(map(operator.is_, source, convo)):
-            source, view, changed, n = [], [], 0, 0
-        scrub = self.redact.scrub_message
-        for message in convo[n:]:
-            shown = scrub(message)
-            source.append(message)
-            view.append(shown)
-            changed += shown is not message
-        self.traced = (source, view, changed)
-        return view if changed else convo
-
     async def _compact(self, convo: List[dict]) -> Optional[Tuple[dict, List[dict]]]:
         policy = self.agent.context
         older, kept = compaction.plan(convo, policy.keep_recent)
@@ -765,6 +732,7 @@ class _Run:
         kept = compaction.clear_tool_results(kept, policy.clear_tool_results_after)
         tokens = 0
         async with child("compact", inputs={"messages": len(older)}, op_type="compaction") as rec:
+            rec.redact = self.redact
             if policy.summarizer is None:
                 summary = compaction.dropped_note(len(older))
             else:
@@ -776,8 +744,7 @@ class _Run:
                     return None
                 self.meter.add(reply.usage)
                 summary, tokens = reply.content, reply.usage.output_tokens
-            shown_summary = summary if self.redact is None else self.redact.redactor.scrub(summary)
-            rec.outputs = {"summary": shown_summary, "kept": len(kept)}
+            rec.outputs = {"summary": summary, "kept": len(kept)}
         self._emit(Compacted(dropped=len(older), summary_tokens=tokens))
         return compaction.summary_item(summary, kept), [compaction.summary_message(summary), *kept]
 

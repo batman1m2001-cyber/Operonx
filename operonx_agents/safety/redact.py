@@ -228,6 +228,10 @@ class Redactor:
             return [self.scrub_data(item, key=key) for item in value]
         return value
 
+    def __call__(self, values: Any) -> Any:
+        """``scrub_data``: a redactor is a record's ``redact`` as it is."""
+        return self.scrub_data(values)
+
     def clean(self, value: Any) -> bool:
         """Whether ``value`` (any data) certainly holds nothing to redact:
         its text, keys included, has none of the default patterns' triggers.
@@ -258,88 +262,69 @@ def _replacer(replacement: str) -> Callable[["re.Match[str]"], str]:
 
 
 class RunRedaction:
-    """One run's trace redaction: each message and each call's arguments is
-    scrubbed once, however many records show it — a tool's message is in
-    its own record and in every later model call's, its arguments in its
-    record and in the assistant message that made the call. Keyed by
-    identity (the conversation reuses the same objects turn after turn);
-    entries keep their object alive, as the run's state does anyway.
+    """One run's trace redaction, as its records' ``redact``.
 
-    The common case — nothing to redact — is one trigger search per text
-    and returns the object itself (``scripts/bench_overhead.py``: a turn's
-    redaction is its largest cost after the model call's bookkeeping).
+    The runner records its tool and model calls as they are, and sets this
+    on each record: operonx applies it where the trace leaves the process
+    (``child()``'s ``redact``: the run stores, the Local and Langfuse
+    consumers), so the run's own loop scrubs nothing. On the loop it cost
+    0.03-0.05 ms per turn of a 0.3-0.45 ms budget (``bench_overhead``).
+
+    A conversation repeats its messages in every later model call's record,
+    so each message, and each call's arguments, is scrubbed once per run:
+    memoised by identity (the run reuses the same objects turn after turn);
+    entries keep their object alive, as the trace does anyway.
     """
 
-    __slots__ = ("redactor", "_memo", "_gate")
+    __slots__ = ("redactor", "_memo")
 
     def __init__(self, redactor: Redactor) -> None:
         self.redactor = redactor
         self._memo: Dict[int, Tuple[Any, Any]] = {}
-        self._gate = redactor._gate
 
-    def scrub_data(self, value: Any) -> Any:
-        """A call's arguments (see :meth:`Redactor.scrub_data`)."""
+    def __call__(self, values: Dict[str, Any]) -> Dict[str, Any]:
+        """A record's inputs or outputs as the trace exports them."""
+        if not isinstance(values, dict):
+            return self.redactor.scrub_data(values)
+        return {key: self._value(key, value) for key, value in values.items()}
+
+    def _value(self, key: str, value: Any) -> Any:
+        if _is_message(value):
+            return self.scrub_message(value)
+        if isinstance(value, list) and value and all(_is_message(m) for m in value):
+            return [self.scrub_message(m) for m in value]
+        if isinstance(value, (dict, list)):
+            return self._once(value, self.redactor.scrub_data)
+        return self.redactor.scrub_data(value, key=str(key))
+
+    def _once(self, value: Any, scrub: Callable[[Any], Any]) -> Any:
         hit = self._memo.get(id(value))
-        if hit is not None and hit[0] is value:
-            return hit[1]
-        gate = self._gate
-        if gate is not None and gate.search(repr(value).lower()) is None:
-            out = value
-        else:
-            out = self.redactor.scrub_data(value)
-        self._memo[id(value)] = (value, out)
-        return out
+        if hit is None or hit[0] is not value:
+            hit = self._memo[id(value)] = (value, scrub(value))
+        return hit[1]
 
     def scrub_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """A conversation message (see :meth:`Redactor.scrub_turn_message`),
-        its tool calls' arguments through :meth:`scrub_data`."""
-        hit = self._memo.get(id(message))
-        if hit is not None and hit[0] is message:
-            return hit[1]
-        content = message.get("content")
+        """A conversation message: its content, and its tool calls'
+        arguments (each memoised: the tool's own record shows them too)."""
+        return self._once(message, self._message)
+
+    def _message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         calls = message.get("tool_calls")
-        gate = self._gate
-        if not calls and type(content) is str and gate is not None:
-            if gate.search(content.lower()) is None:
-                out = message
-            else:
-                out = {**message, "content": self.redactor.scrub(content)}
-        elif calls and gate is not None and self._calls_clean(content, calls):
-            out = message
-        elif calls:
-            out = self._with_calls(message, content, calls)
-        else:
-            out = self.redactor.scrub_turn_message(message)
-        self._memo[id(message)] = (message, out)
-        return out
-
-    def _calls_clean(self, content: Any, calls: List[Any]) -> bool:
-        """One search over the message's text and every call's arguments
-        (not its ids and names); when clean, the calls' own records find
-        their arguments here."""
-        args = [c.get("args") for c in calls if isinstance(c, dict)]
-        if len(args) != len(calls) or (content and type(content) is not str):
-            return False
-        if self._gate.search(f"{content or ''}\n{args!r}".lower()) is not None:
-            return False
-        memo = self._memo
-        for value in args:
-            memo[id(value)] = (value, value)
-        return True
-
-    def _with_calls(self, message: Dict[str, Any], content: Any, calls: List[Any]) -> Any:
+        if not calls:
+            return self.redactor.scrub_turn_message(message)
+        content = message.get("content")
         scrubbed = self.redactor.scrub_data(content) if content else content
         shown = [
-            {**c, "args": args}
-            if isinstance(c, dict)
-            and "args" in c
-            and (args := self.scrub_data(c["args"])) is not c["args"]
-            else c
+            {**c, "args": self._once(c["args"], self.redactor.scrub_data)}
+            if isinstance(c, dict) and "args" in c
+            else self.redactor.scrub_data(c)
             for c in calls
         ]
-        if scrubbed is content and all(map(operator.is_, shown, calls)):
-            return message
         return {**message, "content": scrubbed, "tool_calls": shown}
+
+
+def _is_message(value: Any) -> bool:
+    return isinstance(value, dict) and "role" in value
 
 
 class RedactToolOutput(Hooks):

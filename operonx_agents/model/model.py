@@ -210,11 +210,10 @@ class Model:
         tool_choice: Any = None,
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
-        trace_messages: Optional[List[Dict[str, Any]]] = None,
         redact: Any = None,
     ) -> ModelResponse:
         """One answer, through the fallback chain, within the deadline.
-        ``trace_messages`` and ``redact``: as for :meth:`stream`.
+        ``redact``: as for :meth:`stream`.
 
         Raises:
             ModelTimeout: the deadline passed.
@@ -228,7 +227,6 @@ class Model:
                 tool_choice=tool_choice,
                 response_format=response_format,
                 settings=settings,
-                trace_messages=trace_messages,
                 redact=redact,
             )
 
@@ -246,7 +244,6 @@ class Model:
         tool_choice: Any = None,
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
-        trace_messages: Optional[List[Dict[str, Any]]] = None,
         redact: Any = None,
     ) -> ModelResponse:
         """:meth:`request` without the deadline — for code already inside
@@ -255,16 +252,17 @@ class Model:
         attempts: List[tuple] = []
         spent = Usage()
         refused = 0
-        recorded = _recorded(messages, trace_messages, redact)
+        recorded = {"messages": messages}
         for resource in self.resources:
             llm = self.llm(resource)
             try:
                 async with child("model", inputs=recorded, op_type="llm") as rec:
+                    rec.redact = redact  # set first: a failed call is exported too
                     completion, used = await _with_transport_retry(
                         llm, _per_resource(llm, params), messages
                     )
                     reply = _response(completion, resource, spent + used)
-                    _record(rec, llm, resource, reply, used, redact)
+                    _record(rec, llm, resource, reply, used)
             except Exception as exc:  # noqa: BLE001 - the next resource decides
                 attempts.append((resource, f"{type(exc).__name__}: {exc}"))
                 LOGGER.warning("model %s failed (%s); %s", resource, exc, _next(self, resource))
@@ -293,7 +291,6 @@ class Model:
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
         reasoning: bool = False,
-        trace_messages: Optional[List[Dict[str, Any]]] = None,
         redact: Any = None,
     ) -> AsyncIterator[Union[str, Reasoning, ModelResponse]]:
         """Text deltas (``str``) as they arrive, then the whole
@@ -304,19 +301,17 @@ class Model:
         gateway streams it (``reasoning_content``), as :class:`Reasoning`
         pieces; it never enters the answer's text.
 
-        What the trace records: ``trace_messages`` as the request's messages
-        when given (the runner's redacted view of the conversation), and
-        ``redact``'s ``scrub_message`` applied to the messages otherwise and
-        to the answer (the runner passes its
-        :class:`~operonx_agents.safety.redact.RunRedaction`). The model is
-        sent, and answers, the real text either way.
+        ``redact`` (``dict -> dict``) scrubs each call's record where the
+        trace leaves the process (operonx ``child()``'s ``redact``: the run
+        stores and consumers apply it, not this loop); the model is sent,
+        and answers, the real text.
 
         Consume it in the task that started it, and do not await other
         work between pieces: the deadline cancels the consuming task, and
         only a cancel that lands inside this generator becomes
         :class:`ModelTimeout`.
         """
-        recorded = _recorded(messages, trace_messages, redact)
+        recorded = {"messages": messages}
         params = self._request_params(settings, tools, tool_choice, response_format)
         attempts: List[tuple] = []
         async with self.bounded():
@@ -326,6 +321,7 @@ class Model:
                 emitted = False
                 try:
                     async with child("model", inputs=recorded, op_type="llm", current=False) as rec:
+                        rec.redact = redact
                         async for chunk in llm.stream(
                             messages=messages, **_per_resource(llm, params)
                         ):
@@ -336,7 +332,7 @@ class Model:
                                 emitted = True
                                 yield delta
                         reply = acc.response(resource, llm)
-                        _record(rec, llm, resource, reply, reply.usage, redact)
+                        _record(rec, llm, resource, reply, reply.usage)
                 except Exception as exc:  # noqa: BLE001
                     if emitted:
                         raise  # a replay would contradict what the consumer has
@@ -478,24 +474,10 @@ def _dump(value: Any) -> Any:
     return value.model_dump() if hasattr(value, "model_dump") else value
 
 
-def _recorded(messages: List[Dict[str, Any]], shown: Optional[list], redact: Any) -> dict:
-    if shown is None and redact is not None:
-        shown = [redact.scrub_message(m) for m in messages]
-    return {"messages": messages if shown is None else shown}
-
-
-def _record(
-    rec: Any, llm: Any, resource: str, reply: ModelResponse, used: Usage, redact: Any = None
-) -> None:
-    content, calls = reply.content, reply.tool_calls
-    if redact is not None:
-        answer = redact.scrub_message(
-            {"role": "assistant", "content": content, "tool_calls": calls}
-        )
-        content, calls = answer["content"], answer.get("tool_calls", calls)
+def _record(rec: Any, llm: Any, resource: str, reply: ModelResponse, used: Usage) -> None:
     rec.outputs = {
-        "content": content,
-        "tool_calls": calls,
+        "content": reply.content,
+        "tool_calls": reply.tool_calls,
         "finish_reason": reply.finish_reason,
         "usage": used.to_dict(),
         # The key the run store counts LLM calls by.

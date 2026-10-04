@@ -206,7 +206,7 @@ async def call_api(url: str, token: str) -> str:
     return "200 OK"
 
 
-def traced(agent):
+def traced(agent, trace=None):
     @op
     async def chat(question: str) -> dict:
         res = await Runner.run(agent, question, store=InMemoryStateStore())
@@ -217,23 +217,47 @@ def traced(agent):
         c = chat(question=question)
         START >> c >> END
 
-    return Operon(flow, params={"question": None})
+    return Operon(flow, params={"question": None}, trace=trace)
 
 
 class TestWhereItApplies:
+    """Records keep their values in memory and are scrubbed where the trace
+    is exported (operonx ``child()``'s ``redact``: ``OpExecution.exported``,
+    which every run store and consumer writes through)."""
+
+    async def test_the_run_scrubs_nothing_in_memory(self, hub):
+        agent, _ = make(hub, asks(("read_env", {})), says("done"), tools=[read_env])
+        handle = traced(agent).start({"question": "go"})
+        await handle.result()
+        tool_record = next(n for n in handle.trace.nodes if n.op_name == "read_env")
+        assert SECRET in tool_record.outputs["tool_message"]["content"]
+        assert SECRET not in json.dumps(tool_record.exported())
+
+    async def test_a_run_store_holds_no_secret(self, hub, tmp_path):
+        from operonx.telemetry.runs.sqlite import SqliteRunStore
+
+        agent, _ = make(hub, asks(("read_env", {})), says(f"it is {SECRET}"), tools=[read_env])
+        store = SqliteRunStore(path=tmp_path / "runs.sqlite")
+        handle = traced(agent, trace=store).start({"question": "go"}, trace_id="redact-a4")
+        await handle.collect()
+        rows = [r for r in store.get_run("redact-a4").nodes if r["op_name"] != "c"]
+        assert sorted(r["op_name"] for r in rows) == ["model", "model", "read_env", "turn", "turn"]
+        assert SECRET not in json.dumps(rows, default=str)
+        assert "OPENAI_API_KEY" in json.dumps(rows), "the setting's name is not the secret"
+
     async def test_traces_are_scrubbed_by_default_and_the_model_reads_the_real_output(self, hub):
         agent, llm = make(hub, asks(("read_env", {})), says("done"), tools=[read_env])
         handle = traced(agent).start({"question": f"my key is {SECRET}"})
         assert (await handle.result())["answer"] == "done"
         mine = [n for n in handle.trace.nodes if n.op_name != "c"]  # `c` is the caller's op
         assert sorted(n.op_name for n in mine) == ["model", "model", "read_env", "turn", "turn"]
-        dumped = json.dumps([(n.inputs, n.outputs) for n in mine], default=str)
+        dumped = json.dumps([n.exported() for n in mine], default=str)
         assert SECRET not in dumped, "no record of the agent's holds the key"
         assert "OPENAI_API_KEY" in dumped, "the setting's name is not the secret"
         tool_record = next(n for n in handle.trace.nodes if n.op_name == "read_env")
-        assert "[redacted:" in tool_record.outputs["tool_message"]["content"]
+        assert "[redacted:" in tool_record.exported()[1]["tool_message"]["content"]
         model_record = [n for n in handle.trace.nodes if n.op_name == "model"][1]
-        assert "[redacted:" in model_record.inputs["messages"][-1]["content"]
+        assert "[redacted:" in model_record.exported()[0]["messages"][-1]["content"]
         assert SECRET in llm.requests[1]["messages"][-1]["content"], "the model is untouched"
 
     async def test_redact_none_records_as_is(self, hub):
@@ -241,7 +265,7 @@ class TestWhereItApplies:
         handle = traced(agent).start({"question": "go"})
         await handle.result()
         tool_record = next(n for n in handle.trace.nodes if n.op_name == "read_env")
-        assert SECRET in tool_record.outputs["tool_message"]["content"]
+        assert SECRET in tool_record.exported()[1]["tool_message"]["content"]
 
     async def test_an_approval_shows_redacted_args_and_the_tool_gets_the_real_ones(self, hub):
         SEEN.clear()
@@ -299,7 +323,7 @@ class TestWhereItApplies:
         assert summarizer.calls == 1 and SECRET in summarizer.requests[0]["messages"][0]["content"]
         mine = [n for n in handle.trace.nodes if n.op_name != "c"]
         assert "compact" in [n.op_name for n in mine]
-        dumped = json.dumps([(n.inputs, n.outputs) for n in mine], default=str)
+        dumped = json.dumps([n.exported() for n in mine], default=str)
         assert SECRET not in dumped
 
     async def test_a_model_repeating_a_secret_is_scrubbed_in_its_record(self, hub):
@@ -308,6 +332,8 @@ class TestWhereItApplies:
         handle = traced(agent).start({"question": "go"})
         assert (await handle.result())["answer"] == f"saved {SECRET}", "the run is untouched"
         models = [n for n in handle.trace.nodes if n.op_name == "model"]
-        assert SECRET not in json.dumps([n.outputs for n in models], default=str)
-        assert "[redacted:" in models[1].outputs["content"]
-        assert models[0].outputs["tool_calls"][0]["args"]["text"].startswith("token: [redacted")
+        assert SECRET not in json.dumps([n.exported()[1] for n in models], default=str)
+        assert "[redacted:" in models[1].exported()[1]["content"]
+        assert (
+            models[0].exported()[1]["tool_calls"][0]["args"]["text"].startswith("token: [redacted")
+        )

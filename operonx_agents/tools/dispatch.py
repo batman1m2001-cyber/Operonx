@@ -22,8 +22,8 @@ messages come back in emitted order.
 
 Each call is recorded as a child execution of the op running dispatch
 (``operonx.child``, ``op_type="tool"``) with its arguments, its message
-and the GenAI attributes — scrubbed by ``redact`` when one is given;
-outside a traced run that costs nothing.
+and the GenAI attributes; ``redact`` scrubs them where the trace is
+exported, not here. Outside a traced run that costs nothing.
 """
 
 from __future__ import annotations
@@ -136,8 +136,10 @@ async def dispatch(
             such a call is refused (fail closed): a gate that opens when
             nobody can answer is decoration.
         hooks: ``before_tool`` / ``after_tool`` hooks (a :class:`HookSet`).
-        redact: A :class:`~operonx_agents.Redactor` for what the trace
-            records of each call; the tool and the model are untouched.
+        redact: ``dict -> dict`` (a :class:`~operonx_agents.Redactor`)
+            for what the trace exports of each call; operonx applies it
+            where the trace leaves the process. The tool and the model are
+            untouched.
         on_start: Told when a call's tool is about to run (the runner's
             ``ToolCallStarted``).
         on_message: Awaited with each call's message as soon as it is
@@ -239,8 +241,8 @@ def _sequential(t: Optional[Tool]) -> bool:
 async def _one(call, toolset, ctx, policy, gate, hooks, redact, on_start) -> Union[dict, Paused]:
     call_id, name, raw = call["id"], call["name"], call["args"]
     found = toolset.get(name)
-    shown = redact.scrub_data(raw) if redact is not None else raw
-    async with child(_label(name), inputs={"args": shown}, op_type="tool") as rec:
+    async with child(_label(name), inputs={"args": raw}, op_type="tool") as rec:
+        rec.redact = redact
         rec.attrs.update(
             {
                 "gen_ai.operation.name": "execute_tool",
@@ -251,8 +253,6 @@ async def _one(call, toolset, ctx, policy, gate, hooks, redact, on_start) -> Uni
         outcome = await _answer(call, found, toolset, ctx, policy, gate, hooks, on_start)
         if isinstance(outcome, Paused):
             rec.outputs = {"interrupted": [i.id for i in outcome.interruptions]}
-        elif redact is not None:
-            rec.outputs = {"tool_message": redact.scrub_message(outcome)}
         else:
             rec.outputs = {"tool_message": outcome}
         return outcome
