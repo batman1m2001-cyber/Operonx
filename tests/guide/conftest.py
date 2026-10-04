@@ -19,18 +19,18 @@ import pytest
 
 
 def _judge(messages: list):
-    """A judge prompt (it asks for a ``<verdict>``): a pairwise one is a
+    """A judge prompt (it asks for a JSON ``verdict``): a pairwise one is a
     tie; a binary one passes when the output under ``Output:`` says
     ``refund``."""
     system = " ".join(str(m.get("content") or "") for m in messages if m.get("role") == "system")
-    if "<verdict>" not in system:
+    if '"verdict"' not in system:
         return None
     if "A|B|TIE" in system:
-        return "<reason>both answers say the same</reason><verdict>TIE</verdict>"
+        return json.dumps({"reason": "both answers say the same", "verdict": "TIE"})
     user = " ".join(str(m.get("content") or "") for m in messages if m.get("role") == "user")
     output = user.split("Output:", 1)[-1].split("Expected", 1)[0]
     verdict = "PASS" if "refund" in output else "FAIL"
-    return f"<reason>the output says {output.strip()[:40]}</reason><verdict>{verdict}</verdict>"
+    return json.dumps({"reason": f"the output says {output.strip()[:40]}", "verdict": verdict})
 
 
 def _answer(messages: list) -> str:

@@ -419,10 +419,10 @@ def _judge_project(project, base_url, evaluators='["checks:label", "judges:on_to
 def _says(body):
     msgs = body.get("messages") or []
     system = " ".join(str(m.get("content") or "") for m in msgs if m.get("role") == "system")
-    if "<verdict>" not in system:
+    if '"verdict"' not in system:
         return None
     verdict = "A" if "A|B|TIE" in system else "PASS"
-    return f"<reason>fine</reason><verdict>{verdict}</verdict>"
+    return json.dumps({"reason": "fine", "verdict": verdict})
 
 
 def test_run_no_cache_asks_the_judge_again(project):

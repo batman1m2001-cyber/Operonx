@@ -572,7 +572,13 @@ def _cmd_align(project: _Project, args: argparse.Namespace) -> int:
             print(f"  note: {s['note']}")
         skipped = {
             k: s[k]
-            for k in ("unmatched_judge", "unmatched_human", "human_ties", "unusable_human")
+            for k in (
+                "unmatched_judge",
+                "unmatched_human",
+                "human_ties",
+                "unusable_human",
+                "judge_errors",
+            )
             if s[k]
         }
         if skipped:

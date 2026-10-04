@@ -15,7 +15,7 @@ one trace away and the system's cost never holds the judge's.
     ev = Eval("replies", graph=bot, dataset="dataset:replies", evaluators=[polite],
               scores="score_store:team")                   # the store is also the cache
 
-    render → LLMOp (reason, then verdict) → decide
+    render → LLMOp (JSON: reason, then verdict) → decide
 
 A judge is **versioned** — rubric, examples, labels, temperature, the
 model its ``llm:`` resource resolves to and the graph's own code — and,
@@ -285,7 +285,8 @@ async def run_judge(
     if key is not None:
         hit = await asyncio.to_thread(cache.cache_get, key)
         if hit is not None:
-            return {**hit, "cached": True, "cost_usd": 0.0}
+            # spend, not value: a hit costs nothing and used no tokens
+            return {**hit, "cached": True, "cost_usd": 0.0, "tokens_in": 0, "tokens_out": 0}
 
     engine = judging.engine(ev.graph) if judging is not None else ev._untraced()
     gate = judging.limit() if judging is not None else contextlib.nullcontext()
@@ -318,9 +319,8 @@ async def run_judge(
 # ── judge(): one criterion, graded by a model ────────────────────────────
 
 _FORMAT = (
-    "Think about the criterion first, then answer in exactly this form:\n"
-    "<reason>one or two sentences on why</reason>\n"
-    "<verdict>{labels}</verdict>\n"
+    "Think about the criterion first, then answer with one JSON object and nothing else:\n"
+    '{{"reason": "one or two sentences on why", "verdict": "{labels}"}}\n'
     "The verdict is exactly one of: {listed}."
 )
 
@@ -332,11 +332,16 @@ def _examples_text(examples: Sequence[Mapping[str, Any]]) -> str:
         part.append(f"Output:\n{_show(ex.get('output'))}")
         if ex.get("expected") is not None:
             part.append(f"Expected:\n{_show(ex.get('expected'))}")
-        if ex.get("reason"):
-            part.append(f"<reason>{ex['reason']}</reason>")
-        part.append(f"<verdict>{ex['verdict']}</verdict>")
+        part.append(_answer(ex))
         out.append("\n".join(part))
     return "\n\n".join(out)
+
+
+def _answer(ex: Mapping[str, Any]) -> str:
+    """A graded example's answer, as the model is asked to give its own."""
+    return json.dumps(
+        {"reason": str(ex.get("reason") or ""), "verdict": str(ex["verdict"])}, ensure_ascii=False
+    )
 
 
 @op(bound="sync")
@@ -501,7 +506,7 @@ class Judge(GraphEvaluator):
                 resource=self.resource,
                 messages=prompt["messages"],
                 fields=["reason: str", "verdict: str"],
-                parser="xml",
+                parser="json",
                 validators={"verdict": list(self.labels)},
                 max_retries=self.max_retries,
                 on_failure="error",
@@ -534,7 +539,17 @@ class Judge(GraphEvaluator):
                 "temperature": self.temperature,
                 "model": config if config is not None else {"resource": self.resource},
                 # the graph is a pure function of this code and the values above
-                "graph": canonical([type(self)._build, judge_prompt, decide, self._extra_code()]),
+                "graph": canonical(
+                    [
+                        type(self)._build,
+                        judge_prompt,
+                        decide,
+                        _FORMAT,
+                        _examples_text,
+                        _answer,
+                        self._extra_code(),
+                    ]
+                ),
             }
         )
 
@@ -726,9 +741,7 @@ def _pair_examples_text(examples: Sequence[Mapping[str, Any]]) -> str:
             f"[Answer A]\n{_show(ex.get('a'))}",
             f"[Answer B]\n{_show(ex.get('b'))}",
         ]
-        if ex.get("reason"):
-            part.append(f"<reason>{ex['reason']}</reason>")
-        part.append(f"<verdict>{ex['verdict']}</verdict>")
+        part.append(_answer(ex))
         out.append("\n".join(part))
     return "\n\n".join(out)
 
@@ -838,7 +851,7 @@ class PairwiseJudge(Judge):
                 resource=self.resource,
                 messages=prompt["messages"],
                 fields=["reason: str", "verdict: str"],
-                parser="xml",
+                parser="json",
                 validators={"verdict": list(PAIR_LABELS)},
                 max_retries=self.max_retries,
                 on_failure="error",

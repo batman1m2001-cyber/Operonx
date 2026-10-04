@@ -108,6 +108,8 @@ class Alignment:
     unmatched_human: int = 0
     human_ties: int = 0
     unusable_human: int = 0
+    #: Judge scores that are no verdict (the judge errored: no answer, or one that did not parse).
+    judge_errors: int = 0
     disagreements: List[Dict[str, Any]] = field(default_factory=list)
     stats: Dict[str, Any] = field(default_factory=dict)
 
@@ -160,6 +162,7 @@ class Alignment:
             "unmatched_human": self.unmatched_human,
             "human_ties": self.human_ties,
             "unusable_human": self.unusable_human,
+            "judge_errors": self.judge_errors,
         }
 
 
@@ -216,7 +219,8 @@ def align(
     targets. *version* picks the judge version (default its newest, by
     when it scored); *experiment* only that experiment's judge scores.
     Several people on one target: the majority; a tie is left out and
-    counted, as are human labels that say neither PASS nor FAIL."""
+    counted, as are human labels that say neither PASS nor FAIL, and judge
+    scores that are no verdict (the judge errored)."""
     human = human or judge
     judged = _all(store, ScoreFilter(score_name=judge, source="judge"))
     judged = [s for s in judged if s.target != "pair" and s.passed is not None]
@@ -228,6 +232,8 @@ def align(
             newest[s.evaluator_version] = max(newest.get(s.evaluator_version, 0.0), s.created_at)
         version = max(newest, key=lambda v: newest[v])
     judged = [s for s in judged if s.evaluator_version == version]
+    errored = [s for s in judged if (s.metadata or {}).get("error")]
+    judged = [s for s in judged if not (s.metadata or {}).get("error")]
 
     labels: Dict[Tuple[Any, ...], Dict[str, Optional[bool]]] = defaultdict(dict)
     targets: Dict[Tuple[Any, ...], Tuple[Any, ...]] = {}  # every key → its target's first key
@@ -244,7 +250,9 @@ def align(
             targets.setdefault(k, target)
         labels[target][str(s.author)] = said
 
-    out = Alignment(judge, str(version or ""), human, unusable_human=unusable)
+    out = Alignment(
+        judge, str(version or ""), human, unusable_human=unusable, judge_errors=len(errored)
+    )
     seen = set()
     for s in judged:
         hit = next((targets[k] for k in _keys(s) if k in targets), None)

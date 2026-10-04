@@ -52,15 +52,15 @@ def judge_answers(rule):
 
     def answer(body):
         system, user = _messages(body)
-        if "<verdict>" not in system:
+        if '"verdict"' not in system:
             return None
-        return f"<reason>read the output</reason>\n<verdict>{rule(system, user)}</verdict>"
+        return json.dumps({"reason": "read the output", "verdict": rule(system, user)})
 
     return answer
 
 
 def _judge_requests(server):
-    return [b for b in server.requests if "<verdict>" in _messages(b)[0]]
+    return [b for b in server.requests if '"verdict"' in _messages(b)[0]]
 
 
 @pytest.fixture
@@ -177,7 +177,7 @@ def test_the_prompt_is_binary_and_one_criterion(tmp_path, hub_reset):
 
     system, user = _messages(_judge_requests(server)[0])
     assert "The reply answers what the user asked." in system
-    assert "PASS" in system and "FAIL" in system and "<reason>" in system
+    assert "PASS" in system and "FAIL" in system and '"reason"' in system
     assert "where is order 42" in user and "Your order 42 has shipped." in user
 
 
@@ -260,7 +260,7 @@ def test_a_cache_hit_makes_no_call(tmp_path, hub_reset):
                 ca["reason"],
             )
             assert cb["cached"] is True and "cached" not in ca
-            assert cb["cost_usd"] == 0.0  # spend, not value
+            assert cb["cost_usd"] == 0.0 and cb["tokens_in"] == 0  # spend, not value
             assert cb["judge_trace_id"] == ca["judge_trace_id"]  # the run that decided it
         j = second.meta["eval"]["judges"]["judge:on_topic"]
         assert (j["calls"], j["cached"]) == (0, 2)
@@ -369,7 +369,7 @@ def test_judge_concurrency_bounds_the_calls_in_flight(tmp_path, hub_reset):
         time.sleep(0.15)
         with lock:
             now[0] -= 1
-        return "<reason>ok</reason><verdict>PASS</verdict>"
+        return json.dumps({"reason": "ok", "verdict": "PASS"})
 
     rows = [{"id": f"c{i}", "input": f"order {i}"} for i in range(6)]
     with fake_llm(answer) as server:

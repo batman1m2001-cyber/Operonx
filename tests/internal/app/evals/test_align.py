@@ -352,3 +352,27 @@ def test_without_a_score_store_there_is_no_record_to_read(tmp_path):
     run = _eval(tmp_path, None).run_sync()
     (w,) = _warnings(run)
     assert "no score store" in w
+
+
+def test_a_judge_that_errored_is_not_counted_as_fail(tmp_path):
+    """Found measuring real data: a judge answer that did not parse is a
+    failed check (passed False), but it is no FAIL verdict — counting it
+    would charge the judge with a disagreement it never made."""
+    from operonx.app.evals.publish import check_score
+
+    store = _store("sqlite", tmp_path)
+    broken = check_score(
+        JUDGE,
+        {"passed": False, "error": "the judge's answer did not parse: mismatched tag"},
+        source="judge",
+        evaluator_version="v1",
+        target="trace",
+        trace_id="t0",
+    )
+    assert broken.metadata["error"].startswith("the judge's answer did not parse")
+    store.put_scores(
+        [broken, _judge_score(1, False), _human_on_trace(0, True), _human_on_trace(1, False)]
+    )
+    got = align(store, JUDGE)
+    assert (got.tp, got.fp, got.fn, got.tn) == (0, 0, 0, 1)
+    assert got.judge_errors == 1

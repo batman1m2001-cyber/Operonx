@@ -45,20 +45,20 @@ def _first_answer(user: str) -> str:
 def prefers_shipped(body):
     """A fair judge: the answer that says the order shipped, wherever it is."""
     system, user = _messages(body)
-    if "<verdict>" not in system:
+    if '"verdict"' not in system:
         return None
     first_has = "shipped" in _first_answer(user)
     second_has = "shipped" in user.split("[Answer B]", 1)[1]
     verdict = "TIE" if first_has == second_has else ("A" if first_has else "B")
-    return f"<reason>compared</reason><verdict>{verdict}</verdict>"
+    return json.dumps({"reason": "compared", "verdict": verdict})
 
 
 def always_first(body):
     """A position-biased judge: always the first answer it is shown."""
     system, _ = _messages(body)
-    if "<verdict>" not in system:
+    if '"verdict"' not in system:
         return None
-    return "<reason>the first one</reason><verdict>A</verdict>"
+    return json.dumps({"reason": "the first one", "verdict": "A"})
 
 
 @op(bound="sync")

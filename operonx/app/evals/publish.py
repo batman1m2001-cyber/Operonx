@@ -141,7 +141,12 @@ def check_score(
         evaluator_version=evaluator_version,
         judge_trace_id=check.get("judge_trace_id"),
         cost_usd=check.get("cost_usd"),
-        metadata={k: v for k, v in check.items() if k not in _SCORE_FIELDS},
+        metadata={
+            **{k: v for k, v in check.items() if k not in _SCORE_FIELDS},
+            # a check that could not decide (a broken evaluator, a judge answer that
+            # did not parse) says so: its `passed` False is not a verdict
+            **({"error": str(check["error"])} if check.get("error") else {}),
+        },
         **ids,
     )
 
