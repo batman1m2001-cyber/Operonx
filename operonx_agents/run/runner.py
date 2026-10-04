@@ -7,19 +7,33 @@
                            store=RedisStateStore(url=...))
     async for event in Runner.stream(agent, "hi"): ...      # ends with RunFinished
     res = await Runner.resume(agent, res.run_id, store=store)
+    res = await Runner.resume(agent, res.run_id, store=store,       # an interrupted run
+                              approvals={i.id: Approve() for i in res.interruptions})
 
 Each turn::
 
     caps (before)    a spent budget ends the run; the last budgeted turn is
                      told so and cannot call tools
     compaction       when the last prompt crossed ContextPolicy's threshold
-    model call       streamed: TextDelta / ReasoningDelta events, real usage
+    model call       hooks.before_model; streamed: TextDelta / ReasoningDelta
+                     events, real usage; hooks.after_model
     caps (after)     an overrun ends the run, calls answered "not run"
     output           an answer ends the run; one that does not validate is
                      re-asked next turn, at most output_retries times
-    tools            dispatch: one tool message per call, child executions
+    tools            dispatch: one tool message per call, child executions;
+                     a call that needs a human parks the turn
     commit           the turn's items to the session and the state to the
                      store, together, after the whole turn
+
+**Approvals are interruptions.** A call that needs a human (its tool's
+``approval``, the policy's ``ask``, a hook's ``Ask``, a sub-agent's own
+approval) does not wait in the process: the turn is parked in the
+:class:`RunState` with the calls that finished, the run ends
+``interrupted`` with an :class:`~operonx_agents.Interruption` per waiting
+call, and ``Runner.resume(..., approvals={id: Approve() | Deny()})`` — in
+this process or another — finishes the turn and carries on. That needs a
+``store``; without one, such a call is refused (fail closed). A hook's
+:class:`~operonx_agents.Tripwire` ends the run ``blocked``.
 
 **Commit only at turn boundaries.** A turn cancelled, failed or cut by the
 wall clock writes nothing, so the session never holds half a turn and a
@@ -43,7 +57,9 @@ model streamed either way, no events built.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
+import operator
 import time
 import uuid
 from contextlib import nullcontext
@@ -57,7 +73,7 @@ from operonx_agents.agent import Agent
 from operonx_agents.context import compaction
 from operonx_agents.context.prompt import assemble
 from operonx_agents.context.session import Session
-from operonx_agents.errors import OutputInvalid
+from operonx_agents.errors import Interrupted, OutputInvalid, Tripwire
 from operonx_agents.model._deadline import deadline as _deadline
 from operonx_agents.model.model import ModelResponse, Reasoning
 from operonx_agents.model.output import (
@@ -72,6 +88,7 @@ from operonx_agents.model.output import (
 from operonx_agents.model.usage import Usage
 from operonx_agents.run.context import RunContext
 from operonx_agents.run.events import (
+    ApprovalRequired,
     Compacted,
     Event,
     ReasoningDelta,
@@ -83,13 +100,23 @@ from operonx_agents.run.events import (
     TurnFinished,
     TurnStarted,
 )
+from operonx_agents.run.interruption import (
+    Approve,
+    Decision,
+    Deny,
+    Interruption,
+    interruption_id,
+)
 from operonx_agents.run.limits import Meter
 from operonx_agents.run.result import RunResult
 from operonx_agents.run.state import PendingTurn, RunState
 from operonx_agents.run.store import StateStore
-from operonx_agents.tools.dispatch import dispatch, tool_message
+from operonx_agents.safety.hooks import ModelRequest, ToolCall
+from operonx_agents.safety.redact import RunRedaction
+from operonx_agents.tools.dispatch import DENIED, NO_APPROVER, Paused, run_calls, tool_message
+from operonx_agents.tools.tool import ToolSpec
 
-__all__ = ["Runner", "BUDGET_NOTICE", "NOT_RUN", "OUTCOME_UNKNOWN"]
+__all__ = ["Runner", "BUDGET_NOTICE", "EXPIRED", "NOT_RUN", "OUTCOME_UNKNOWN"]
 
 DURABILITY = ("turn", "exit")
 
@@ -133,6 +160,16 @@ OUTCOME_UNKNOWN = (
     "Interrupted: {name!r} was running when the run stopped, and its outcome is unknown. "
     "Check whether it took effect before calling it again."
 )
+
+#: A call whose approval request was not answered in time: an answer that
+#: arrives later must not run it (``Agent.approval_ttl``).
+EXPIRED = (
+    "Blocked: the approval for this {name!r} call expired before anyone answered. "
+    "Do not retry it; ask how to proceed."
+)
+
+#: What a run in each status may still do: a terminal one returns its result.
+TERMINAL = ("completed", "limit", "blocked")
 
 ACCEPTED = "Final answer recorded."
 FINAL_DESCRIPTION = "Give the final answer. Call it once, when you are done."
@@ -211,22 +248,32 @@ class Runner:
         run_id: str,
         *,
         store: StateStore,
+        approvals: Optional[Dict[str, Decision]] = None,
         deps: Any = None,
         session: Optional[Session] = None,
         durability: str = "turn",
         parent: Optional[RunContext] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> RunResult:
-        """Continue the run saved under ``run_id``: after a crash, from its
-        last turn (finishing the turn whose tools were running), or a
-        failed run, by retrying the turn that failed. A run that ended
-        returns its result again. Pass the same agent and session.
+        """Continue the run saved under ``run_id``: an interrupted run, with
+        the humans' ``approvals``; after a crash, from its last turn
+        (finishing the turn whose tools were running); or a failed run, by
+        retrying the turn that failed. A run that ended returns its result
+        again. Pass the same agent and session.
+
+        Args:
+            approvals: ``{interruption id: Approve() | Deny(reason)}``. An
+                interruption left unanswered keeps waiting: the run ends
+                ``interrupted`` again, with the same id.
 
         Raises:
             KeyError: ``store`` has no run ``run_id``.
-            ValueError: the run belongs to another agent.
+            ValueError: the run belongs to another agent, or ``approvals``
+                answers an interruption the run is not waiting on.
         """
-        run = await _Run.load(agent, run_id, store, deps, session, durability, parent, metadata)
+        run = await _Run.load(
+            agent, run_id, store, approvals, deps, session, durability, parent, metadata
+        )
         return await run.execute(None)
 
     @staticmethod
@@ -235,6 +282,7 @@ class Runner:
         run_id: str,
         *,
         store: StateStore,
+        approvals: Optional[Dict[str, Decision]] = None,
         deps: Any = None,
         session: Optional[Session] = None,
         durability: str = "turn",
@@ -242,7 +290,9 @@ class Runner:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> AsyncIterator[Event]:
         """:meth:`resume`, yielding its events."""
-        return _stream(_Run.load(agent, run_id, store, deps, session, durability, parent, metadata))
+        return _stream(
+            _Run.load(agent, run_id, store, approvals, deps, session, durability, parent, metadata)
+        )
 
 
 class _End:
@@ -295,7 +345,7 @@ async def _stream(prepare: Awaitable["_Run"]) -> AsyncIterator[Event]:
 
 
 class _Stop(Exception):
-    """Ends the loop: ``status`` (``completed``/``limit``/``failed``)."""
+    """Ends the loop: ``status`` (``completed``/``limit``/``interrupted``)."""
 
     def __init__(self, status: str, limit: Optional[str] = None, error: Optional[str] = None):
         super().__init__(f"{status}: {limit}" if limit else status)
@@ -318,6 +368,7 @@ class _Run:
         parent: Optional[RunContext],
         metadata: Optional[Dict[str, Any]],
         resumed: bool,
+        approvals: Optional[Dict[str, Decision]] = None,
     ) -> None:
         if durability not in DURABILITY:
             raise ValueError(
@@ -331,6 +382,7 @@ class _Run:
         self.durability = durability
         self.resumed = resumed
         self.meter = Meter(parent.meter if parent is not None else None, Usage(**state.usage))
+        self.decisions: Dict[str, Decision] = dict(approvals or {})
         self.ctx = RunContext(
             deps=deps,
             metadata=dict(metadata or {}),
@@ -339,7 +391,21 @@ class _Run:
             agent=agent.name,
             turn=state.turn,
             meter=self.meter,
+            store=store,
+            approvals=self.decisions,
         )
+        self.hooks = agent.hooks if agent.hooks else None
+        self.redact = RunRedaction(agent.redact) if agent.redact is not None else None
+        # What the trace records of the conversation: the messages, their
+        # redacted copies, and how many copies differ (see _trace_view).
+        self.traced: Tuple[List[dict], List[dict], int] = ([], [], 0)
+        # The interruptions the parked turn waits on, by id.
+        self.waiting: Dict[str, Interruption] = {}
+        if state.pending is not None:
+            for data in state.pending.interruptions:
+                waiting = Interruption.from_json(data)
+                self.waiting[waiting.id] = waiting
+        self._check_decisions()
         self.emit: Optional[Emit] = None
         self.shape: Optional[Shape] = None
         self.strategy: Optional[str] = None
@@ -369,7 +435,7 @@ class _Run:
 
     @classmethod
     async def load(
-        cls, agent, run_id, store, deps, session, durability, parent, metadata
+        cls, agent, run_id, store, approvals, deps, session, durability, parent, metadata
     ) -> "_Run":
         state = await store.load(run_id)
         if state is None:
@@ -381,11 +447,26 @@ class _Run:
                 f"run {run_id!r} belongs to agent {state.agent!r}, not {agent.name!r}. Resume "
                 "it with the agent that started it."
             )
-        run = cls(agent, state, deps, session, store, durability, parent, metadata, True)
-        if session is not None and state.status == "running":
+        run = cls(agent, state, deps, session, store, durability, parent, metadata, True, approvals)
+        if session is not None and state.status in ("running", "interrupted"):
             written = len(await session.get_items()) - (state.session_base + state.saved)
             run.skip = max(0, written)
         return run
+
+    def _check_decisions(self) -> None:
+        for key, decision in self.decisions.items():
+            if not isinstance(decision, (Approve, Deny)):
+                raise TypeError(
+                    f"approvals[{key!r}] is {type(decision).__name__}; answer each "
+                    "interruption with Approve() or Deny(reason)."
+                )
+        unknown = sorted(set(self.decisions) - set(self.waiting))
+        if unknown:
+            raise ValueError(
+                f"run {self.state.run_id!r} is not waiting on {unknown}; it waits on "
+                f"{sorted(self.waiting) or 'nothing'}. Answer the ids in "
+                "RunResult.interruptions."
+            )
 
     # ── the loop ───────────────────────────────────────────────────────
 
@@ -393,7 +474,7 @@ class _Run:
         s, agent = self.state, self.agent
         self.emit = emit
         self._emit(RunStarted(s.run_id, agent.name, self.resumed))
-        if s.status in ("completed", "limit"):
+        if s.status in TERMINAL:
             output_type = agent.output_type
             if isinstance(s.output, dict) and output_type not in (str, None):
                 # Read back from JSON: the answer is the model again.
@@ -416,6 +497,10 @@ class _Run:
             s.status, s.limit_hit, s.error = stop.status, stop.limit, stop.error
             if stop.status != "completed":
                 s.output = self._best() if stop.status == "limit" else None
+        except Tripwire as trip:
+            LOGGER.warning("agent %s run %s blocked: %s", agent.name, s.run_id, trip.reason)
+            s.status, s.output = "blocked", None
+            s.error = f"Tripwire: {trip.reason}"
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - a run ends in a result, not a raise
@@ -526,9 +611,15 @@ class _Run:
             if len(run) == room:
                 s.final_turn = "tool_calls"
         s.tool_calls += len(run)
-        messages = await self._dispatch(run, items, convo)
+        if self.redact is not None:
+            self.redact.scrub_message(items[-1])  # the calls' arguments, once
+        outcomes = await self._dispatch(run, items, convo)
         answers = self._unrun(cut, NOT_RUN["tool_calls"].format(cap=limits.tool_calls))
-        by_id = {m["tool_call_id"]: m for m in messages + answers}
+        by_id = {m["tool_call_id"]: m for m in answers}
+        by_id.update((m["tool_call_id"], m) for m in outcomes if isinstance(m, dict))
+        paused = [o for o in outcomes if isinstance(o, Paused)]
+        if paused:
+            return self._park(items, convo, calls, by_id, paused)
         ordered = [by_id[c["id"]] for c in calls]
         await self._commit(items + ordered, convo + ordered, reply)
         return None
@@ -539,7 +630,7 @@ class _Run:
         """A reply with no tool calls: the answer, or a re-ask."""
         s = self.state
         if self.shape is None:
-            s.output = reply.content
+            s.output = await self._output(reply.content)
             await self._commit(items, convo, reply)
             return _Stop("limit", final) if final is not None else _Stop("completed")
         raw, error = read_answer(reply, "tool" if self.strategy == "tool" else "native")
@@ -549,6 +640,7 @@ class _Run:
             except pydantic.ValidationError as exc:
                 error = validation_errors(exc)
         if error is None:
+            s.output = await self._output(s.output)
             await self._commit(items, convo, reply)
             return _Stop("limit", final) if final is not None else _Stop("completed")
         fix = {"role": "user", "content": REASK.format(error=error)}
@@ -567,6 +659,7 @@ class _Run:
                 error = validation_errors(exc)
         others = [c for c in calls if c is not answer]
         if error is None:
+            s.output = await self._output(s.output)
             done = tool_message(answer["id"], FINAL_TOOL, ACCEPTED)
             answers = [done, *self._unrun(others, NOT_RUN["answered"])]
             self._finished(done)
@@ -607,7 +700,16 @@ class _Run:
             tool_choice = "none"
         if self.strategy == "native":
             response_format = native_format(self.shape)
+        hooks = self.hooks
+        if hooks is not None and hooks.before_model:
+            request = await hooks.model_request(self.ctx, ModelRequest(convo, tools or None))
+            convo, tools = request.messages, request.tools
         messages = assemble(self.system, convo)
+        traced = None
+        if self.redact is not None:
+            view = self._trace_view(convo)
+            if view is not convo:  # something was redacted: record the copy
+                traced = assemble(self.system, view)
         reply: Optional[ModelResponse] = None
         async for piece in agent.model.stream(
             messages,
@@ -616,6 +718,7 @@ class _Run:
             response_format=response_format,
             settings=agent.settings,
             reasoning=self.emit is not None,
+            trace_messages=traced,
         ):
             if isinstance(piece, ModelResponse):
                 reply = piece
@@ -628,7 +731,32 @@ class _Run:
         assert reply is not None  # a stream always ends with one
         self.meter.add(reply.usage)
         self.state.last_input = reply.usage.input_tokens
+        if hooks is not None and hooks.after_model:
+            reply = await hooks.model_response(self.ctx, reply)
         return reply
+
+    def _trace_view(self, convo: List[dict]) -> List[dict]:
+        """``convo`` as the trace records it, each message redacted once;
+        ``convo`` itself when no message needed it (the common case, which
+        then costs no second list).
+
+        A turn's conversation is the last one's plus what the turn added
+        (the same message objects), so the redacted copy is extended, not
+        rebuilt: checking the shared prefix is one C-level pass. Anything
+        else (compaction, a hook's replacement) starts it over.
+        """
+        source, view, changed = self.traced
+        n = len(source)
+        if n > len(convo) or not all(map(operator.is_, source, convo)):
+            source, view, changed, n = [], [], 0, 0
+        scrub = self.redact.scrub_message
+        for message in convo[n:]:
+            shown = scrub(message)
+            source.append(message)
+            view.append(shown)
+            changed += shown is not message
+        self.traced = (source, view, changed)
+        return view if changed else convo
 
     async def _compact(self, convo: List[dict]) -> Optional[Tuple[dict, List[dict]]]:
         policy = self.agent.context
@@ -655,9 +783,8 @@ class _Run:
 
     # ── tools ──────────────────────────────────────────────────────────
 
-    async def _dispatch(
-        self, calls: List[dict], items: List[dict], convo: List[dict]
-    ) -> List[dict]:
+    async def _dispatch(self, calls: List[dict], items: List[dict], convo: List[dict]) -> list:
+        """Run ``calls``: per call, its message or :class:`Paused`."""
         if not calls:
             return []
         risky = any(
@@ -671,17 +798,75 @@ class _Run:
             )
             await self._save()
         try:
-            listening = self.emit is not None
-            return await dispatch(
-                calls,
-                self.agent.tools,
-                ctx=self.ctx,
-                policy=self.agent.policy,
-                on_start=self._started if listening else None,
-                on_message=self._result_ready if listening or self.journal else None,
-            )
+            return await self._run_calls(calls, self.emit is not None)
         finally:
             self.journal = False
+
+    def _run_calls(self, calls: List[dict], listening: bool) -> Awaitable[list]:
+        return run_calls(
+            calls,
+            self.agent.tools,
+            ctx=self.ctx,
+            policy=self.agent.policy,
+            gate=self._gate,
+            hooks=self.hooks,
+            redact=self.redact,
+            on_start=self._started if listening else None,
+            on_message=self._result_ready if listening or self.journal else None,
+        )
+
+    async def _gate(self, call: ToolCall, spec: ToolSpec, reason: str) -> Optional[str]:
+        """A call that needs a human: its answer, or park it."""
+        s, agent = self.state, self.agent
+        key = interruption_id(s.run_id, agent.name, call.name, s.turn + 1, call.id)
+        asked = self.waiting.get(key)
+        if asked is not None and asked.expired:
+            return EXPIRED.format(name=call.name)  # a late answer does not count
+        decision = self.decisions.get(key)
+        if isinstance(decision, Approve):
+            return None
+        if isinstance(decision, Deny):
+            text = DENIED.format(name=call.name)
+            return f"{text} Their reason: {decision.reason}" if decision.reason else text
+        if self.store is None:
+            return NO_APPROVER.format(name=call.name)
+        if asked is not None:
+            asked = dataclasses.replace(asked, path=())  # _park adds this agent again
+        else:
+            ttl = agent.approval_ttl
+            shown = (
+                self.redact.redactor.scrub_data(call.args) if self.redact is not None else call.args
+            )
+            asked = Interruption(
+                id=key,
+                tool=call.name,
+                args=_jsonable(shown),
+                reason=reason,
+                call_id=call.id,
+                path=(),
+                expires_at=time.time() + ttl if ttl is not None else None,
+            )
+        raise Interrupted([asked])
+
+    def _park(
+        self, items: List[dict], convo: List[dict], calls: List[dict], results: dict, paused: list
+    ) -> _Stop:
+        """Save the turn as waiting for a human; the run ends ``interrupted``."""
+        s = self.state
+        waiting = [i.under(self.agent.name) for p in paused for i in p.interruptions]
+        s.pending = PendingTurn(
+            items=items,
+            messages=convo,
+            calls=calls,
+            inflight=[],
+            results=results,
+            interruptions=[i.to_json() for i in waiting],
+        )
+        self.waiting = {i.id: i for i in waiting}
+        if self.emit is not None:
+            for i in waiting:
+                self.emit(ApprovalRequired(i.id, i.call_id, i.tool, i.args, i.reason, i.path))
+        return _Stop("interrupted")
 
     def _started(self, call: Dict[str, Any]) -> None:
         self.started[call["id"]] = time.perf_counter()
@@ -720,7 +905,9 @@ class _Run:
         return out
 
     async def _resume_pending(self) -> None:
-        """Finish the turn a crash interrupted while its tools ran."""
+        """Finish the parked turn: the calls a crash cut (an idempotent one
+        re-runs, any other is "outcome unknown") and the calls that waited
+        for a human (run with their answers, or parked again)."""
         s = self.state
         pending = s.pending
         n = s.turn + 1
@@ -731,26 +918,23 @@ class _Run:
             )
             if self.emit is not None:
                 self.emit(TurnStarted(n))
-            open_calls = [c for c in pending.calls if c["id"] in pending.inflight]
-            rerun = [
-                c
-                for c in open_calls
-                if (t := self.agent.tools.get(c["name"])) is not None and t.spec.idempotent
-            ]
-            unknown = [c for c in open_calls if c not in rerun]
             results = dict(pending.results)
+            unknown = [
+                c
+                for c in pending.calls
+                if c["id"] in pending.inflight
+                and ((t := self.agent.tools.get(c["name"])) is None or not t.spec.idempotent)
+            ]
+            run = [c for c in pending.calls if c["id"] not in results and c not in unknown]
             self.journal = self.store is not None and self.durability == "turn"
             try:
+                if self.journal and run:
+                    # The calls about to run join the cut ones still unknown:
+                    # a crash during this resume treats both alike.
+                    pending.inflight = [c["id"] for c in run + unknown]
+                    await self._save()
                 async with self._wall_bound():
-                    for message in await dispatch(
-                        rerun,
-                        self.agent.tools,
-                        ctx=self.ctx,
-                        policy=self.agent.policy,
-                        on_start=self._started,
-                        on_message=self._result_ready,
-                    ):
-                        results[message["tool_call_id"]] = message
+                    outcomes = await self._run_calls(run, True)
             finally:
                 self.journal = False
             for call in unknown:
@@ -758,8 +942,15 @@ class _Run:
                 message = tool_message(call["id"], call["name"], text, is_error=True)
                 self._finished(message)
                 results[call["id"]] = message
-            ordered = [results[c["id"]] for c in pending.calls]
-            rec.outputs = {"rerun": len(rerun), "unknown": len(unknown)}
+            results.update((m["tool_call_id"], m) for m in outcomes if isinstance(m, dict))
+            paused = [o for o in outcomes if isinstance(o, Paused)]
+            rec.outputs = {"run": len(run), "unknown": len(unknown), "waiting": len(paused)}
+            if paused:
+                end = self._park(pending.items, pending.messages, pending.calls, results, paused)
+        if paused:
+            raise end
+        ordered = [results[c["id"]] for c in pending.calls]
+        self.waiting = {}
         await self._commit(pending.items + ordered, pending.messages + ordered, None)
 
     # ── writes ─────────────────────────────────────────────────────────
@@ -799,6 +990,12 @@ class _Run:
             await self._write()
 
     # ── helpers ────────────────────────────────────────────────────────
+
+    async def _output(self, output: Any) -> Any:
+        hooks = self.hooks
+        if hooks is None or not hooks.on_output:
+            return output
+        return await hooks.output(self.ctx, output)
 
     def _emit(self, event: Event) -> None:
         if self.emit is not None:
@@ -840,6 +1037,7 @@ class _Run:
             limit_hit=s.limit_hit,
             error=s.error,
             finish_reason=s.finish_reason,
+            interruptions=list(self.waiting.values()) if s.status == "interrupted" else [],
         )
 
 
@@ -872,6 +1070,17 @@ async def _shielded(write: Awaitable[None]) -> None:
     except asyncio.CancelledError:
         await task
         raise
+
+
+def _jsonable(value: Any) -> Any:
+    """Validated arguments as JSON data (an interruption is saved)."""
+    return json.loads(json.dumps(value, ensure_ascii=False, default=_plain))
+
+
+def _plain(value: Any) -> Any:
+    if isinstance(value, pydantic.BaseModel):
+        return value.model_dump(mode="json")
+    return str(value)
 
 
 def _input_messages(input: Any) -> List[Dict[str, Any]]:

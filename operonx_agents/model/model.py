@@ -285,6 +285,7 @@ class Model:
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
         reasoning: bool = False,
+        trace_messages: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncIterator[Union[str, Reasoning, ModelResponse]]:
         """Text deltas (``str``) as they arrive, then the whole
         :class:`ModelResponse`. A resource is abandoned for the next only
@@ -294,11 +295,16 @@ class Model:
         gateway streams it (``reasoning_content``), as :class:`Reasoning`
         pieces; it never enters the answer's text.
 
+        ``trace_messages`` is what the trace records as the request's
+        messages, when that must differ from what is sent (the runner
+        passes a redacted copy).
+
         Consume it in the task that started it, and do not await other
         work between pieces: the deadline cancels the consuming task, and
         only a cancel that lands inside this generator becomes
         :class:`ModelTimeout`.
         """
+        recorded = {"messages": messages if trace_messages is None else trace_messages}
         params = self._request_params(settings, tools, tool_choice, response_format)
         attempts: List[tuple] = []
         async with self.bounded():
@@ -307,9 +313,7 @@ class Model:
                 acc = _StreamAcc()
                 emitted = False
                 try:
-                    async with child(
-                        "model", inputs={"messages": messages}, op_type="llm", current=False
-                    ) as rec:
+                    async with child("model", inputs=recorded, op_type="llm", current=False) as rec:
                         async for chunk in llm.stream(
                             messages=messages, **_per_resource(llm, params)
                         ):
