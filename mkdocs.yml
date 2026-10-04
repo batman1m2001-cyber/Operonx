@@ -118,6 +118,13 @@ nav:
       - Resource hub: architecture/resource-hub.md
       - Failure modes: architecture/failure-modes.md
   - Open findings: design/OPEN_FINDINGS.md
+  - Roadmap:
+      - Q4 2026 roadmap: roadmap/ROADMAP.md
+      - "Track 1: dogfood": roadmap/track1_dogfood.md
+      - "Track 2: LangGraph gap": roadmap/track2_langgraph_gap.md
+      - "Track 3: agents": roadmap/track3_agents.md
+      - "Track 4: evals": roadmap/track4_eval.md
+      - "Track 5: knowledge": roadmap/track5_knowledge.md
   - Handoff: HANDOFF.md
   - API reference:
       - operonx.core: api/core.md

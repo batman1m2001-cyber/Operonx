@@ -153,7 +153,7 @@ def resolve_value(key: str, value: Any, parent) -> Any:
     if isinstance(value, Ref):
         _reject_ref_operands(key, value)
         resolved = resolve_parent(value.raw_source)
-        new_ref = Ref(resolved, value.var, value.transforms)
+        new_ref = Ref(resolved, value.var, value.transforms, optional=value._optional)
         # Preserve streaming modifiers (.parallel(), .collect())
         object.__setattr__(new_ref, "_stream_parallel", value._stream_parallel)
         object.__setattr__(new_ref, "_stream_parallel_max", value._stream_parallel_max)

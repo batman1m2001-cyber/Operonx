@@ -119,21 +119,22 @@ class TestStreamCoreYields:
         assert results[0] == {"content": "Hello", "role": "assistant", "final": False}
         assert results[1] == {"content": " world", "role": "assistant", "final": False}
 
-        # Final yield has complete metadata
+        # Final yield has complete metadata, and no delta of its own
         final = results[2]
-        assert final["content"] == "Hello world"
+        assert final["content"] == ""
+        assert final["full_content"] == "Hello world"
         assert final["model_used"] == "gpt-4o"
         assert final["finish_reason"] == "stop"
         assert final["usage"]["prompt_tokens"] == 5
 
     @pytest.mark.asyncio
-    async def test_the_last_frame_repeats_the_whole_content(self, hub):
-        """F8 — joining every frame's ``content`` double-counts the answer.
+    async def test_joining_every_frame_gives_the_answer_once(self, hub):
+        """F8 — the closing frame adds no text of its own.
 
-        The last frame carries the accumulated text, not a tail, and it
-        arrives through the same channel as the deltas. ``final`` is the
-        only thing that separates them; before it, consumers had to notice
-        that ``finish_reason`` happened to be set.
+        It used to repeat the accumulated answer under ``content``, the key
+        every delta uses, so joining every frame's ``content`` gave it
+        twice unless the consumer filtered on ``final``. The whole answer
+        is ``full_content`` now.
         """
         from operonx.providers.ops import LLMOp
 
@@ -154,12 +155,8 @@ class TestStreamCoreYields:
 
         results = [r async for r in op._stream_core(messages=[{"role": "user", "content": "hi"}])]
 
-        naive = "".join(r["content"] for r in results)
-        assert naive == "HelloHello", "the duplication is real, not hypothetical"
-
-        deltas = "".join(r["content"] for r in results if not r["final"])
-        assert deltas == "Hello"
-        assert next(r for r in results if r["final"])["content"] == "Hello"
+        assert "".join(r["content"] for r in results) == "Hello"
+        assert next(r for r in results if r["final"])["full_content"] == "Hello"
 
     @pytest.mark.asyncio
     async def test_empty_stream_yields_final_only(self, hub):
@@ -184,6 +181,7 @@ class TestStreamCoreYields:
 
         assert len(results) == 1
         assert results[0]["content"] == ""
+        assert results[0]["full_content"] == ""
         assert results[0]["finish_reason"] == "stop"
 
 
@@ -317,7 +315,7 @@ class TestStreamingWithThinking:
 
         final = results[1]
         assert final["extras"]["thinking_content"] == "Let me think..."
-        assert final["content"] == "The answer is 42"
+        assert final["full_content"] == "The answer is 42"
 
 
 # =============================================================================

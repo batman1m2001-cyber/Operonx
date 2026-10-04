@@ -106,8 +106,11 @@ class TestErrorsKey:
         engine = Operon(g)
 
         out = await engine.run(inputs={"x": "nope"})
-        assert list(out["$errors"]) == ["outer.inner.p"]
+        # The subgraph that produced nothing because of it has an entry
+        # too, naming the op (see test_subgraph_failure_stops_successors).
+        assert list(out["$errors"]) == ["outer.inner.p", "outer.inner"]
         assert out["$errors"]["outer.inner.p"] == out["$state"]["outer.inner.p", "error"]
+        assert "'outer.inner.p' raised" in out["$errors"]["outer.inner"]
 
     async def test_a_subgraph_failing_itself_is_reported(self, monkeypatch):
         """`GraphOp.run` has its own handler, for what fails around the

@@ -178,7 +178,7 @@ class RerankOp(BaseOp):
         return cls(resource=resource, inputs=input_mappings or None, **init_kwargs)
 
     def serialize(self) -> dict:
-        """Serialize RerankOp for Rust backend, including backend config."""
+        """Serialize RerankOp, including the resolved backend config."""
         self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource

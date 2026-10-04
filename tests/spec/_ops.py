@@ -1,12 +1,4 @@
-"""Shared `@op` pool used by every spec fixture's `builder.py`.
-
-The Python and Rust parity harnesses read the same fixture JSON from this
-directory tree. On the Python side, fixtures build a `GraphOp` via the
-authoring DSL and run it through `Operon`; on the Rust side the serialized
-`graph.json` feeds the engine directly. The op names here must match the
-`func_name` strings the Rust-side shared pool registers in
-`rust/operonx/tests/common/mod.rs`.
-"""
+"""Shared `@op` pool used by every spec fixture's `builder.py`."""
 
 from operonx.core import SCRATCH, op
 

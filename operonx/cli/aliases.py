@@ -1,6 +1,6 @@
-"""The ``operonx-run``, ``operonx-serve``, ``operonx-pack`` and
-``operonx-play`` scripts, kept for one release as aliases of
-``operonx run`` / ``serve`` / ``pack`` / ``play``.
+"""The ``operonx-run``, ``operonx-serve`` and ``operonx-play`` scripts,
+kept for one release as aliases of ``operonx run`` / ``serve`` / ``play``.
+(``operonx-pack`` went with ``operonx pack`` and the Rust runtime.)
 
 Each warns once on stderr and then calls the very ``main`` the subcommand
 calls, with the same arguments, so the two forms cannot drift apart.
@@ -14,7 +14,7 @@ import importlib
 import sys
 from typing import Callable
 
-__all__ = ["run", "serve", "pack", "play"]
+__all__ = ["run", "serve", "play"]
 
 
 def _alias(command: str) -> Callable[[], int]:
@@ -35,5 +35,4 @@ def _alias(command: str) -> Callable[[], int]:
 
 run = _alias("run")
 serve = _alias("serve")
-pack = _alias("pack")
 play = _alias("play")

@@ -64,6 +64,8 @@ __all__ = [
     "MANIFEST_FILENAME",
     "STREAM_KINDS",
     "SESSION_MODES",
+    "DOOR_CODECS",
+    "door_codec",
 ]
 
 MANIFEST_FILENAME = "operonx.toml"
@@ -79,6 +81,36 @@ SESSION_MODES = frozenset({"per_request", "per_connection", "per_message"})
 
 #: How many runs a job mints: one per item, or one fed every item.
 JOB_SESSION_MODES = frozenset({"per_item", "stream"})
+
+#: How a door reads what its caller sends (``codec =``): ``"json"`` decodes
+#: every body and text frame, ``"text"`` passes text through. Bytes frames
+#: are bytes either way. One rule for every door, so a graph served on
+#: HTTP and on a websocket receives the same item for the same payload.
+DOOR_CODECS = ("json", "text")
+
+#: The kinds whose payload a codec reads.
+CODEC_KINDS = frozenset({"http", "websocket", "webhook"})
+
+
+def door_codec(spec: "ServeSpec") -> str:
+    """The codec a door reads its payloads with; ``"json"`` when unset.
+
+    Raises:
+        ManifestError: the door declares a codec that is not one of
+            :data:`DOOR_CODECS`.
+    """
+    codec = spec.options.get("codec", "json")
+    check_codec(codec, f"[[serve]] {spec.name!r}")
+    return codec
+
+
+def check_codec(codec: Any, label: str) -> None:
+    if codec not in DOOR_CODECS:
+        raise ManifestError(
+            f"{label} has codec {codec!r}; expected one of {', '.join(DOOR_CODECS)} "
+            '("json" decodes each body and text frame, "text" passes text through)'
+        )
+
 
 _ENTRY_RE = re.compile(r"^[\w.]+:[\w.]+$")
 
@@ -601,6 +633,8 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
+    if "codec" in options:
+        check_codec(options["codec"], f"{where}: {label}")
     trace_own = None
     if "trace" in block:
         trace_own = tuple(_as_list(block["trace"]))

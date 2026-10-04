@@ -437,12 +437,12 @@ def build_react_agent(
             messages=assistant["messages"],
         )
         # `finish_reason`/`truncated` are optional outputs of `call_model`:
-        # one that does not produce them leaves these inputs at their
-        # defaults.
+        # `.get` reads them without the build-time output check, and one
+        # that does not produce them leaves these inputs at their defaults.
         ended = how_it_ended(
             exhausted=counter["exhausted"],
-            finish_reason=model["finish_reason"],
-            truncated=model["truncated"],
+            finish_reason=model.get("finish_reason"),
+            truncated=model.get("truncated"),
         )
         tools = run_tools(tool_calls=model["tool_calls"])
 

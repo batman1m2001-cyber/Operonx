@@ -17,10 +17,17 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx.app.declare import ref_name
-from operonx.app.manifest import _ENTRY_RE, Manifest, ManifestError, ServeSpec
+from operonx.app.manifest import (
+    _ENTRY_RE,
+    CODEC_KINDS,
+    Manifest,
+    ManifestError,
+    ServeSpec,
+    door_codec,
+)
 from operonx.core.loggings import LOGGER
 
-from .asgi import HttpTransport, WebSocketTransport
+from .asgi import DoorDecodeError, HttpTransport, WebSocketTransport, decode_payload
 from .protocol import RunRequest
 from .registry import load_object, resolve_ref, resolve_transport
 from .runner import ServeRunner
@@ -235,6 +242,8 @@ def build_app(
             LOGGER.info(f"[serve:{spec.name}] mounted {ref_name(spec.app)} at {spec.path}")
             continue
 
+        if spec.kind in CODEC_KINDS:
+            door_codec(spec)  # an unknown codec fails the build, not the first request
         built = engines_for(spec, engines)
         engines.update(built)
         if spec.variants:
@@ -310,14 +319,32 @@ def build_app(
     return app
 
 
+#: The response header naming the run an HTTP reply came from.
+TRACE_HEADER = "x-operonx-trace-id"
+
+
+def _trace_headers(trace_id: Optional[str]) -> Dict[str, str]:
+    return {TRACE_HEADER: trace_id} if trace_id else {}
+
+
+async def _read_body(request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, Any]:
+    """``(payload, None)``, or ``(None, a 400 response)`` when the door's
+    codec cannot read the body — answered before any run is minted."""
+    try:
+        return decode_payload(await request.body(), door_codec(spec)), None
+    except DoorDecodeError as exc:
+        LOGGER.info(f"[serve:{spec.name}] refused a request: {exc}")
+        return None, JSONResponse({"error": str(exc), "endpoint": spec.name}, status_code=400)
+
+
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
-        try:
-            payload = await request.json()
-        except Exception:  # noqa: BLE001
-            payload = (await request.body()).decode("utf-8", "replace")
+        payload, refusal = await _read_body(request, spec, JSONResponse)
+        if refusal is not None:
+            return refusal
 
         session = await transport.handle(payload, meta=_meta_from_request(request))
+        headers = _trace_headers(session.trace_id)
 
         if not session.replies:
             # The plan's requirement, and the reason this branch exists: a
@@ -332,25 +359,27 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
             return JSONResponse(
                 {"error": "the graph produced no output", "endpoint": spec.name},
                 status_code=500,
+                headers=headers,
             )
-        return JSONResponse(session.reply)
+        return JSONResponse(session.reply, headers=headers)
 
     return endpoint
 
 
 def _webhook_endpoint(spec: ServeSpec, transport: Any, JSONResponse):
     async def endpoint(request):
-        try:
-            payload = await request.json()
-        except Exception:  # noqa: BLE001
-            payload = (await request.body()).decode("utf-8", "replace")
+        payload, refusal = await _read_body(request, spec, JSONResponse)
+        if refusal is not None:
+            return refusal
         run_id = transport.accept(payload, meta=_meta_from_request(request))
         if run_id is None:
             # Stopping, or full: the sender retries. Queueing without bound
             # behind a slow flow is how a burst becomes an outage.
             return JSONResponse({"accepted": False, "service": spec.name}, status_code=429)
         return JSONResponse(
-            {"accepted": True, "service": spec.name, "run_id": run_id}, status_code=202
+            {"accepted": True, "service": spec.name, "run_id": run_id},
+            status_code=202,
+            headers=_trace_headers(run_id),
         )
 
     return endpoint
@@ -365,7 +394,9 @@ def _ws_endpoint(spec: ServeSpec, transport: WebSocketTransport):
             "headers": dict(websocket.headers),
             "path": str(websocket.url.path),
         }
-        session = WebSocketSession(websocket, meta=meta, max_inflight=spec.max_inflight)
+        session = WebSocketSession(
+            websocket, meta=meta, max_inflight=spec.max_inflight, codec=door_codec(spec)
+        )
 
         # `on_session` decides before the handshake completes. Accepting and
         # then closing is not the same thing as refusing: the peer sees a

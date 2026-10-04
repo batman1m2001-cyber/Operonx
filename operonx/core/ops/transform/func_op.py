@@ -16,6 +16,7 @@ from typing import (
 
 from operonx.core.configs.op_config import OpType
 from operonx.core.loggings import LOGGER
+from operonx.core.ops._cache import code_digest
 from operonx.core.ops.base import (
     _BASE_INIT_KEYS,
     SCALAR_OUTPUT,
@@ -375,6 +376,50 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
         return {}
 
 
+_NESTED_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+
+
+def static_output_keys(func: Callable) -> Optional[frozenset]:
+    """The output keys a function can produce, if its code alone says so.
+
+    Known only when every ``return`` and ``yield`` in the function's own
+    body (not in a nested function) is a dict literal with string-constant
+    keys, a bare ``return``, or ``return None``. A dict built at run time,
+    a ``**`` spread, a call, ``yield from``, or source that cannot be read
+    makes the answer ``None``: unknown, so graph validation does not check
+    references to the op's outputs.
+    """
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+    except (OSError, TypeError, SyntaxError):
+        return None
+    if not tree.body or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return None
+
+    keys: set = set()
+    found = False
+    pending = list(tree.body[0].body)
+    while pending:
+        node = pending.pop()
+        if isinstance(node, _NESTED_SCOPES):
+            continue
+        if isinstance(node, ast.YieldFrom):
+            return None
+        if isinstance(node, (ast.Return, ast.Yield)):
+            found = True
+            value = node.value
+            if value is None or (isinstance(value, ast.Constant) and value.value is None):
+                continue
+            if not isinstance(value, ast.Dict):
+                return None
+            for key in value.keys:
+                if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                    return None  # a ** spread (key None) or a computed key
+                keys.add(key.value)
+        pending.extend(ast.iter_child_nodes(node))
+    return frozenset(keys) if found else None
+
+
 class FuncOp(BaseOp):
     """Op that executes a Python function.
 
@@ -414,7 +459,7 @@ class FuncOp(BaseOp):
         **kwargs,
     ):
         # Parse inputs/outputs từ function signature/AST
-        parsed_inputs, parsed_outputs = self._parse_function(code_fn, return_keys)
+        parsed_inputs, parsed_outputs, static_outputs = self._parse_function(code_fn, return_keys)
 
         # The function's own name is the fallback when auto-naming cannot
         # trust what it read off the calling line — an op built inline
@@ -451,6 +496,7 @@ class FuncOp(BaseOp):
         self._init_io(parsed_inputs, parsed_outputs, inputs, outputs)
 
         self.code_fn = code_fn
+        self._static_outputs = static_outputs
         self._set_core(code_fn)
 
         # Lấy source code
@@ -469,10 +515,14 @@ class FuncOp(BaseOp):
         """Parse inputs/outputs từ function signature và source.
 
         Returns:
-            Tuple[Dict[str, Param], Dict[str, Param]]: (inputs, outputs)
+            ``(inputs, outputs, static_outputs)``: ``static_outputs`` is
+            the set of keys the code can return when it is known before the
+            op runs (see :func:`static_output_keys`), else ``None``. Never
+            known with ``return_keys=``: that names the outputs to declare,
+            and the function may return more.
         """
         if code_fn is None:
-            return {}, {}
+            return {}, {}, None
 
         # Parse inputs từ function parameters
         inputs = {}
@@ -490,9 +540,11 @@ class FuncOp(BaseOp):
         # Parse outputs: return_keys explicit > AST parsing
         if return_keys:
             outputs = {key: Param() for key in return_keys}
+            static_outputs = None
         else:
             # Parse return schema từ source code (với type hints và descriptions)
             outputs = extract_return_schema(code_fn)
+            static_outputs = static_output_keys(code_fn)
 
         # A function that returns a bare value — `return n <= CAP` — has no
         # dict literal to read keys from, so the AST pass finds nothing and
@@ -507,8 +559,20 @@ class FuncOp(BaseOp):
         if not outputs and _returns_scalar(code_fn):
             ann = inspect.signature(code_fn).return_annotation
             outputs = {SCALAR_OUTPUT: Param(type=None if ann is inspect.Signature.empty else ann)}
+            static_outputs = frozenset({SCALAR_OUTPUT})
 
-        return inputs, outputs
+        return inputs, outputs, static_outputs
+
+    def _cache_identity(self) -> Any:
+        """The function and a hash of its code, so an edited body misses."""
+        fn = self.code_fn
+        if fn is None:
+            return super()._cache_identity()
+        return [
+            f"{type(self).__module__}.{type(self).__qualname__}",
+            f"{fn.__module__}.{fn.__qualname__}",
+            code_digest(fn).hex(),
+        ]
 
     @property
     def specific_metadata(self) -> Dict[str, Any]:

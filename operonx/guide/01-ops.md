@@ -207,9 +207,17 @@ asyncio.run(main())
 - `prompt` is a string (one user message) or `{"system": ..., "user": ...}`
   with `{placeholders}`; `messages=[...]` passes a ready message list.
 - `stream=True` makes it a streaming op that yields `content` deltas.
+  The last frame has `final=True`, an empty `content` and the whole
+  answer in `full_content`, so joining every frame's `content` gives the
+  answer once. Read `full_content` for the whole text, streamed or not.
 - Name template variables after what they hold (`question`, `message`).
   Never `{user}`, `{temperature}` and the like: those are model settings,
   and such a placeholder raises `PromptError` when the op is built.
+- `fields=` types are checked, not guessed: `int` from `"2.5"` or `bool`
+  from `"maybe"` (it takes true/false/yes/no/1/0) sets `error`, and
+  `max_retries=N` asks the model again. A `list` field is a list even
+  with one item. The JSON parser reads the first fenced block, or the
+  first `{...}` in the text, so prose around the answer is fine.
 - `validators=` takes literal values. A Ref there raises `TypeError`;
   check values that arrive at run time in an op after the LLM.
 - `cost_usd` is `None` unless the resource sets `cost_per_input_token`
@@ -293,8 +301,10 @@ asyncio.run(main())
 - **`if_` / `.else_()`** — branching; see [control flow](03-control-flow.md#ifelse).
 - **`EmitOp(payload=ref, channel="progress")`** sends a side event to
   `engine.stream(inputs, mode="custom")` without changing the data flow.
-- **`InterruptOp(payload=ref, timeout=0)`** pauses for a human answer;
-  resume with `handle.state.resume_interrupt(interrupt_id, value)`.
+- **`InterruptOp(payload=ref, timeout=0)`** pauses for a human answer.
+  `engine.stream(inputs, mode="interrupts")` yields an `InterruptEvent`
+  when it pauses (`mode="updates"` yields it among the updates); answer
+  with `event.resume(value)`, and the op outputs `response=value`.
 
 ```python
 import asyncio
@@ -319,6 +329,40 @@ async def main():
     engine = Operon(progress, params={"n": None})
     seen = [e.payload async for e in engine.stream({"n": 4}, mode="custom", channels=["progress"])]
     assert seen == ["doubled 4"]
+
+
+asyncio.run(main())
+```
+
+```python
+import asyncio
+
+from operonx import END, START, InterruptOp, Operon, graph, op
+
+
+@op
+def plan(x: int) -> dict:
+    return {"plan": f"delete {x} rows"}
+
+
+@op
+def execute(plan: str, approved: str = None) -> dict:
+    return {"done": plan if approved == "yes" else "skipped"}
+
+
+@graph
+def guarded(x):
+    p = plan(x=x)
+    ask = InterruptOp(payload=p["plan"])
+    ex = execute(plan=p["plan"], approved=ask["response"])
+    START >> p >> ask >> ex >> END
+
+
+async def main():
+    engine = Operon(guarded, params={"x": None})
+    async for event in engine.stream({"x": 3}, mode="interrupts"):
+        assert event.payload == "delete 3 rows"
+        assert event.resume("yes")  # False if the op was no longer waiting
 
 
 asyncio.run(main())

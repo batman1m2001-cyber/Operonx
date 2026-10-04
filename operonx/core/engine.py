@@ -137,12 +137,19 @@ class ExecutionHandle:
                     self._frames.append(item)
                     self._cond.notify_all()
                     self._match_waiters(op, data)
-        except Exception as exc:
+        except BaseException as exc:
+            # Cancellation included: `cancel()` stops this pump, and the
+            # None the scheduler enqueues on its way out then reaches
+            # nobody. Whoever is parked on `_cond` — `result()`,
+            # `collect()`, `async for` — has to be woken here or never.
             async with self._cond:
-                self._error = exc
-                self._done = True
-                self._resolve_all_waiters(exc)
+                if not self._done:
+                    self._error = exc
+                    self._done = True
+                self._resolve_all_waiters(self._error)
                 self._cond.notify_all()
+            if not isinstance(exc, Exception):
+                raise
 
     def _resolve_all_waiters(self, exc: BaseException | None) -> None:
         """Resolve or reject every pending future, then clear."""
@@ -369,7 +376,28 @@ class ExecutionHandle:
         return self._with_errors(out)
 
     def cancel(self) -> None:
-        """Cancel the workflow execution."""
+        """Cancel the workflow execution.
+
+        Ends the run for everyone waiting on it: ``result()``,
+        ``collect()``, ``await handle[op, var]`` and ``async for`` raise
+        ``asyncio.CancelledError`` once the frames that landed before the
+        cancel are consumed.
+
+        A run that already finished keeps its result, and its teardown —
+        trace consumers, checkpointer unsubscribe — is left to complete:
+        ``stream()`` cancels in its ``finally`` on every exit, the clean
+        one included.
+        """
+        if self._done:
+            return
+        # Marked here, not only in `_pump`'s handler: a pump cancelled
+        # before its first step never runs that handler, and a caller doing
+        # `cancel()` then `await result()` would wait on a mark nothing
+        # sets. A waiter already parked on `_cond` parked after the pump
+        # started, so the handler wakes it.
+        self._error = asyncio.CancelledError("the run was cancelled")
+        self._done = True
+        self._resolve_all_waiters(self._error)
         self._scheduler_task.cancel()
         self._pump_task.cancel()
 
@@ -787,7 +815,15 @@ class Operon:
             checkpointer=checkpointer,
         )
 
-        result = await handle.collect(unwrap=True)
+        try:
+            result = await handle.collect(unwrap=True)
+        except BaseException:
+            # `asyncio.wait_for(engine.run(...), t)` cancels this await,
+            # not the run behind it: the graph kept going after the caller
+            # had been told it timed out, and the op after the timeout
+            # still ran. The run belongs to this call, so it ends with it.
+            handle.cancel()
+            raise
         result["$state"] = handle.state
 
         return result
@@ -824,7 +860,11 @@ class Operon:
                 - ``"updates"`` — yields ``{op_name: {var: value, ...}}`` per op
                   completion (matches LangGraph's ``stream_mode="updates"``).
                   Covers **every** op, including generators in the middle of
-                  the graph, and delivers each write as it lands.
+                  the graph, and delivers each write as it lands. When an
+                  :class:`~operonx.InterruptOp` suspends, also yields its
+                  :class:`~operonx.checkpoint.InterruptEvent`, in order with
+                  the updates; answer with ``event.resume(value)``.
+                - ``"interrupts"`` — yields only those ``InterruptEvent`` objects.
                 - ``"values"`` — yields the full state snapshot per step;
                   requires a checkpointer (auto-created in-memory if omitted)
                 - ``"frames"`` — yields ``(op, ctx, data)`` for ops that
@@ -851,7 +891,7 @@ class Operon:
 
         from operonx.checkpoint import InMemoryCheckpointer
         from operonx.checkpoint.base import CustomEvent
-        from operonx.checkpoint.bridge import bind_custom_bus
+        from operonx.checkpoint.bridge import bind_custom_bus, bind_interrupt_bus
 
         # Only "values" mode strictly needs a checkpointer. Create an in-memory
         # one on demand so callers don't have to plumb it manually.
@@ -914,8 +954,9 @@ class Operon:
         # For "updates" and "values" we need per-op-completion granularity,
         # not just the scheduler's output-frame stream (which only fires for
         # ops that push to PARENT / END). We piggy-back on the state's write
-        # bus so every op invocation yields exactly once.
-        if mode in ("updates", "values"):
+        # bus so every op invocation yields exactly once. "interrupts" shares
+        # the pacing loop and records no writes.
+        if mode in ("updates", "values", "interrupts"):
             if mode == "values" and checkpointer is None:
                 checkpointer = InMemoryCheckpointer()
             handle = self.start(inputs, checkpointer=checkpointer, **kwargs)
@@ -929,11 +970,6 @@ class Operon:
             # Buffer per-step writes into a list of updates. Each element
             # in step_updates is {op_name: {var: value, ...}} for one step.
             step_updates: Dict[int, Dict[str, Dict[str, Any]]] = {}
-
-            def _record(idx: int, ctx_key: tuple, value):
-                op_name, var = idx_to_key.get(idx, ("?", "?"))
-                step = state._current_step
-                step_updates.setdefault(step, {}).setdefault(op_name, {})[var] = value
 
             # A write signals the pacer. This loop used to be driven by
             # ``async for _ in handle``, which only ticks on *output*
@@ -950,6 +986,16 @@ class Operon:
                 step_updates.setdefault(step, {}).setdefault(op_name, {})[var] = value
                 signal.put_nowait(step)
 
+            # An InterruptOp waits for an answer the consumer gives. The
+            # consumer has to see the question, or the stream blocks on the
+            # suspended op with nothing to show for it — which is what
+            # "updates" did while its docstring promised the event.
+            interrupts: List[Any] = []
+
+            def _interrupted(event) -> None:
+                interrupts.append(event)
+                signal.put_nowait(None)
+
             def _flush(upto: int, last: int):
                 """Yield completed steps in ``(last, upto]``; return the new last."""
                 out = []
@@ -959,14 +1005,20 @@ class Operon:
                         batch = step_updates.pop(last, {})
                         if batch:
                             out.append(batch)
-                    elif checkpointer is not None:
+                    elif mode == "values" and checkpointer is not None:
                         try:
                             out.append(checkpointer.get_state(last))
                         except Exception:
                             pass
                 return out, last
 
-            state.subscribe_writes(_record)
+            if mode != "interrupts":
+                state.subscribe_writes(_record)
+            _unbind_interrupts = None
+            if mode != "values":
+                _unbind_interrupts = bind_interrupt_bus(
+                    state, _interrupted, op_registry=self._all_ops_registry()
+                )
             drainer = None
             getter = None
             try:
@@ -991,6 +1043,10 @@ class Operon:
                     batches, last_yielded = _flush(state._current_step - 1, last_yielded)
                     for batch in batches:
                         yield batch
+                    # After the updates that landed before the op suspended:
+                    # every op that committed before it has bumped the step.
+                    while interrupts:
+                        yield interrupts.pop(0)
                     while not signal.empty():
                         signal.get_nowait()
                 # The run is over, so the last step is complete too.
@@ -1002,7 +1058,10 @@ class Operon:
                 # only `done()` ended the stream cleanly instead.
                 drainer.result()
             finally:
-                state.unsubscribe_writes(_record)
+                if mode != "interrupts":
+                    state.unsubscribe_writes(_record)
+                if _unbind_interrupts is not None:
+                    _unbind_interrupts()
                 # Phase 2b3 B3: cancel scheduler on caller break so a partial
                 # consume doesn't leave the graph running with no listener.
                 handle.cancel()
@@ -1024,7 +1083,8 @@ class Operon:
             return
 
         raise ValueError(
-            f"engine.stream(mode={mode!r}) — valid modes: 'updates', 'values', 'frames', 'custom'"
+            f"engine.stream(mode={mode!r}) — valid modes: 'updates', 'values', 'frames', "
+            f"'custom', 'interrupts'"
         )
 
     async def __call__(self, inputs: Dict[str, Any], **kwargs) -> Dict[str, Any]:

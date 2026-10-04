@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`engine.stream(mode="interrupts")`, and `InterruptEvent.resume(value)`.**
+  When an `InterruptOp` pauses, `mode="updates"` now yields its
+  `InterruptEvent` after the updates that landed before it, and
+  `mode="interrupts"` yields only the events. `event.resume(value)` answers
+  the op (it outputs `response=value`) and returns whether it was still
+  waiting. Events from `bind_interrupt_bus` have the same method.
+- **`if_(..., max_iterations=N)`** sets the iteration cap of the loop the
+  branch closes (default 1000). It is refused on a branch that closes no
+  loop, and two different caps on one loop are refused.
+
 - **`BaseVectorStore.delete(ids=None, filter=None, collection=None)`**,
   for FAISS (by id, on an id-mapped or IVF index), pgvector (by id or the
   search filter dialect; returns the row count) and Qdrant (by point ids
@@ -35,7 +45,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `detect_media` and `MediaInfo`, moved from `operonx.telemetry.media`,
   which still exports them.
 
+### Fixed
+
+- **An op failing inside a subgraph stops the ops after the subgraph**, as
+  it does flat. The subgraph yielded its all-`None` outputs, so the next op
+  ran on `None` and an HTTP door answered `200 null` (now `500`).
+  `$errors` gets a `"<graph>.<sub>"` entry naming the op that raised. A
+  subgraph that wrote some of its outputs still yields them.
+- **`handle.cancel()` ends the run for everyone waiting on it.**
+  `result()`, `collect()`, `await handle[op, var]` and `async for` waited
+  forever; they now raise `asyncio.CancelledError`. Cancelling a finished
+  run keeps its result and no longer interrupts its trace consumers.
+- **`asyncio.wait_for(engine.run(...), t)` cancels the graph** when it
+  times out (or when the caller is cancelled). The graph kept running, and
+  the op after the timeout still ran.
+- **`.collect()` no longer writes the collected op's outputs twice.** A
+  reducer cell fed by one of its outputs got every item a second time, as
+  one list (`ReducerError` with `dict_merge`).
+- **A loop that reaches its iteration cap reports it**: `LoopLimitExceeded`
+  in `$errors` under the hidden loop, and nothing after the loop runs. It
+  stopped silently.
+
+- **`@op(cache=...)` no longer answers one graph with another's result.**
+  The store was keyed by the op's full name, which is spelled from
+  variable names, so two graphs built under `engine = Operon(...)` with an
+  op bound to the same name returned each other's cached outputs. The key
+  is now BLAKE2b over the root graph's fingerprint (every op's full name
+  and identity, every edge), the op's identity (a function op: its
+  qualname and a hash of its code; an LLM op: model, prompt, `fields`,
+  `parser`, `validators`) and its inputs encoded exactly. Inputs that are
+  not JSON values, dataclasses, pydantic models, sets or bytes are an op
+  error instead of a `str()` key. Each store is an LRU of 1024 entries.
+  Cache files have a new versioned format; an old file starts empty with
+  a warning. Changing any op in a graph starts a fresh cache for it.
+- **Structured output fails loudly.** In `fields=` parsing, a value that
+  is not the declared type is a field error, so `max_retries` asks again:
+  `int` from `"2.5"`, `bool` from `"maybe"` (it takes only
+  true/false/yes/no/1/0), where both used to pass with `error: None`. A
+  `list` field wraps a lone value. Every parser reads the first fenced
+  block anywhere in the answer; JSON then falls back to the first
+  balanced object, so prose around it parses. XML retries once with a
+  bare `&` escaped. `convert_type` raises `ValueError` on such a value.
+- **Every serve door decodes its payload the same way.** HTTP, webhook
+  and websocket doors take `codec="json"` (default) or `"text"`
+  (`codec =` in `[[serve]]`). A websocket text frame is decoded as an
+  HTTP body is, instead of reaching the graph as a raw string. A body the
+  codec cannot read is answered `400` before a run is minted (it used to
+  run the graph with the raw string); an empty body is the item `None`. A
+  websocket frame it cannot read gets `{"error": ...}` back. A websocket
+  run that fails before sending anything sends an error frame with its
+  `trace_id`. HTTP and webhook replies carry `x-operonx-trace-id`.
+
 ### Changed
+
+- `$errors` of a run whose subgraph failed has one more key, the
+  subgraph's.
+- `docs/architecture`: per-yield dispatch is sequential by default (it said
+  parallel), and the overview no longer advertises `operonx-rs`.
+
+- **Breaking: the closing frame of `LLMOp(stream=True)` adds no text.**
+  Its `content` is `""` and the whole answer is the new `full_content`
+  output, so joining every frame's `content` gives the answer once. It
+  used to repeat the answer under `content`, and a consumer that
+  forwarded every frame sent it twice. A batch call sets `content` and
+  `full_content` to the answer. Read `full_content` where you read the
+  closing frame's `content`.
+- **Breaking: a websocket door decodes text frames as JSON by default.**
+  A client that sends plain text declares the door
+  `websocket(..., codec="text")`.
 
 - **An unknown resource category raises `ResourceCategoryError`** (a
   `KeyError`) instead of parsing to the raw YAML dict, which was cached,
@@ -48,6 +125,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implement it.
 
 ### Removed
+
+- `operonx pack` and the `operonx-pack` script: they serialised graphs
+  for the dropped Rust runtime and raised on any looping graph.
 
 - `RerankingType.COHERE`, which no factory branch built: `api_type:
   cohere` failed at first use. It is now refused when the config is read.
