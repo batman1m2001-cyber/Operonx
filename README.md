@@ -170,7 +170,7 @@ uv sync --extra mcp                  # MCPToolset; tests/test_mcp_reference.py a
 
 operonx is an editable path dependency on `../Operon`. That relative path
 is why this repo is not worked on from git worktrees. The checkout at
-`../Operon` must contain `child()`'s `redact` (operonx main `10fe40a`, #90, or later); to test
+`../Operon` must contain `Service(resume=)` and SSE doors (operonx main `2c5feb9`, #91, or later); to test
 against another checkout, put it first on `PYTHONPATH`.
 
 ## A2 gate (2026-10-04)
