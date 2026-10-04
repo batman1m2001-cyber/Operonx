@@ -397,7 +397,7 @@ copy of its rules or statistics. What it needed from operonx and did not have:
 
 | # | Question | Decision | Why |
 |---|---|---|---|
-| D62 | Listing experiments cheaply | `ExperimentData.from_experiment(exp)`: one store row as an experiment with its summary and no items (what `from_store` builds its summary from, now shared). `experiments_of(…, items=False)` lists with one `list_experiments` call and no per-experiment reads, and reads each record's `run.json` without its `items.jsonl` | a list of 30 experiments from ClickHouse was 60 queries (`get_experiment` + `scores` each); a list needs the summaries only |
+| D62 | Listing experiments cheaply; how a case moved | `ExperimentData.from_experiment(exp)`: one store row as an experiment with its summary and no items (what `from_store` builds its summary from, now shared). `experiments_of(…, items=False)` lists with one `list_experiments` call and no per-experiment reads, and reads each record's `run.json` without its `items.jsonl` (`JobRun.load(path, items=False)`). `gate.flip_class(a, b)` is the comparison's per-case rule, public, so a page classes every case (the comparison lists at most 50 per class) without a copy of it | a list of 30 experiments from ClickHouse was 60 queries (`get_experiment` + `scores` each); a list needs the summaries only |
 | D63 | Editing a case | `Dataset.update(case_id, changes)` changes `expected`, `tags`, `split`, `cluster`, `trajectory`, `note`, `status` of one case; a value `None` removes the key. Not `id` or `input`: a different input is a different case (add it). The changed row is checked like `problems()` and refused with the reason; the file is rewritten through a temporary file beside it and `os.replace`, every other line byte for byte. `add()` and `update()` hold an advisory lock on the dataset's folder (no lock file in git), so an append never lands in the file an edit replaces; a writer that is not a `Dataset` (an editor, a script) is caught by a size/mtime check before the replace, and the edit is refused, not written over it. A bare-input line gains its `id` (the same value) when edited. Returns the new row | T4 §15.2 `PATCH …/rows/{case_id}` "atomic rewrite via operonx `Dataset.update`"; git JSONL stays the truth |
 | D64 | Archived cases | `status` is `active` (the default, never written) or `archived`. `rows()` leaves archived cases out — so a run, a selection and `dataset_version` see the active cases only (T4 §5.1) — and `all_rows()` keeps them; `problems()` flags any other status | archive instead of delete: a case's history across experiments stays readable |
 
@@ -412,3 +412,13 @@ copy of its rules or statistics. What it needed from operonx and did not have:
 - `tests/internal/app/evals/test_experiments_list.py`: `from_experiment` has `from_store`'s
   summary; `experiments_of(items=False)` equals the full listing minus items, from records and
   from the store, and reads the store with one `list_experiments` and no `get_experiment`.
+
+**E6 built, 2026-10-04** (`feat/evals-e6` here; the pages on operonx-studio `feat/experiments`).
+
+- Listing (a demo project, 6 experiments × 20–21 cases × 3 repeats, files store, median of 5):
+  records and store with items **15.0 ms**, summaries only (`items=False`) **2.7 ms**; from the
+  store alone, one `list_experiments` call instead of 1 + 2 per experiment (counted in
+  `test_experiments_list.py`) — on ClickHouse each saved call is a network round trip.
+- Dataset edits: without the folder lock, 4 threads adding while one edits made the edit
+  refuse itself (another writer changed the file) on every run of the test; with it, nothing
+  is refused or lost (`test_edits_and_adds_from_many_threads_lose_nothing`).
