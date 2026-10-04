@@ -15,9 +15,26 @@ what is allowed to land here.
 **Status: P1.** Tools, permission policy, dispatch and the ReAct loop
 have landed. Memory, compaction and sub-agents are P2/P3. Nothing is
 exported before it works.
+
+**Deprecated.** Agents moved to the ``operonx-agents`` distribution
+(``import operonx_agents``; ``docs/AGENTS_V2_PLAN.md`` decision D3). This
+package keeps working, unchanged, until one release after operonx-agents
+1.0, and warns once when it is imported. ``MIGRATION.md`` maps each name
+here to its replacement.
 """
 
 from __future__ import annotations
+
+import warnings
+
+warnings.warn(
+    "operonx.agents is deprecated: agents moved to the operonx-agents package "
+    "(pip install operonx-agents; import operonx_agents). It keeps working until one "
+    "release after operonx-agents 1.0; MIGRATION.md, 'operonx.agents → operonx-agents', "
+    "maps each name to its replacement.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from operonx.agents.graphs.dispatch import build_dispatch
 from operonx.agents.graphs.react import agent_result, build_react_agent
