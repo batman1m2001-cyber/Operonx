@@ -1,0 +1,8 @@
+
+qwen3.7-plus 3-tool agent: completed in 3 turns, 8.2s, usage {'input_tokens': 1890, 'output_tokens': 159, 'cached_input_tokens': 512, 'reasoning_tokens': 0, 'requests': 3, 'cost_usd': None}, tools ['order_status', 'customer_tier', 'refund_policy']
+answer: '- Order A1B2C3D4: shipped on 2 October\n- Customer C-42 tier: gold\n- Refund window: 60 days'
+.
+20-turn Redis session: 40 items, 33.3s, usage {'input_tokens': 6658, 'output_tokens': 37, 'cached_input_tokens': 0, 'reasoning_tokens': 0, 'requests': 20, 'cost_usd': None}
+last answer: 'Pelican'
+.........
+10 passed in 115.59s (0:01:55)

@@ -24,16 +24,18 @@ Who retries what (operonx.agents' rule, kept):
 - **Output** — an answer that does not validate is re-asked by the output
   layer (:mod:`operonx_agents.model.output`), inside the same deadline.
 
-Each resource tried by :meth:`Model.request` is recorded as a child
-execution (``op_type="llm"``) of the op running it, with the messages, the
-answer and ``gen_ai.*`` attributes. A stream is not recorded yet: a child
-scope cannot stay open across the generator's yields.
+Each resource tried by :meth:`Model.request` or :meth:`Model.stream` is
+recorded as a child execution (``op_type="llm"``) of the op running it,
+with the messages, the answer and ``gen_ai.*`` attributes. A stream's
+record stays open across its yields without becoming the current frame
+(``child(current=False)``), so the consumer's own steps stay its siblings.
 """
 
 from __future__ import annotations
 
 import asyncio
 import random
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Union
 
@@ -45,7 +47,7 @@ from operonx_agents.errors import ModelError, ModelRefused, ModelTimeout
 from operonx_agents.model._deadline import deadline as _deadline
 from operonx_agents.model.usage import Usage
 
-__all__ = ["Model", "ModelResponse", "ModelSettings"]
+__all__ = ["Model", "ModelResponse", "ModelSettings", "Reasoning"]
 
 #: Stop reasons that mean the provider declined to answer.
 REFUSAL_REASONS = frozenset({"content_filter", "safety"})
@@ -99,6 +101,15 @@ class ModelSettings:
 
 
 @dataclass(frozen=True)
+class Reasoning:
+    """A piece of the model's thinking, streamed apart from the answer
+    (``stream(reasoning=True)``). Not a ``str``, so code that joins the
+    ``str`` pieces into the answer never mixes it in."""
+
+    text: str
+
+
+@dataclass(frozen=True)
 class ModelResponse:
     """One answer.
 
@@ -134,7 +145,7 @@ class Model:
         settings: Default request knobs; a call may override them.
     """
 
-    __slots__ = ("resource", "fallback", "deadline", "settings", "_llms")
+    __slots__ = ("resource", "fallback", "deadline", "settings", "_llms", "_params")
 
     def __init__(
         self,
@@ -156,6 +167,7 @@ class Model:
         self.deadline = deadline
         self.settings = settings or ModelSettings()
         self._llms: Dict[str, Any] = {}
+        self._params = self.settings.params()
 
     @property
     def resources(self) -> List[str]:
@@ -177,6 +189,16 @@ class Model:
 
     def __repr__(self) -> str:
         return f"Model({self.resource!r}, fallback={list(self.fallback)}, deadline={self.deadline})"
+
+    def _request_params(self, settings, tools, tool_choice, response_format) -> Dict[str, Any]:
+        params = dict(self._params) if settings is None else self.settings.merge(settings).params()
+        if tools is not None:
+            params["tools"] = tools
+        if tool_choice is not None:
+            params["tool_choice"] = tool_choice
+        if response_format is not None:
+            params["response_format"] = response_format
+        return params
 
     # ── requests ───────────────────────────────────────────────────────
 
@@ -205,11 +227,11 @@ class Model:
                 settings=settings,
             )
 
-    def bounded(self) -> "_Bounded":
+    def bounded(self) -> Any:
         """``async with model.bounded():`` — the model's deadline over a
         block of several requests (an answer and its re-asks), raising
-        :class:`ModelTimeout`."""
-        return _Bounded(self)
+        :class:`ModelTimeout`. Without a deadline, a no-op."""
+        return _Bounded(self) if self.deadline is not None else nullcontext()
 
     async def request_unbounded(
         self,
@@ -222,14 +244,7 @@ class Model:
     ) -> ModelResponse:
         """:meth:`request` without the deadline — for code already inside
         :meth:`bounded`."""
-        params = self.settings.merge(settings).params()
-        for key, value in (
-            ("tools", tools),
-            ("tool_choice", tool_choice),
-            ("response_format", response_format),
-        ):
-            if value is not None:
-                params[key] = value
+        params = self._request_params(settings, tools, tool_choice, response_format)
         attempts: List[tuple] = []
         spent = Usage()
         refused = 0
@@ -241,15 +256,7 @@ class Model:
                         llm, _per_resource(llm, params), messages
                     )
                     reply = _response(completion, resource, spent + used)
-                    rec.outputs = {
-                        "content": reply.content,
-                        "tool_calls": reply.tool_calls,
-                        "finish_reason": reply.finish_reason,
-                        "usage": used.to_dict(),
-                        # The key the run store counts LLM calls by.
-                        "cost_usd": used.cost_usd,
-                    }
-                    rec.attrs.update(_gen_ai_attrs(llm, resource, reply, used))
+                    _record(rec, llm, resource, reply, used)
             except Exception as exc:  # noqa: BLE001 - the next resource decides
                 attempts.append((resource, f"{type(exc).__name__}: {exc}"))
                 LOGGER.warning("model %s failed (%s); %s", resource, exc, _next(self, resource))
@@ -277,18 +284,22 @@ class Model:
         tool_choice: Any = None,
         response_format: Optional[Dict[str, Any]] = None,
         settings: Optional[ModelSettings] = None,
-    ) -> AsyncIterator[Union[str, ModelResponse]]:
+        reasoning: bool = False,
+    ) -> AsyncIterator[Union[str, Reasoning, ModelResponse]]:
         """Text deltas (``str``) as they arrive, then the whole
         :class:`ModelResponse`. A resource is abandoned for the next only
-        before it has yielded a delta."""
-        params = self.settings.merge(settings).params()
-        for key, value in (
-            ("tools", tools),
-            ("tool_choice", tool_choice),
-            ("response_format", response_format),
-        ):
-            if value is not None:
-                params[key] = value
+        before it has yielded a delta.
+
+        ``reasoning=True`` also yields the model's thinking, where the
+        gateway streams it (``reasoning_content``), as :class:`Reasoning`
+        pieces; it never enters the answer's text.
+
+        Consume it in the task that started it, and do not await other
+        work between pieces: the deadline cancels the consuming task, and
+        only a cancel that lands inside this generator becomes
+        :class:`ModelTimeout`.
+        """
+        params = self._request_params(settings, tools, tool_choice, response_format)
         attempts: List[tuple] = []
         async with self.bounded():
             for resource in self.resources:
@@ -296,18 +307,26 @@ class Model:
                 acc = _StreamAcc()
                 emitted = False
                 try:
-                    async for chunk in llm.stream(messages=messages, **_per_resource(llm, params)):
-                        delta = acc.add(chunk)
-                        if delta:
-                            emitted = True
-                            yield delta
+                    async with child(
+                        "model", inputs={"messages": messages}, op_type="llm", current=False
+                    ) as rec:
+                        async for chunk in llm.stream(
+                            messages=messages, **_per_resource(llm, params)
+                        ):
+                            delta, thought = acc.add(chunk)
+                            if thought and reasoning:
+                                yield Reasoning(thought)
+                            if delta:
+                                emitted = True
+                                yield delta
+                        reply = acc.response(resource, llm)
+                        _record(rec, llm, resource, reply, reply.usage)
                 except Exception as exc:  # noqa: BLE001
                     if emitted:
                         raise  # a replay would contradict what the consumer has
                     attempts.append((resource, f"{type(exc).__name__}: {exc}"))
                     LOGGER.warning("model %s failed (%s); %s", resource, exc, _next(self, resource))
                     continue
-                reply = acc.response(resource, llm)
                 if not emitted and reply.finish_reason in REFUSAL_REASONS:
                     attempts.append((resource, f"refused (finish_reason={reply.finish_reason!r})"))
                     continue
@@ -434,8 +453,25 @@ def _text(content: Any) -> str:
     )  # content parts
 
 
+def _field(value: Any, name: str) -> Any:
+    """``value[name]`` of a dict, else the attribute (an SDK object)."""
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
 def _dump(value: Any) -> Any:
     return value.model_dump() if hasattr(value, "model_dump") else value
+
+
+def _record(rec: Any, llm: Any, resource: str, reply: ModelResponse, used: Usage) -> None:
+    rec.outputs = {
+        "content": reply.content,
+        "tool_calls": reply.tool_calls,
+        "finish_reason": reply.finish_reason,
+        "usage": used.to_dict(),
+        # The key the run store counts LLM calls by.
+        "cost_usd": used.cost_usd,
+    }
+    rec.attrs.update(_gen_ai_attrs(llm, resource, reply, used))
 
 
 def _gen_ai_attrs(llm: Any, resource: str, reply: ModelResponse, used: Usage) -> Dict[str, Any]:
@@ -460,31 +496,35 @@ class _StreamAcc:
         self.usage: Any = None
         self.finish_reason: Optional[str] = None
 
-    def add(self, chunk: Any) -> str:
+    def add(self, chunk: Any) -> tuple:
+        """``(text delta, reasoning delta)`` of one chunk, either may be ""."""
         if getattr(chunk, "usage", None):
             self.usage = chunk.usage
         if not chunk.choices:
-            return ""
+            return "", ""
         choice = chunk.choices[0]
         delta = choice.delta
         if choice.finish_reason:
             self.finish_reason = choice.finish_reason
         for part in getattr(delta, "tool_calls", None) or ():
-            data = _dump(part)
             entry = self.calls.setdefault(
-                data.get("index") or 0, {"id": "", "function": {"name": "", "arguments": ""}}
+                _field(part, "index") or 0, {"id": "", "function": {"name": "", "arguments": ""}}
             )
-            entry["id"] = entry["id"] or data.get("id") or ""
-            fn = data.get("function") or {}
-            entry["function"]["name"] = entry["function"]["name"] or fn.get("name") or ""
-            entry["function"]["arguments"] += fn.get("arguments") or ""
+            entry["id"] = entry["id"] or _field(part, "id") or ""
+            fn = _field(part, "function")
+            if fn is not None:
+                entry["function"]["name"] = entry["function"]["name"] or _field(fn, "name") or ""
+                entry["function"]["arguments"] += _field(fn, "arguments") or ""
         tokens = getattr(getattr(choice, "logprobs", None), "content", None)
         if tokens:
             self.logprobs.extend(_dump(t) for t in tokens)
         text = getattr(delta, "content", None) or ""
         if text:
             self.text.append(text)
-        return text
+        # A vendor field (Qwen, DeepSeek): read from the extras, so a delta
+        # without it costs no AttributeError.
+        extra = getattr(delta, "model_extra", None)
+        return text, (extra.get("reasoning_content") if extra else None) or ""
 
     def response(self, resource: str, llm: Any) -> ModelResponse:
         return ModelResponse(
