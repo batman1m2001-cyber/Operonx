@@ -274,3 +274,40 @@ class TestWhereItApplies:
         assert SECRET[:10] not in seen, "a cut cannot leave half a key behind"
         assert seen.startswith("padding padding [redacted")
         assert "[truncated:" in seen
+
+    async def test_compaction_records_are_scrubbed(self, hub):
+        """The summarizer's prompt holds the old turns, and its summary may
+        repeat what they said: both records are scrubbed."""
+        from operonx_agents import Agent, ContextPolicy, Model
+        from tests.fakes import ScriptedLLM
+
+        llm = ScriptedLLM(
+            asks(("read_env", {}), turn=0),
+            asks(("read_env", {}), turn=1, prompt_tokens=900),
+            says("done"),
+        )
+        summarizer = ScriptedLLM(says(f"the key was {SECRET}"))
+        hub(m=llm, s=summarizer)
+        agent = Agent(
+            name="agent",
+            model=Model("m"),
+            tools=[read_env],
+            context=ContextPolicy(window=1000, keep_recent=1, summarizer=Model("s")),
+        )
+        handle = traced(agent).start({"question": "go"})
+        assert (await handle.result())["status"] == "completed"
+        assert summarizer.calls == 1 and SECRET in summarizer.requests[0]["messages"][0]["content"]
+        mine = [n for n in handle.trace.nodes if n.op_name != "c"]
+        assert "compact" in [n.op_name for n in mine]
+        dumped = json.dumps([(n.inputs, n.outputs) for n in mine], default=str)
+        assert SECRET not in dumped
+
+    async def test_a_model_repeating_a_secret_is_scrubbed_in_its_record(self, hub):
+        args = {"text": f"token: {SECRET}"}
+        agent, _ = make(hub, asks(("note", args)), says(f"saved {SECRET}"))
+        handle = traced(agent).start({"question": "go"})
+        assert (await handle.result())["answer"] == f"saved {SECRET}", "the run is untouched"
+        models = [n for n in handle.trace.nodes if n.op_name == "model"]
+        assert SECRET not in json.dumps([n.outputs for n in models], default=str)
+        assert "[redacted:" in models[1].outputs["content"]
+        assert models[0].outputs["tool_calls"][0]["args"]["text"].startswith("token: [redacted")

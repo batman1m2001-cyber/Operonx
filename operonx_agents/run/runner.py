@@ -168,7 +168,7 @@ EXPIRED = (
     "Do not retry it; ask how to proceed."
 )
 
-#: What a run in each status may still do: a terminal one returns its result.
+#: The statuses a run ends in for good: resuming one returns its result.
 TERMINAL = ("completed", "limit", "blocked")
 
 ACCEPTED = "Final answer recorded."
@@ -611,8 +611,6 @@ class _Run:
             if len(run) == room:
                 s.final_turn = "tool_calls"
         s.tool_calls += len(run)
-        if self.redact is not None:
-            self.redact.scrub_message(items[-1])  # the calls' arguments, once
         outcomes = await self._dispatch(run, items, convo)
         answers = self._unrun(cut, NOT_RUN["tool_calls"].format(cap=limits.tool_calls))
         by_id = {m["tool_call_id"]: m for m in answers}
@@ -719,6 +717,7 @@ class _Run:
             settings=agent.settings,
             reasoning=self.emit is not None,
             trace_messages=traced,
+            redact=self.redact,
         ):
             if isinstance(piece, ModelResponse):
                 reply = piece
@@ -771,13 +770,14 @@ class _Run:
             else:
                 prompt = [{"role": "user", "content": compaction.summary_prompt(older)}]
                 try:
-                    reply = await policy.summarizer.request(prompt)
+                    reply = await policy.summarizer.request(prompt, redact=self.redact)
                 except Exception as exc:  # noqa: BLE001 - enrichment fails open
                     LOGGER.warning("compaction skipped: the summarizer failed (%s)", exc)
                     return None
                 self.meter.add(reply.usage)
                 summary, tokens = reply.content, reply.usage.output_tokens
-            rec.outputs = {"summary": summary, "kept": len(kept)}
+            shown_summary = summary if self.redact is None else self.redact.redactor.scrub(summary)
+            rec.outputs = {"summary": shown_summary, "kept": len(kept)}
         self._emit(Compacted(dropped=len(older), summary_tokens=tokens))
         return compaction.summary_item(summary, kept), [compaction.summary_message(summary), *kept]
 
