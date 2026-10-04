@@ -131,6 +131,10 @@ asyncio.run(main())
   outputs too.
 - Inside the block, `run_context()` describes the child: each step has its
   own `idempotency_key`.
+- Held open across an async generator's `yield` (a streamed model call), pass
+  `current=False`: the consumer's code runs between the yields in the same
+  context, and must not run inside the step. Nothing nests under such a
+  step, and `run_context()` keeps describing the op.
 - `async with` only: a plain `def` op cannot use it. Outside a run it records
   nothing.
 - Names are plain: no `.`, `[`, `]` or `#`.

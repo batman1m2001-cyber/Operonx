@@ -198,7 +198,11 @@ class ChildExecution:
 
 
 def child(
-    name: str, inputs: Optional[Dict[str, Any]] = None, *, op_type: str = ""
+    name: str,
+    inputs: Optional[Dict[str, Any]] = None,
+    *,
+    op_type: str = "",
+    current: bool = True,
 ) -> "_ChildScope":
     """Record the block as a child execution of the op running it::
 
@@ -217,6 +221,13 @@ def child(
         inputs: What the step was given, recorded as its inputs.
         op_type: The step's kind (``llm``, ``tool``, ``turn``), so a
             consumer can type it (Langfuse makes ``llm`` a generation).
+        current: Whether the code inside the block runs *as* the child:
+            its own ``child()`` blocks nest under it and :func:`run_context`
+            describes it. ``False`` records the step without that, for a
+            block held open across an async generator's ``yield`` (a
+            streamed model call): the consumer's code runs between the
+            yields in the same context, and would otherwise run inside the
+            step — and stay there if the generator is abandoned unclosed.
 
     The record's ctx is its parent's plus ``"<name>[<n>]"`` — the n-th
     child of that name under that parent — and its full name the parent's
@@ -240,18 +251,21 @@ def child(
             f"'<name>[n]' and the last part of a full name, so it must be a non-empty "
             "string with no '.', '[', ']' or '#'. Use a plain name such as 'model'."
         )
-    return _ChildScope(name, inputs, op_type)
+    return _ChildScope(name, inputs, op_type, current)
 
 
 class _ChildScope:
     """The async context manager :func:`child` returns."""
 
-    __slots__ = ("_handle", "_inputs", "_op_type", "_parent", "_frame", "_start")
+    __slots__ = ("_handle", "_inputs", "_op_type", "_current", "_parent", "_frame", "_start")
 
-    def __init__(self, name: str, inputs: Optional[Dict[str, Any]], op_type: str) -> None:
+    def __init__(
+        self, name: str, inputs: Optional[Dict[str, Any]], op_type: str, current: bool
+    ) -> None:
         self._handle = ChildExecution(name)
         self._inputs = dict(inputs or {})
         self._op_type = op_type
+        self._current = current
         self._parent: Optional[_Frame] = None
         self._frame: Optional[_Frame] = None
         self._start = 0.0
@@ -277,7 +291,8 @@ class _ChildScope:
         frame.deadline = parent.deadline
         self._parent, self._frame = parent, frame
         self._start = perf_counter()
-        _current_frame.set(frame)
+        if self._current:
+            _current_frame.set(frame)
         if frame.trace._task_listeners:
             frame.trace.emit_task(TaskStarted(frame.full_name, frame.ctx, frame.attempt))
         return self._handle
@@ -286,9 +301,10 @@ class _ChildScope:
         frame = self._frame
         if frame is None:
             return False
-        # Restored by value, as BaseOp.run restores its own (a generator
-        # closed by the loop's finalizer runs this in another context).
-        _current_frame.set(self._parent)
+        if self._current:
+            # Restored by value, as BaseOp.run restores its own (a generator
+            # closed by the loop's finalizer runs this in another context).
+            _current_frame.set(self._parent)
         end = perf_counter()
         if exc is None:
             status, error = STATUS_OK, None
