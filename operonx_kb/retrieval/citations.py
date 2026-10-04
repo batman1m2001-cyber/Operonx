@@ -17,10 +17,10 @@ sentences left without a marker are listed in ``unsupported_sentences``.
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from operonx_kb.model.document import Element, Span
+from operonx_kb.text.normalize import clean_chars
 from operonx_kb.text.sentences import sentence_spans
 from operonx_kb.text.spans import elements_in_span, regions_for_span
 
@@ -47,12 +47,12 @@ def _collapsed(text: str) -> Tuple[str, List[int]]:
 def find_quote(canonical: str, spans: Sequence[Span], quote: str) -> Optional[Span]:
     """The canonical span of ``quote`` inside one of ``spans``, or ``None``.
 
-    Whitespace-insensitive, and the quote is NFC-normalised like the canonical
-    text; the quote's own surrounding quotation marks and spaces are ignored. A
+    Whitespace-insensitive, and the quote is cleaned like the canonical text (NFC,
+    invisible characters dropped, :func:`~operonx_kb.text.normalize.clean_chars`); the quote's own surrounding quotation marks and spaces are ignored. A
     quote must lie within one span: two pieces of text the source shows apart are
     not one quotation.
     """
-    needle = _WS.sub(" ", unicodedata.normalize("NFC", quote)).strip().strip(_EDGE_QUOTES).strip()
+    needle = _WS.sub(" ", clean_chars(quote)).strip().strip(_EDGE_QUOTES).strip()
     if not needle:
         return None
     for start, end in spans:

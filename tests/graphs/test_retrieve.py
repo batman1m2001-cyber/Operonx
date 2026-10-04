@@ -191,3 +191,17 @@ def test_the_search_flow_runs_as_a_job(loaded, tmp_path):
     record = run(job.run())
     assert record.status == "ok", record
     assert len(got["q1"]["hits"]) <= 2 and got["q2"]["hits"][0]["key"] == "travel.md"
+
+
+def test_the_default_mode_is_hybrid_when_both_indexes_exist(loaded):
+    from operonx_kb import CollectionSpec, DenseIndexSpec
+
+    assert loaded.default_mode("docs") == "hybrid"
+    loaded.recorder.clear()
+    run(loaded.search("docs", "annual leave", k=2))
+    assert loaded.recorder.runs("fused") == 1
+    loaded.create_collection(
+        "dense_only",
+        CollectionSpec(dense=DenseIndexSpec(embedder="hash", store="vector_store:kb2")),
+    )
+    assert loaded.default_mode("dense_only") == "dense"

@@ -52,10 +52,11 @@ __all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"
 
 #: Retrieval modes of :meth:`KnowledgeBase.search`.
 MODES = ("dense", "lexical", "hybrid")
-#: The mode a search uses unless told otherwise. Dense stays the default until
-#: hybrid beats it on Recall@10 on at least two of the three eval sets
-#: (PLAN K2 gate; the table is in ``docs/bench/k2.md``).
-DEFAULT_MODE = "dense"
+#: The mode a search uses unless told otherwise, for a collection that has both a
+#: dense and a lexical index. Hybrid beat dense on Recall@10 on all three K2 eval
+#: sets (the PLAN gate asks for two of three; the table is in ``docs/bench/k2.md``).
+#: A collection with only one index uses that one (:meth:`KnowledgeBase.default_mode`).
+DEFAULT_MODE = "hybrid"
 
 
 class IngestError(KBError):
@@ -248,13 +249,22 @@ class KnowledgeBase:
 
     # retrieval ------------------------------------------------------------------------------
 
-    def retriever(self, collection_id: str, mode: str = DEFAULT_MODE):
-        """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``).
+    def default_mode(self, collection_id: str) -> str:
+        """:data:`DEFAULT_MODE` when the collection has both indexes, else the one it has."""
+        spec = self.collection(collection_id).spec
+        if spec.dense is not None and spec.lexical is not None:
+            return DEFAULT_MODE
+        return "dense" if spec.dense is not None else "lexical"
+
+    def retriever(self, collection_id: str, mode: Optional[str] = None):
+        """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``;
+        default :meth:`default_mode`). An explicit mode the collection cannot serve raises.
 
         Raises:
             QueryError: Unknown mode, or the collection lacks the index it needs.
         """
         spec = self.collection(collection_id).spec
+        mode = mode or self.default_mode(collection_id)
         if mode not in MODES:
             raise QueryError(f"unknown retrieval mode {mode!r}; use one of {list(MODES)}")
         if mode in ("dense", "hybrid") and spec.dense is None:
@@ -282,9 +292,7 @@ class KnowledgeBase:
     ):
         """The search graph: the retriever, the hydration gate, and with ``reranker``
         (a ``reranking:`` resource name) a rerank of ``rerank_depth`` hits."""
-        search = search_graph(
-            self.retriever(collection_id, mode or DEFAULT_MODE), catalog=self.catalog_key
-        )
+        search = search_graph(self.retriever(collection_id, mode), catalog=self.catalog_key)
         return reranked(search, reranker, depth=rerank_depth) if reranker else search
 
     async def search(
@@ -302,13 +310,13 @@ class KnowledgeBase:
 
         Args:
             filter: A :class:`~operonx_kb.model.filter.KBFilter` or its dict.
-            mode: ``dense``, ``lexical`` or ``hybrid`` (default :data:`DEFAULT_MODE`).
+            mode: ``dense``, ``lexical`` or ``hybrid`` (default :meth:`default_mode`).
             reranker: A ``reranking:`` resource name to rerank with.
 
         Raises:
             QueryError: An op failed (a filter on an undeclared field, a missing index…).
         """
-        mode = mode or DEFAULT_MODE
+        mode = mode or self.default_mode(collection_id)
         flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
         spec = self.collection(collection_id).spec
         config = f"{mode}|{reranker}|{rerank_depth}|{spec.model_dump_json()}"
@@ -365,7 +373,7 @@ class KnowledgeBase:
         Raises:
             QueryError: An op failed, or the model's reply did not parse.
         """
-        mode = mode or DEFAULT_MODE
+        mode = mode or self.default_mode(collection_id)
         flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
         spec = self.collection(collection_id).spec
         config = f"{llm}|{mode}|{reranker}|{rerank_depth}|{budget_tokens}|{neighbours}|{spec.model_dump_json()}"

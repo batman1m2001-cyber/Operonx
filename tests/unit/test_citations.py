@@ -158,3 +158,8 @@ def test_a_touching_hit_that_does_not_fit_is_not_claimed_by_the_source(version):
     budget = RegexTokenizer().count(chunks[occ[a].chunk_id].text)
     (src,) = sources_for(version, [a, b], neighbours=0, budget_tokens=budget)
     assert src.hit_ranks == [1] and "31 March" not in src.text
+
+
+def test_a_quote_is_cleaned_like_the_canonical_text():
+    canonical = "Unused days expire on 31 March."
+    assert find_quote(canonical, [(0, len(canonical))], "expire on 31​ March") == (12, 30)

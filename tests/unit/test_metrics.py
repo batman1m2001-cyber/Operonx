@@ -87,3 +87,14 @@ def test_faithfulness_proxy_rewards_words_found_in_the_cited_quotes():
 def test_grounded_recall():
     assert grounded_recall(ANSWER, [A, [("v1", (305, 320))]]) == 1.0
     assert grounded_recall(ANSWER, [[("v9", (0, 10))]]) == 0.0
+
+
+def test_a_quote_with_characters_the_canonical_text_drops_still_resolves():
+    """XQuAD-vi contexts hold zero-width spaces; the canonical serializer drops them, so a
+    label quoting the raw text must be cleaned the same way (2 of 397 xquad_vi labels)."""
+    from operonx_kb.text.normalize import normalize_inline
+
+    raw = "Tòa án Hiến pháp Ý có ý kiến ​​rằng vì luật quốc hữu hóa"
+    canonical = normalize_inline(raw)
+    assert "​" not in canonical
+    assert occurrences(canonical, raw) == [(0, len(canonical))]

@@ -11,13 +11,13 @@ score every system 0 and look like a retrieval failure.
 from __future__ import annotations
 
 import re
-import unicodedata
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from operonx_kb.errors import KBError
 from operonx_kb.eval.metrics import Occurrence
 from operonx_kb.model.ids import document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of
+from operonx_kb.text.normalize import clean_chars
 
 __all__ = ["LabelError", "LabelResolver", "occurrences"]
 
@@ -27,8 +27,10 @@ class LabelError(KBError):
 
 
 def occurrences(canonical: str, quote: str) -> List[Tuple[int, int]]:
-    """Every span of ``canonical`` holding ``quote``, whitespace-insensitively."""
-    words = unicodedata.normalize("NFC", quote).split()
+    """Every span of ``canonical`` holding ``quote``, whitespace-insensitively. The quote is
+    cleaned like the canonical text (:func:`~operonx_kb.text.normalize.clean_chars`: NFC,
+    invisible characters such as zero-width spaces dropped)."""
+    words = clean_chars(quote).split()
     if not words:
         return []
     pattern = re.compile(r"\s+".join(re.escape(w) for w in words))
