@@ -1,0 +1,164 @@
+"""Scripted model backends and a hub that serves them.
+
+``ScriptedLLM`` speaks the backend interface ``Model`` uses (``generate``
+returning an OpenAI ``ChatCompletion``, ``stream`` yielding chunks), built
+from the SDK's own types so the shapes are the real ones. Each script item
+is a reply, an exception to raise, or a callable taking the request.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional
+
+from openai.types.chat import ChatCompletion, ChatCompletionChunk
+from openai.types.chat.chat_completion_chunk import Choice as ChunkChoice
+from openai.types.chat.chat_completion_chunk import ChoiceDelta
+
+
+def completion(
+    content: str = "",
+    *,
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+    finish_reason: str = "stop",
+    prompt_tokens: int = 10,
+    completion_tokens: int = 3,
+    logprobs: Optional[List[tuple]] = None,
+    refusal: Optional[str] = None,
+) -> ChatCompletion:
+    """A completion as the SDK builds one from a live body: constructed,
+    not validated, since gateways send values outside the SDK's Literals
+    (Gemini's ``finish_reason: "safety"``)."""
+    calls = [
+        {
+            "id": c.get("id", f"call_{i}"),
+            "type": "function",
+            "function": {
+                "name": c["name"],
+                "arguments": c.get("raw") or json.dumps(c.get("args", {})),
+            },
+        }
+        for i, c in enumerate(tool_calls or [])
+    ]
+    lp = None
+    if logprobs:
+        lp = {
+            "content": [
+                {"token": t, "logprob": p, "bytes": None, "top_logprobs": []} for t, p in logprobs
+            ]
+        }
+    body = {
+        "id": "cmpl",
+        "created": 0,
+        "model": "m",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": calls or None,
+                    "refusal": refusal,
+                },
+                "finish_reason": finish_reason,
+                "logprobs": lp,
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+    return ChatCompletion.construct(**body)
+
+
+def chunk(
+    content: Optional[str] = None, finish_reason: Optional[str] = None
+) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id="c",
+        created=0,
+        model="m",
+        object="chat.completion.chunk",
+        choices=[
+            ChunkChoice(index=0, delta=ChoiceDelta(content=content), finish_reason=finish_reason)
+        ],
+    )
+
+
+class ScriptedLLM:
+    """A backend that answers from a script, recording every request."""
+
+    def __init__(
+        self,
+        *script: Any,
+        delay: float = 0.0,
+        structured_output: str = "prompted",
+        stream_script: Optional[List[Any]] = None,
+        cost: Optional[tuple] = None,
+        max_retries: int = 0,
+    ) -> None:
+        self.script = list(script)
+        self.stream_script = list(stream_script or [])
+        self.delay = delay
+        self.requests: List[Dict[str, Any]] = []
+        self.calls = 0
+        self.config = SimpleNamespace(
+            structured_output=structured_output,
+            cost_per_input_token=cost[0] if cost else None,
+            cost_per_output_token=cost[1] if cost else None,
+            max_retries=max_retries,
+            retry_base_delay=0.0,
+            retry_min_delay=0.0,
+            retry_max_delay=0.0,
+            generation_extras=None,
+            model="scripted",
+        )
+
+    async def generate(self, messages, **params) -> ChatCompletion:
+        self.calls += 1
+        self.requests.append({"messages": list(messages), **params, "t": time.perf_counter()})
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        item = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+        if callable(item) and not isinstance(item, ChatCompletion):
+            item = item(messages, params)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    async def stream(self, messages, **params):
+        self.calls += 1
+        self.requests.append({"messages": list(messages), **params})
+        for item in self.stream_script:
+            if isinstance(item, BaseException):
+                raise item
+            await asyncio.sleep(0)
+            yield item
+
+
+class FakeHub:
+    """Stands in for ``ResourceHub.instance()``: ``get("llm:x")``."""
+
+    def __init__(self, **llms: Any) -> None:
+        self.llms = llms
+
+    def get(self, key: str) -> Any:
+        category, _, name = key.partition(":")
+        assert category == "llm", key
+        if name not in self.llms:
+            raise KeyError(f"Resource '{key}' not found")
+        return self.llms[name]
+
+
+class StatusError(Exception):
+    """An HTTP error with a status code, as the SDK raises them."""
+
+    def __init__(self, status_code: int) -> None:
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code

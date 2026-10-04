@@ -18,6 +18,15 @@ from operonx_agents.errors import (
     OutputInvalid,
     ToolDefinitionError,
 )
+from operonx_agents.model import (
+    Choice,
+    Model,
+    ModelResponse,
+    ModelSettings,
+    OutputResult,
+    Usage,
+    ask,
+)
 from operonx_agents.run import RunContext
 from operonx_agents.tools import (
     DEFAULT_POLICY,
@@ -34,18 +43,25 @@ __version__ = "0.1.0.dev0"
 
 __all__ = [
     "AgentsError",
+    "Choice",
     "DEFAULT_POLICY",
+    "Model",
     "ModelError",
     "ModelRefused",
+    "ModelResponse",
     "ModelRetry",
+    "ModelSettings",
     "ModelTimeout",
     "OutputInvalid",
+    "OutputResult",
     "RunContext",
     "Tool",
     "ToolDefinitionError",
     "ToolPolicy",
     "ToolSpec",
     "Toolset",
+    "Usage",
+    "ask",
     "dispatch",
     "tool",
     "tool_message",
