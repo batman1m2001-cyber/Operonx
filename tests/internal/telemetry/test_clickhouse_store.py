@@ -251,9 +251,10 @@ def test_schema_is_created_once_and_versioned(tmp_path):
     creates = [c for c in client.commands if c.startswith("CREATE TABLE")]
     assert [c.split()[5] for c in creates] == [
         "ox.schema_version", "ox.runs", "ox.nodes", "ox.op_rollups", "ox.media",
+        "ox.experiments", "ox.experiment_items", "ox.scores", "ox.judge_cache",
     ]  # fmt: skip
     assert client.commands[0] == "CREATE DATABASE IF NOT EXISTS ox"
-    assert client.versions == [1, 2]
+    assert client.versions == [1, 2, 3]
     # a second process finding version 1 creates nothing new
     again = _store(tmp_path, client=client)
     again.put_trace(_trace("t-3"))
@@ -267,7 +268,7 @@ def test_a_user_granted_only_tables_writes_and_reads(tmp_path):
     store.put_trace(_trace())
     assert not [c for c in client.commands if c.startswith("CREATE DATABASE")]
     assert [t for t, *_ in client.inserts] == ["ox.nodes", "ox.op_rollups", "ox.runs"]
-    assert store.schema_version() == 2
+    assert store.schema_version() == 3
 
 
 def test_batches_go_out_as_one_insert_per_table(tmp_path):
@@ -435,11 +436,64 @@ def test_a_v1_database_upgrades_to_v2_by_creating_only_the_media_table(tmp_path)
     store = _ch(tmp_path, client=client)
     store.put_trace(_trace())
     creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
-    assert creates == ["ox.schema_version", "ox.media"]
-    assert client.versions == [1, 2] and store.schema_version() == 2
+    assert creates[:2] == ["ox.schema_version", "ox.media"]  # then v3's tables
+    assert client.versions == [1, 2, 3] and store.schema_version() == 3
     ddl = next(c for c in client.commands if "ox.media" in c)
     assert "ReplacingMergeTree(expires_at)" in ddl and "ORDER BY sha" in ddl
     assert "TTL expires_at" in ddl and "PARTITION" not in ddl
+
+
+def test_a_v2_database_upgrades_to_v3_by_creating_only_the_score_tables(tmp_path):
+    from operonx.telemetry.scores.clickhouse import ClickHouseScoreStore
+
+    client = FakeClient(databases={"ox"}, grants_db=False)  # a user granted only tables
+    client.versions = [1, 2]  # a 1.14 database: runs, nodes, op_rollups, media
+    store = ClickHouseScoreStore(database="ox", client=client)
+    assert store.schema_version() == 3
+    creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
+    assert creates == [
+        "ox.schema_version", "ox.experiments", "ox.experiment_items", "ox.scores", "ox.judge_cache",
+    ]  # fmt: skip
+    assert not [c for c in client.commands if c.startswith("CREATE DATABASE")]
+    assert client.versions == [1, 2, 3]
+    # the run store on the same database finds v3 and creates nothing
+    runs = _ch(tmp_path, client=client)
+    runs.put_trace(_trace())
+    creates = [c.split()[5] for c in client.commands if c.startswith("CREATE TABLE")]
+    assert creates[5:] == ["ox.schema_version"]  # only the version table's IF NOT EXISTS
+    assert client.versions == [1, 2, 3]
+
+
+def _ddl_columns(client, table):
+    ddl = next(c for c in client.commands if f"CREATE TABLE IF NOT EXISTS ox.{table} " in c)
+    body = ddl.split("(", 1)[1]
+    cols = []
+    for part in body.split(", "):
+        word = part.strip().split(" ", 1)[0]
+        if word and word.isidentifier() and word not in ("INDEX", "CODEC", "DEFAULT"):
+            cols.append(word)
+    return cols
+
+
+def test_the_score_store_inserts_the_columns_v3_creates(tmp_path):
+    from operonx.telemetry.scores import Experiment, ExperimentItem, Score
+    from operonx.telemetry.scores.clickhouse import ClickHouseScoreStore
+
+    client = FakeClient()
+    store = ClickHouseScoreStore(database="ox", client=client)
+    store.put_experiment(Experiment("e1", "labels", started_at=1.0, metrics={"pass": {}}))
+    store.put_items([ExperimentItem("e1", "a", output={"x": 1}, tags=["t"])])
+    store.put_scores([Score("exact", experiment_id="e1", case_id="a", passed=True, created_at=1.0)])
+    store.cache_put("k", {"passed": True})
+    tables = {}
+    for table, columns, rows, settings in client.inserts:
+        tables[table.split(".")[1]] = columns
+        assert len(rows[0]) == len(columns)
+        assert settings == {"async_insert": 1, "wait_for_async_insert": 1}
+    assert set(tables) == {"experiments", "experiment_items", "scores", "judge_cache"}
+    for table, columns in tables.items():
+        ddl = _ddl_columns(client, table)
+        assert set(columns) == set(ddl) - {"written_at"}, table  # the server stamps written_at
 
 
 def test_clickhouse_media_goes_in_the_batch_before_the_nodes(tmp_path):
@@ -786,7 +840,7 @@ def test_storing_a_run_twice_keeps_one_copy(live):
     live.put_trace(_trace("twice"))
     assert live.count(RunFilter(trace_ids=["twice"])) == 1
     assert len(live.get_run("twice").nodes) == 2
-    assert live.schema_version() == 2
+    assert live.schema_version() == 3
 
 
 def test_values_json_cannot_hold_never_sink_a_run(tmp_path):
@@ -837,7 +891,7 @@ def test_live_a_v1_database_upgrades_to_v2(request, tmp_path):
         chmod.MIGRATIONS = real
     store._ready = False  # the next process to open it
     store.put_trace(_with_audio("v2", wav(0.2)))
-    assert store.schema_version() == 2
+    assert store.schema_version() == 3  # through v2 to the newest
     assert {s.trace_id for s in store.list_runs().items} == {"v1", "v2"}
     ref = store.get_run("v2").nodes[0]["outputs"]["audio"]
     assert store.media.get(ref["$media"]) == wav(0.2)
@@ -868,3 +922,38 @@ def test_live_prune_media_in_clickhouse_removes_only_orphans(request, tmp_path):
     assert store.prune_media(older_than_s=0) == 1
     (kept,) = [sha for sha, _ in store.media.keys()]
     assert store.get_run("pa").nodes[0]["outputs"]["audio"]["$media"] == kept
+
+
+def test_live_a_v2_database_with_runs_upgrades_to_v3_and_another_host_reads_it(request, tmp_path):
+    from operonx.telemetry.runs import clickhouse as chmod
+    from operonx.telemetry.scores import Experiment, ExperimentItem, Score, ScoreFilter
+    from operonx.telemetry.scores.clickhouse import ClickHouseScoreStore
+    from tests.internal.telemetry._clickhouse import clickhouse_spec
+
+    runs = open_store(request, tmp_path)
+    real = chmod.MIGRATIONS
+    chmod.MIGRATIONS = real[:2]
+    try:
+        runs.put_trace(_trace("before-v3"))  # a 1.14 database, with a run in it
+        assert runs.schema_version() == 2
+    finally:
+        chmod.MIGRATIONS = real
+
+    host_a = ClickHouseScoreStore(database=runs.database, **clickhouse_spec())
+    exp = Experiment(
+        "e1", "labels", project="demo", started_at=time.time(), metrics={"pass": {"mean": 1.0}}
+    )
+    host_a.put_experiment(exp)
+    host_a.put_items([ExperimentItem("e1", "a", output={"label": "x"})])
+    host_a.put_scores([Score("exact", experiment_id="e1", case_id="a", passed=True)])
+    assert host_a.schema_version() == 3
+    assert runs.get_run("before-v3") is not None  # the run is still there
+
+    host_b = ClickHouseScoreStore(database=runs.database, **clickhouse_spec())  # its own client
+    try:
+        got = host_b.get_experiment("e1")
+        assert got.experiment == exp and got.items[0].output == {"label": "x"}
+        assert [s.passed for s in host_b.scores(ScoreFilter(experiment_id="e1"))] == [True]
+    finally:
+        host_a.close()
+        host_b.close()

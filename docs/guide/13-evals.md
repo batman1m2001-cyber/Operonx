@@ -42,8 +42,8 @@ came from.
 ## Evaluators
 
 An evaluator is a function — plain, async, or an `@op` (called for its
-body) — that takes any of `input`, `output`, `expected`, `row` and
-`outputs` by name, and returns a verdict:
+body) — that takes any of `input`, `output`, `expected`, `row`,
+`outputs` and `trace` by name, and returns a verdict:
 
 - `True` / `False`;
 - a score in [0, 1], which passes at 0.5;
@@ -51,8 +51,8 @@ body) — that takes any of `input`, `output`, `expected`, `row` and
 
 `output` is what the case produced: the one item the graph sent (or its
 result, for a graph with no doors), a list when it sent several, `None`
-when it sent nothing. An evaluator that raises fails its case, with the
-error on the verdict.
+when it sent nothing. An evaluator that raises fails its check, with the
+error on the verdict. A case's async evaluators run at the same time.
 
 ```python
 def short_enough(output):
@@ -72,6 +72,57 @@ The built-ins, each a factory:
 | `json_match(keys=None)` | the output object agrees with `expected` on `keys` (every key `expected` has, when none are named) |
 | `llm_judge(resource, rubric)` | an LLM grades the case against the rubric; its cost and usage stay on the verdict |
 
+## Checking the run: `trace`
+
+An evaluator that names `trace` gets a `TraceView` of the case's own run
+— the rows a run store keeps, so the same evaluator reads a live run
+(in an eval) and a stored one (in a rescore) identically:
+
+| Member | What |
+|---|---|
+| `rows` | every execution, in start order: `OpRow(op_id, op_name, op_full_name, op_type, ctx, inputs, outputs, status, error, start, duration_ms)` |
+| `ops(name, type=, under=, status=)`, `first(name)`, `last(name)` | executions by op name (or a dotted tail of the full name), type, enclosing subgraph, status |
+| `path(types=None, collapse=False)` | op names in order, branch routing left out |
+| `llm_calls()` | executions that report `cost_usd` — LLM calls, as the run store counts them |
+| `tool_calls()` | `ToolCall(name, args, id, op_id, result, status)` for every tool call the LLM calls made, with the tool message an op returned for it |
+| `errors()` | executions that did not end `ok` |
+| `duration_ms`, `cost_usd`, `unpriced`, `tokens_in`, `tokens_out`, `tokens` | the run store's totals over the same rows |
+
+Built on it:
+
+| Helper | Passes when |
+|---|---|
+| `trajectory.ops(reference=None, mode="strict", types=None)` | the op path matches the reference (else the case's `trajectory.ops`) |
+| `trajectory.tool_calls(reference=None, mode="strict", args="exact")` | the tool calls match (else the case's `trajectory.tool_calls`) |
+| `trajectory.op_output(op, check, at="last")` | `check` passes on that op's outputs; the verdict's `op` is its `op_id` |
+| `budget(ms=, cost_usd=, tokens=, llm_calls=)` | the run stays within every limit given (inclusive) |
+
+Modes are AgentEvals': `strict` (same steps, same order), `unordered`
+(same steps, any order), `subset` (nothing beyond the reference),
+`superset` (at least the reference); repeats count. Tool arguments match
+`exact`, `subset` (the reference's arguments are in the call, extras
+allowed) or `ignore`. A case with no reference fails with an error rather
+than passing. A `budget` with a cost limit fails when a call reported no
+price: that cost is unknown, not zero.
+
+An eval whose evaluators do not take `trace` pays nothing for it.
+
+## Rescoring a recorded run
+
+```python
+again = await ev.rescore(run.run_id, [trajectory.ops(["classify", "plan"])], store=runs)
+again.summary["pass_rate"], again.verdicts["order"]
+```
+
+`rescore` judges a recorded run again without running the graph: the
+recorded outputs, the dataset's cases, and — for checks that read
+`trace` — the runs in `store`, the run store the eval traced into. A case
+edited since the run (its `case_hash` changed), an output the record
+holds only clipped (`output_clipped`), or a run the store no longer has
+is an error on that item. Judges are not rescored: `Eval.rescore` leaves
+them out (and names them in `skipped`); `rescore(run, [llm_judge(…)])`
+refuses.
+
 ## Passing and failing
 
 Without a `threshold`, the run fails when any case fails. With one, it
@@ -80,6 +131,55 @@ fails when the pass rate is under it. `run.meta["eval"]` — and the run's
 `pass_rate`, each check's own pass count, the median case time, and what
 the judge cost. Each case's item record carries its verdict, with the
 `case`, its `repeat` and its `case_hash` (input + expected).
+
+## Experiments in a score store
+
+```python
+ev = Eval("replies", graph=..., dataset="dataset:replies", evaluators=[...],
+          scores="score_store:team")        # or a ScoreStore, or {"backend": "files"}
+```
+
+With `scores=`, an eval writes to a `ScoreStore`
+(`operonx.telemetry.scores`) as it runs: the **experiment** (a `running`
+row at the start, the finished one at the end — status, fingerprint
+columns, metrics, gate), one **item** per case × repeat (trace id,
+status, time, the case run's own cost and tokens, passed, output) and one
+**score** per check per item. A score is the one row type for every
+judgement — code checks, judges, humans, online rules, pairwise — with a
+`target` (`item`, `trace`, `op`, `session`, `pair`) and a `score_id`
+derived from what it judges, so the same verdict written twice is one row
+and a human's edit replaces their earlier value.
+
+| Backend | Where |
+|---|---|
+| `files` (default) | JSONL under `<runs root>/scores` (`experiments.jsonl`, `items/<experiment>.jsonl`, `scores/YYYY-MM.jsonl`), an SQLite index beside them |
+| `sqlite` | one file |
+| `clickhouse` | the runs' database: schema version 3 of the same migration chain, so no new server, database or grant |
+
+```yaml
+# resources.yaml
+score_store:
+  team:
+    backend: clickhouse
+    host: ${CLICKHOUSE_HOST}
+    user: ${CLICKHOUSE_USER}
+    password: ${CLICKHOUSE_PASSWORD}
+    database: operonx
+```
+
+The writes go through a background writer. The job record is written
+first and always holds every verdict; a store that is slow or down costs
+the run at most `scores_timeout` (10 s) at its end, and what it did not
+take is logged. `publish(run, store)` sends a recorded run — again, or
+for the first time — through the same converters, so it writes exactly
+what the live run would have. `rescore(..., scores=store)` writes its
+scores beside the experiment's own (keyed by trace and evaluator
+version, never over them).
+
+Reading: `store.list_experiments(ExperimentFilter(eval="replies"))`,
+`store.get_experiment(run_id)` (with its items), `store.scores(ScoreFilter(...))`,
+`store.score_series(where, bucket_s)`. Eval and human scores are kept
+forever; online scores (with a `rule`) for `online_ttl_days` (365).
 
 ## A run is an experiment
 

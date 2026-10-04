@@ -10,7 +10,10 @@ of them alike:
 * ``eval``: an :class:`~operonx.app.evals.Eval` with one ``exact`` check
   and no judge (``repeats=1``, the default);
 * ``eval+gate``: the same eval with a ``Gate`` (statistics, must-pass,
-  error budget) but no baseline, when this operonx has one.
+  error budget) but no baseline, when this operonx has one;
+* ``eval+trace``: the eval plus a check that reads the case's
+  ``TraceView`` (its path), when this operonx has one — what asking for
+  the trace costs; ``eval`` shows what not asking costs.
 
 An eval's cost is a fixed part per run (reading the dataset, the
 fingerprint, the summary) and a part per case. Running two dataset sizes
@@ -74,6 +77,14 @@ async def main() -> None:
         from operonx.app.evals import Gate
     except ImportError:
         Gate = None  # an operonx from before the gate
+    try:
+        from operonx.app.evals import TraceView
+    except ImportError:
+        TraceView = None  # an operonx from before evaluators could read the trace
+
+    def one_step(trace=None):
+        return trace.path() == ["c"]
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         common = dict(graph=flow, item_input="text", concurrency=CONCURRENCY, trace=[])
@@ -100,6 +111,14 @@ async def main() -> None:
                     gate=Gate(must_pass_tag="critical"),
                     **common,
                 )
+            if TraceView is not None:
+                out["eval+trace"] = lambda: Eval(
+                    "bench_trace",
+                    dataset=data,
+                    evaluators=[exact("label"), one_step],
+                    record_dir=root / "evals",
+                    **common,
+                )
             return out
 
         got = {}
@@ -115,7 +134,7 @@ async def main() -> None:
     small, large = SIZES
     med = {k: statistics.median(v) for k, v in got.items()}
     print(f"sizes {SIZES}, {ROUNDS} rounds, concurrency {CONCURRENCY} (CPU time, medians)")
-    names = sorted({name for name, _ in med}, key=["job", "eval", "eval+gate"].index)
+    names = sorted({name for name, _ in med}, key=["job", "eval", "eval+gate", "eval+trace"].index)
     per_case = {m: (med[m, large] - med[m, small]) / (large - small) * 1e3 for m in names}
     fixed = {m: med[m, small] - small * per_case[m] / 1e3 for m in names}
     for m in names:

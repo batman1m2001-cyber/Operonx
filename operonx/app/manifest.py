@@ -770,7 +770,7 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         "description",
     }
     options = {k: v for k, v in block.items() if k not in known_keys}
-    eval_keys = ("dataset", "evaluators", "threshold", "repeats", "cluster", "gate")
+    eval_keys = ("dataset", "evaluators", "threshold", "repeats", "cluster", "gate", "scores")
     if options.get("dataset") is not None:
         # an eval: `operonx.app.evals.Eval.from_spec` reads these
         if not isinstance(options.get("evaluators", []), list):
@@ -782,6 +782,13 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
             )
         if not isinstance(options.get("gate", {}), dict):
             raise ManifestError(f"{where}: {label} `gate` must be a table ([job.gate])")
+        scores = options.get("scores")
+        if scores is not None and not (
+            isinstance(scores, str) and scores.startswith("score_store:")
+        ):
+            raise ManifestError(
+                f"{where}: {label} has scores={scores!r}; expected a 'score_store:<name>' key"
+            )
     unread = {
         k: v
         for k, v in options.items()

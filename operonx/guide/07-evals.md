@@ -35,9 +35,11 @@ must-pass under a gate.
 ```
 
 An evaluator is a function that takes any of `input`, `output`,
-`expected`, `row`, `outputs` by name and returns a bool, a score in
-[0, 1], or `{"passed", "score", "reason"}`. Built-ins: `exact`,
-`contains`, `fuzzy`, `json_match`, `llm_judge`.
+`expected`, `row`, `outputs`, `trace` by name and returns a bool, a score
+in [0, 1], or `{"passed", "score", "reason"}`. Built-ins: `exact`,
+`contains`, `fuzzy`, `json_match`, `llm_judge`, and over the run:
+`trajectory.ops`, `trajectory.tool_calls`, `trajectory.op_output`,
+`budget`.
 
 ## Run it: repeats, metrics, the fingerprint
 
@@ -128,6 +130,155 @@ three cases is about ±56 points. A real gate needs hundreds of cases (a
 5-point drop needs about 312 paired cases to be seen 80% of the time).
 Without a `gate`, an eval passes or fails exactly as `threshold` says,
 and exits 0 or 1.
+
+## Check the path, not just the answer
+
+An evaluator that takes `trace` gets a `TraceView` of the case's own run:
+every op execution in order, with inputs, outputs, status, timing and
+cost. The built-ins on top of it check how the answer was reached.
+
+```python file=agent.py
+from operonx import END, START, graph, op
+from operonx.core.ops import if_
+
+
+@op(bound="sync")
+def classify(text: str = "") -> dict:
+    return {"kind": "order" if "order" in text else "chat"}
+
+
+@op(bound="sync")
+def plan(text: str = "") -> dict:
+    # stands in for an LLM call: an op whose outputs carry `cost_usd` is one
+    calls = [{"name": "lookup", "args": {"order_id": text.split()[-1]}}]
+    return {"tool_calls": calls, "cost_usd": 0.0}
+
+
+@op(bound="sync")
+def chat(text: str = "") -> dict:
+    return {"reply": "hi!"}
+
+
+@graph
+def agent(text: str = ""):
+    c = classify(text=text, name="classify")
+    p = plan(text=text, name="plan")
+    s = chat(text=text, name="chat")
+    route = if_(c["kind"] == "order", p).else_(s)
+    START >> c >> route
+    p >> END
+    s >> END
+```
+
+A case can carry its reference trajectory:
+
+```json file=datasets/agent.jsonl
+{"id": "order", "input": "where is order 42", "expected": {"kind": "order"}, "trajectory": {"ops": ["classify", "plan"], "tool_calls": [{"name": "lookup", "args": {"order_id": "42"}}]}}
+{"id": "chat", "input": "hello", "expected": {"kind": "chat"}, "trajectory": {"ops": ["classify", "chat"], "tool_calls": []}}
+```
+
+```python
+import asyncio
+
+from operonx.app.evals import Eval, budget, exact, trajectory
+from operonx.telemetry.runs import open_run_store
+
+from agent import agent
+
+runs = open_run_store({"backend": "files"})  # .operonx/runs, or OPERONX_RUNS_DIR
+
+
+def planned_the_lookup(output=None, trace=None):  # any evaluator can read the run
+    step = trace.last("plan")
+    return step is None or step.outputs["tool_calls"][0]["name"] == "lookup"
+
+
+ev = Eval(
+    "agent",
+    graph=agent,
+    item_input="text",
+    dataset="dataset:agent",
+    evaluators=[
+        trajectory.ops(mode="strict"),  # the case's trajectory.ops, in order
+        trajectory.tool_calls(mode="superset", args="subset"),
+        trajectory.op_output("classify", exact("kind")),  # one op's output, not the answer
+        budget(ms=2000, llm_calls=1),
+        planned_the_lookup,
+    ],
+    trace=[runs],  # a store keeps each case's run, for rescore
+)
+run = ev.run_sync()
+order = next(i.verdict for i in run.items if i.key == "order")
+assert run.meta["eval"]["passed"] == 2, run.meta["eval"]["checks"]
+print(order["checks"]["op_output(classify:exact(kind))"]["op"])  # the op judged: its op_id
+
+# a new check over the same runs: nothing runs again
+again = asyncio.run(
+    ev.rescore(run.run_id, [trajectory.ops(["classify"], mode="superset")], store=runs)
+)
+assert again.summary["passed"] == 2
+```
+
+- `path()` lists the ops that ran, in order, leaving out branch routing;
+  names are the ops' names (`name=` or the variable they were assigned to).
+- Modes (AgentEvals'): `strict` — same steps, same order; `unordered` —
+  same steps, any order; `subset` — nothing beyond the reference;
+  `superset` — at least the reference. Tool arguments match `exact`,
+  `subset` (the reference's arguments, extra ones allowed) or `ignore`.
+- `budget` limits are inclusive; a cost limit over a call that reported
+  no price fails, because that cost is unknown.
+- `rescore` re-runs deterministic checks over a recorded run: the
+  recorded outputs, the cases (an edited case is reported, not judged),
+  and the stored runs for checks that read `trace`. A judge
+  (`llm_judge`) is not rescored.
+- An evaluator that does not take `trace` costs nothing extra; async
+  evaluators of one case run at the same time.
+
+## Keep experiments in a score store
+
+With `scores=`, an eval writes its experiment, each item and every
+check's score to a `ScoreStore` as it runs: `files` (JSONL plus an index,
+under the runs root) by default, or the team's ClickHouse — the database
+the runs are in. Studio and CI read experiments there instead of from one
+machine's `evals/` folder.
+
+```python
+from operonx.app.evals import Eval, exact, publish
+from operonx.telemetry.scores import ExperimentFilter, ScoreFilter, open_score_store
+
+from labels import flow
+
+store = open_score_store({"backend": "files"})  # or "score_store:team" from resources.yaml
+ev = Eval(
+    "labels_stored",
+    graph=flow,
+    item_input="text",
+    dataset="dataset:labels",
+    evaluators=[exact("label")],
+    scores=store,
+)
+run = ev.run_sync()
+
+got = store.get_experiment(run.run_id)
+print(got.experiment.status, got.experiment.metrics["pass"]["mean"], len(got.items))
+for s in store.scores(ScoreFilter(experiment_id=run.run_id)):
+    print(s.case_id, s.score_name, s.passed, s.evaluator_version)
+listed = store.list_experiments(ExperimentFilter(eval="labels_stored"))
+assert [e.experiment_id for e in listed.items] == [run.run_id]
+
+# a store that was down, or a run from before the store: publish its record
+assert publish(run, store) == {"experiments": 1, "items": 3, "scores": 3}  # again: the same rows
+assert len(store.scores(ScoreFilter(experiment_id=run.run_id))) == 3
+```
+
+- The job record is written first, always. A store that is slow or down
+  costs the run at most `scores_timeout` (10 s) at its end; what it did
+  not take is logged, and `publish(run, store)` sends it later.
+- A score's id comes from what it judges (experiment, case, repeat,
+  check), so writing the same verdict twice is one row.
+- In `resources.yaml`: `score_store: {team: {backend: clickhouse, host: …,
+  database: …}}`; in `operonx.toml`: `scores = "score_store:team"` on the
+  `[[job]]`.
 
 ## Declared in `operonx.toml`
 

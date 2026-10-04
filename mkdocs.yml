@@ -135,6 +135,7 @@ nav:
       - operonx.app: api/app.md
       - operonx.app.jobs: api/jobs.md
       - operonx.telemetry.runs: api/runs.md
+      - operonx.telemetry.scores: api/scores.md
 
 # Mermaid loader — Material renders any <pre class="mermaid"> block
 # (produced by the pymdownx.superfences custom fence above) once this

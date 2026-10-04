@@ -1,19 +1,22 @@
 """Evaluators: what judges a case, and how any result becomes a verdict.
 
 An evaluator is a function — plain, async, or an ``@op`` (called for its
-body) — that takes any of ``input``, ``output``, ``expected``, ``row`` and
-``outputs`` by name and returns ``True``/``False``, a score in [0, 1]
-(passes at 0.5), or ``{"passed", "score", "reason"}``.
+body) — that takes any of ``input``, ``output``, ``expected``, ``row``,
+``outputs`` and ``trace`` (a :class:`~.traceview.TraceView` of the case's
+run) by name and returns ``True``/``False``, a score in [0, 1] (passes at
+0.5), or ``{"passed", "score", "reason"}``.
 """
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import inspect
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Callable, Dict, Optional, Sequence
+from typing import Any, Awaitable, Callable, Dict, FrozenSet, List, Optional, Sequence, Tuple
 
 __all__ = ["contains", "exact", "fuzzy", "json_match", "llm_judge", "verdict_of"]
 
@@ -42,26 +45,95 @@ def _name(ev: Any) -> str:
     return str(getattr(ev, "eval_name", None) or getattr(ev, "__name__", None) or type(ev).__name__)
 
 
-async def _judge_one(ev: Any, avail: Dict[str, Any]) -> Dict[str, Any]:
-    fn = getattr(ev, "__wrapped__", ev)  # an @op is called for its body
+@dataclass(frozen=True)
+class Prepared:
+    """An evaluator with its signature read once: the body to call and the
+    names it takes (``None``: it takes ``**kwargs``, so everything)."""
+
+    ev: Any
+    fn: Callable
+    name: str
+    params: Optional[FrozenSet[str]]
+
+    def wants(self, name: str) -> bool:
+        return self.params is None or name in self.params
+
+    def kwargs(self, avail: Mapping[str, Any]) -> Dict[str, Any]:
+        if self.params is None:
+            return dict(avail)
+        return {k: v for k, v in avail.items() if k in self.params}
+
+
+def prepare(ev: Any) -> Prepared:
+    """Read *ev*'s signature once (an ``@op`` is called for its body)."""
+    fn = getattr(ev, "__wrapped__", ev)
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
         params = {}
     if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        kwargs = dict(avail)
+        names: Optional[FrozenSet[str]] = None
     else:
-        kwargs = {k: v for k, v in avail.items() if k in params}
-    t0 = perf_counter()
+        names = frozenset(params)
+    return Prepared(ev, fn, _name(ev), names)
+
+
+def _failed(exc: BaseException, t0: float) -> Dict[str, Any]:
+    # a broken evaluator fails its check, loudly — never the case's other checks
+    return {
+        "passed": False,
+        "error": f"{type(exc).__name__}: {exc}",
+        "ms": round((perf_counter() - t0) * 1000, 3),
+    }
+
+
+def _settled(result: Any, t0: float) -> Dict[str, Any]:
     try:
-        result = fn(**kwargs)
-        if inspect.isawaitable(result):
-            result = await result
         verdict = verdict_of(result)
-    except Exception as exc:  # noqa: BLE001 — a broken evaluator fails its case, loudly
-        verdict = {"passed": False, "error": f"{type(exc).__name__}: {exc}"}
+    except Exception as exc:  # noqa: BLE001
+        return _failed(exc, t0)
     verdict["ms"] = round((perf_counter() - t0) * 1000, 3)
     return verdict
+
+
+async def _finish(name: str, t0: float, pending: Awaitable) -> Tuple[str, Dict[str, Any]]:
+    try:
+        result = await pending
+    except Exception as exc:  # noqa: BLE001
+        return name, _failed(exc, t0)
+    return name, _settled(result, t0)
+
+
+async def judge_all(prepared: Sequence[Prepared], avail: Mapping[str, Any]) -> Dict[str, Any]:
+    """Every evaluator on one case: ``{name: verdict}`` in evaluator order.
+
+    A sync evaluator runs inline — no task for a microsecond check; the
+    async ones' awaitables then run together, so three judges of one case
+    take as long as the slowest. A check's ``ms`` is its own start to finish.
+    """
+    checks: Dict[str, Any] = {}
+    waiting: List[Tuple[str, float, Awaitable]] = []
+    for p in prepared:
+        t0 = perf_counter()
+        try:
+            result = p.fn(**p.kwargs(avail))
+        except Exception as exc:  # noqa: BLE001
+            checks[p.name] = _failed(exc, t0)
+            continue
+        if inspect.isawaitable(result):
+            checks[p.name] = None  # holds its place in the order
+            waiting.append((p.name, t0, result))
+        else:
+            checks[p.name] = _settled(result, t0)
+    if len(waiting) == 1:
+        done = [await _finish(*waiting[0])]
+    elif waiting:
+        done = await asyncio.gather(*(_finish(*w) for w in waiting))
+    else:
+        done = []
+    for name, verdict in done:
+        checks[name] = verdict
+    return checks
 
 
 # ── built-in evaluators ──────────────────────────────────────────────────
@@ -193,4 +265,5 @@ def llm_judge(resource: str, rubric: str, *, name: str = "llm_judge") -> Callabl
         return verdict
 
     judge.eval_name = name
+    judge.eval_kind = "judge"  # asks a model: not rescored, and not deterministic
     return judge

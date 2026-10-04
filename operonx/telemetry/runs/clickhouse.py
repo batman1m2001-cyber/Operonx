@@ -83,9 +83,11 @@ from .sql import SUMMARY_COLUMNS
 __all__ = [
     "FOREVER",
     "MIGRATIONS",
+    "ClickHouseConnection",
     "ClickHouseMediaStore",
     "ClickHouseRunStore",
     "expires_at",
+    "migrate",
     "node_rows",
     "rollup_rows",
     "run_row",
@@ -228,13 +230,153 @@ TTL expires_at
 SETTINGS index_granularity = 256, index_granularity_bytes = 1048576
 """
 
+# Schema version 3: the score store's tables (operonx.telemetry.scores), in
+# the same database. Experiments and their items are kept forever; scores
+# expire through expires_at (online scores after a year, the rest never).
+# Every table's version column is written_at, so the row written last wins;
+# a score's ORDER BY holds created_at, so a re-written score (a human edit)
+# can sit in another part or partition — readers dedupe by score_id.
+_DDL_EXPERIMENTS = """
+CREATE TABLE IF NOT EXISTS {db}.experiments (
+  experiment_id String,
+  project LowCardinality(String),
+  eval LowCardinality(String),
+  dataset LowCardinality(String),
+  dataset_version String,
+  split LowCardinality(Nullable(String)),
+  graph LowCardinality(String),
+  code_version LowCardinality(Nullable(String)),
+  version_dirty Nullable(Bool),
+  graph_hash String,
+  config_hash String,
+  evaluators_hash String,
+  operonx_version LowCardinality(String),
+  variant Nullable(String),
+  repeats UInt16,
+  baseline_id Nullable(String),
+  status LowCardinality(String),
+  started_at Float64,
+  ended_at Nullable(Float64),
+  cases UInt32,
+  errored UInt32,
+  cost_usd Nullable(Float64),
+  judge_cost_usd Nullable(Float64),
+  p50_ms Nullable(Float64),
+  p95_ms Nullable(Float64),
+  metrics String CODEC(ZSTD(3)),
+  gate String CODEC(ZSTD(3)),
+  metadata String CODEC(ZSTD(3)),
+  written_at DateTime64(3) DEFAULT now64(3)
+) ENGINE = ReplacingMergeTree(written_at)
+ORDER BY (project, eval, started_at, experiment_id)
+"""
+
+_DDL_EXPERIMENT_ITEMS = """
+CREATE TABLE IF NOT EXISTS {db}.experiment_items (
+  experiment_id String,
+  case_id String,
+  repeat UInt16,
+  case_hash String,
+  trace_id Nullable(String),
+  status LowCardinality(String),
+  ms Float64,
+  cost_usd Nullable(Float64),
+  tokens_in UInt64,
+  tokens_out UInt64,
+  passed Nullable(Bool),
+  tags Array(LowCardinality(String)),
+  cluster Nullable(String),
+  output String CODEC(ZSTD(3)),
+  error Nullable(String) CODEC(ZSTD(3)),
+  written_at DateTime64(3) DEFAULT now64(3)
+) ENGINE = ReplacingMergeTree(written_at)
+ORDER BY (experiment_id, case_id, repeat)
+"""
+
+_DDL_SCORES = """
+CREATE TABLE IF NOT EXISTS {db}.scores (
+  score_id String,
+  target LowCardinality(String),
+  trace_id Nullable(String),
+  op_id Nullable(String),
+  session_id Nullable(String),
+  experiment_id Nullable(String),
+  pair_experiment_id Nullable(String),
+  case_id Nullable(String),
+  repeat Nullable(UInt16),
+  origin LowCardinality(String),
+  name LowCardinality(String),
+  score_name LowCardinality(String),
+  evaluator_version String,
+  source LowCardinality(String),
+  data_type LowCardinality(String),
+  value Nullable(Float64),
+  passed Nullable(Bool),
+  label LowCardinality(Nullable(String)),
+  reason String CODEC(ZSTD(3)),
+  judge_trace_id Nullable(String),
+  cost_usd Nullable(Float64),
+  author LowCardinality(Nullable(String)),
+  rule LowCardinality(Nullable(String)),
+  queue LowCardinality(Nullable(String)),
+  snapshot String CODEC(ZSTD(3)),
+  metadata String CODEC(ZSTD(3)),
+  created_at Float64,
+  expires_at DateTime,
+  written_at DateTime64(3) DEFAULT now64(3),
+  INDEX by_trace trace_id TYPE bloom_filter GRANULARITY 4,
+  INDEX by_exp experiment_id TYPE bloom_filter GRANULARITY 4
+) ENGINE = ReplacingMergeTree(written_at)
+PARTITION BY toYYYYMM(toDateTime(created_at))
+ORDER BY (origin, name, score_name, created_at, score_id)
+TTL expires_at
+"""
+
+_DDL_JUDGE_CACHE = """
+CREATE TABLE IF NOT EXISTS {db}.judge_cache (
+  key String,
+  verdict String CODEC(ZSTD(3)),
+  expires_at DateTime,
+  written_at DateTime64(3) DEFAULT now64(3)
+) ENGINE = ReplacingMergeTree(written_at)
+ORDER BY key
+TTL expires_at
+"""
+
 #: ``(version, note, statements)``, applied in order on first use. A new
 #: version appends here and must be idempotent (``ADD COLUMN IF NOT
 #: EXISTS``): two processes may migrate at once.
 MIGRATIONS: List[Tuple[int, str, List[str]]] = [
     (1, "runs, nodes and op_rollups", [_DDL_RUNS, _DDL_NODES, _DDL_ROLLUPS]),
     (2, "media", [_DDL_MEDIA]),
+    (
+        3,
+        "experiments, experiment_items, scores, judge_cache",
+        [_DDL_EXPERIMENTS, _DDL_EXPERIMENT_ITEMS, _DDL_SCORES, _DDL_JUDGE_CACHE],
+    ),
 ]
+
+
+def migrate(ch: Any, database: str) -> int:
+    """Bring *database* to the newest schema version; return it. Creates
+    the database only when it is missing: a user granted only tables in an
+    existing database may not run ``CREATE DATABASE``, even ``IF NOT
+    EXISTS``. Every store on the database (runs, scores) migrates through
+    here, so the chain is one."""
+    if not ch.query(f"EXISTS DATABASE {database}").result_rows[0][0]:
+        ch.command(f"CREATE DATABASE IF NOT EXISTS {database}")
+    ch.command(_DDL_VERSION.format(db=database))
+    rows = ch.query(f"SELECT max(version) FROM {database}.schema_version").result_rows
+    current = int((rows[0][0] if rows else 0) or 0)
+    for version, note, statements in MIGRATIONS:
+        if version <= current:
+            continue
+        for sql in statements:
+            ch.command(sql.format(db=database))
+        ch.insert(f"{database}.schema_version", [[version, note]], column_names=["version", "note"])
+        current = version
+    return current
+
 
 # ── rows ────────────────────────────────────────────────────────────────
 
@@ -626,10 +768,110 @@ class ClickHouseMediaStore(MediaStore):
             yield sha, float(written)
 
 
+# ── the connection ──────────────────────────────────────────────────────
+
+
+class ClickHouseConnection:
+    """One database through ``clickhouse-connect`` over HTTP: the client is
+    opened on first use (constructing does no I/O, so a service starts
+    while its ClickHouse is down), again in a forked child, and the
+    database is migrated once per client (:func:`migrate`). ``client=``
+    takes a ready client (anything with ``query``, ``command`` and
+    ``insert`` the way ``clickhouse_connect``'s has): tests hand in a fake.
+    The run store and the score store share it."""
+
+    def _connect_init(
+        self,
+        *,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        database: str,
+        secure: bool,
+        timeout: float,
+        client: Any,
+    ) -> None:
+        if not _IDENT.match(database or ""):
+            raise ValueError(f"database {database!r} is not a plain identifier")
+        self.host = host or "localhost"
+        self.port = int(port or (8443 if secure else 8123))
+        self.user = user or "default"
+        self.password = password or ""
+        self.database = database
+        self.secure = bool(secure)
+        self.timeout = float(timeout)
+        self._given_client = client
+        self._ch = client
+        self._ch_pid = os.getpid()
+        self._ready = False
+        self._lock = threading.RLock()
+
+    def _client(self) -> Any:
+        if self._ch is None or (self._given_client is None and self._ch_pid != os.getpid()):
+            with self._lock:
+                if self._ch is None or self._ch_pid != os.getpid():
+                    try:
+                        import clickhouse_connect
+                    except ImportError as exc:  # pragma: no cover — the extra's absence
+                        raise ImportError(
+                            'the clickhouse stores need: pip install "operonx[clickhouse]"'
+                        ) from exc
+                    self._ch = clickhouse_connect.get_client(
+                        host=self.host,
+                        port=self.port,
+                        username=self.user,
+                        password=self.password,
+                        secure=self.secure,
+                        connect_timeout=self.timeout,
+                        send_receive_timeout=max(self.timeout, 30.0),
+                        autogenerate_session_id=False,
+                    )
+                    self._ch_pid = os.getpid()
+                    self._ready = False
+        if not self._ready:
+            with self._lock:
+                if not self._ready:
+                    self._migrate(self._ch)
+                    self._ready = True
+        return self._ch
+
+    def _migrate(self, ch: Any) -> int:
+        """Create what is missing; apply migrations newer than recorded."""
+        return migrate(ch, self.database)
+
+    def schema_version(self) -> int:
+        rows = self._query(f"SELECT max(version) FROM {self.database}.schema_version")
+        return int(rows[0][0] or 0)
+
+    def _query(self, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Sequence[Any]]:
+        return list(self._client().query(sql, parameters=params or None).result_rows)
+
+    def _command(self, sql: str, params: Optional[Dict[str, Any]] = None) -> Any:
+        return self._client().command(sql, parameters=params or None)
+
+    def _insert(self, table: str, rows: List[List[Any]], columns: Sequence[str]) -> None:
+        if rows:
+            self._client().insert(
+                f"{self.database}.{table}",
+                rows,
+                column_names=list(columns),
+                settings={"async_insert": 1, "wait_for_async_insert": 1},
+            )
+
+    def _close_client(self) -> None:
+        ch, self._ch = self._ch, None
+        if ch is not None and self._given_client is None:
+            try:
+                ch.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 # ── the store ───────────────────────────────────────────────────────────
 
 
-class ClickHouseRunStore(RunStore):
+class ClickHouseRunStore(ClickHouseConnection, RunStore):
     """See the module docstring.
 
     ``client=`` takes a ready client (anything with ``query``,
@@ -664,20 +906,21 @@ class ClickHouseRunStore(RunStore):
         client: Any = None,
         media_batch_bytes: int = 32 << 20,
     ):
-        if not _IDENT.match(database or ""):
-            raise ValueError(f"database {database!r} is not a plain identifier")
         if ttl_days is not None and float(ttl_days) < 0:
             raise ValueError(f"ttl_days is {ttl_days}; must be >= 0, or unset")
+        self._connect_init(
+            host=host,
+            port=port,
+            user=user,
+            password=password,
+            database=database,
+            secure=secure,
+            timeout=timeout,
+            client=client,
+        )
         super().__init__(config={"host": host, "database": database})
-        self.host = host or "localhost"
-        self.port = int(port or (8443 if secure else 8123))
-        self.user = user or "default"
-        self.password = password or ""
-        self.database = database
-        self.secure = bool(secure)
         self.ttl_days = None if ttl_days is None else float(ttl_days)
         self.media_threshold = int(media_threshold)
-        self.timeout = float(timeout)
         self.read_timeout = float(read_timeout)
         if media is None or media in ("", "local"):
             root = resolve_root(media_dir) if media_dir else resolve_root("") / "media"
@@ -687,11 +930,6 @@ class ClickHouseRunStore(RunStore):
         elif not isinstance(media, MediaStore):
             raise ValueError(f"media is {media!r}; one of 'local', 'clickhouse', or a MediaStore")
         self.media: MediaStore = media
-        self._given_client = client
-        self._ch = client
-        self._ch_pid = os.getpid()
-        self._ready = False
-        self._lock = threading.RLock()
         self.writer = BackgroundWriter(
             self._write_batch,
             name=f"clickhouse:{self.host}/{database}",
@@ -700,75 +938,6 @@ class ClickHouseRunStore(RunStore):
             flush_interval=flush_interval,
             weight=lambda trace: len(getattr(trace, "nodes", ()) or ()) + 1,
         )
-
-    # -- connection and schema ----------------------------------------------------
-
-    def _client(self) -> Any:
-        if self._ch is None or (self._given_client is None and self._ch_pid != os.getpid()):
-            with self._lock:
-                if self._ch is None or self._ch_pid != os.getpid():
-                    try:
-                        import clickhouse_connect
-                    except ImportError as exc:  # pragma: no cover — the extra's absence
-                        raise ImportError(
-                            'the clickhouse run store needs: pip install "operonx[clickhouse]"'
-                        ) from exc
-                    self._ch = clickhouse_connect.get_client(
-                        host=self.host,
-                        port=self.port,
-                        username=self.user,
-                        password=self.password,
-                        secure=self.secure,
-                        connect_timeout=self.timeout,
-                        send_receive_timeout=max(self.timeout, 30.0),
-                        autogenerate_session_id=False,
-                    )
-                    self._ch_pid = os.getpid()
-                    self._ready = False
-        if not self._ready:
-            with self._lock:
-                if not self._ready:
-                    self._migrate(self._ch)
-                    self._ready = True
-        return self._ch
-
-    def _migrate(self, ch: Any) -> int:
-        """Create what is missing; apply migrations newer than recorded."""
-        db = self.database
-        # A user granted only tables in an existing database may not run
-        # CREATE DATABASE at all, even IF NOT EXISTS — so ask first.
-        if not ch.query(f"EXISTS DATABASE {db}").result_rows[0][0]:
-            ch.command(f"CREATE DATABASE IF NOT EXISTS {db}")
-        ch.command(_DDL_VERSION.format(db=db))
-        rows = ch.query(f"SELECT max(version) FROM {db}.schema_version").result_rows
-        current = int((rows[0][0] if rows else 0) or 0)
-        for version, note, statements in MIGRATIONS:
-            if version <= current:
-                continue
-            for sql in statements:
-                ch.command(sql.format(db=db))
-            ch.insert(f"{db}.schema_version", [[version, note]], column_names=["version", "note"])
-            current = version
-        return current
-
-    def schema_version(self) -> int:
-        rows = self._query(f"SELECT max(version) FROM {self.database}.schema_version")
-        return int(rows[0][0] or 0)
-
-    def _query(self, sql: str, params: Optional[Dict[str, Any]] = None) -> List[Sequence[Any]]:
-        return list(self._client().query(sql, parameters=params or None).result_rows)
-
-    def _command(self, sql: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        return self._client().command(sql, parameters=params or None)
-
-    def _insert(self, table: str, rows: List[List[Any]], columns: Sequence[str]) -> None:
-        if rows:
-            self._client().insert(
-                f"{self.database}.{table}",
-                rows,
-                column_names=list(columns),
-                settings={"async_insert": 1, "wait_for_async_insert": 1},
-            )
 
     # -- write -------------------------------------------------------------------
 
@@ -1100,9 +1269,4 @@ class ClickHouseRunStore(RunStore):
 
     def close(self) -> None:
         self.writer.close()
-        ch, self._ch = self._ch, None
-        if ch is not None and self._given_client is None:
-            try:
-                ch.close()
-            except Exception:  # noqa: BLE001
-                pass
+        self._close_client()

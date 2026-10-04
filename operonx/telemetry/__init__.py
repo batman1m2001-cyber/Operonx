@@ -42,6 +42,7 @@ Prompt management (uses the Langfuse SDK directly)::
 # before anything else reads it.
 import operonx.telemetry.consumers  # noqa: F401
 import operonx.telemetry.runs  # noqa: F401  — `run_store:` resources
+import operonx.telemetry.scores  # noqa: F401  — `score_store:` resources
 from operonx.core.registry import REGISTRY
 from operonx.telemetry.backends import (
     LangfuseClient,

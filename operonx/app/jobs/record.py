@@ -83,19 +83,22 @@ class ItemResult:
     attempts: int = 1
     #: An eval's judgement of the case (`operonx.app.evals`); absent for a job.
     verdict: Optional[Dict[str, Any]] = None
+    #: The item's live ``WorkflowTrace`` while its case is judged — for the
+    #: evaluators that read it. Never written, and let go once judged.
+    trace: Any = field(default=None, repr=False, compare=False)
 
     def as_dict(self) -> Dict[str, Any]:
         """The record line's fields. Shallow: the line is serialized at
         once, and a deep copy of an eval's verdict (``asdict``) was most of
         what writing an item cost (`scripts/bench_eval_overhead.py`)."""
-        out = {name: getattr(self, name) for name in self.__dataclass_fields__}
+        out = {name: getattr(self, name) for name in self.__dataclass_fields__ if name != "trace"}
         if out["verdict"] is None:
             del out["verdict"]
         return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ItemResult":
-        return cls(**{k: data.get(k) for k in cls.__dataclass_fields__ if k in data})
+        return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data and k != "trace"})
 
 
 @dataclass
