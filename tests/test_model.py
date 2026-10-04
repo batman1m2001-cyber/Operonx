@@ -267,3 +267,15 @@ class TestRequest:
         assert plain[:-1] == ["4", "2"] and plain[-1].content == "42"
         pieces = [p async for p in Model("a").stream(MSGS, reasoning=True)]
         assert pieces[0] == Reasoning("six times seven") and pieces[-1].content == "42"
+
+
+class TestTheHubItReads:
+    async def test_a_model_made_once_reads_the_hub_installed_now(self, hub):
+        """A project's agent is a module-level spec; each test (or a
+        reloaded deployment) installs its own hub. The backend is the
+        current hub's, not the first one's the model ever saw."""
+        model = Model("m")
+        hub(m=ScriptedLLM(completion("first")))
+        assert (await model.request([{"role": "user", "content": "hi"}])).content == "first"
+        hub(m=ScriptedLLM(completion("second")))
+        assert (await model.request([{"role": "user", "content": "hi"}])).content == "second"
