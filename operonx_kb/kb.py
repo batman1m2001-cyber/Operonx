@@ -150,14 +150,16 @@ class KnowledgeBase:
         output: Optional[str],
         error: type = IngestError,
         required: Sequence[str] = (),
+        trace_id: Optional[str] = None,
     ) -> Any:
         """Run a graph; return ``out[output]``, or every output when ``output`` is ``None``.
+        ``trace_id`` is the run's id (default: a new one).
 
         Raises:
             error: An op failed, or an expected output is missing.
         """
         engine = self._engine(kind, collection_id, factory, list(inputs), config)
-        out = await engine.run(inputs=inputs)
+        out = await engine.run(inputs=inputs, trace_id=trace_id)
         expected = [*required, *([output] if output is not None else [])]
         if "$errors" in out or any(name not in out for name in expected):
             errors = out.get("$errors") or {kind: {"message": "the run produced no result"}}
@@ -308,6 +310,7 @@ class KnowledgeBase:
         mode: Optional[str] = None,
         reranker: Optional[str] = None,
         rerank_depth: int = 30,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Search a collection; return ``{"hits", "stats"}`` (hits hydrated, best first).
 
@@ -315,6 +318,8 @@ class KnowledgeBase:
             filter: A :class:`~operonx_kb.model.filter.KBFilter` or its dict.
             mode: ``dense``, ``lexical`` or ``hybrid`` (default :meth:`default_mode`).
             reranker: A ``reranking:`` resource name to rerank with.
+            trace_id: The run's trace id (default: a new one), for a caller that links
+                to the run's trace.
 
         Raises:
             QueryError: An op failed (a filter on an undeclared field, a missing index…).
@@ -327,7 +332,7 @@ class KnowledgeBase:
             "search", collection_id,
             lambda: self.search_graph(collection_id, mode, reranker, rerank_depth), config,
             {"query": query, "collection": collection_id, "filter": flt, "k": k}, None,
-            error=QueryError, required=("hits",),
+            error=QueryError, required=("hits",), trace_id=trace_id,
         )  # fmt: skip
         return {"hits": out["hits"], "stats": out.get("stats", {})}
 
@@ -365,8 +370,11 @@ class KnowledgeBase:
         rerank_depth: int = 30,
         budget_tokens: int = 1500,
         neighbours: int = 1,
+        trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Answer a question from the collection with verified citations (track5 §10).
+
+        ``trace_id`` names the run (default: a new one), as in :meth:`search`.
 
         Returns:
             ``{"text", "citations", "dropped", "unsupported_sentences", "sources",
@@ -386,7 +394,7 @@ class KnowledgeBase:
                                       rerank_depth=rerank_depth, budget_tokens=budget_tokens,
                                       neighbours=neighbours),
             config, {"query": question, "collection": collection_id, "filter": flt, "k": k},
-            "answer", error=QueryError,
+            "answer", error=QueryError, trace_id=trace_id,
         )  # fmt: skip
 
     # maintenance ----------------------------------------------------------------------------

@@ -30,7 +30,10 @@ postgres = [
 ]
 # Answers with citations (LLMOp): operonx's OpenAI-compatible providers.
 answer = ["operonx[openai]"]
-all = ["operonx-kb[pdf,postgres,faiss,answer]"]
+# The admin API Studio's Knowledge tab talks to (operonx_kb.admin): Starlette, as
+# operonx's own serve layer mounts it, and page images rendered with pypdfium2.
+admin = ["operonx[serve]", "pypdfium2>=4.30", "pillow>=10"]
+all = ["operonx-kb[pdf,postgres,faiss,answer,admin]"]
 
 # Dense index backends: operonx's vector stores.
 faiss = ["operonx[faiss]"]
@@ -59,6 +62,9 @@ dev = [
     "faiss-cpu>=1.15.1",
     "numpy>=2.2.6",
     "openai>=1.0",  # LLMOp's message types (the ScriptedLLM fake)
+    "starlette>=0.27",  # the admin API (tests/admin)
+    "pypdfium2>=4.30",  # page images (tests/admin)
+    "pillow>=10",
 ]
 
 [tool.uv.sources]

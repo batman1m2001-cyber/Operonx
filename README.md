@@ -36,5 +36,17 @@ operonx-kb query handbook "how many days of leave" --answer assistant
 operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
 ```
 
+Studio's Knowledge tab reads a knowledge base through its admin API (extra `admin`), served as
+one of the project's services:
+
+```python
+import operonx
+from operonx.app import Service, asgi
+from operonx_kb.admin import kb_admin_app
+
+operonx.bootstrap()  # operonx serve loads no resources for an asgi service
+Service("kb_admin", asgi("/kb", port=8021), app=kb_admin_app(llm="assistant"))
+```
+
 Design and phase gates: [PLAN.md](PLAN.md); measured gates: [docs/bench](docs/bench).
 Contributor and agent rules: [AGENTS.md](AGENTS.md).

@@ -127,3 +127,12 @@ def test_an_answer_without_citations_is_shown_as_unsupported(loaded, llm):
     answer = run(loaded.ask("docs", "what is the meaning of life", "answerer", k=2))
     assert answer["citations"] == [] and answer["unsupported_sentences"] == [0]
     assert answer["stats"]["precision"] is None
+
+
+def test_a_search_and_an_answer_run_under_the_trace_id_given(loaded, llm):
+    """A caller that links to the run (Studio's "Open trace") names its trace id."""
+    llm.script = quoting()
+    loaded.recorder.clear()
+    run(loaded.search("docs", "code review", k=3, trace_id="kb-search-1"))
+    run(loaded.ask("docs", "how do we review code", "answerer", k=3, trace_id="kb-answer-1"))
+    assert [t.trace_id for t in loaded.recorder.traces] == ["kb-search-1", "kb-answer-1"]
