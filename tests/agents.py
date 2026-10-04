@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 from operonx_agents import Agent, Model, RunContext, tool
 from operonx_agents.context.compaction import unmatched_tool_calls
-from tests.fakes import ScriptedLLM, completion
+from operonx_agents.testing import ScriptedLLM, asks, calls, says  # noqa: F401 — re-exported
 
 RAN: List[str] = []
 
@@ -43,22 +43,6 @@ async def slow(seconds: float) -> str:
 
 
 TOOLS = [echo, note, charge, slow]
-
-
-def calls(*specs: Any, turn: int = 0) -> List[Dict[str, Any]]:
-    """``calls(("echo", {"a": 1}), ...)`` with ids ``t<turn>_<i>``."""
-    return [{"id": f"t{turn}_{i}", "name": n, "args": a} for i, (n, a) in enumerate(specs)]
-
-
-def asks(*specs: Any, turn: int = 0, **kw: Any):
-    """A reply that calls tools."""
-    kw.setdefault("finish_reason", "tool_calls")
-    return completion("", tool_calls=calls(*specs, turn=turn), **kw)
-
-
-def says(text: str = "final", **kw: Any):
-    """A reply that answers."""
-    return completion(text, **kw)
 
 
 def strict(script: List[Any]):
