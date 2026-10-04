@@ -197,6 +197,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`-> dict` under `from __future__ import annotations`.** PEP 563 hands
+  the return annotation over as the string `"dict"`, which was read as "not
+  a mapping": an op returning a dict it did not build as a literal
+  (`return helper()`) got one scalar output, `value`. Graph validation
+  refused every reader of its real keys, and at run time the op failed with
+  `KeyError: '(flow.s, a) not found in schema'`. The return annotation is
+  now evaluated in the function's globals; a forward reference that does
+  not resolve counts as unannotated.
 - **A retried attempt no longer fails the run.** An op that failed once and
   then succeeded under `retry=` left an `error` trace node: the result was
   clean and `handle.errors` empty, but `trace.status` was `"error"`, a job
