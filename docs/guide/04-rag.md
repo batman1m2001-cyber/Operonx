@@ -218,6 +218,29 @@ The graph doesn't change — only these two resource entries do. See
 [`examples/python/ex16_rag_pipeline/`](https://github.com/batman1m2001-cyber/Operonx/tree/main/examples/python/ex16_rag_pipeline)
 for a runnable version.
 
+## Keeping the index in step
+
+The index is derived from your store of record, so it follows it:
+`VectorUpsertOp` writes vectors when a document arrives, and
+`VectorDeleteOp` removes them when one goes. Without the delete, a
+document removed upstream stays findable.
+
+```python
+emb = EmbeddingOp.of(resource="bge-m3", texts=chunks["texts"])
+write = VectorUpsertOp.of(resource="docs", ids=chunks["ids"], vectors=emb["embeddings"])
+gone = VectorDeleteOp.of(resource="docs", ids=chunks["removed"])
+purge = VectorDeleteOp.of(resource="docs", filter={"document_id": doc_id})  # pgvector
+```
+
+`VectorDeleteOp` takes `ids=` or `filter=`, never both and never neither
+— neither is not "delete everything". A missing id is not an error, so a
+cleanup that crashed halfway can run again.
+
+A search on an index nobody wrote to answers every question with
+nothing. `VectorSearchOp` logs a WARNING and sets `empty_index=True`
+when an unfiltered search finds no hits, so that shows up before the
+"no documents found" answers do.
+
 ## Notes
 
 - `EmbeddingOp.of` uses keyword args — never positional.

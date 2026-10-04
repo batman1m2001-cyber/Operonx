@@ -4,10 +4,10 @@ FAISS is an in-process index library, not a server — so this backend is
 CPU-bound (``bound = "cpu"``) and requires no infrastructure, which
 makes it the natural choice for tests and local development.
 
-It also holds *only* vectors and ids: no metadata, no filtering. That
-makes it a faithful check on the ids-only contract in plan §5.2 — if a
-pipeline works against FAISS, it isn't secretly leaning on payload
-storage.
+It also holds *only* vectors and ids: no metadata, no filtering, so
+``delete`` takes ids and never a filter. That makes it a faithful check
+on the ids-only contract in plan §5.2 — if a pipeline works against
+FAISS, it isn't secretly leaning on payload storage.
 """
 
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -162,8 +162,10 @@ class FaissVectorStore(BaseVectorStore):
             )
 
         index = self._index_for(collection)
-        arr = self._prepare(vectors)
         id_arr = np.asarray(ids, dtype=np.int64)
+        if not len(id_arr) and not len(vectors):
+            return  # an empty batch writes nothing (_prepare would make it one empty row)
+        arr = self._prepare(vectors)
         if len(id_arr) != len(arr):
             raise ValueError(f"ids/vectors length mismatch: {len(id_arr)} vs {len(arr)}")
 
@@ -173,6 +175,51 @@ class FaissVectorStore(BaseVectorStore):
         except Exception:  # noqa: BLE001 — index types differ in remove support
             pass
         index.add_with_ids(arr, id_arr)
+
+    async def _delete(
+        self,
+        ids: Optional[List[Any]],
+        filter: Optional[Union[Dict[str, Any], str]],
+        collection: Optional[str],
+    ) -> int:
+        """Remove vectors by id from the selected index.
+
+        Changes the index in memory; call :meth:`save` to persist it.
+
+        Raises:
+            ValueError: If ``filter`` is set — FAISS stores no metadata to
+                match it against — or if the index does not map external
+                ids (see :meth:`_require_ids`).
+        """
+        if filter is not None:
+            raise ValueError(
+                "FAISS does not support metadata filtering, so it cannot delete by "
+                "filter. Delete by ids=, or pre-partition into separate FAISS "
+                "indices (collections=) and replace a whole one."
+            )
+        index = self._index_for(collection)
+        self._require_ids(index, collection)
+        return int(index.remove_ids(np.asarray(ids, dtype=np.int64)))
+
+    def _require_ids(self, index, collection: Optional[str]) -> None:
+        """Refuse to delete from an index whose ids are row positions.
+
+        A bare flat index numbers vectors 0..n-1 and ``remove_ids`` on it
+        shifts every later vector down, so "delete id 3" would quietly
+        renumber the rest. Only an id-mapped index (``IndexIDMap``, which
+        this backend builds for ``dim=``) or an IVF index (which stores
+        ids) keeps the ids a caller wrote.
+        """
+        import faiss
+
+        if isinstance(index, (faiss.IndexIDMap, faiss.IndexIVF)):
+            return
+        raise ValueError(
+            f"The FAISS index for collection {collection or self._default!r} is a "
+            f"{type(index).__name__}, whose ids are row positions, so deleting by id "
+            "would renumber the rest. Build it as faiss.IndexIDMap2(<index>) and "
+            "add vectors with add_with_ids (an empty dim= index already is one)."
+        )
 
     def save(self, path: str, collection: Optional[str] = None) -> None:
         """Persist an index to disk. Not part of the ABC — FAISS-specific."""

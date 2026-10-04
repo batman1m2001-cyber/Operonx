@@ -19,6 +19,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   branch closes (default 1000). It is refused on a branch that closes no
   loop, and two different caps on one loop are refused.
 
+- **`BaseVectorStore.delete(ids=None, filter=None, collection=None)`**,
+  for FAISS (by id, on an id-mapped or IVF index), pgvector (by id or the
+  search filter dialect; returns the row count) and Qdrant (by point ids
+  or a condition tree, `wait=True`; returns `None`). Exactly one of `ids`
+  and a non-empty `filter`: neither, both, or `{}` raise rather than read
+  as "delete everything". `ids=[]` deletes nothing; a missing id is not
+  an error. One contract suite runs against every backend
+  (`tests/internal/providers/test_vector_store_contract.py`; live
+  Postgres and Qdrant via `OPERONX_TEST_PG_DSN` / `OPERONX_TEST_QDRANT`).
+- **`VectorUpsertOp` and `VectorDeleteOp`**, the write half of
+  `VectorSearchOp` (op types `vector-upsert`, `vector-delete`).
+- **`VectorSearchOp` output `empty_index`**, with a WARNING, when an
+  unfiltered search returns no hits: the index holds no vectors. Before,
+  an index nobody populated answered every query with three empty lists.
+- **`operonx.resources` entry points.** A package declares the resource
+  categories it registers, `[project.entry-points."operonx.resources"]
+  my_category = "my_pkg.registry:register"`, and the hub loads that entry
+  point on first use of the category; no import order needed.
+- **Anthropic citations.** With citation-enabled `search_result` /
+  `document` blocks, the completion's message (and a stream's last delta)
+  carries `citations`: spans `{start, end, block_index, text, citations}`
+  of the joined answer, with Anthropic's citations unchanged.
+- `operonx.core.media_store`: `MediaStore`, `LocalMediaStore`,
+  `detect_media` and `MediaInfo`, moved from `operonx.telemetry.media`,
+  which still exports them.
+
 ### Fixed
 
 - **An op failing inside a subgraph stops the ops after the subgraph**, as
@@ -88,10 +114,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A client that sends plain text declares the door
   `websocket(..., codec="text")`.
 
+- **An unknown resource category raises `ResourceCategoryError`** (a
+  `KeyError`) instead of parsing to the raw YAML dict, which was cached,
+  so a category registered later never resolved. A config that does not
+  parse raises "invalid config" instead of "not found". `has()` and
+  `keys()` answer from storage without parsing. operonx's own
+  `run_store:`, `trace_*:`, `langfuse:`, `source:` and `sink:` categories
+  now resolve in a script that has not imported their modules.
+- `BaseVectorStore` has a new abstract `_delete()`: a custom backend must
+  implement it.
+
 ### Removed
 
 - `operonx pack` and the `operonx-pack` script: they serialised graphs
   for the dropped Rust runtime and raised on any looping graph.
+
+- `RerankingType.COHERE`, which no factory branch built: `api_type:
+  cohere` failed at first use. It is now refused when the config is read.
 
 ## [1.14.0] - 2026-10-04
 

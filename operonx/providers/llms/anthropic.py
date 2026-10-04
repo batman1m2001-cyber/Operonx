@@ -82,6 +82,75 @@ def _tool_result_block(message: Dict[str, Any]) -> Dict[str, Any]:
     return block
 
 
+class _CitedSpans:
+    """Where an answer's citations point, built as its text blocks arrive.
+
+    Anthropic splits a cited answer into several text blocks; those resting
+    on a source carry ``citations``. OpenAI's message has one ``content``
+    string, so each cited block becomes a span of it::
+
+        {"start": 25, "end": 53, "block_index": 1,
+         "text": "refunds take 5 business days",
+         "citations": [<Anthropic's citation dicts, unchanged>]}
+
+    ``content[start:end] == text``. Only text blocks count toward offsets,
+    as only they are joined into ``content``. Fed whole blocks
+    (:meth:`add_block`) or stream events (:meth:`add_event`).
+    """
+
+    def __init__(self) -> None:
+        self._length = 0
+        self._spans: Dict[int, Dict[str, Any]] = {}
+        self._text_blocks: set = set()
+
+    def add_block(self, index: int, block: Dict[str, Any]) -> None:
+        if block.get("type") != "text":
+            return
+        text = block.get("text", "")
+        if block.get("citations"):
+            self._spans[index] = {
+                "start": self._length,
+                "end": self._length + len(text),
+                "block_index": index,
+                "text": text,
+                "citations": list(block["citations"]),
+            }
+        self._length += len(text)
+
+    def add_event(self, event_type: str, event_data: Dict[str, Any]) -> None:
+        index = event_data.get("index", 0)
+        if event_type == "content_block_start":
+            if (event_data.get("content_block") or {}).get("type") == "text":
+                self._text_blocks.add(index)
+            return
+        if event_type != "content_block_delta" or index not in self._text_blocks:
+            return
+        delta = event_data.get("delta") or {}
+        if delta.get("type") == "citations_delta" and delta.get("citation"):
+            span = self._spans.setdefault(
+                index,
+                {
+                    "start": self._length,
+                    "end": self._length,
+                    "block_index": index,
+                    "text": "",
+                    "citations": [],
+                },
+            )
+            span["citations"].append(delta["citation"])
+        elif delta.get("type") == "text_delta":
+            text = delta.get("text", "")
+            span = self._spans.get(index)
+            if span is not None:
+                span["text"] += text
+                span["end"] += len(text)
+            self._length += len(text)
+
+    def result(self) -> Optional[List[Dict[str, Any]]]:
+        """The spans in answer order, or None when nothing was cited."""
+        return [self._spans[i] for i in sorted(self._spans)] or None
+
+
 class AnthropicModel(BaseLLM):
     """Anthropic Claude provider using httpx.AsyncClient (no SDK)."""
 
@@ -228,11 +297,21 @@ class AnthropicModel(BaseLLM):
     # ── Response conversion ─────────────────────────────────────────────
 
     def _to_chat_completion(self, resp: Dict[str, Any]) -> ChatCompletion:
-        """Anthropic response dict → OpenAI ChatCompletion."""
+        """Anthropic response dict → OpenAI ChatCompletion.
+
+        Native citations ride on the message as ``citations`` (see
+        :class:`_CitedSpans`), set only when the answer cites something —
+        OpenAI's message has no field for them, and joining the text
+        blocks would otherwise lose which part rests on which source.
+        """
         content_blocks = resp.get("content", [])
         text = "".join(
             block.get("text", "") for block in content_blocks if block.get("type") == "text"
         )
+        spans = _CitedSpans()
+        for index, block in enumerate(content_blocks):
+            spans.add_block(index, block)
+        cited = spans.result()
         tool_calls = [
             ChatCompletionMessageToolCall(
                 id=block.get("id", ""),
@@ -269,6 +348,7 @@ class AnthropicModel(BaseLLM):
                         role="assistant",
                         content=text,
                         tool_calls=tool_calls or None,
+                        **({"citations": cited} if cited else {}),
                     ),
                     finish_reason=self._map_stop_reason(resp.get("stop_reason", "end_turn")),
                 )
@@ -570,6 +650,9 @@ class AnthropicModel(BaseLLM):
         """Streaming Anthropic Messages API call.
 
         Parses Anthropic SSE events and yields OpenAI-compatible chunks.
+        Citations (``citations_delta`` events) are collected as the text
+        streams and ride on the final chunk's delta as ``citations``, in
+        the shape :meth:`generate` gives them.
         """
         body = self._build_request(
             messages,
@@ -587,6 +670,7 @@ class AnthropicModel(BaseLLM):
         chunk_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         chunk_model = self.model
         tool_index: Dict[int, int] = {}
+        spans = _CitedSpans()
 
         async with self.client.stream("POST", url, headers=self._headers(), json=body) as resp:
             if resp.status_code != 200:
@@ -617,8 +701,13 @@ class AnthropicModel(BaseLLM):
                         chunk_id = msg.get("id", chunk_id)
                         continue
 
+                    spans.add_event(event_type, event_data)
                     chunk = self._to_chunk(
                         event_type, event_data, chunk_model, chunk_id, tool_index
                     )
+                    if chunk and event_type == "message_delta":
+                        cited = spans.result()
+                        if cited:
+                            chunk.choices[0].delta.citations = cited
                     if chunk:
                         yield chunk

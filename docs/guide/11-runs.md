@@ -153,8 +153,9 @@ its size. `store.media.get(sha)` reads a blob back, from either place;
 `"store"` in the reference says which (`local` or `clickhouse`).
 Switching `media` does not move blobs already written. Deleting a run
 keeps its blobs, which other runs may share; `store.prune_media()` removes
-the ones nothing references. `operonx.telemetry.media` (`detect_media`,
-`LocalMediaStore`) is usable by any other store.
+the ones nothing references. `operonx.core.media_store` (`detect_media`,
+`MediaStore`, `LocalMediaStore`) is not specific to traces: any other
+store can use it. `operonx.telemetry.media` still exports those names.
 
 ## Reading a project's own sinks
 

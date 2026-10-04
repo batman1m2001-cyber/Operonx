@@ -149,6 +149,8 @@ class PgVectorStore(BaseVectorStore):
             raise ValueError(f"ids/vectors length mismatch: {len(ids)} vs {len(vectors)}")
         if metadata is not None and len(metadata) != len(ids):
             raise ValueError(f"ids/metadata length mismatch: {len(ids)} vs {len(metadata)}")
+        if not ids:
+            return  # an empty batch writes nothing, and needs no round trip
 
         relation = self._relation(collection)
         cols = [self._id_col, self._vec_col] + self._meta_cols
@@ -177,6 +179,22 @@ class PgVectorStore(BaseVectorStore):
 
         await self._execute_many(sql, batch)
 
+    async def _delete(
+        self,
+        ids: Optional[List[Any]],
+        filter: Optional[Union[Dict[str, Any], str]],
+        collection: Optional[str],
+    ) -> int:
+        """``DELETE`` by primary key, or by the same filter dialect
+        :meth:`search` takes. Returns the number of rows removed."""
+        relation = self._relation(collection)
+        if ids is not None:
+            where_sql, params = f"{self._id_col} = ANY(%(ids)s)", {"ids": ids}
+        else:
+            where_sql, params = split_filter(filter)
+        sql = f"DELETE FROM {relation} WHERE {where_sql}"  # noqa: S608 - identifiers validated
+        return await self._execute(sql, params)
+
     # ── plumbing ──────────────────────────────────────────────────────
 
     @staticmethod
@@ -193,6 +211,14 @@ class PgVectorStore(BaseVectorStore):
             async with conn.cursor(row_factory=dict_row) as cur:
                 await cur.execute(sql, params)
                 return await cur.fetchall()
+
+    async def _execute(self, sql: str, params: Dict[str, Any]) -> int:
+        """Run one statement; return the number of rows it touched."""
+        await self._pool.open()
+        async with self._pool.connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, params)
+                return cur.rowcount
 
     async def _execute_many(self, sql: str, batch: List[Dict[str, Any]]) -> None:
         """Run a statement once per parameter set, in one transaction."""

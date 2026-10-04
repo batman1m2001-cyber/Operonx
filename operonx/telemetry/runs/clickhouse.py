@@ -55,15 +55,15 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 from operonx.core.loggings import LOGGER
-from operonx.telemetry.consumers.local import resolve_root
-from operonx.telemetry.media import (
+from operonx.core.media_store import (
     _HEX64,
     LocalMediaStore,
     MediaInfo,
     MediaStore,
     detect_media,
-    json_default,
 )
+from operonx.telemetry.consumers.local import resolve_root
+from operonx.telemetry.media import json_default
 from operonx.telemetry.writer import BackgroundWriter
 
 from .base import RunStore, _check_by
@@ -641,7 +641,7 @@ class ClickHouseRunStore(RunStore):
     ``media_dir``; ``"clickhouse"`` the ``media`` table, written in the
     same batches as the runs (``media_dir`` is then unused, and
     ``media_batch_bytes`` caps the blob bytes one insert carries); or a
-    :class:`~operonx.telemetry.media.MediaStore` of your own.
+    :class:`~operonx.core.media_store.MediaStore` of your own.
     """
 
     def __init__(

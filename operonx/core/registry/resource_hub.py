@@ -2,9 +2,11 @@
 
 import functools
 import hashlib
+import importlib
 import json
 import warnings
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Dict, List, Optional, Tuple
 
@@ -12,7 +14,12 @@ from operonx.core.loggings import LOGGER
 from operonx.core.utils.yaml_model import YamlModel
 
 from .config_registry import REGISTRY
-from .errors import EnvVarUnsetError, ResourceHubWarning, ResourceUnreachable
+from .errors import (
+    EnvVarUnsetError,
+    ResourceCategoryError,
+    ResourceHubWarning,
+    ResourceUnreachable,
+)
 from .shortcuts.health import HealthCheckResult
 from .storage import ConfigStorage, YamlConfigStorage
 
@@ -40,15 +47,112 @@ class CacheEntry:
 TOKEN_REF_PREFIXES = ("keycloak", "oauth2")
 
 
+#: The modules that register operonx's own categories when imported:
+#: llm, embedding, reranking, vector_store, doc_store, onnx, keycloak,
+#: oauth2 (providers); langfuse, trace_local, trace_langfuse,
+#: trace_clickhouse, run_store (telemetry); source, sink (jobs).
+_BUILTIN_CATEGORY_MODULES = (
+    "operonx.providers.registry",
+    "operonx.telemetry",
+    "operonx.telemetry.consumers",
+    "operonx.telemetry.runs",
+    "operonx.app.jobs",
+)
+
+#: Entry-point group a package uses to declare the categories it
+#: registers. The entry point's name is the category and its value a
+#: function taking no arguments that registers it::
+#:
+#:     [project.entry-points."operonx.resources"]
+#:     kb_catalog = "operonx_kb.registry:register"
+RESOURCE_ENTRY_POINT_GROUP = "operonx.resources"
+
+
 @functools.cache
-def _load_builtin_providers() -> bool:
-    """Import operonx.providers' registry plugins (once). False on a
-    core-only install, where the package is absent."""
-    try:
-        import operonx.providers.registry  # noqa: F401 — registers on import
-    except ImportError:
+def _load_builtin_categories() -> None:
+    """Import the modules that register operonx's own categories (once).
+
+    A script that bootstraps and calls ``hub.get("run_store:…")`` before
+    anything imported :mod:`operonx.telemetry.runs` must still resolve it.
+    A module whose optional dependency is not installed registers
+    nothing, and :meth:`ResourceHub.get` then says the category is
+    unknown; a module of operonx's own that fails to import raises.
+    """
+    for module in _BUILTIN_CATEGORY_MODULES:
+        try:
+            importlib.import_module(module)
+        except ModuleNotFoundError as e:
+            if (e.name or "").split(".")[0] == "operonx":
+                raise
+            LOGGER.debug(
+                "%s not loaded (missing %s); its categories stay unregistered", module, e.name
+            )
+
+
+def _installed_entry_points() -> List[metadata.EntryPoint]:
+    """Every installed entry point in :data:`RESOURCE_ENTRY_POINT_GROUP`."""
+    return list(metadata.entry_points(group=RESOURCE_ENTRY_POINT_GROUP))
+
+
+@functools.cache
+def _plugin_entry_points() -> Dict[str, Tuple[metadata.EntryPoint, ...]]:
+    """Installed ``operonx.resources`` entry points by category (read once)."""
+    found: Dict[str, Tuple[metadata.EntryPoint, ...]] = {}
+    for ep in _installed_entry_points():
+        found[ep.name] = found.get(ep.name, ()) + (ep,)
+    return found
+
+
+def _load_plugin_category(category: str) -> bool:
+    """Run the entry point that registers *category*, if a package has one.
+
+    Only that one entry point is loaded, so a broken plugin for some other
+    category cannot break this lookup. Returns False when no installed
+    package declares the category.
+
+    Raises:
+        ResourceCategoryError: Two packages claim the category, or its
+            entry point fails to load, is not a function, or runs without
+            registering the category.
+    """
+    eps = _plugin_entry_points().get(category, ())
+    if not eps:
         return False
+    if len(eps) > 1:
+        claims = ", ".join(f"{ep.value} ({_dist_name(ep)})" for ep in eps)
+        raise ResourceCategoryError(
+            f"Category {category!r} has {len(eps)} entry points in "
+            f"{RESOURCE_ENTRY_POINT_GROUP!r}: {claims}. A category belongs to one "
+            "package; uninstall one, or rename the category in one of them."
+        )
+    (ep,) = eps
+    try:
+        register = ep.load()
+    except Exception as e:
+        raise ResourceCategoryError(
+            f"Category {category!r}: the entry point {ep.value!r} from "
+            f"{_dist_name(ep)} failed to load ({type(e).__name__}: {e})."
+        ) from e
+    if not callable(register):
+        raise ResourceCategoryError(
+            f"Category {category!r}: the entry point {ep.value!r} from {_dist_name(ep)} "
+            f"is a {type(register).__name__}, not a function. It must name a function "
+            "taking no arguments that calls REGISTRY.register(ConfigClass, factory)."
+        )
+    register()
+    if REGISTRY.get_class(category) is None:
+        raise ResourceCategoryError(
+            f"Category {category!r}: the entry point {ep.value!r} from {_dist_name(ep)} "
+            f"ran but did not register category {category!r}. Its config class needs "
+            f'`_category: ClassVar[str] = "{category}"`.'
+        )
+    LOGGER.debug("Loaded category %s from entry point %s", category, ep.value)
     return True
+
+
+def _dist_name(ep: metadata.EntryPoint) -> str:
+    dist = getattr(ep, "dist", None)
+    return f"package {dist.name}" if dist is not None else "an installed package"
 
 
 def _split_token_ref(api_key: Any) -> Optional[Tuple[str, str]]:
@@ -73,11 +177,13 @@ class ResourceHub:
     - Lazy loading: resources are initialized on first access
     - Pluggable storage: YAML, JSON, or custom backend
     - Extensible: external packages register their configs and factories
+      (``REGISTRY.register``, found through an ``operonx.resources``
+      entry point when nothing imported the package)
 
     Example:
         hub = ResourceHub.from_yaml("configs/resources.yaml")
         llm = hub.get("llm:gpt-4o")
-        stt = hub.get("triton:stt")
+        index = hub.get("vector_store:docs")
 
         # Or use global hub
         from operonx.core.registry import ResourceHub
@@ -210,7 +316,18 @@ class ResourceHub:
     # ========================================================================
 
     def _load_config(self, key: str) -> Optional[YamlModel]:
-        """Load a config from storage (lazy, on demand)."""
+        """Load and parse a config from storage (lazy, cached once parsed).
+
+        Returns None only when *key* is not declared. A declared key is
+        either parsed into its category's config class or raises: nothing
+        unparsed is cached, so a category that registers later still
+        resolves.
+
+        Raises:
+            ResourceCategoryError: No package registers the key's category
+                (or the ``type:`` it names).
+            KeyError: The config does not parse as its class.
+        """
         key = self._resolve_alias(key)
         if key in self._cache:
             return self._cache[key].config
@@ -225,40 +342,62 @@ class ResourceHub:
             LOGGER.warning("Invalid key format, missing category: %s", key)
             return None
 
-        # Lookup config class by category. The built-in categories (llm,
-        # embedding, …) register when operonx.providers is imported; a
-        # script that bootstraps and calls hub.get() first must not get a
-        # raw dict for them.
-        config_class = REGISTRY.get_class(category) or (
-            _load_builtin_providers() and REGISTRY.get_class(category)
-        )
-
-        # Fall back to 'type' or '_class' field
-        if not config_class:
-            config_type = config_data.get("type") or config_data.get("_class")
-            if config_type:
-                config_class = REGISTRY.get_class(config_type)
-
-        # No config class found — store raw dict as config (for triton, custom categories)
-        if not config_class:
-            self._cache[key] = CacheEntry(config=config_data)
-            return config_data
-
+        config_class = self._config_class(key, category, config_data)
+        # Parse config (exclude type and _class fields)
+        data = {k: v for k, v in config_data.items() if k not in ("type", "_class")}
         try:
-            # Parse config (exclude type and _class fields)
-            data = {k: v for k, v in config_data.items() if k not in ("type", "_class")}
-
             # If config class has create_config, use it to dispatch to subclass
             if hasattr(config_class, "create_config"):
                 config = config_class.create_config(data)
             else:
                 config = config_class.model_validate(data)
-
-            self._cache[key] = CacheEntry(config=config)
-            return config
         except Exception as e:
-            LOGGER.error("Cannot parse config '%s': %s", key, e)
-            return None
+            raise KeyError(
+                f"Resource '{key}' in {self._source_label()} has an invalid config for "
+                f"{config_class.__name__}: {e}"
+            ) from e
+
+        self._cache[key] = CacheEntry(config=config)
+        return config
+
+    def _config_class(self, key: str, category: str, config_data: Dict[str, Any]) -> type:
+        """The config class for *key*: by category, else by its ``type:``.
+
+        A category nobody registered yet is looked for first among
+        operonx's own (:func:`_load_builtin_categories`), then among
+        installed ``operonx.resources`` entry points.
+        """
+        config_class = REGISTRY.get_class(category)
+        if config_class is None:
+            _load_builtin_categories()
+            config_class = REGISTRY.get_class(category)
+        if config_class is None and _load_plugin_category(category):
+            config_class = REGISTRY.get_class(category)
+        if config_class is not None:
+            return config_class
+
+        named = config_data.get("type") or config_data.get("_class")
+        if named:
+            config_class = REGISTRY.get_class(str(named))
+            if config_class is None:
+                raise ResourceCategoryError(
+                    f"Resource '{key}' names type {named!r}, which no package registers "
+                    "as a config class or category."
+                )
+            return config_class
+
+        raise ResourceCategoryError(
+            f"Resource '{key}' in {self._source_label()}: no package registers category "
+            f"{category!r}. operonx's own categories are "
+            f"{', '.join(sorted(REGISTRY.categories())) or '(none loaded)'}; a missing one "
+            "of those means its extra is not installed (pip install operonx[providers]). "
+            "A category of your own needs REGISTRY.register(ConfigClass, factory) before "
+            "first use, or, in a package, an entry point in "
+            f'[project.entry-points."{RESOURCE_ENTRY_POINT_GROUP}"] named {category!r}.'
+        )
+
+    def _source_label(self) -> str:
+        return str(self._source_path) if self._source_path else "<in-memory storage>"
 
     def _hash_of(self, config: YamlModel) -> str:
         """Create MD5 hash of config for unique identification."""
@@ -347,15 +486,11 @@ class ResourceHub:
         return self._aliases.get(key, key)
 
     def keys(self) -> List[str]:
-        """Return all registered keys (loads all configs from storage)."""
-        all_configs = self._storage.load_all()
-
-        for key, config_data in all_configs.items():
-            if key not in self._cache:
-                # Use _load_config which handles category resolution
-                self._load_config(key)
-
-        return list(self._cache.keys())
+        """Every declared key: those in storage, then any registered in
+        memory only. Parses nothing — :meth:`get` reports a key that does
+        not build, and :meth:`health_check` reports all of them."""
+        declared = list(self._storage.load_all())
+        return declared + [k for k in self._cache if k not in declared]
 
     def declares(self, key: str) -> bool:
         """Whether *key* is configured, without loading it.
@@ -368,11 +503,10 @@ class ResourceHub:
         return key in self._cache or self._storage.load_one(key) is not None
 
     def has(self, key: str) -> bool:
-        """Check if resource exists in registry."""
-        if key in self._cache:
-            return True
-        # Try loading from storage
-        return self._load_config(key) is not None
+        """Whether *key* is configured. The same question as
+        :meth:`declares`: it parses nothing, so it neither fails on a
+        category not registered yet nor caches anything."""
+        return self.declares(key)
 
     def get(self, key: str) -> Any:
         """Get resource instance by key (lazy load on first access).
@@ -384,9 +518,12 @@ class ResourceHub:
             Initialized resource instance
 
         Raises:
-            KeyError: If key not found or resource failed to initialize.
-                The message includes ``source_path`` and available keys
-                so the user can tell which fix to apply.
+            KeyError: If key not found, its config does not parse, or the
+                resource failed to initialize. The message says which,
+                with ``source_path`` (and the available keys when the key
+                is missing) so the user can tell which fix to apply.
+            ResourceCategoryError: A ``KeyError`` for a key whose category
+                no package registers.
             EnvVarUnsetError: If the resource references a ``${VAR}``
                 whose env var is unset. Subclass of ``RuntimeError`` for
                 backwards compatibility.
@@ -411,14 +548,6 @@ class ResourceHub:
         # (api_key: "keycloak:xxx" or "oauth2:xxx")
         resolved_config = self._resolve_token_ref(config)
         create_config = resolved_config or config
-
-        if isinstance(create_config, dict):
-            raise KeyError(
-                f"Resource '{key}': no provider is registered for category "
-                f"'{key.split(':')[0]}'. The built-in ones come with operonx.providers "
-                "(pip install operonx[providers]); a custom category needs "
-                "REGISTRY.register(ConfigClass, factory)."
-            )
 
         # Lazy initialize resource
         try:
@@ -473,7 +602,7 @@ class ResourceHub:
             available = sorted(self._storage.load_all().keys())
         except Exception:
             available = sorted(self._cache.keys())
-        source = str(self._source_path) if self._source_path else "<in-memory storage>"
+        source = self._source_label()
         if available:
             avail_str = ", ".join(repr(k) for k in available)
             return f"Resource '{key}' not found in {source}.\n  Available: [{avail_str}]"
@@ -514,10 +643,8 @@ class ResourceHub:
         Returns:
             True if removed, False if not found
         """
-        if key not in self._cache:
-            # Try loading first
-            if not self._load_config(key):
-                return False
+        if not self.declares(key):
+            return False
 
         if key in self._cache:
             del self._cache[key]

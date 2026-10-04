@@ -35,6 +35,12 @@ dialect.
 ::: operonx.providers.ops.VectorSearchOp
 ::: operonx.providers.ops.DocFetchOp
 
+`VectorUpsertOp` and `VectorDeleteOp` are the write half: they keep the
+index in step with the store of record as documents arrive and go.
+
+::: operonx.providers.ops.VectorUpsertOp
+::: operonx.providers.ops.VectorDeleteOp
+
 ### Ordering helpers
 
 Vector search returns score-ordered ids; key-based fetches return
