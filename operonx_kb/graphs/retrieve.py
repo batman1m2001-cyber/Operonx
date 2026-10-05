@@ -10,6 +10,7 @@ graph::
     lexical = lexical_retriever(spec.lexical)             # lexical_search
     hybrid  = hybrid_retriever(dense, lexical)            # both, concurrently ─► rrf
     tree    = tree_retriever(hybrid, spec.tree)           # seed ─► beam loop over the tree index (LLMOp)
+    graph   = graph_retriever(hybrid, spec.graph)         # seed ─► personalized PageRank over concepts
     search  = search_graph(hybrid)                        # retriever ─► hydrate (the catalog gate)
     best    = reranked(search, reranker="bge-reranker")   # search(depth) ─► RerankOp ─► apply_rerank
     flow    = build_search_flow(best)                     # behind doors: a Job, an Eval, a Service
@@ -26,7 +27,8 @@ from operonx.core.ops import if_
 from operonx.providers.ops import EmbeddingOp, LLMOp, RerankOp, VectorSearchOp
 
 from operonx_kb.errors import KBError
-from operonx_kb.model.collection import DenseIndexSpec, LexicalIndexSpec, TreeSpec
+from operonx_kb.model.collection import DenseIndexSpec, GraphSpec, LexicalIndexSpec, TreeSpec
+from operonx_kb.ops.graph import graph_hits
 from operonx_kb.ops.retrieve import (
     apply_rerank,
     dense_hits,
@@ -45,6 +47,7 @@ __all__ = [
     "lexical_retriever",
     "hybrid_retriever",
     "tree_retriever",
+    "graph_retriever",
     "search_graph",
     "reranked",
     "build_search_flow",
@@ -209,6 +212,29 @@ def tree_retriever(seed, tree: TreeSpec, *, catalog: str = "kb_catalog:main"):
         hits >> END
 
     return tree_retrieve
+
+
+def graph_retriever(seed, spec: GraphSpec, *, catalog: str = "kb_catalog:main"):
+    """Graph search (PLAN G4): ``seed`` (a retriever) finds where to start, a
+    personalized PageRank walk over the collection's concept graph finds what
+    those chunks link to, and the chunks come by where the walk ends, then the
+    seed's other hits. No model call.
+
+    ::
+
+        fusion_depth ─► seed ─► graph_hits
+    """
+    settings = spec.model_dump(mode="json")
+
+    @graph
+    def graph_retrieve(query, collection, filter, k):
+        size = fusion_depth(k=k, depth=spec.seed_depth)
+        found = seed(query=query, collection=collection, filter=filter, k=size["depth"])
+        walked = graph_hits(seed=found["hits"], collection=collection, k=k, graph=settings,
+                            catalog=catalog, filter=filter)  # fmt: skip
+        START >> size >> found >> walked >> END
+
+    return graph_retrieve
 
 
 def search_graph(retriever, *, catalog: str = "kb_catalog:main"):

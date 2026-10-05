@@ -275,7 +275,11 @@ def stage_index_writes(
     }
 
 
-@op(bound="cpu", exclude={"trace": ["tree", "chunks", "occurrences", "nodes"]}, show_keys="version")
+@op(
+    bound="cpu",
+    exclude={"trace": ["tree", "chunks", "occurrences", "nodes", "mentions"]},
+    show_keys="version",
+)
 def commit_version(
     plan: dict,
     tree: dict,
@@ -285,12 +289,14 @@ def commit_version(
     blobs: str,
     written: int,
     nodes: Optional[list] = None,
+    mentions: Optional[list] = None,
 ) -> dict:
     """Store the canonical text, re-check the invariant, and flip the active version.
 
     It runs after the vector upsert; ``written`` is the upsert's count (0 when
     the version brought no new chunk: an empty batch is a no-op upstream).
-    ``nodes`` is the version's tree index, committed with it (PLAN E5).
+    ``nodes`` is the version's tree index and ``mentions`` its chunks' concepts
+    (``[chunk_id, concept, weight]``), both committed with it (PLAN E5, G2).
     """
     vt = tree_from_dict(tree)
     chunk_models = [Chunk.model_validate(c) for c in chunks]
@@ -336,11 +342,19 @@ def commit_version(
             "pages": len(vt.pages),
             "indexed": written,
             "tree_nodes": len(tree_nodes),
+            "graph_mentions": len(mentions or []),
         },
     )
     cat = catalog_of(catalog)
+    chunk_ids = {c.id for c in chunk_models}
+    graph_rows = [(m[0], m[1], float(m[2])) for m in mentions or []]
+    stray = sorted({m[0] for m in graph_rows} - chunk_ids)
+    if stray:
+        raise SpanInvariantError(
+            "concept mentions name chunks the version lacks", {"chunks": stray[:5]}
+        )
     result = cat.commit_version(
-        document, version, vt.elements, vt.pages, chunk_models, occ_models, tree_nodes
+        document, version, vt.elements, vt.pages, chunk_models, occ_models, tree_nodes, graph_rows
     )
     cat.log_ingest(
         plan["collection_id"],
@@ -422,6 +436,7 @@ def report(
     lexical_deleted: int = 0,
     contextual: Optional[dict] = None,
     tree: Optional[dict] = None,
+    graph: Optional[dict] = None,
 ) -> dict:
     """Where the two arms merge: one result per item."""
     if skip is not None:
@@ -439,6 +454,7 @@ def report(
             "lexical": {"written": lexical_written, "deleted": lexical_deleted},
             "contextual": contextual or {},
             "tree": tree or {},
+            "graph": graph or {},
         },
     }
     return {"result": result}

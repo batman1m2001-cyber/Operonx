@@ -3,6 +3,7 @@
     operonx-kb collections
     operonx-kb create handbook --embedder bge-m3 --store vector_store:kb
     operonx-kb create manuals --embedder bge-m3 --lexical kb_lexical:main --tree-llm gpt-4o-mini
+    operonx-kb create wiki --embedder bge-m3 --lexical kb_lexical:main --graph
     operonx-kb add handbook raw/ --recursive
     operonx-kb list handbook
     operonx-kb status handbook
@@ -11,6 +12,7 @@
     operonx-kb verify handbook            # exit 1 when a problem is found
     operonx-kb query handbook "how many days of leave" --mode hybrid --tag hr
     operonx-kb query manuals "which clause covers refunds" --mode tree
+    operonx-kb query wiki "who directed the film that won in 1999" --mode graph
     operonx-kb query handbook "how many days of leave" --answer assistant
     operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
 
@@ -38,6 +40,7 @@ from operonx_kb.model.collection import (
     CollectionSpec,
     ContextualSpec,
     DenseIndexSpec,
+    GraphSpec,
     LexicalIndexSpec,
     TreeSpec,
 )
@@ -85,6 +88,7 @@ def _cmd_create(kb: KnowledgeBase, args) -> int:
         language=args.language,
         contextual=ContextualSpec(llm=args.contextual_llm) if args.contextual_llm else None,
         tree=TreeSpec(llm=args.tree_llm) if args.tree_llm else None,
+        graph=GraphSpec() if args.graph else None,
     )
     kb.create_collection(args.collection, spec)
     print(f"created {args.collection}")
@@ -250,6 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--tree-llm", help="llm resource that builds the tree index (summaries, tables of contents)"
+    )
+    p.add_argument(
+        "--graph", action="store_true", help="build the concept graph (no model) for --mode graph"
     )
     p.set_defaults(fn=_cmd_create)
 

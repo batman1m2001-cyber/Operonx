@@ -6,6 +6,7 @@ from operonx_kb.model.collection import (
     CollectionSpec,
     ContextualSpec,
     DenseIndexSpec,
+    GraphSpec,
     LayoutSpec,
     TreeSpec,
 )
@@ -43,5 +44,6 @@ __all__ = [
     "Span",
     "TreeNode",
     "TreeSpec",
+    "GraphSpec",
     "VersionChunk",
 ]
