@@ -28,6 +28,10 @@ first, then build, then measure; keep the CPU suite green (GPU tests behind a ma
 
 ## Other open items
 
+- MCP server (`kb_search` / `kb_read` over MCP) — only when a client outside our code needs the KB
+  (Claude Desktop, an IDE, another language). Our flows and agents use it in process (PLAN K7).
+- Other track5 P7 items on demand: S3 / Drive / crawl connectors, Qdrant hybrid, LanceDB, wiki export.
+
 - K4 gate: resume `scripts/bench_k4.py` when OpenAI credits exist (~$1.5; `docs/bench/k4.md`).
 - K6 follow-up: a query router (track5 §9.8) sending relation questions to `mode="graph"`.
 - Human check of the 30 answers in `docs/bench/d5_answers.jsonl`; OCR for scanned PDFs.

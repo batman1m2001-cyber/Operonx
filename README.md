@@ -37,6 +37,34 @@ operonx-kb query handbook "how many days of leave" --answer assistant
 operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
 ```
 
+## Use it inside your flows
+
+A search is an operonx graph, so it is one step of your own flow — traced with it, no service in
+between (`tests/graphs/test_in_a_flow.py`):
+
+```python
+search = kb.search_graph("handbook", mode="hybrid")
+
+@graph
+def answer_flow(question):
+    found = search(query=question, collection="handbook", filter=None, k=5)
+    reply = cite(hits=found["hits"])          # your own op
+    START >> found >> reply >> END
+
+out = await Operon(answer_flow, params={"question": None}).run(inputs={"question": "..."})
+```
+
+For an agent (operonx-agents installed beside it), `kb_tools` gives a read-only `kb_search` /
+`kb_read` toolset. The scope comes from your code or the run's context — the model only sends a
+query — and `kb_read` checks it again (`tests/graphs/test_agent_tools.py`):
+
+```python
+from operonx_kb.tools import kb_tools
+
+tools = kb_tools(kb, "handbook", scope=lambda ctx: {"acl_any": ctx.deps.principals})
+agent = Agent(name="hr", model=Model("assistant"), tools=[tools])
+```
+
 Studio's Knowledge tab reads a knowledge base through its admin API (extra `admin`), served as
 one of the project's services:
 
