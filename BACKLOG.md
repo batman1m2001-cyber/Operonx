@@ -32,6 +32,25 @@ first, then build, then measure; keep the CPU suite green (GPU tests behind a ma
   (Claude Desktop, an IDE, another language). Our flows and agents use it in process (PLAN K7).
 - Other track5 P7 items on demand: S3 / Drive / crawl connectors, Qdrant hybrid, LanceDB, wiki export.
 
-- K4 gate: resume `scripts/bench_k4.py` when OpenAI credits exist (~$1.5; `docs/bench/k4.md`).
+- K4 gate (optional — K4 is built and opt-in; this only decides default-on). Decided 2026-10-06: run
+  it on the **in-house model** (`google/gemma-4-E2B-it`, the callbot gateway), not OpenAI. Probed: plain
+  calls ~1 s, JSON navigator answers correct in 0.2 s, ~130 calls/min. A run was started and stopped by
+  choice at ~10% (1 123 of ~10 500 calls; ETA was 2-2.5 h). To run it, with this `llm.yaml`:
+
+  ```yaml
+  llm:inhouse:
+    api_type: openai
+    api_key: ${LLM_API_KEY}
+    base_url: ${LLM_API_URL}
+    model: ${LLM_MODEL_NAME}
+    cost_per_input_token: 0.0
+    cost_per_output_token: 0.0
+  ```
+  ```
+  OMP_NUM_THREADS=8 uv run python scripts/bench_k4.py WORK --llm inhouse --llm-resources llm.yaml \
+      --env ../educa-reminder-agent/.env
+  ```
+  Reusing the same `WORK` folder resumes for free (answers are cached in its catalog). Run it when
+  nobody is testing the callbot: it shares that gateway.
 - K6 follow-up: a query router (track5 §9.8) sending relation questions to `mode="graph"`.
 - Human check of the 30 answers in `docs/bench/d5_answers.jsonl`; OCR for scanned PDFs.
