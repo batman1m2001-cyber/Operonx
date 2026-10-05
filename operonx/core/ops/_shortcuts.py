@@ -51,8 +51,37 @@ _BASE_INIT_KEYS = frozenset(
 # lose the argument.
 _POLICY_KEYS = {"retry": Retry, "timeout": Timeout}
 
+#: Every setting an ``@op`` / ``@graph`` call takes besides its inputs —
+#: what ``f.configure(...)`` accepts.
+OP_SETTINGS = frozenset(_BASE_INIT_KEYS | set(_POLICY_KEYS) | {"return_keys", "delay"})
 
-def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
+
+def configurer(build, label: str):
+    """``f.configure(**settings)`` for a decorated op or graph whose call is
+    ``build(kwargs, settings)``: the settings, checked now, then a callable
+    taking the inputs. How a setting whose name the function also uses as a
+    parameter (``id``, ``name``…) is given at all."""
+
+    def configure(**settings):
+        unknown = sorted(set(settings) - OP_SETTINGS)
+        if unknown:
+            raise TypeError(
+                f"{label}.configure: {unknown} not an op setting; the settings are "
+                f"{sorted(OP_SETTINGS)} — inputs go in the call that follows"
+            )
+
+        def call(**kwargs):
+            return build(kwargs, settings)
+
+        register_skip(call)
+        return call
+
+    return configure
+
+
+def split_shorthand_kwargs(
+    kwargs: dict, extra_init_keys: set = None, own: frozenset = frozenset()
+) -> tuple:
     """Split flat kwargs into (inputs, init_kwargs).
 
     Used by shorthand functions (llm_, for_, op, etc.) to separate
@@ -62,6 +91,11 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
         kwargs: Flat keyword arguments from shorthand function.
         extra_init_keys: Additional op-specific init keys beyond base keys
             (e.g., {'max_concurrency', 'callback'} for iteration ops).
+
+        own: The function's own parameter names. A keyword among them is
+            always an input — ``@op def f(id)`` called ``f(id=7)`` gets
+            the 7 — whatever op setting shares its name; that setting is
+            given with ``f.configure(...)``.
 
     Returns:
         (inputs, init_kwargs) tuple where:
@@ -84,6 +118,9 @@ def split_shorthand_kwargs(kwargs: dict, extra_init_keys: set = None) -> tuple:
     init_kwargs = {}
 
     for key, value in kwargs.items():
+        if key in own:
+            inputs[key] = value
+            continue
         policy_type = _POLICY_KEYS.get(key)
         if policy_type is not None and key not in init_keys:
             # By type, not by name: `fetch(url=u, timeout=10)` is the

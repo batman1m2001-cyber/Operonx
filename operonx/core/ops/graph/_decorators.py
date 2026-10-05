@@ -34,7 +34,7 @@ sugar was removed. Two replacements depending on what you were doing:
 from functools import wraps
 
 from operonx.core.loggings import LOGGER
-from operonx.core.ops._shortcuts import _BASE_INIT_KEYS, split_shorthand_kwargs
+from operonx.core.ops._shortcuts import configurer, split_shorthand_kwargs
 from operonx.core.ops.base import PARENT
 from operonx.core.states.ref import Ref
 from operonx.core.utils.auto_name import register_skip
@@ -95,21 +95,17 @@ def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
         from operonx.core.ops.graph.graph_op import GraphOp
 
         sig = inspect.signature(fn)
-        collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
-        if collisions:
-            LOGGER.warning(
-                "@graph function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
-                "Consider renaming them.",
-                fn.__name__,
-                sorted(collisions),
-                sorted(_BASE_INIT_KEYS),
-            )
-
         param_names = set(sig.parameters.keys())
+        # a keyword the graph function takes is its input, never a setting
+        own = frozenset(param_names)
 
         @wraps(fn)
         def wrapper(**kwargs):
-            input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
+            return _build(kwargs, {})
+
+        def _build(kwargs, settings):
+            input_mappings, init_kwargs = split_shorthand_kwargs(kwargs, own=own)
+            init_kwargs.update(settings)
 
             # Inject decorator-level bound if not overridden at call time
             if graph_bound is not None and "bound" not in init_kwargs:
@@ -129,7 +125,9 @@ def graph(fn=None, *, bound: "str | None" = None, strict_dag: bool = False):
             return g
 
         register_skip(wrapper)
+        register_skip(_build)
         wrapper.__wrapped__ = fn
+        wrapper.configure = configurer(_build, fn.__name__)
         # What tells a `@graph` apart from a plain function that returns
         # one — the serve layer's variants need the difference.
         wrapper._operonx_graph = True

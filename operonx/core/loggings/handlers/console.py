@@ -160,7 +160,7 @@ def create_console_handler(config: ConsoleHandlerConfig) -> logging.Handler:
     if use_rich == "auto":
         # Dùng Rich nếu stdout là TTY (terminal thực)
         # Plain text nếu pipe sang file hoặc trong CI/CD
-        use_rich = sys.stdout.isatty()
+        use_rich = sys.stderr.isatty()
 
     if use_rich:
         console = Console(
@@ -168,6 +168,9 @@ def create_console_handler(config: ConsoleHandlerConfig) -> logging.Handler:
             # Không ép buộc terminal - để Rich tự phát hiện
             # Đảm bảo output plain text khi pipe sang file hoặc trong CI/CD
             highlight=False,
+            # logs are not the program's output: a script's stdout stays
+            # what it prints
+            stderr=True,
         )
 
         handler = ColoredRichHandler(
@@ -190,7 +193,7 @@ def create_console_handler(config: ConsoleHandlerConfig) -> logging.Handler:
     else:
         # Plain text mode - strip markup tags
         format_str = config.format_str or "[%(asctime)s] %(levelname)-8s [%(name)s] %(message)s"
-        handler = logging.StreamHandler(stream=codecs.getwriter("utf-8")(sys.stdout.buffer))
+        handler = logging.StreamHandler(stream=codecs.getwriter("utf-8")(sys.stderr.buffer))
         handler.setLevel(getattr(logging, config.level.upper()))
         handler.setFormatter(PlainTextFormatter(format_str, datefmt="%H:%M:%S"))
         return handler
