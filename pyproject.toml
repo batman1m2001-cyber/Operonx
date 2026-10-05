@@ -133,6 +133,8 @@ serve = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "websockets>=11.0",
+    # completion callbacks of queued webhook runs
+    "httpx>=0.24",
 ]
 # All HTTP-based LLM + embedding + reranker providers. Referenced by the
 # ImportError hints in llms/, embeddings/, rerankers/ and auth/ factories —

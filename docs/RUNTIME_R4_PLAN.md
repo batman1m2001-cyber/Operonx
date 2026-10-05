@@ -1,6 +1,6 @@
 # R4 — the platform: threads, a durable run queue, leases
 
-Status: plan (2026-10-05). Roadmap: `docs/roadmap/ROADMAP.md` "R4 (W4): platform";
+Status: done (2026-10-05): R4a #98, R4b. Roadmap: `docs/roadmap/ROADMAP.md` "R4 (W4): platform";
 gap analysis `docs/roadmap/track2_langgraph_gap.md` rows 25–26 and "Phase 4".
 
 ## 1. What is missing today (audit)

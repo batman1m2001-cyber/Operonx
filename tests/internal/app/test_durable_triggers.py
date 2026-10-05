@@ -84,9 +84,9 @@ from starlette.testclient import TestClient
 from operonx import END, START, graph, op
 from operonx.app import Application, Service, webhook
 from operonx.app.queue import SqliteQueue
-from operonx.app.serve import ingress
+from operonx.app.serve import egress, ingress
 
-LOG, DB = {log!r}, {db!r}
+LOG, DB, HOOK = {log!r}, {db!r}, {hook!r}
 
 @op
 async def ship(item: dict = None) -> dict:
@@ -101,13 +101,14 @@ async def ship(item: dict = None) -> dict:
 def orders():
     src = ingress()
     s = ship(item=src["item"])
-    START >> src >> s >> END
+    out = egress(item=s["shipped"])
+    START >> src >> s >> out >> END
 
 service = Service("orders", webhook("/orders", port=8823), graph=orders, queue=DB,
-                  lease=0.5, poll=0.1)
+                  lease=0.5, poll=0.1, callback_hosts=["127.0.0.1"])
 with TestClient(Application("t", services=[service]).asgi()) as client:
     if sys.argv[1] == "start":
-        reply = client.post("/orders", json={{"order": 42}})
+        reply = client.post(f"/orders?callback={{HOOK}}", json={{"order": 42}})
         print("ACCEPTED", reply.status_code, reply.json()["run_id"], flush=True)
         time.sleep(600)
     else:
@@ -121,10 +122,15 @@ with TestClient(Application("t", services=[service]).asgi()) as client:
 
 
 def test_a_webhook_event_survives_its_process_dying(tmp_path):
+    from tests.internal.app._receiver import Receiver
+
+    receiver = Receiver()
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     log, db = tmp_path / "calls.log", tmp_path / "q.db"
     script = tmp_path / "child.py"
-    script.write_text(textwrap.dedent(_CHILD.format(root=root, log=str(log), db=str(db))))
+    script.write_text(
+        textwrap.dedent(_CHILD.format(root=root, log=str(log), db=str(db), hook=receiver.url))
+    )
 
     proc = subprocess.Popen(
         [sys.executable, str(script), "start"],
@@ -161,6 +167,10 @@ def test_a_webhook_event_survives_its_process_dying(tmp_path):
     [result] = [line.split() for line in done.stdout.splitlines() if line.startswith("RESULT")]
     assert result == ["RESULT", "done", "2"]  # the second attempt, on another process
     assert log.read_text().split("\n")[:2] == ["ship 42", "ship 42"]
+    # the callback came once, from the process that ended the run
+    assert _wait(lambda: receiver.got)
+    receiver.close()
+    assert [(c["run_id"], c["status"], c["output"]) for c in receiver.got] == [(run_id, "done", 42)]
 
 
 # ── a schedule shared by two workers ─────────────────────────────────────

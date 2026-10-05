@@ -357,10 +357,13 @@ def wants_stream(request: Any) -> bool:
     return EVENT_STREAM in request.headers.get("accept", "")
 
 
-def sse_frame(item: Any) -> str:
+def sse_frame(item: Any, seq: Optional[int] = None) -> str:
     """One item as one server-sent event: its JSON on a ``data:`` line —
-    the same encoding a JSON reply gives it."""
-    return f"data: {json.dumps(item, ensure_ascii=False, default=str)}\n\n"
+    the same encoding a JSON reply gives it — and its number on an ``id:``
+    line, which a reader that dropped sends back (``after_seq`` or
+    ``Last-Event-ID``) to read on from there."""
+    head = f"id: {seq}\n" if seq is not None else ""
+    return f"{head}data: {json.dumps(item, ensure_ascii=False, default=str)}\n\n"
 
 
 def _no_output(spec: ServeSpec, trace_id: Optional[str], JSONResponse):
@@ -394,7 +397,7 @@ async def _stream_reply(
     from starlette.responses import StreamingResponse
 
     session = transport.open_stream(payload, meta=meta)
-    frames = session.frames()
+    frames = session.follow(0)
     try:
         first = await frames.__anext__()
     except StopAsyncIteration:
@@ -402,18 +405,55 @@ async def _stream_reply(
 
     async def body():
         try:
-            yield sse_frame(first)
-            async for item in frames:
-                yield sse_frame(item)
+            yield sse_frame(first[1], first[0])
+            async for seq, item in frames:
+                yield sse_frame(item, seq)
         finally:
-            session.gone = True
+            await frames.aclose()
 
     headers = {**_trace_headers(session.trace_id), "cache-control": "no-cache"}
     return StreamingResponse(body(), media_type=EVENT_STREAM, headers=headers)
 
 
+def _reconnect(spec: ServeSpec, transport: HttpTransport, request: Any, JSONResponse):
+    """A stream read again: ``?run_id=R`` with ``after_seq=N`` (or a
+    ``Last-Event-ID: N`` header) gives the run's items after the N-th —
+    those sent while the reader was away, then the rest as they come."""
+    from starlette.responses import StreamingResponse
+
+    run_id = request.query_params["run_id"]
+    raw = request.query_params.get("after_seq") or request.headers.get("last-event-id") or "0"
+    try:
+        after = int(raw)
+    except ValueError:
+        return JSONResponse({"error": f"after_seq={raw!r} is not a number"}, status_code=400)
+    session = transport.stream_of(run_id)
+    if session is None:
+        return JSONResponse(
+            {
+                "error": f"no stream of run {run_id!r} here: it ended more than "
+                "15 minutes ago, never streamed, or ran on another replica",
+                "endpoint": spec.name,
+            },
+            status_code=404,
+        )
+
+    async def body():
+        frames = session.follow(after)
+        try:
+            async for seq, item in frames:
+                yield sse_frame(item, seq)
+        finally:
+            await frames.aclose()
+
+    headers = {**_trace_headers(run_id), "cache-control": "no-cache"}
+    return StreamingResponse(body(), media_type=EVENT_STREAM, headers=headers)
+
+
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
+        if wants_stream(request) and "run_id" in request.query_params:
+            return _reconnect(spec, transport, request, JSONResponse)
         payload, refusal = await _read_body(request, spec, JSONResponse)
         if refusal is not None:
             return refusal
@@ -436,7 +476,12 @@ def _webhook_endpoint(spec: ServeSpec, transport: Any, JSONResponse):
         payload, refusal = await _read_body(request, spec, JSONResponse)
         if refusal is not None:
             return refusal
-        run_id = await transport.submit(payload, meta=_meta_from_request(request))
+        from .triggers import Refused
+
+        try:
+            run_id = await transport.submit(payload, meta=_meta_from_request(request))
+        except Refused as no:
+            return JSONResponse(no.body, status_code=no.status)
         if run_id is None:
             # Stopping, or full: the sender retries. Queueing without bound
             # behind a slow flow is how a burst becomes an outage.

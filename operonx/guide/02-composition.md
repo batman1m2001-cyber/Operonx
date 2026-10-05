@@ -193,6 +193,19 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
   A schedule's ticks line up on the clock and each fires on one replica.
   Rows of one `thread_id` run one at a time, in order. Inspect it with
   `SqliteQueue("runs.db").items("<service>")`.
+- On a queued webhook, `multitask=` says what a second message on a busy
+  thread (`?thread_id=` or header `x-operonx-thread`) does: `"enqueue"`
+  (default: waits its turn), `"reject"` (`409`), `"interrupt"` (stops the
+  running run, keeping what it did) or `"rollback"` (stops it, marked
+  discarded). `callback_hosts=["hooks.example.com"]` lets a request add
+  `?callback=https://hooks.example.com/…`; when the run ends that URL gets
+  `{run_id, service, status, output, errors}` — from whichever replica ended
+  it. A host not on the list is answered `400`.
+- An `http` door streamed as server-sent events numbers each event (`id:`).
+  A reader that dropped sends the same request with `?run_id=<id>&after_seq=N`
+  (or `Last-Event-ID: N`) and gets the events after N, then the rest live.
+  The events are kept 15 minutes after the run ends, on the replica that ran
+  it (route reconnects to the same replica).
 - `on_session=fn` turns the request into the graph's inputs
   (`RunRequest(inputs={...})`, or `None` to refuse). Without it the query
   string becomes the inputs.
