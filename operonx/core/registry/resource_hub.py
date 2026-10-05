@@ -38,6 +38,8 @@ class CacheEntry:
 
     config: YamlModel
     instance: Any = None
+    #: The entry's ``rate_limit:`` (see :mod:`.rate_limit`), if it has one.
+    rate_limit: Any = None
 
 
 #: Resource categories whose instances expose ``get_token()``. An
@@ -345,6 +347,15 @@ class ResourceHub:
         config_class = self._config_class(key, category, config_data)
         # Parse config (exclude type and _class fields)
         data = {k: v for k, v in config_data.items() if k not in ("type", "_class")}
+        # not the provider's: the hub enforces it on whatever it builds
+        rate_limit = None
+        if "rate_limit" in data:
+            from .rate_limit import RateLimit
+
+            try:
+                rate_limit = RateLimit.parse(data.pop("rate_limit"), key=key)
+            except ValueError as e:
+                raise KeyError(f"Resource '{key}' in {self._source_label()}: {e}") from e
         try:
             # If config class has create_config, use it to dispatch to subclass
             if hasattr(config_class, "create_config"):
@@ -357,7 +368,7 @@ class ResourceHub:
                 f"{config_class.__name__}: {e}"
             ) from e
 
-        self._cache[key] = CacheEntry(config=config)
+        self._cache[key] = CacheEntry(config=config, rate_limit=rate_limit)
         return config
 
     def _config_class(self, key: str, category: str, config_data: Dict[str, Any]) -> type:
@@ -569,6 +580,11 @@ class ResourceHub:
             instance._keycloak_provider = provider
             instance._original_config = config
 
+        limit = self._cache[key].rate_limit
+        if limit is not None:
+            from .rate_limit import limit_instance
+
+            limit_instance(instance, limit, key=key)
         self._cache[key].instance = instance
         LOGGER.debug("Lazy loaded resource: %s", key)
 
