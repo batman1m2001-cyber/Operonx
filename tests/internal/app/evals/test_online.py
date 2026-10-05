@@ -346,3 +346,24 @@ def test_a_served_request_runs_no_evaluator(runs, scores, tmp_path):
     assert calls == []
     asyncio.run(online.run())
     assert len(calls) == 1
+
+
+def test_a_judge_that_only_uses_a_reference_when_there_is_one_is_accepted(runs, scores, tmp_path):
+    """`judge(...)` defaults to reference="auto": it shows `expected` when a
+    case has one. Online there is none, so it judges without — refusing it
+    refused every default judge."""
+    from operonx.app.evals import judge
+
+    def lenient(output, expected=None) -> bool:
+        return expected is None
+
+    _online(
+        runs,
+        scores,
+        tmp_path,
+        evaluators=[judge("llm:j", "Was it polite?", name="polite"), lenient],
+    )
+    with pytest.raises(ValueError, match="no expected answer"):
+        _online(
+            runs, scores, tmp_path, evaluators=[judge("llm:j", "Polite?", name="p", reference=True)]
+        )
