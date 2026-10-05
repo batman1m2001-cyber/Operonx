@@ -29,7 +29,7 @@ import time
 import uuid
 from collections import deque
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
 
 from operonx.core.loggings import LOGGER, format_event
 from operonx.core.ops.graph.graph_op import GraphOp
@@ -521,6 +521,7 @@ class Operon:
         "_durability",
         "_on_resume",
         "_fingerprint",
+        "_carry",
     ]
 
     def __init__(
@@ -534,6 +535,7 @@ class Operon:
         journal: Any = None,
         durability: str = "async",
         on_resume: str = "restart",
+        carry: Sequence[str] = (),
     ):
         """Initialize Operon engine with a GraphOp or a graph factory.
 
@@ -602,6 +604,10 @@ class Operon:
                    loses at most the unwritten tail, which runs again),
                    ``"sync"`` (each step committed before the scheduler sees
                    its event) or ``"exit"`` (all at the end of the run).
+            carry: Declared cells (``PARENT.declare``) a thread keeps between
+                   its runs: a run started with ``thread_id=T`` begins with
+                   them as T's last run left them, and saves them when it
+                   ends. Needs a ``journal=``, where threads are kept.
             on_resume: An execution that had yielded and not ended when the
                    run stopped: ``"restart"`` runs it again and checks its
                    first yields against the journal; ``"fail"`` refuses.
@@ -646,6 +652,19 @@ class Operon:
         self._fingerprint: Optional[str] = None
         self.graph = graph
         self.name = graph.name
+        self._carry = tuple(carry)
+        if self._carry:
+            if journal is None:
+                raise ValueError(
+                    "carry= keeps cells between a thread's runs in the journal: pass journal="
+                )
+            declared = set(getattr(graph, "_shared_vars", None) or {})
+            unknown = [name for name in self._carry if name not in declared]
+            if unknown:
+                raise ValueError(
+                    f"carry={list(self._carry)}: {unknown} not declared by graph {graph.name!r} "
+                    f"(PARENT.declare(...)); it declares {sorted(declared) or 'none'}"
+                )
         self._trace_consumers = self._resolve_trace_consumers(trace)
         #: The runtime inputs a caller must pass, when whoever compiled the
         #: engine knows them (a served graph: its unbound parameters). The
@@ -785,6 +804,7 @@ class Operon:
         checkpointer=None,
         context: Any = None,
         run_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
@@ -811,6 +831,9 @@ class Operon:
                 stored as given, never read by operonx.
             run_id: The run's id — its trace id, and with a ``journal=`` the
                 key :meth:`resume` continues it by. Same as ``trace_id``.
+            thread_id: The thread the run belongs to (``session_id`` names
+                the same thing). With ``carry=``, the run starts with the
+                carried cells as the thread's last run left them.
 
         The run's ``run_context().run_id`` is its trace id (``trace_id``,
         else ``request_id``), and ``thread_id`` is ``session_id`` as given
@@ -823,7 +846,12 @@ class Operon:
         if run_id is not None and trace_id is not None and run_id != trace_id:
             raise ValueError(f"run_id={run_id!r} and trace_id={trace_id!r} name one id; give one")
         trace_id = trace_id or run_id
-        thread_id = session_id
+        if thread_id is not None and session_id is not None and thread_id != session_id:
+            raise ValueError(
+                f"thread_id={thread_id!r} and session_id={session_id!r} name one thread; give one"
+            )
+        thread_id = thread_id or session_id
+        session_id = session_id or thread_id
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
         request_id = request_id or str(uuid.uuid4())
@@ -834,6 +862,11 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
         )
+        carried: Dict[str, Any] = {}
+        if self._carry and thread_id is not None:
+            saved = self._journal.load_thread(thread_id)
+            carried = {name: saved[name] for name in self._carry if name in saved}
+            self._seed(state, carried)
         if self._journal is not None:
             from operonx.durable import RunHeader
 
@@ -844,6 +877,7 @@ class Operon:
                     fingerprint=self.fingerprint,
                     inputs=dict(inputs),
                     thread_id=thread_id,
+                    carried=carried,
                 )
             )
         return self._launch(
@@ -867,6 +901,17 @@ class Operon:
 
             self._fingerprint = graph_fingerprint(self.graph)
         return self._fingerprint
+
+    def _seed(self, state: Any, values: Dict[str, Any]) -> None:
+        """Set the root's declared cells to *values* — as they start, not
+        as a write: no reducer, nothing journalled (the run's header keeps
+        them)."""
+        from operonx.core.states.cell import DEFAULT_CONTEXT
+
+        for name, value in values.items():
+            idx = state.schema.get_index(state.schema.name, name)
+            if idx >= 0:
+                state._cells[idx][DEFAULT_CONTEXT] = value
 
     def _recorder(self, run_id: str, state: Any) -> Any:
         from operonx.durable import RunRecorder
@@ -946,6 +991,7 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
         )
+        self._seed(state, header.carried)  # what the thread gave it, then its own writes
         recorder = self._recorder(run_id, state)
         recorder.restore(state, steps, lenient=allow_graph_change)
         asked = set(recorder.questions.values())
@@ -1095,6 +1141,10 @@ class Operon:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
                 if recorder is not None:
                     recorder.on_quiet = None  # ended: a stop asked now is too late
+                if self._carry and thread_id is not None:
+                    root = state.schema.name
+                    kept = {name: state[root, name] for name in self._carry}
+                    await asyncio.to_thread(self._journal.save_thread, thread_id, kept)
             except asyncio.CancelledError:
                 if recorder is not None and recorder.stopping is not None and recorder._quiet:
                     # Parked on an interrupt or drained: stopped on purpose,
@@ -1193,6 +1243,7 @@ class Operon:
         checkpointer=None,
         context: Any = None,
         run_id: Optional[str] = None,
+        thread_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -1215,6 +1266,7 @@ class Operon:
             context: What the run's ops read as ``run_context().context``
                 (see :meth:`start`).
             run_id: The run's id (see :meth:`start`).
+            thread_id: The run's thread (see :meth:`start`).
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -1237,6 +1289,7 @@ class Operon:
             checkpointer=checkpointer,
             context=context,
             run_id=run_id,
+            thread_id=thread_id,
         )
 
         try:

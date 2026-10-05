@@ -436,7 +436,7 @@ def _webhook_endpoint(spec: ServeSpec, transport: Any, JSONResponse):
         payload, refusal = await _read_body(request, spec, JSONResponse)
         if refusal is not None:
             return refusal
-        run_id = transport.accept(payload, meta=_meta_from_request(request))
+        run_id = await transport.submit(payload, meta=_meta_from_request(request))
         if run_id is None:
             # Stopping, or full: the sender retries. Queueing without bound
             # behind a slow flow is how a burst becomes an outage.

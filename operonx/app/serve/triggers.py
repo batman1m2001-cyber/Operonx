@@ -28,31 +28,182 @@ the runner logs a failure and the next tick comes anyway.
 **A webhook under load says no, loudly.** With ``max_inflight=N`` the N+1th
 pending event is answered ``429`` — the sender retries — instead of being
 queued without bound behind a slow flow.
+
+With ``queue=`` (a SQLite path, or ``{url = "postgresql://…"}``) a trigger is
+durable across restarts and replicas (docs/RUNTIME_R4_PLAN.md D5, D6): a
+webhook writes the event to the queue *before* it answers ``202``, and every
+replica's transport claims events from it — one that dies mid-run leaves a
+lease that lapses, and another replica runs the event again under the same
+run id. ``max_inflight`` then bounds the runs a replica holds at once. A
+schedule's ticks are aligned to the clock and each fires on one replica.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import socket
+import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Dict, Optional, Set
 
 from operonx.core.loggings import LOGGER
 
+from ..queue import LeaseLost, RunQueue, open_queue
 from .asgi import AsgiTransport, HttpSession
 
 __all__ = ["ScheduleTransport", "WebhookTransport", "parse_every"]
 
 
+def _worker_name() -> str:
+    """This process, as a queue's rows name the worker holding them."""
+    return f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
+
+
+def _queue_of(spec: Any) -> Optional[RunQueue]:
+    setting = (getattr(spec, "options", None) or {}).get("queue")
+    return open_queue(setting) if setting is not None else None
+
+
+class QueuedSession(HttpSession):
+    """A session made from a queue row; remembers whether its run failed."""
+
+    def __init__(self, payload: Any, meta: Optional[Dict[str, Any]] = None):
+        super().__init__(payload, meta=meta)
+        self.failed = False
+
+    async def run_failed(self) -> None:
+        self.failed = True
+
+
+class _Claims:
+    """Claiming a door's rows from its queue and holding their leases: the
+    part a durable webhook and a durable schedule share."""
+
+    def __init__(self, queue: RunQueue, service: str, spec: Any):
+        opts = dict(getattr(spec, "options", None) or {})
+        self.queue = queue
+        self.service = service
+        self.worker = _worker_name()
+        self.lease_s = float(opts.get("lease", 30))
+        self.poll_s = float(opts.get("poll", 1.0))
+        self.limit = getattr(spec, "max_inflight", None)
+        self.held: Set[asyncio.Task] = set()
+        self.wake = asyncio.Event()
+
+    async def next(self, stopped: asyncio.Event) -> Optional[QueuedSession]:
+        """The next row this worker claims, as a session — None once
+        *stopped*. Waits while the replica holds ``max_inflight`` runs."""
+        while not stopped.is_set():
+            if not self.limit or len(self.held) < self.limit:
+                item = await asyncio.to_thread(
+                    self.queue.claim, self.service, self.worker, lease_s=self.lease_s
+                )
+                if item is not None:
+                    meta = dict(item.meta)
+                    meta["trace_id"] = item.id
+                    meta["attempt"] = item.attempts
+                    session = QueuedSession(item.payload, meta=meta)
+                    task = asyncio.ensure_future(self._hold(item.id, session))
+                    self.held.add(task)
+                    task.add_done_callback(self.held.discard)
+                    return session
+            self.wake.clear()
+            try:
+                await asyncio.wait_for(self.wake.wait(), self.poll_s)
+            except asyncio.TimeoutError:
+                pass
+        return None
+
+    async def _hold(self, item_id: str, session: QueuedSession) -> None:
+        """Renew the row's lease until its run ends, then mark it ended."""
+        every = max(self.lease_s / 3, 0.05)
+        while not session.finished.is_set():
+            try:
+                await asyncio.wait_for(session.finished.wait(), every)
+                break
+            except asyncio.TimeoutError:
+                pass
+            try:
+                await asyncio.to_thread(
+                    self.queue.renew, item_id, self.worker, lease_s=self.lease_s
+                )
+            except LeaseLost:
+                LOGGER.warning(
+                    f"[serve:{self.service}] lost the lease on run {item_id}: another "
+                    "worker runs it now; this run's end will not count"
+                )
+                return
+            except Exception as exc:  # noqa: BLE001 — a blip; the next renew may work
+                LOGGER.error(f"[serve:{self.service}] renewing run {item_id}: {exc}")
+        status = "failed" if session.failed else "done"
+        try:
+            await asyncio.to_thread(self.queue.finish, item_id, self.worker, status)
+        except Exception as exc:  # noqa: BLE001 — the lease lapses; it runs again
+            LOGGER.error(f"[serve:{self.service}] ending run {item_id}: {exc}")
+        self.wake.set()  # a slot is free
+
+    async def drain(self) -> None:
+        if self.held:
+            await asyncio.gather(*list(self.held), return_exceptions=True)
+
+
 class WebhookTransport(AsgiTransport):
-    """``session = "per_request"``, answered before the run, not after it."""
+    """``session = "per_request"``, answered before the run, not after it.
+    With ``queue=``, the event is durable before the answer."""
 
     def __init__(self, spec: Any = None):
         super().__init__(spec)
         self._pending: Set[HttpSession] = set()
         self.accepted = 0
         self.refused = 0
+        self.queue = _queue_of(spec)
+        self._claims: Optional[_Claims] = None
+        self._stop_claims = asyncio.Event()
+
+    async def submit(self, payload: Any, meta: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Take one event; return its run id, or ``None`` when refused.
+        With a queue it is written there first: durable when this returns."""
+        if self.queue is None:
+            return self.accept(payload, meta)
+        if self._stopped:
+            self.refused += 1
+            return None
+        meta = dict(meta or {})
+        run_id = (
+            (meta.get("query") or {}).get("trace_id") or meta.get("trace_id") or uuid.uuid4().hex
+        )
+        meta["trace_id"] = run_id
+        await asyncio.to_thread(
+            self.queue.put, getattr(self.spec, "name", "webhook"), payload, meta=meta, id=run_id
+        )
+        self.accepted += 1
+        if self._claims is not None:
+            self._claims.wake.set()  # this replica can take it at once
+        return run_id
+
+    async def sessions(self) -> AsyncIterator[Any]:
+        if self.queue is None:
+            async for session in super().sessions():
+                yield session
+            return
+        self._claims = _Claims(self.queue, getattr(self.spec, "name", "webhook"), self.spec)
+        try:
+            while True:
+                session = await self._claims.next(self._stop_claims)
+                if session is None:
+                    return
+                yield session
+        finally:
+            await self._claims.drain()
+
+    async def close(self) -> None:
+        await super().close()
+        self._stop_claims.set()
+        if self._claims is not None:
+            self._claims.wake.set()
 
     def accept(self, payload: Any, meta: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Queue one event; return its run id, or ``None`` when refused."""
@@ -112,14 +263,27 @@ class ScheduleTransport:
         self._current: Optional[HttpSession] = None
         self.ticks = 0
         self.skipped = 0
+        # with a queue every replica ticks on the same slots, and a slot's
+        # row decides which one runs it
+        self.queue = _queue_of(spec)
+        self.lost = 0  # ticks another replica fired
 
     def _delay(self, now: datetime) -> float:
         if self._every is not None:
-            return self._every
+            if self.queue is None:
+                return self._every
+            epoch = now.timestamp()
+            return (int(epoch // self._every) + 1) * self._every - epoch
         nxt = now.replace(hour=self._at[0], minute=self._at[1], second=0, microsecond=0)
         if nxt <= now:
             nxt += timedelta(days=1)
         return (nxt - now).total_seconds()
+
+    def _slot(self, now: datetime) -> str:
+        """The tick that is due, named the same on every replica."""
+        if self._every is not None:
+            return str(round(now.timestamp() / self._every))
+        return now.strftime("%Y-%m-%d")
 
     async def sessions(self) -> AsyncIterator[Any]:
         name = getattr(self.spec, "name", "schedule")
@@ -136,9 +300,17 @@ class ScheduleTransport:
                     f"({self.skipped} skipped so far)"
                 )
                 continue
+            now = datetime.now()
+            slot = self._slot(now)
+            if self.queue is not None and not await asyncio.to_thread(
+                self.queue.fire_once, f"schedule:{name}", slot
+            ):
+                self.lost += 1  # another replica runs this tick
+                continue
             self.ticks += 1
-            tick = {"tick": self.ticks, "at": datetime.now().isoformat(timespec="seconds")}
-            self._current = HttpSession(tick, meta={"query": {}, "trigger": "schedule", **tick})
+            tick = {"tick": self.ticks, "at": now.isoformat(timespec="seconds")}
+            meta = {"query": {}, "trigger": "schedule", "slot": slot, **tick}
+            self._current = HttpSession(tick, meta=meta)
             yield self._current
 
     async def close(self) -> None:
