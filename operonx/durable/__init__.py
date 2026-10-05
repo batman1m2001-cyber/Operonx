@@ -9,13 +9,23 @@ docs/RUNTIME_R3_PLAN.md.
 """
 
 from .fingerprint import graph_fingerprint
-from .journal import END, Journal, JournalError, MemoryJournal, RunHeader, SqliteJournal, Step
+from .journal import (
+    END,
+    PARKED,
+    Journal,
+    JournalError,
+    MemoryJournal,
+    RunHeader,
+    SqliteJournal,
+    Step,
+)
 from .recorder import DURABILITY, ON_RESUME, NonDeterministicResume, RunRecorder
 
 __all__ = [
     "DURABILITY",
     "END",
     "ON_RESUME",
+    "PARKED",
     "Journal",
     "JournalError",
     "MemoryJournal",

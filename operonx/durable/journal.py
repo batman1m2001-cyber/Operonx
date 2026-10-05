@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, Union, 
 
 __all__ = [
     "END",
+    "PARKED",
     "Journal",
     "JournalError",
     "MemoryJournal",
@@ -34,6 +35,9 @@ __all__ = [
 
 #: A step's ``index`` when it is the execution's end.
 END = -1
+#: A step's ``index`` when the execution is an interrupt that parked the run:
+#: its ``event`` is ``(interrupt_id, payload)``, the question a resume answers.
+PARKED = -2
 #: Run statuses a journal records.
 STATUSES = ("running", "ok", "error", "interrupted", "drained")
 
@@ -61,7 +65,7 @@ class Step:
     """One execution's progress.
 
     ``op`` and ``ctx`` name the execution; ``index`` is the yield's number
-    (0, 1, …) or :data:`END`. ``writes`` are ``(op, var, ctx, value)`` with
+    (0, 1, …), :data:`END` or :data:`PARKED`. ``writes`` are ``(op, var, ctx, value)`` with
     post-reducer values. ``event`` is what the execution yielded —
     ``(item_ctx, outputs)``, or ``(ctx, Failure)`` on an error edge — and,
     on the end step of an op that yields once, the tuple of its events (held

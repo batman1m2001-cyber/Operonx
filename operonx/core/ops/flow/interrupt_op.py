@@ -50,6 +50,8 @@ class InterruptOp(BaseOp):
         payload: Value (typically a ``Ref``) sent to the caller via
             :class:`~operonx.checkpoint.InterruptEvent`.
         timeout: Optional wall-clock seconds. Falsey (0/None) = wait forever.
+            A run with a journal does not wait: it parks (below), and the
+            timeout does not apply.
 
     Behaviour:
         - Emits ``InterruptEvent(step_id, op, ctx, payload, interrupt_id)``
@@ -61,6 +63,12 @@ class InterruptOp(BaseOp):
         - Returns ``{"response": <value>}`` — downstream refs like
           ``approve["response"]`` read the answer.
         - Also exposes ``timed_out`` (bool) and ``interrupt_id`` (str) outputs.
+        - With ``Operon(journal=…)`` the run **parks** instead: the question
+          is journalled, the ops in flight finish, nothing new starts, and
+          the run stops with status ``interrupted`` — its result holds
+          ``"$interrupted": [{interrupt_id, op, ctx, payload}]``.
+          ``await engine.resume(run_id, answers={interrupt_id: value})``, in
+          any process, continues it with ``value`` as the response.
 
     Design note:
         This op piggybacks on the state's interrupt bus.
@@ -115,6 +123,17 @@ class InterruptOp(BaseOp):
         except LookupError:
             # Outside a run — no bus, no resume. Return timed_out immediately.
             return {"response": None, "timed_out": True, "interrupt_id": interrupt_id}
+
+        durable = getattr(state, "_durable", None)
+        if durable is not None:
+            # A journalled run parks instead of waiting in this process: the
+            # question is journalled, the run stops, and a resume — in any
+            # process — that answers it gets the answer here at once.
+            interrupt_id, answered, response = durable.answer(interrupt_id)
+            if not answered:
+                state._notify_interrupt(self.full_name, ctx, payload, interrupt_id)
+                await durable.park(self.full_name, ctx, interrupt_id, payload)
+            return {"response": response, "timed_out": False, "interrupt_id": interrupt_id}
 
         # Ensure the response bus exists on the state (created lazily so ops
         # that never interrupt don't carry the dict).

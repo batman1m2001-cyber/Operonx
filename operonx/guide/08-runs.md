@@ -329,3 +329,59 @@ asyncio.run(main())
   `on_resume="fail"` refuses instead).
 - Without `journal=` nothing is recorded, and the scheduler pays one
   `is None` test per op.
+
+### Approvals that outlive the process, and drains
+
+With a journal, an `InterruptOp` does not hold the process while it waits
+for a person: the run **parks**. Its question is journalled, the ops in
+flight finish, nothing new starts, and the run ends with status
+`interrupted`; its result lists the questions. Answer them days later, in
+any process, with `resume(..., answers=)`.
+
+```python
+import asyncio
+
+from operonx import END, START, InterruptOp, Operon, graph, op
+from operonx.durable import SqliteJournal
+
+
+@op
+async def propose(amount: int) -> dict:
+    return {"refund": amount}
+
+
+@op
+async def pay(response: str, refund: int) -> dict:
+    return {"paid": refund if response == "approve" else 0}
+
+
+@graph
+def refunds(amount):
+    p = propose(amount=amount)
+    ask = InterruptOp(payload=p["refund"])
+    r = pay(response=ask["response"], refund=p["refund"])
+    START >> p >> ask >> r >> END
+
+
+async def main():
+    engine = Operon(refunds, params={"amount": None}, journal=SqliteJournal("refunds.db"))
+    out = await engine.run({"amount": 30}, run_id="refund-7")
+    [question] = out["$interrupted"]  # {interrupt_id, op, ctx, payload}
+    assert question["payload"] == 30
+
+    # later — another process with the same journal
+    handle = await engine.resume("refund-7", answers={question["interrupt_id"]: "approve"})
+    assert (await handle.result())["paid"] == 30
+
+
+asyncio.run(main())
+```
+
+- A question left unanswered parks the run again; an answer to a question
+  the run never asked is refused.
+- With a journal the interrupt's `timeout` does not apply — nothing waits.
+- **`await handle.drain()`** stops a run for a deploy: nothing new starts,
+  what runs finishes, status `drained`, `"$drained": True` in its result.
+  `resume(run_id)` on the next worker continues it.
+- A graph that reads through a door (`ingress`) is journalled but not
+  resumable: its items came from a live connection the journal does not hold.

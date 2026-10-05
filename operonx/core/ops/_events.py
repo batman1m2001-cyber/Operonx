@@ -23,6 +23,11 @@ class _SelfContext:
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return "Interrupt.SELF"
 
+    def __reduce__(self) -> str:
+        # Unpickled as the one instance: the scheduler tests it with `is`,
+        # and a durable run's journal pickles the Interrupts ops yield.
+        return "SELF_CTX"
+
 
 SELF_CTX = _SelfContext()
 

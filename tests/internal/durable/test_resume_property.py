@@ -18,7 +18,7 @@ import operator
 from collections import Counter
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
 from operonx import END, PARENT, START, Operon, graph, op
@@ -222,3 +222,61 @@ def test_a_stopped_run_resumes_to_the_uninterrupted_result(parallel, n, fail, li
     for (name, ctx), count in again.items():
         full = [key for key in ended if key[0].endswith("." + name) and key[1] == ctx]
         assert not full, f"{name} at {ctx} ended before the stop and ran again"
+
+
+class DrainingJournal(MemoryJournal):
+    """Asks the run to drain once it has taken ``after`` steps — a deploy
+    stopping the worker at that point."""
+
+    def __init__(self, after: int):
+        super().__init__()
+        self.after, self.taken, self.drain = after, 0, None
+
+    def append(self, run_id, steps):
+        super().append(run_id, steps)
+        self.taken += len(steps)
+        if self.taken >= self.after and self.drain is not None:
+            self.drain()  # once
+            self.drain = None
+
+
+async def _drained_then_resumed(parallel, inputs, after):
+    journal = DrainingJournal(after)
+    engine = Operon(
+        _flow(parallel),
+        params={"n": None, "fail": None, "limit": None},
+        journal=journal,
+        durability="sync",  # append runs in a worker thread
+    )
+    handle = engine.start(inputs, run_id="d")
+    loop = asyncio.get_running_loop()
+    journal.drain = lambda: loop.call_soon_threadsafe(handle.state._durable.drain)
+    await handle.collect()
+    status = journal.runs()[0].status
+    if status == "ok":  # it ended before the drain came
+        return _outcome(await handle.result(), handle.state, parallel), status
+    resumed = await engine.resume("d")
+    out = await resumed.result()
+    return _outcome(out, resumed.state, parallel), status
+
+
+@settings(
+    max_examples=int(__import__("os").environ.get("OPERONX_R3_EXAMPLES", "60")),
+    deadline=None,
+    suppress_health_check=[HealthCheck.too_slow],
+)
+@given(
+    parallel=st.booleans(),
+    n=st.integers(0, 4),
+    fail=st.integers(-1, 3),
+    limit=st.integers(1, 3),
+    after=st.integers(1, 40),
+)
+def test_a_drained_run_resumes_to_the_uninterrupted_result(parallel, n, fail, limit, after):
+    inputs = {"n": n, "fail": fail, "limit": limit}
+    expected, _ = asyncio.run(_uninterrupted(parallel, inputs))
+    got, status = asyncio.run(_drained_then_resumed(parallel, inputs, after))
+
+    assert status in ("ok", "drained")
+    event(f"status: {status}")
+    assert got == expected
