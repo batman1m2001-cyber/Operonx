@@ -392,6 +392,10 @@ class Scheduler:
         effective_queue = output_queue
         if effective_queue is None and getattr(g, "_loop_mode", None) == "synthetic":
             effective_queue = getattr(state, "_stream_output_queue", None)
+            if effective_queue is not None and state._durable is not None:
+                # what the loop puts on the stream is part of its execution's
+                # step, so a replay that skips the loop puts it back
+                effective_queue = state._durable.emitting(effective_queue)
         # A loop is not re-run from here: a synthetic loop is one iteration
         # per call, and the scheduler that owns the loop op dispatches the
         # next one from its EOF (see `_on_eof`).
@@ -624,7 +628,11 @@ class Scheduler:
                 if shared is not None:
                     await shared.acquire()
                     shared_held = True
-                async for item_ctx, result in op.run(state, ctx):
+                # A durable run (`journal=`) records — or, on resume,
+                # replays — each execution; otherwise one `is None` test.
+                durable = state._durable
+                source = op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
+                async for item_ctx, result in source:
                     if isinstance(result, Interrupt):
                         # Validated before stamping. Raising from inside
                         # this `async for` would throw into a suspended
@@ -818,7 +826,11 @@ class Scheduler:
                 op_name, ctx = inline_pending.pop(0)
                 op = g._ops[op_name]
                 try:
-                    async for item_ctx, result in op.run(state, ctx):
+                    durable = state._durable
+                    source = (
+                        op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
+                    )
+                    async for item_ctx, result in source:
                         if isinstance(result, Interrupt):
                             # Validated before stamping. Raising from inside
                             # this `async for` would throw into a suspended
@@ -1522,7 +1534,12 @@ class Scheduler:
                     pass
 
         if getattr(g, "_loop_mode", None) == "synthetic":
-            state._loop_signals[(g.full_name, context_id)] = (loop_fired, frozenset(loop_taken))
+            signal = (loop_fired, frozenset(loop_taken))
+            state._loop_signals[(g.full_name, context_id)] = signal
+            if state._durable is not None:
+                # how the iteration ended is part of its execution: a replay
+                # that skips the iteration still continues or ends the loop
+                state._durable.loop_signal((g.full_name, context_id), signal)
 
         # Store graph-level metrics so TraceCollector can find this graph node.
         _end_time = datetime.now(timezone.utc)
