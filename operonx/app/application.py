@@ -183,12 +183,13 @@ class Application:
 
     # -- what production does ----------------------------------------------
 
-    def serve(self, only: Optional[Sequence[str]] = None) -> None:
-        """Boot every listener the manifest declares, and block."""
+    def serve(self, only: Optional[Sequence[str]] = None, **bind: Any) -> None:
+        """Boot every listener the manifest declares, and block. ``host=`` /
+        ``port=`` bind elsewhere than declared (``port``: one listener only)."""
         from .serve.app import serve_manifest
 
         self.bootstrap()
-        serve_manifest(self.manifest, only=list(only) if only else None)
+        serve_manifest(self.manifest, only=list(only) if only else None, **bind)
 
     def asgi(
         self,

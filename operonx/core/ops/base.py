@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import os
 import traceback
 import uuid
 from abc import ABC
@@ -238,6 +239,43 @@ def _safe_auto_name(name_hint: Optional[str] = None) -> Optional[str]:
     while f"{name_hint}_{n}" in taken:
         n += 1
     return f"{name_hint}_{n}"
+
+
+#: Ops whose time is someone else's: a provider's (an LLM, an embedding, a
+#: store), the peer's (an interrupt waiting on a person), or their own
+#: children's (a graph, an agent loop). Slow is what they are, not news.
+_SLOW_EXEMPT = frozenset(
+    {
+        "llm",
+        "embedding",
+        "rerank",
+        "vector-search",
+        "vector-upsert",
+        "vector-delete",
+        "doc-fetch",
+        "interrupt",
+        "graph",
+        "agent",
+        "mcp",
+        "tool-executor",
+    }
+)
+_SLOW_OP_MS: Optional[float] = None
+
+
+def slow_op_ms() -> float:
+    """The duration past which an op logs "Slow op": ``OPERONX_SLOW_OP_MS``
+    (default 100), read once. Generators and door ops are not timed this
+    way at all — their time is the stream's, summed over every yield."""
+    global _SLOW_OP_MS
+    if _SLOW_OP_MS is None:
+        raw = os.environ.get("OPERONX_SLOW_OP_MS", "100")
+        try:
+            _SLOW_OP_MS = float(raw)
+        except ValueError:
+            LOGGER.warning("OPERONX_SLOW_OP_MS=%r is not a number; using 100", raw)
+            _SLOW_OP_MS = 100.0
+    return _SLOW_OP_MS
 
 
 class BaseOp(ABC):
@@ -1727,7 +1765,13 @@ class BaseOp(ABC):
             if prev_frame is not _MISSING:
                 _current_frame.set(prev_frame)
 
-            if duration_ms > 100 and LOGGER.isEnabledFor(WARNING):
+            if (
+                duration_ms > slow_op_ms()
+                and LOGGER.isEnabledFor(WARNING)
+                and self.type not in _SLOW_EXEMPT
+                and self.door is None
+                and not getattr(self, "is_gen", False)
+            ):
                 LOGGER.warning(
                     format_event(
                         "op_slow",

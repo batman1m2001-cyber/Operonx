@@ -26,6 +26,10 @@ def create_llm(config: LLMConfig) -> BaseLLM:
         ImportError: With a helpful pointer to the right ``operonx[<extra>]``
             install when an optional dependency is missing.
     """
+    if config.api_type == LLMType.FAKE:
+        from .fake import FakeLLM
+
+        return FakeLLM(config=config)
     if config.api_type in [LLMType.VLLM, LLMType.OPENAI]:
         try:
             from .openai import OpenAISDKModel

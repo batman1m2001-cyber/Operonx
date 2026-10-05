@@ -21,8 +21,8 @@ from typing import (
 from operonx.core.configs.op_config import OpType
 from operonx.core.loggings import LOGGER
 from operonx.core.ops._cache import code_digest
+from operonx.core.ops._shortcuts import configurer
 from operonx.core.ops.base import (
-    _BASE_INIT_KEYS,
     SCALAR_OUTPUT,
     BaseOp,
     split_shorthand_kwargs,
@@ -134,21 +134,20 @@ def op(
         if cache is not None:
             fn._op_cache = cache
         sig = inspect.signature(fn)
-        collisions = set(sig.parameters.keys()) & _BASE_INIT_KEYS
-        if collisions:
-            LOGGER.warning(
-                "@op function '%s' has parameter(s) %s that collide with reserved op keywords %s. "
-                "When called via shorthand (e.g. %s(name=PARENT['name'])), these may be misinterpreted "
-                "as op constructor args instead of function inputs. Consider renaming them.",
-                fn.__name__,
-                sorted(collisions),
-                sorted(_BASE_INIT_KEYS),
-                fn.__name__,
-            )
+        # a keyword the function takes is its input, never an op setting
+        own = frozenset(
+            name
+            for name, p in sig.parameters.items()
+            if p.kind not in (p.VAR_KEYWORD, p.VAR_POSITIONAL)
+        )
 
         @wraps(fn)
         def wrapper(**kwargs):
-            mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"})
+            return _build(kwargs, {})
+
+        def _build(kwargs, settings):
+            mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"}, own=own)
+            init_kwargs.update(settings)
             op_bound = init_kwargs.pop("bound", bound)
             op_delay = init_kwargs.pop("delay", delay)
             # Per-call kwargs override the @op-decoration filter, if provided.
@@ -179,7 +178,9 @@ def op(
             )
 
         register_skip(wrapper)
+        register_skip(_build)
         wrapper.__wrapped__ = fn
+        wrapper.configure = configurer(_build, fn.__name__)
         return wrapper
 
     if func is not None:

@@ -1,8 +1,8 @@
 from enum import Enum
 from pathlib import Path
-from typing import ClassVar, Dict, Literal, Optional, Sequence, Union
+from typing import Any, ClassVar, Dict, List, Literal, Optional, Sequence, Union
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from operonx.core.utils import YamlModel
 
@@ -22,6 +22,8 @@ class LLMType(Enum):
     #: Gemini behind Databricks ``/ai-gateway/mlflow/v1`` — a strict
     #: OpenAI-compat surface that rejects Anthropic-only fields.
     DB_GEMINI = "db-gemini"
+    #: A scripted LLM, no network (``operonx.providers.llms.fake``).
+    FAKE = "fake"
 
 
 class CompletionConfig(YamlModel):
@@ -183,6 +185,8 @@ class LLMConfig(YamlModel):
             # message normalisation differs, and that lives in the backend
             # class rather than in config.
             return OpenAIConfig(**config_data)
+        elif api_type == LLMType.FAKE:
+            return FakeConfig(**config_data)
         else:
             raise ValueError(f"Unsupported api_type: {api_type}")
 
@@ -293,3 +297,13 @@ class AnthropicConfig(LLMConfig):
     base_url: str = "https://api.anthropic.com"
     model: str = "claude-3-haiku-20240307"
     anthropic_version: str = "2023-06-01"
+
+
+class FakeConfig(LLMConfig):
+    """``api_type: fake``: answers from ``script`` (see
+    :mod:`operonx.providers.llms.fake`) — text, tool calls, an HTTP status,
+    a delay. ``chunk_size``: characters per streamed chunk."""
+
+    model: str = "fake"
+    script: List[Any] = Field(default_factory=lambda: ["ok"])
+    chunk_size: int = 4

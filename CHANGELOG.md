@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Developer experience** (docs/DX_PLAN.md). `api_type: fake` — a scripted LLM (text, tool calls,
+  an HTTP status raising the SDK's error, delays, echo, streaming in chunks; no network); the chat
+  template's tests use it instead of a hand-rolled server. A keyword the op/graph function takes
+  is its input (`@op def f(id)` called `f(id=7)` lost the 7 to the op's id); a colliding setting
+  goes through `f.configure(...)(...)`. Results carry `$cells` (the root's declared cells, final).
+  `OPERONX_LOG_LEVEL` (over `LOG_LEVEL`), logs on stderr, `OPERONX_SLOW_OP_MS`, and no "Slow op" for
+  provider, graph, agent, door or generator ops. `operonx serve --host/--port/--reload`; every
+  listener answers `GET /healthz`. `operonx init --editable PATH` (the default inside a checkout).
 - **`rate_limit:` on a resource** (`resources.yaml`): `{concurrency: N, per_second | per_minute: M}`,
   one limiter per key for the whole process — every op, run and nested graph calling it waits its
   turn; an async generator method holds its slot until it ends; a call from inside another call to

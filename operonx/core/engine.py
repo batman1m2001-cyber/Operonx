@@ -336,6 +336,22 @@ class ExecutionHandle:
             return {}
         return dict(self.state._edge_drops)
 
+    @property
+    def cells(self) -> Dict[str, Any]:
+        """The root graph's declared cells (``PARENT.declare``) as the run
+        left them, by name — the reduced value, where the result shows what
+        the run wrote. ``{}`` when the graph declares none."""
+        state = self.state
+        if state is None:
+            return {}
+        schema = state.schema
+        root = schema.name
+        return {
+            var: state[root, var]
+            for (op, var), idx in schema._var_to_idx.items()
+            if op == root and idx in schema._shared_indices
+        }
+
     def _with_errors(self, out: Dict[str, Any]) -> Dict[str, Any]:
         """Add ``"$errors"`` to a result payload when an op failed.
 
@@ -345,6 +361,9 @@ class ExecutionHandle:
         errors = self.errors
         if errors:
             out["$errors"] = errors
+        cells = self.cells
+        if cells:
+            out["$cells"] = cells
         stopped = getattr(self.state, "_durable", None)
         if stopped is not None and stopped.stopped == "interrupted":
             out["$interrupted"] = list(stopped.parked)

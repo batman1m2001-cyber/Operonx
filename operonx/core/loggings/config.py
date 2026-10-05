@@ -76,7 +76,13 @@ class LogConfig(BaseModel):
     """
 
     name: str = "operonx"
-    level: str = Field(default_factory=lambda: os.environ.get("LOG_LEVEL", "WARNING"))
+    # OPERONX_LOG_LEVEL first: LOG_LEVEL is a name other tools set too (a
+    # project's .env), and operonx then logged at their level
+    level: str = Field(
+        default_factory=lambda: (
+            os.environ.get("OPERONX_LOG_LEVEL") or os.environ.get("LOG_LEVEL") or "WARNING"
+        )
+    )
     handlers: List[Union[HandlerConfig, Dict[str, Any]]] = Field(
         default_factory=lambda: [{"type": "console"}]
     )

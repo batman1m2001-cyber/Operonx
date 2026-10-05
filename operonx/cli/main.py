@@ -62,6 +62,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     init.add_argument("--name", default=None, help="project name (default: DIR's name)")
     init.add_argument("--force", action="store_true", help="overwrite files that already exist")
+    init.add_argument(
+        "--editable",
+        default=None,
+        metavar="PATH",
+        help="use the operonx checkout at PATH instead of PyPI (default inside a checkout)",
+    )
 
     guide = sub.add_parser(
         "guide",
@@ -88,7 +94,13 @@ def _parser() -> argparse.ArgumentParser:
 def _init(args: argparse.Namespace) -> int:
     root = Path(args.dir)
     try:
-        result = init_project(root, template=args.template, name=args.name, force=args.force)
+        result = init_project(
+            root,
+            template=args.template,
+            name=args.name,
+            force=args.force,
+            editable=Path(args.editable) if args.editable else None,
+        )
     except InitError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
