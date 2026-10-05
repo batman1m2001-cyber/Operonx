@@ -99,6 +99,7 @@ class GraphOp(BaseOp):
         "_stream_initial_ready",
         "_scheduler",
         "_out_vars",
+        "_output_writers",
         "_auto_soft",
         # Phase 3 cycle-rewrite plumbing
         "_strict_dag",
@@ -151,6 +152,9 @@ class GraphOp(BaseOp):
         self._out_vars: Dict[
             str, dict
         ] = {}  # {op_name: {src_var: dest_var}} — vars mapped to PARENT output
+        # {output_var: [ops that write it]} — set by _setup_schema; tells an
+        # output its ops wrote from one that only holds the same-named input.
+        self._output_writers: Dict[str, List[BaseOp]] = {}
         self._auto_soft = auto_soft  # auto-soften branch-merge edges at build time
         # Phase 3: opt-out for the Level-2 cycle→loop rewrite. When True, back-edges
         # remain as-is and hit the classic validate() warning path.
@@ -649,6 +653,7 @@ class GraphOp(BaseOp):
         LOGGER.debug("Graph [highlight]%s[/highlight]: building schema...", self.name)
         graph_inputs = {}
         graph_outputs = {}
+        self._output_writers = {}
 
         def _collect(child_name: str, child, loop_owner=None):
             """Recurse into synthetic loops when scanning for PARENT refs.
@@ -679,6 +684,7 @@ class GraphOp(BaseOp):
                         description=param.description,
                     )
                     (loop_owner or self)._out_vars.setdefault(child_name, {})[var] = param.value.var
+                    self._output_writers.setdefault(param.value.var, []).append(child)
 
             # Descend into synthetic hidden loops — their children's PARENT
             # refs point through the loop back to us.
@@ -848,6 +854,39 @@ class GraphOp(BaseOp):
                     break
         return sorted(failed)
 
+    def _drop_unwritten(
+        self, state: "MemoryState", context_id: tuple, outputs: Dict[str, Any]
+    ) -> None:
+        """Set to ``None`` each output no op under this graph wrote in this run.
+
+        An output named like one of the graph's inputs shares that input's
+        cell. When the op writing it raised, or never ran because an op
+        before it raised, the cell still holds what came in — the outputs
+        are not all ``None``, and the next op ran on the graph's own input
+        as if it were its answer. An output counts as written when one of
+        its writers finished without an error at ``context_id`` or a
+        context below it: every op run writes its ``error`` cell, ``None``
+        when it succeeded, so a key there holding ``None`` is a successful
+        run. Declared cells are left alone: they hold the graph's state
+        across writes, not a single answer. Only called when some op in the
+        run raised, so a run without failures pays nothing.
+        """
+        schema = state.schema
+        cells = state._cells
+        n = len(context_id)
+
+        def wrote(op) -> bool:
+            idx = schema.get_index(op.full_name, "error")
+            return idx >= 0 and any(
+                err is None and ctx[:n] == context_id for ctx, err in cells[idx].items()
+            )
+
+        for var, writers in self._output_writers.items():
+            if outputs.get(var) is None or var in self._shared_vars:
+                continue
+            if not any(wrote(w) for w in writers):
+                outputs[var] = None
+
     @staticmethod
     def _subgraph_error(failed: List[str]) -> str:
         """The ``$errors`` text of a subgraph whose ops raised."""
@@ -938,6 +977,8 @@ class GraphOp(BaseOp):
                 # this is the batch equivalent.
                 _outputs = {}
             elif not _streamed:
+                if state._op_errors:
+                    self._drop_unwritten(state, context_id, _outputs)
                 failed = (
                     self._failed_descendants(state, context_id)
                     if all(v is None for v in _outputs.values())
@@ -967,6 +1008,8 @@ class GraphOp(BaseOp):
             else:
                 for sctx in stream_ctxs:
                     item = self.get_outputs(state, context_id=sctx)
+                    if state._op_errors:
+                        self._drop_unwritten(state, sctx, item)
                     if any(v is not None for v in item.values()):
                         self.store_result(state, item, sctx)
                         yield sctx, item

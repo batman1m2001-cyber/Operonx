@@ -183,3 +183,102 @@ def test_http_door_answers_500_not_200_null():
         "endpoint": "d",
         "trace_id": response.headers["x-operonx-trace-id"],
     }
+
+
+# An output named like one of the graph's inputs lives in the same cell as
+# that input. When the op writing it raised, the cell still held what came
+# in, so the outputs were not all `None`, the failure check never ran, and
+# the next op ran on the subgraph's own input as if it were its answer.
+
+
+@op
+def clean(x: str) -> dict:
+    if x == "bad":
+        raise ValueError("boom")
+    return {"x": x.strip().upper()}
+
+
+@op
+def check(x: str) -> dict:
+    if x == "bad":
+        raise ValueError("rejected")
+    return {"ok": True}
+
+
+@op
+def show(x: str = None) -> dict:
+    return {"shown": f"got {x}"}
+
+
+@graph
+def inner_same_name(x):
+    c = clean(x=x)
+    START >> c >> END
+
+
+@graph
+def nested_same_name(text):
+    s = inner_same_name(x=text)
+    a = show(x=s["x"])
+    START >> s >> a >> END
+
+
+@graph
+def inner_writer_skipped(x):
+    k = check(x=x)
+    c = clean(x=x)
+    START >> k >> c >> END
+
+
+@graph
+def nested_writer_skipped(text):
+    s = inner_writer_skipped(x=text)
+    a = show(x=s["x"])
+    START >> s >> a >> END
+
+
+async def _run_text(g, text: str) -> tuple:
+    engine = Operon(g, params={"text": None})
+    return engine.name, await engine.run(inputs={"text": text})
+
+
+async def test_an_output_named_like_an_input_is_not_handed_on_when_its_writer_raised():
+    name, out = await _run_text(nested_same_name, "bad")
+
+    assert "shown" not in out
+    assert out["$errors"][f"{name}.s"]["type"] == "SubgraphError"
+
+
+async def test_an_output_named_like_an_input_is_not_handed_on_when_its_writer_never_ran():
+    name, out = await _run_text(nested_writer_skipped, "bad")
+
+    assert "shown" not in out
+    assert f"{name}.s.k" in out["$errors"][f"{name}.s"]["message"]
+
+
+async def test_an_output_named_like_an_input_still_flows_when_written():
+    _, out = await _run_text(nested_same_name, " ok ")
+
+    assert out["shown"] == "got OK"
+    assert "$errors" not in out
+
+
+@op
+def words(text: str):
+    for w in text.split():
+        yield {"w": w}
+
+
+@graph
+def per_word(text):
+    e = words(text=text)
+    s = inner_same_name(x=e["w"])
+    a = show(x=s["x"])
+    START >> e >> s >> a >> END
+
+
+async def test_a_failing_item_does_not_hand_on_its_input_and_the_others_flow():
+    engine = Operon(per_word, params={"text": None})
+    out = await engine.run(inputs={"text": "a bad c"})
+
+    assert sorted(out["shown"]) == ["got A", "got C"]
