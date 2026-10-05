@@ -323,11 +323,24 @@ def build_app(
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
 
+    # A health route for a load balancer, unless the listener's own code
+    # answers it: a service on that path, or a mounted app (its own routes).
+    if not any(spec.path == HEALTH_PATH or spec.kind == "asgi" for spec in specs):
+        names = [spec.name for spec in specs]
+
+        async def healthz(_request):
+            return JSONResponse({"ok": True, "services": names})
+
+        routes.insert(0, Route(HEALTH_PATH, healthz, methods=["GET"]))
+
     app = Starlette(routes=routes, lifespan=lifespan)
     app.state.operonx_runners = runners
     app.state.operonx_engines = engines
     return app
 
+
+#: The route every listener answers ``GET`` on with ``{"ok": true, ...}``.
+HEALTH_PATH = "/healthz"
 
 #: The response header naming the run an HTTP reply came from.
 TRACE_HEADER = "x-operonx-trace-id"
@@ -563,7 +576,12 @@ def plan(
     return [(addr, tuple(group), group[0].workers) for addr, group in grouped.items()]
 
 
-def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None:
+def serve_manifest(
+    manifest: Manifest,
+    only: Optional[List[str]] = None,
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+) -> None:
     """Boot every listener the manifest declares, and block.
 
     A listener with one worker runs in this process — several of them as
@@ -572,6 +590,9 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
     worker loads the application again from ``operonx.toml``
     (`worker_app`), so it compiles its own engines and runs its own
     service's startup hooks. When this process ends, the children do.
+
+    ``host`` / ``port`` bind somewhere else than the manifest says (the
+    CLI's ``--host`` / ``--port``); ``port`` only when one listener runs.
     """
     try:
         import uvicorn
@@ -581,6 +602,15 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
     from operonx.app.tracing import check_sinks
 
     listeners = plan(manifest, only)
+    if port is not None and len(listeners) > 1:
+        raise ManifestError(
+            f"--port binds one listener; this would serve {len(listeners)} "
+            f"({', '.join(f'{h}:{p}' for (h, p), _, _ in listeners)}) — choose with --only"
+        )
+
+    def bind(h: str, p: int) -> Tuple[str, int]:
+        return host or h, port or p
+
     # here too, before a pooled listener's workers fail one by one in
     # processes of their own
     check_sinks(manifest.name, [s for _, group, _ in listeners for s in group])
@@ -608,27 +638,29 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
         signal.signal(signal.SIGTERM, _stop)
 
     children = []
-    for (host, port), group, workers in pooled:
+    for (lhost, lport), group, workers in pooled:
+        bhost, bport = bind(lhost, lport)
         proc = multiprocessing.Process(
             target=_run_pooled,
-            args=(str(root), host, port, [s.name for s in group], workers),
-            name=f"operonx-serve-{port}",
+            args=(str(root), lhost, lport, [s.name for s in group], workers, bhost, bport),
+            name=f"operonx-serve-{bport}",
         )
         proc.start()
         children.append(proc)
         LOGGER.info(
-            f"[serve] {host}:{port} x{workers} workers -> "
+            f"[serve] {bhost}:{bport} x{workers} workers -> "
             + ", ".join(f"{s.name}({s.kind}){s.path}" for s in group)
         )
 
     async def run_here() -> None:
         servers = []
-        for (host, port), group, _ in here:
+        for (lhost, lport), group, _ in here:
+            bhost, bport = bind(lhost, lport)
             app = build_app(group, on_startup=manifest.on_startup)
-            config = uvicorn.Config(app, host=host, port=port, log_level="info")
+            config = uvicorn.Config(app, host=bhost, port=bport, log_level="info")
             servers.append(uvicorn.Server(config).serve())
             LOGGER.info(
-                f"[serve] {host}:{port} -> "
+                f"[serve] {bhost}:{bport} -> "
                 + ", ".join(f"{s.name}({s.kind}){s.path}" for s in group)
             )
         await asyncio.gather(*servers)
@@ -646,8 +678,17 @@ def serve_manifest(manifest: Manifest, only: Optional[List[str]] = None) -> None
                 proc.join(timeout=5)
 
 
-def _run_pooled(root: str, host: str, port: int, names: List[str], workers: int) -> None:
-    """A child process: uvicorn, `workers` processes, each loading the app."""
+def _run_pooled(
+    root: str,
+    host: str,
+    port: int,
+    names: List[str],
+    workers: int,
+    bind_host: Optional[str] = None,
+    bind_port: Optional[int] = None,
+) -> None:
+    """A child process: uvicorn, `workers` processes, each loading the app.
+    *host*:*port* name the listener; *bind_host*/*bind_port* where it binds."""
     import os
 
     import uvicorn
@@ -658,8 +699,8 @@ def _run_pooled(root: str, host: str, port: int, names: List[str], workers: int)
     uvicorn.run(
         "operonx.app.serve.app:worker_app",
         factory=True,
-        host=host,
-        port=port,
+        host=bind_host or host,
+        port=bind_port or port,
         workers=workers,
         log_level="info",
     )
