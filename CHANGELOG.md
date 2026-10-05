@@ -247,6 +247,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An online eval's budget holds when judges run at once.** Each judge checked what had been
+  spent when it started, so judges running together all saw the same total: on 121 recorded
+  calls a $0.05 budget spent $0.12. A judge in flight now counts at the day's cost per judged
+  run, the first waits for a price to be known, and a run is judged only while its estimated
+  cost fits — the same pass spent $0.056.
+
 - **An online eval accepts the default judge.** `judge(...)` defaults to `reference="auto"`
   (it shows `expected` when a case has one), so it declares `expected`, and `OnlineEval`
   refused every default judge. It now refuses only what cannot judge without a reference: a

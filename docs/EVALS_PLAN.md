@@ -463,3 +463,13 @@ the job record (`run.json`, items, resume).
 - `tests/internal/app/evals/test_traceview.py`: a run's `input`/`output` (D77), live and stored.
 - `test_online.py::test_a_served_request_runs_no_evaluator`: never inline.
 - CLI: `operonx eval online run|backfill`, `operonx eval queue add|list`, `migrate-reviews`.
+
+**E7 gate, 2026-10-05** (`#93`, `#94`, and the budget fix): one online pass over the 121
+recorded callbot calls in `educa-reminder-agent/.operonx/runs/services/call` (a private copy,
+deleted after; staging untouched), code checks (`no_errors`, `spoke`, `classify_fast`) and a
+politeness judge on the **in-house** model with a nominal price so the budget could trip.
+121 runs judged in 5.2 s, 366 scores with snapshots, the failing run queued, cursor saved.
+The first pass found the budget overrun ($0.12 spent of $0.05: concurrent judges each saw the
+same spent total); with in-flight judges counted it spent $0.056 — over by the per-call cost
+spread, not by the pass's concurrency. Service latency: unchanged by construction
+(`test_a_served_request_runs_no_evaluator`).
