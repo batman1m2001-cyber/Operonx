@@ -290,3 +290,66 @@ async def test_trajectory_reads_skip_a_retried_attempt_and_what_ran_under_it(tmp
     assert len(view.llm_calls()) == 2, "both calls were made and paid for"
     assert view.ops("model")[0].is_child and not view.ops("a")[0].is_child
     assert view.summary.status == "ok"
+
+
+# ── a whole run's input and output (online evaluators read these) ────────
+
+
+def test_a_runs_input_is_its_first_ops_inputs_and_its_output_its_last_ops_outputs(tmp_path):
+    from operonx import END, START, graph, op
+
+    @op
+    def shout(text: str) -> dict:
+        return {"loud": text.upper()}
+
+    @op
+    def wrap(loud: str) -> dict:
+        return {"reply": f"<{loud}>"}
+
+    @graph
+    def g(text):
+        s = shout(text=text)
+        w = wrap(loud=s["loud"])
+        START >> s >> w >> END
+
+    store = _store("files", tmp_path)
+    import asyncio
+
+    async def go():
+        engine = Operon(g, params={"text": None}, trace=[store])
+        handle = engine.start(inputs={"text": "hi"})
+        await handle.result()
+        await handle.collect()
+        return handle.trace
+
+    trace = asyncio.run(go())
+    for view in (TraceView.from_trace(trace), TraceView.from_store(store, trace.trace_id)):
+        assert view.input == {"text": "hi"}
+        assert view.output == {"reply": "<HI>"}
+
+
+def test_a_source_ops_output_is_what_came_in():
+    """A run that starts at an op with no inputs (a door's ingress) took
+    in what that op put out."""
+    rows = [
+        _row("ingress", 1.0, outputs={"item": {"q": "where is my order"}}),
+        _row("answer", 2.0, outputs={"text": "on its way"}),
+        _row("egress", 3.0, outputs={"item": "on its way"}),
+    ]
+    view = TraceView.from_rows(rows, {"trace_id": "t9"})
+
+    assert view.input == {"item": {"q": "where is my order"}}
+    assert view.output == {"item": "on its way"}
+
+
+def test_steps_inside_ops_are_not_the_runs_ends():
+    rows = [
+        _row("a", 1.0, outputs={"x": 1}),
+        {**_row("inner", 1.5, outputs={"y": 2}), "op_full_name": "g.sub.inner"},
+        _row("b", 2.0, outputs={"z": 3}),
+        {**_row("late", 3.0, outputs={"w": 4}), "op_full_name": "g.sub.late"},
+    ]
+    view = TraceView.from_rows(rows, {"trace_id": "t10"})
+
+    assert view.output == {"z": 3}
+    assert TraceView.from_rows([], {"trace_id": "t11"}).output is None

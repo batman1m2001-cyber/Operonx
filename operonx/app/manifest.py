@@ -47,7 +47,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 try:  # Python 3.11+
     import tomllib as _toml
@@ -318,6 +318,8 @@ class Manifest:
     base: Optional[Path] = None
     #: ``[tracing]``: which trace sinks are on (`operonx.app.tracing`).
     tracing: Any = None
+    #: ``[[queue]]``: review queues (`operonx.app.evals.queues.QueueSpec`).
+    queues: Tuple[Any, ...] = ()
 
     @property
     def name(self) -> str:
@@ -465,6 +467,7 @@ class Manifest:
             # known only once it is imported: checked when jobs are built.
             complete = not any(j.runbook for j in jobs)
             check_names(tracing, where, serves, [j.name for j in jobs] if complete else None)
+        queues = _queue_specs(_as_list(raw.get("queue")), where)
 
         return cls(
             project=project,
@@ -477,6 +480,7 @@ class Manifest:
             jobs=jobs,
             src=src,
             tracing=tracing,
+            queues=queues,
         )
 
 
@@ -746,9 +750,12 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
             record_dir=(str(block["record_dir"]) if block.get("record_dir") else None),
             description=str(block.get("description") or ""),
         )
-    if not graph:
-        raise ManifestError(f"{where}: {label} has no `graph` (or `runbook`)")
-    if not _ENTRY_RE.match(graph):
+    online = "runs" in block
+    if online:
+        _check_online(block, where, label)
+    elif not graph:
+        raise ManifestError(f"{where}: {label} has no `graph` (or `runbook`, or `runs`)")
+    if graph and not _ENTRY_RE.match(graph):
         raise ManifestError(
             f"{where}: {label} graph {graph!r} is not a `module:function` entry point"
         )
@@ -842,6 +849,7 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         k: v
         for k, v in options.items()
         if not (options.get("dataset") is not None and k in eval_keys)
+        and not (online and k in ONLINE_KEYS)
     }
     if unread:
         # Kept, for tools that read their own keys — but a Job ignores them,
@@ -877,6 +885,66 @@ def _job_spec(block: Any, where: str, index: int) -> JobSpec:
         description=str(block.get("description") or ""),
         options=options,
     )
+
+
+#: The keys of an online eval's ``[[job]]`` block (``runs = {…}`` makes one).
+ONLINE_KEYS = (
+    "runs",
+    "store",
+    "evaluators",
+    "scores",
+    "sample",
+    "target",
+    "budget_usd_per_day",
+    "queue",
+)
+
+
+def _check_online(block: Dict[str, Any], where: str, label: str) -> None:
+    """An online eval's block (`operonx.app.evals.OnlineEval.from_spec` reads it)."""
+    if block.get("graph") or block.get("dataset"):
+        raise ManifestError(
+            f"{where}: {label} has `runs`, so it judges stored runs: it takes no "
+            "`graph` and no `dataset`"
+        )
+    if not isinstance(block["runs"], dict):
+        raise ManifestError(f"{where}: {label} `runs` is a table of run filters (origin, name…)")
+    for key, prefix in (("store", "run_store:"), ("scores", "score_store:")):
+        value = block.get(key)
+        if not (isinstance(value, str) and value.startswith(prefix)):
+            raise ManifestError(f"{where}: {label} needs {key} = '{prefix}<name>'; got {value!r}")
+    evaluators = block.get("evaluators")
+    if not isinstance(evaluators, list) or not evaluators:
+        raise ManifestError(f"{where}: {label} `evaluators` is a non-empty list of module:attr")
+    queue = block.get("queue")
+    if queue is not None and not isinstance(queue, dict):
+        raise ManifestError(f"{where}: {label} `queue` is a table: {{to = '<queue>', …}}")
+
+
+def _queue_specs(blocks: List[Any], where: str) -> Tuple[Any, ...]:
+    """``[[queue]]`` blocks as QueueSpecs; names unique."""
+    from operonx.app.evals.queues import QueueSpec
+
+    out: List[Any] = []
+    for i, block in enumerate(blocks):
+        if not isinstance(block, dict):
+            raise ManifestError(f"{where}: [[queue]] #{i} is not a table")
+        stray = sorted(set(block) - {"name", "rubric", "reviewers", "description"})
+        if stray:
+            raise ManifestError(f"{where}: [[queue]] #{i} has keys a queue does not read: {stray}")
+        try:
+            spec = QueueSpec(
+                name=str(block.get("name") or ""),
+                rubric=dict(block.get("rubric") or {}),
+                reviewers=block.get("reviewers", 1),
+                description=str(block.get("description") or ""),
+            )
+        except ValueError as exc:
+            raise ManifestError(f"{where}: [[queue]] #{i}: {exc}") from None
+        if any(q.name == spec.name for q in out):
+            raise ManifestError(f"{where}: two [[queue]] blocks named {spec.name!r}")
+        out.append(spec)
+    return tuple(out)
 
 
 def _default_session(kind: str) -> str:

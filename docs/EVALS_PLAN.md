@@ -1,6 +1,6 @@
 # Evals — experiments with an identity, repeats, error bars and a gate
 
-Status: **E0 committed 2026-10-04; E1 built on `feat/evals-e1`; E2–E3 on `feat/evals-e2`; E4 on `feat/evals-e4`; E5 on `feat/evals-e5`.**
+Status: **E1–E6 merged (2026-10-04). E7 (online eval, review queues, score alerts) planned in §14–§15, on `feat/evals-e7`.**
 Source: `docs/roadmap/ROADMAP.md` §3 and the full design in `docs/roadmap/track4_eval.md`
 (cited below as T4 §n). This file is the working plan: it keeps what T4 decided, resolves
 what T4 left to the implementer, and says what each phase ships and how it is tested.
@@ -422,3 +422,44 @@ copy of its rules or statistics. What it needed from operonx and did not have:
 - Dataset edits: without the folder lock, 4 threads adding while one edits made the edit
   refuse itself (another writer changed the file) on every run of the test; with it, nothing
   is refused or lost (`test_edits_and_adds_from_many_threads_lose_nothing`).
+
+## 14. Decisions (E7: online eval, review queues, score alerts)
+
+Branch `feat/evals-e7`. T4 §9 (online), §10 (queues), G13 (alerts). What already exists and is
+reused, not rebuilt: `Score.rule/queue/snapshot` and the online retention in every score store
+(E3), `score_series` (E3), `TraceView.from_record` (E2), `prepare`/`judge_all` (E1/E5), judges
+as traced graphs with `cost_usd` (E5), the alert loop and webhook delivery (`runs/alerts.py`),
+the job record (`run.json`, items, resume).
+
+| # | Question | Decision | Why |
+|---|---|---|---|
+| D65 | What an online eval is | `OnlineEval(Job)`, `origin = "eval"` (the origins are fixed; its judges' runs carry `role=judge` like an experiment's). Its items are stored runs, its graph is one op that loads a run (`store.get_run`), builds `TraceView.from_record` and runs the evaluators. Declared as a `[[job]]` with `runs = {…}` (a `RunFilter`) instead of `dataset`; `operonx run <name>` runs one pass, cron calls it (`schedule` stays declarative, as for every job) | a job already has the record, resume, concurrency and `operonx run`; a second runtime is T4 §9 rule 1's "no new runtime" |
+| D66 | Which runs | `RunStoreSource(store, where, since=cursor)`: pages `list_runs(where, "started_asc")` from the cursor, stops at the first run still `running` (it holds the cursor until it ends), and passes over `origin=eval` runs — experiments and every judge's, its own included. The cursor (the last `started_at` and the trace ids at it) is kept in the job's state file next to its records, so the next pass starts where this one stopped and a crash re-reads at most one page | idempotent `score_id`s make the re-read harmless; ties at one timestamp need the ids |
+| D67 | Sampling | stable: `int(sha1(trace_id)[:8], 16) / 2**32 < sample`. Same trace, same answer, on any host, in a backfill and in the live pass | T4 §9; a second worker or a backfill must not judge a different 5 % |
+| D68 | Which evaluators | reference-free only: a function asking for `expected` or `case` is refused when the eval is declared, naming the parameter. Judges allowed | there is no expected answer for production traffic |
+| D69 | Budget | `budget_usd_per_day`: spend is the evaluators' `cost_usd` summed over the scores this rule wrote today (UTC), read from the score store at the start of a pass and counted as the pass runs. When a judge would start past the budget the item is recorded `budget_exhausted` and the cursor still moves (a skipped day is not judged later unless backfilled) | LangSmith-style spend limit; the store is the truth across hosts |
+| D70 | What is written | one score per check per run: `target=trace` (or `session` when `target = "session"`, id from the run's `session_id` metadata), `source` code/judge, `rule=<name>`, `origin`/`name` of the judged run, `snapshot` = the run's input/output clipped to 2 KB. ids `sha(trace_id, op_id?, score_name, evaluator_version)` (T4 §6.3) | readable after the trace expires (30 d), and a re-run collapses |
+| D71 | Backfill | `operonx eval online backfill <name> --since 7d [--until …]` runs the same pass over a window without touching the cursor | trying a new judge on last week's traffic (T4 §9) |
+| D72 | Queues | `[[queue]]` in `operonx.toml`: `name`, `rubric` (score names with their data types; `review` good/bad is always there), `sample`, `reviewers` (how many per item, default 1). An item is `(target, queue)`; filled by an online eval's `queue = {when = "any_failed"\|"all", to = "<queue>", sample = …}` and by `operonx eval queue add <queue> --runs …\|--experiment X --failed`. Items live in their own append-only JSONL under `.operonx/queues/<name>.jsonl` beside `reviews.jsonl`, one line per add, last line wins, so files projects need no new store; done = the item has a human score with `queue=<name>` from the rubric | an item is a pointer, the judgement is a score; the score store already holds human scores |
+| D73 | A review is a score | `review(target, verdict, labels, note, author, queue=None)` writes `Score(score_name="review", source="human", data_type="categorical", label=good\|bad, metadata.labels, reason=note)`. `operonx eval migrate-reviews` writes every `reviews.jsonl` line as such a score (idempotent ids from `(trace_id, "review", author)`), and `reviews_as_scores()` reads the file as scores without migrating, so alignment sees old reviews at once | T4 §10.4: no data loss, one row kind |
+| D74 | Agreement per queue | `queue_agreement(store, queue)`: Cohen's κ over items two reviewers both scored, per rubric item, with the count; fewer than 10 shared items says so instead of a number | T4 §10.2 "reported, not hidden" |
+| D75 | Score alerts | `alerts.METRICS` gains `score_mean:<name>` and `score_fail_rate:<name>`, over `scores(ScoreFilter(score_name, since=window))` filtered by the alert's `origin`/`target`; `min_runs` reads as minimum scores | G13; same webhook, same state machine |
+| D76 | The gate without staging | The roadmap's gate is one week of staging traces. Staging is out of bounds for this work, so the gate runs on recorded traces, read-only: a backfill over the team ClickHouse `callbot_traces` window at a sample that yields ≥ 30 runs, with a judge, under a budget set below the full spend — proving the stop, the scores and the queue spillover; and a test that a request served through an HTTP door runs no evaluator, which runs only when the pass reads the stored run (`test_a_served_request_runs_no_evaluator`) | the property "service latency unchanged" holds by construction when nothing runs inline; the test pins it |
+| D77 | A stored run's `input` and `output` | the first root-level execution's inputs and the last root-level execution's outputs (`TraceView.input` / `.output`, new): an online evaluator takes `input`, `output`, `trace`, `trace_summary`, `run` (the `RunSummary`) and `judging`. A run whose root wrote nothing has `output` `None` | nothing in operonx defined a whole run's I/O; a service run is ingress → … → egress, so the root's ends are the request and the answer |
+
+## 15. E7 tests
+
+- `tests/internal/app/evals/test_online.py`: stable sampling (same set across runs and hosts;
+  rate within binomial bounds on 10k ids); the cursor (a second pass judges only new runs; a
+  run added at the cursor's timestamp is not lost; a crashed pass re-reads at most one page);
+  running runs and the eval's own judge runs skipped; reference-free refusal; budget stops the
+  judge and records `budget_exhausted`, code checks still run; scores carry rule/snapshot and
+  collapse on re-run; session target; backfill leaves the cursor alone; files and SQLite stores.
+- `tests/internal/app/evals/test_queues.py`: queue declaration errors; add from an online
+  eval's failures and from an experiment's failed cases; done-ness from human scores;
+  `migrate-reviews` idempotent; `reviews_as_scores` equals the migration; κ per queue with the
+  < 10 note.
+- `tests/internal/telemetry/test_score_alerts.py`: both metrics fire and resolve, min count.
+- `tests/internal/app/evals/test_traceview.py`: a run's `input`/`output` (D77), live and stored.
+- `test_online.py::test_a_served_request_runs_no_evaluator`: never inline.
+- CLI: `operonx eval online run|backfill`, `operonx eval queue add|list`, `migrate-reviews`.
