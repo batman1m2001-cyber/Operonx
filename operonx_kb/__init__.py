@@ -26,6 +26,7 @@ from operonx_kb.model.collection import (
     CollectionSpec,
     ContextualSpec,
     DenseIndexSpec,
+    GraphSpec,
     LayoutSpec,
     TreeSpec,
 )
@@ -55,6 +56,7 @@ __all__ = [
     "Page",
     "Region",
     "TreeSpec",
+    "GraphSpec",
     "VersionChunk",
     "DEFAULT_MODE",
     "IngestError",

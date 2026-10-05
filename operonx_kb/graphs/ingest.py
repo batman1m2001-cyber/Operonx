@@ -6,6 +6,7 @@
                    else  ─► parse_document ─► build_tree ─┬─► chunk_version ─► contextualize     │
                                                           │   ─► EmbedChunksOp ─► stage_index_writes
                                                           │   ─► VectorUpsertOp ─► write_lexical ─┐
+                                                          │   contextualize ─► graph_concepts ─────┤
                                                           └─► tree_index ────────────────────────┤
                             commit_version ◄─────────────────────────────────────────────────────┘
                             ─► removed_vector_ids ─► VectorDeleteOp ─► forget_index_writes
@@ -15,7 +16,8 @@ Both indexes are written before the commit and cleaned after it (track5 §11.2).
 A collection without a lexical index runs the same graph: the lexical ops do
 nothing when its spec is ``None``. ``contextualize`` and ``tree_index`` are the
 collection's enrichment subgraphs (:mod:`operonx_kb.graphs.enrich`), or
-pass-throughs of the same shape when it has none.
+pass-throughs of the same shape when it has none. ``graph_concepts`` returns no
+mentions for a collection without a ``graph`` spec.
 
 :func:`build_ingest_graph` returns the per-document graph (``item``,
 ``collection`` → ``result``), which a script or test runs with ``Operon``.
@@ -52,6 +54,7 @@ from operonx_kb.ops import (
     skipped,
     stage_index_writes,
 )
+from operonx_kb.ops.graph import graph_concepts
 from operonx_kb.ops.lexical import delete_lexical, write_lexical
 
 __all__ = ["build_ingest_graph", "build_ingest_flow"]
@@ -128,6 +131,7 @@ def build_ingest_graph(
             catalog=catalog,
             lexical=lexical_spec,
         )
+        concepts = graph_concepts(plan=plan["plan"], tree=tree["tree"], chunks=enriched["chunks"])
         commit = commit_version(
             plan=plan["plan"],
             tree=tree["tree"],
@@ -137,6 +141,7 @@ def build_ingest_graph(
             blobs=blobs,
             written=upsert["upserted"],
             nodes=nodes["nodes"],
+            mentions=concepts["mentions"],
         )
         gone = removed_vector_ids(removed=commit["removed"])
         delete = VectorDeleteOp.of(
@@ -161,10 +166,12 @@ def build_ingest_graph(
             lexical_deleted=unlex["deleted"],
             contextual=enriched["stats"],
             tree=nodes["stats"],
+            graph=concepts["stats"],
         )
         START >> plan >> if_(plan["action"] == "skip", skip).else_(parsed)
         parsed >> tree >> chunks >> enriched >> embed >> stage >> upsert >> lex >> commit
         tree >> nodes >> commit
+        enriched >> concepts >> commit
         commit >> gone >> delete >> forget >> unlex
         unlex >> result
         skip >> result

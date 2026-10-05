@@ -107,3 +107,12 @@ def test_cli_create_with_enrichment_stores_the_specs(hub, capsys):
                  "--contextual-llm", "llm:gpt-4o-mini", "--tree-llm", "gpt-4o-mini"]) == 0  # fmt: skip
     spec = KnowledgeBase().collection("manuals").spec
     assert spec.contextual.llm == "gpt-4o-mini" and spec.tree.llm == "gpt-4o-mini"
+
+
+def test_cli_create_with_the_graph_stores_its_spec(hub):
+    from operonx_kb import GraphSpec, KnowledgeBase
+
+    res = str(hub.source_path)
+    assert main(["--resources", res, "create", "wiki", "--embedder", "fake_embedding:hash",
+                 "--graph"]) == 0  # fmt: skip
+    assert KnowledgeBase().collection("wiki").spec.graph == GraphSpec()

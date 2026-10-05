@@ -23,6 +23,7 @@ from operonx.core.loggings import LOGGER
 from operonx_kb.enrich import contextual as ctx
 from operonx_kb.enrich import tree as trees
 from operonx_kb.enrich.base import enricher_fingerprint
+from operonx_kb.enrich.concepts import concepts_fingerprint
 from operonx_kb.errors import EnrichmentError
 from operonx_kb.model.collection import CollectionSpec
 from operonx_kb.model.ids import combine_fingerprints, node_id, sha256_text
@@ -72,8 +73,8 @@ def stage_fingerprints(spec: CollectionSpec) -> Dict[str, str]:
 
 def pipeline_enrichers(spec: CollectionSpec, stages: Dict[str, str]) -> Dict[str, str]:
     """What enrichment adds to ``pipeline_fp`` (PLAN E8): every setting that changes
-    a version's chunks or tree. Query-time settings (the navigator, beam, docs) are
-    not part of it."""
+    a version's chunks, tree or concepts. Query-time settings (the navigator, beam,
+    docs; the graph walk's seeds, alpha, max_df) are not part of it."""
     out: Dict[str, str] = {}
     if spec.contextual is not None:
         out["contextual"] = combine_fingerprints(
@@ -85,6 +86,8 @@ def pipeline_enrichers(spec: CollectionSpec, stages: Dict[str, str]) -> Dict[str
             summary=stages["summary"], toc=stages["toc"], input=str(t.summary_input_tokens),
             toc_min=str(t.toc_min_tokens), toc_window=str(t.toc_window_tokens),
         )  # fmt: skip
+    if spec.graph is not None:
+        out["graph"] = concepts_fingerprint(spec.graph.title_weight)
     return out
 
 

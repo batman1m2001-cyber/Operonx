@@ -149,10 +149,12 @@ class Catalog(ABC):
         chunks: Sequence[Chunk],
         occurrences: Sequence[VersionChunk],
         nodes: Sequence[TreeNode] = (),
+        mentions: Sequence[Tuple[str, str, float]] = (),
     ) -> CommitResult:
         """In one transaction: upsert the document, insert the version and its rows
-        (with its tree ``nodes``, when the collection has a tree index), make it
-        active, and mark the previous active version superseded.
+        (with its tree ``nodes`` and its concept ``mentions`` — ``(chunk_id, concept,
+        weight)`` — when the collection has those indexes), make it active, and mark
+        the previous active version superseded.
 
         Idempotent: committing the version that is already active writes nothing.
 
@@ -251,6 +253,14 @@ class Catalog(ABC):
     @abstractmethod
     def tree_nodes(self, version_id: str) -> List[TreeNode]:
         """A version's tree index in path order; empty when it has none."""
+
+    @abstractmethod
+    def active_version_ids(self, collection_id: str) -> List[str]:
+        """The active versions of the collection's live documents."""
+
+    @abstractmethod
+    def graph_mentions(self, collection_id: str) -> List[Tuple[str, str, str, float]]:
+        """``(chunk_id, document_id, concept, weight)`` of the collection's active versions (PLAN G2)."""
 
     @abstractmethod
     def log_ingest(

@@ -20,6 +20,7 @@ __all__ = [
     "LexicalIndexSpec",
     "ContextualSpec",
     "TreeSpec",
+    "GraphSpec",
     "FieldType",
     "CollectionSpec",
     "Collection",
@@ -228,6 +229,43 @@ class TreeSpec(_Spec):
         return self.navigator or self.llm
 
 
+class GraphSpec(_Spec):
+    """The concept graph and graph search (PLAN G1-G6).
+
+    No model builds it: each chunk's concepts are the names its text holds
+    (runs of capitalised words) plus its document title and headings, committed
+    with the version. A search walks the chunk-concept graph from the seed
+    retriever's best hits (personalized PageRank) and ranks chunks by where
+    the walk ends.
+
+    Attributes:
+        title_weight: A heading's or title's weight on its chunk's edge, against
+            1 per mention in the text: a chunk is most of all about its heading.
+        seeds: The seed retriever's hits the walk restarts from (the first
+            ``seeds``, weighted 1/rank).
+        expand: Chunks the walk brings in beside the seeds, at most: the seeds and
+            these come first (by the walk's mass), then the seed retriever's other
+            hits in its order. More would push a single-hop answer the seed
+            retriever ranked 4th-10th out of the top 10 (``docs/bench/k6.md``).
+        alpha: The restart probability of the walk.
+        max_df_share: A concept in more than this share of the collection's
+            chunks (and in more than ``max_df_min`` chunks) is too common to
+            link anything and is left out of the graph.
+        max_df_min: The floor of that limit, for small collections.
+        iterations: Power-iteration steps.
+        seed_depth: Hits the seed retriever returns.
+    """
+
+    title_weight: float = Field(default=3.0, gt=0)
+    seeds: int = Field(default=3, ge=1)
+    expand: int = Field(default=5, ge=0)
+    alpha: float = Field(default=0.3, gt=0, lt=1)
+    max_df_share: float = Field(default=0.005, gt=0, le=1)
+    max_df_min: int = Field(default=10, ge=1)
+    iterations: int = Field(default=30, ge=1)
+    seed_depth: int = Field(default=30, ge=1)
+
+
 class CollectionSpec(_Spec):
     """Everything that decides how a collection's documents are processed.
 
@@ -240,6 +278,8 @@ class CollectionSpec(_Spec):
             chunks as they are.
         tree: The tree index (section summaries, tables of contents) and the
             ``tree`` retrieval mode; ``None`` (default) builds none.
+        graph: The concept graph and the ``graph`` retrieval mode; ``None``
+            (default) builds none.
     """
 
     chunker: ChunkerSpec = ChunkerSpec()
@@ -250,6 +290,7 @@ class CollectionSpec(_Spec):
     language: Optional[str] = None
     contextual: Optional[ContextualSpec] = None
     tree: Optional[TreeSpec] = None
+    graph: Optional[GraphSpec] = None
 
     @field_validator("filterable")
     @classmethod

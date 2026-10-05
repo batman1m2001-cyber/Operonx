@@ -378,6 +378,7 @@ class SqlCatalog(Catalog):
         chunks: Sequence[Chunk],
         occurrences: Sequence[VersionChunk],
         nodes: Sequence[TreeNode] = (),
+        mentions: Sequence[Tuple[str, str, float]] = (),
     ) -> CommitResult:
         with self._tx(write=True) as c:
             self._lock_document(c, document.id)
@@ -476,6 +477,10 @@ class SqlCatalog(Catalog):
                     [(version.id, n.id, n.parent_id, n.path, n.ordinal, n.depth, n.title, n.span[0], n.span[1],
                       _j(n.pages), n.source, n.summary, n.summary_sha) for n in nodes],
                 )  # fmt: skip
+                c.many(
+                    "INSERT INTO kb_graph_mentions (version_id, chunk_id, concept, weight) VALUES (?, ?, ?, ?)",
+                    [(version.id, chunk_id, concept, float(weight)) for chunk_id, concept, weight in mentions],
+                )  # fmt: skip
             else:
                 c.run("UPDATE kb_versions SET status = 'committed' WHERE id = ?", (version.id,))
             if previous is not None:
@@ -553,7 +558,13 @@ class SqlCatalog(Catalog):
                 r["id"]
                 for r in c.rows("SELECT id FROM kb_chunks WHERE document_id = ?", (document_id,))
             ]
-            for table in ("kb_version_chunks", "kb_elements", "kb_pages", "kb_tree_nodes"):
+            for table in (
+                "kb_version_chunks",
+                "kb_elements",
+                "kb_pages",
+                "kb_tree_nodes",
+                "kb_graph_mentions",
+            ):
                 c.many(f"DELETE FROM {table} WHERE version_id = ?", [(v,) for v in versions])
             c.run("DELETE FROM kb_chunks WHERE document_id = ?", (document_id,))
             c.run("DELETE FROM kb_versions WHERE document_id = ?", (document_id,))
@@ -733,6 +744,26 @@ class SqlCatalog(Catalog):
             for r in rows
         ]
         return sorted(nodes, key=lambda n: _path_key(n.path))
+
+    def active_version_ids(self, collection_id: str) -> List[str]:
+        with self._tx() as c:
+            rows = c.rows(
+                "SELECT active_version_id FROM kb_documents WHERE collection_id = ? "
+                "AND deleted_at IS NULL AND active_version_id IS NOT NULL",
+                (collection_id,),
+            )
+        return sorted(r["active_version_id"] for r in rows)
+
+    def graph_mentions(self, collection_id: str) -> List[Tuple[str, str, str, float]]:
+        with self._tx() as c:
+            rows = c.rows(
+                "SELECT m.chunk_id AS chunk_id, d.id AS document_id, m.concept AS concept, "
+                "m.weight AS weight "
+                "FROM kb_graph_mentions m JOIN kb_documents d ON d.active_version_id = m.version_id "
+                "WHERE d.collection_id = ? AND d.deleted_at IS NULL ORDER BY m.chunk_id, m.concept",
+                (collection_id,),
+            )
+        return [(r["chunk_id"], r["document_id"], r["concept"], float(r["weight"])) for r in rows]
 
     def log_ingest(
         self,

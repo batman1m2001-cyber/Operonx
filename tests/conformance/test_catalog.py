@@ -271,3 +271,27 @@ def test_tree_nodes_commit_with_the_version_and_purge_with_it(cat):
     assert cat.tree_nodes("ver_2") == []
     cat.purge("doc_1")
     assert cat.tree_nodes("ver_1") == []
+
+
+def test_graph_mentions_are_the_active_versions_and_purge_with_them(cat):
+    tree, version, chunks, occ = _version("ver_1", ["alpha", "beta"])
+    a, b = chunks[0].id, chunks[1].id
+    cat.commit_version(DOC, version, tree.elements, tree.pages, chunks, occ,
+                       mentions=[(a, "zulawski", 1.0), (b, "zulawski", 3.0), (b, "warsaw", 1.5)])  # fmt: skip
+    assert cat.active_version_ids("col") == ["ver_1"]
+    want = [
+        (a, "doc_1", "zulawski", 1.0),
+        (b, "doc_1", "warsaw", 1.5),
+        (b, "doc_1", "zulawski", 3.0),
+    ]
+    assert cat.graph_mentions("col") == sorted(want, key=lambda m: (m[0], m[2]))
+    tree2, version2, chunks2, occ2 = _version("ver_2", ["alpha"])
+    cat.commit_version(DOC, version2, tree2.elements, tree2.pages, chunks2, occ2,
+                       mentions=[(a, "braunek", 2.0)])  # fmt: skip
+    assert cat.graph_mentions("col") == [(a, "doc_1", "braunek", 2.0)]  # the new version only
+    assert cat.active_version_ids("col") == ["ver_2"]
+    cat.tombstone("doc_1")
+    assert cat.graph_mentions("col") == [] and cat.active_version_ids("col") == []
+    cat.purge("doc_1")
+    with cat._tx() as c:
+        assert c.one("SELECT COUNT(*) AS n FROM kb_graph_mentions")["n"] == 0

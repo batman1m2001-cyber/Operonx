@@ -31,6 +31,7 @@ from operonx_kb.graphs.maintenance import (
 )
 from operonx_kb.graphs.retrieve import (
     dense_retriever,
+    graph_retriever,
     hybrid_retriever,
     lexical_retriever,
     reranked,
@@ -52,8 +53,9 @@ from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
 __all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
 
 #: Retrieval modes of :meth:`KnowledgeBase.search`. ``tree`` needs the collection's
-#: ``tree`` spec (PLAN E7) and is seeded by the collection's default mode.
-MODES = ("dense", "lexical", "hybrid", "tree")
+#: ``tree`` spec (PLAN E7), ``graph`` its ``graph`` spec (PLAN G4); both are seeded
+#: by the collection's default mode.
+MODES = ("dense", "lexical", "hybrid", "tree", "graph")
 #: The mode a search uses unless told otherwise, for a collection that has both a
 #: dense and a lexical index. Hybrid beat dense on Recall@10 on all three K2 eval
 #: sets (the PLAN gate asks for two of three; the table is in ``docs/bench/k2.md``).
@@ -271,7 +273,7 @@ class KnowledgeBase:
 
     def retriever(self, collection_id: str, mode: Optional[str] = None):
         """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``,
-        ``tree``; default :meth:`default_mode`). An explicit mode the collection cannot
+        ``tree``, ``graph``; default :meth:`default_mode`). An explicit mode the collection cannot
         serve raises.
 
         Raises:
@@ -289,6 +291,14 @@ class KnowledgeBase:
                 )
             seed = self.retriever(collection_id, self.default_mode(collection_id))
             return tree_retriever(seed, spec.tree, catalog=self.catalog_key)
+        if mode == "graph":
+            if spec.graph is None:
+                raise QueryError(
+                    f"collection {collection_id!r} has no concept graph for mode 'graph'; set "
+                    "CollectionSpec(graph=GraphSpec()) and re-add its documents"
+                )
+            seed = self.retriever(collection_id, self.default_mode(collection_id))
+            return graph_retriever(seed, spec.graph, catalog=self.catalog_key)
         if mode in ("dense", "hybrid") and spec.dense is None:
             raise QueryError(f"collection {collection_id!r} has no dense index for mode {mode!r}")
         if mode in ("lexical", "hybrid") and spec.lexical is None:
@@ -333,7 +343,8 @@ class KnowledgeBase:
 
         Args:
             filter: A :class:`~operonx_kb.model.filter.KBFilter` or its dict.
-            mode: ``dense``, ``lexical``, ``hybrid`` or ``tree`` (default :meth:`default_mode`).
+            mode: ``dense``, ``lexical``, ``hybrid``, ``tree`` or ``graph`` (default
+                :meth:`default_mode`).
             reranker: A ``reranking:`` resource name to rerank with.
             trace_id: The run's trace id (default: a new one), for a caller that links
                 to the run's trace.

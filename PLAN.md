@@ -100,7 +100,8 @@ reordered (see `docs/bench/k1d_layout.md` §4).
 | **D5** ✔ | The first real corpus: Vietnamese public documents with checked licenses (MLQA vi / Wikipedia CC BY-SA 3.0, 511 human-written QA cases; 63 official legal PDFs, not copyright-protected), pinned download script | Recorded in `docs/bench/d5.md`: hybrid beats dense by +0.069 Recall@10 (McNemar p < 0.001) and stays the default; rerank +0.055 MRR (opt-in, ~5 s/query on CPU); live citation precision 29/30. **Open:** OCR (68% of crawled legal PDFs are scans), the human check of the 30 answers, no licensed legal QA set yet |
 | **K3** | track5 §18 P3: the admin API `operonx-kb/1` (§8) and Studio's Knowledge tab (operonx-studio): collections, documents, a viewer with bbox overlays, the chunk inspector, a query playground with clickable citations, trace deep links, save as eval case | Recorded in `docs/bench/k3.md`: screenshots of every view at desktop and phone width (light and dark); a cited answer opens the correct page and box on 20/20 sampled citations (checked in the browser and against pdfium's own text layer) |
 | **K4** (built; gate open) | track5 §18 P4 (§9 below): contextual chunk enrichment at section scope, section and document summaries, the tree index (headings, or an LLM table of contents for heading-less documents) and beam tree search; every LLM step an `LLMOp` cached by content | Incrementality met (tests: re-ingest = 0 `LLMOp` spans and 0 model calls; delete and re-add answered by the cache; an edit re-contextualizes one window, re-summarizes one section). Recorded in `docs/bench/k4.md`: on `xquad_en` contextual gives no significant lift in any mode (hybrid ΔMRR +0.001, p = 0.93); cost $0.58/1k pages contextual, $0.16/1k pages tree, $0.00013 per tree query. **Open:** the run stopped at $1.18 when the OpenAI account ran out of credits; `vi_public`, `xquad_vi`, `corpus_vi` and the 100-case tree comparisons resume from the cache. Nothing is default-on. |
-| K5+ | track5 §18 P5-P7 (visual; graph) | track5 gates |
+| **K6** | track5 §18 P6 (§10 below): the concept graph (no model), mentions committed with the version, personalized PageRank graph search seeded by the default retriever, filter-closed walk | Recorded in `docs/bench/k6.md` (see §10) |
+| K5, K7 | track5 §18 P5 (visual pages: needs a GPU), P7 (hardening) | track5 gates |
 
 ## 6 · K2: retrieval, citations, eval (track5 §9, §10, §12.3, §15.3)
 
@@ -197,3 +198,37 @@ Built and tested; requires operonx main at or after #89 (#87 a loop entered from
 #88 an op joining a stream with an op outside it, #89 a subgraph whose branch went around its
 stream — each a silent failure the K4 graphs hit). Gate numbers and the stop are in
 `docs/bench/k4.md`: contextual and tree stay opt-in until the resumed run measures a lift.
+
+## 10 · K6: the concept graph and graph search (track5 §9.6, §18 P6)
+
+K6 comes before K5 (visual pages): K5's ColQwen-family page embedder needs a GPU this
+project's machine does not have, while the graph builds and queries on CPU with no model.
+
+### Decisions
+
+| # | Decision | Consequence |
+|---|---|---|
+| G1 | **Concepts without a model** (track5's `entities_lazy`, LazyGraphRAG's idea): a chunk's concepts are the names in its text — runs of capitalised words with the lowercase connectors names carry (`Duke of York`, `van`, `da`), cut at punctuation and at `and` — plus its document title and headings, folded (casefold, no diacritics). A heading weighs `title_weight` (3) against 1 per mention. Content n-grams were measured on the dev split and added nothing, so they are not extracted. | Ingest stays free and offline; a re-ingest of unchanged content extracts nothing (the version is skipped). Vietnamese capitalises proper names the same way. The opt-in LLM entity graph (LightRAG-style) waits for a measured reason and API credits. |
+| G2 | **Mentions are part of the version** (`kb_graph_mentions`, committed with it, purged with it), like the tree index (E5). The graph of a collection is the mentions of its active versions. | No ledger, nothing derived outside the catalog; a tombstone hides a document's concepts at once; `verify`'s guarantees are unchanged. |
+| G3 | **The graph is built in memory per collection generation** (the hash of the active version ids), from one catalog query, and cached (16 collections, LRU). A concept in more than `max_df_share` (0.5%) of the chunks, and more than `max_df_min` (10), links nothing in particular and is left out. numpy edge arrays and `bincount`, no scipy. | A commit, delete or purge is seen by the next search; a collection that does not change is read once. The rebuild is whole (incremental rebuilds wait for a collection where it costs). |
+| G4 | **Graph search (`mode="graph"`) is seeded by the collection's default retriever**: its first `seeds` (3) hits, weighted 1/rank, are the restart distribution of a personalized PageRank walk (`alpha` 0.3, 30 steps) over the chunk-concept graph (HippoRAG 2). Chunks come by the mass the walk leaves on them, then the seed's other hits. No model call; the query's own words are not concepts (adding them did not help on dev). | One more mode beside `tree`, composable like every retriever (track5 §9.1). The seeds keep most of their own mass, so they stay first and what they link to follows: the gain is at Recall@5/10, not @2. |
+| G5 | **A filter closes the walk**: under a `KBFilter`, only the chunks of documents the filter allows take part — mass that would enter any other chunk restarts — and hydration checks again. | A hidden document neither shows up nor carries the walk to what only it links to (tested). |
+| G6 | The graph's query-time settings (`seeds`, `alpha`, `max_df_*`, `iterations`) are not in `pipeline_fp`; `title_weight` and the extractor version are. | Tuning the walk needs no re-ingest. |
+
+### Gate
+
+- Multi-hop: MuSiQue-Ans dev and 2WikiMultihopQA validation (`scripts/prepare_multihop.py`; licenses
+  CC BY 4.0 and Apache-2.0), 400 questions each with 2+ supporting paragraphs, their paragraphs
+  pooled per set (HippoRAG's setup). Settings chosen on the `dev` split (100 questions); the gate
+  reads `test` (300): `graph` against `hybrid`, Recall@2/5/10 (the share of a question's
+  supporting paragraphs) and MRR, paired bootstrap (`stats.compare_paired`).
+- No harm: the K2 single-hop sets (`xquad_en`, `xquad_vi`, `corpus_vi`), where nothing links one
+  answer to another.
+- **Graph becomes the default only with a significant lift on multi-hop and no significant loss on
+  single-hop**; otherwise it stays opt-in (`CollectionSpec(graph=GraphSpec())`, `mode="graph"`)
+  and the table is published (`docs/bench/k6.md`). Also recorded: graph size, cold build time,
+  query latency, ingest cost of the concept step.
+- Tests: extraction cases; the walk (hops, the df cut, the filter mask, seeds outside the graph);
+  the real ingest and search graphs (two hops found; an edit, a re-add and a delete change the
+  graph at once; an unchanged re-add skips; a purge leaves no mention; a filter hides a bridge);
+  catalog conformance on SQLite and Postgres.
