@@ -234,17 +234,28 @@ class ScriptedLLM:
 
 
 class FakeHub:
-    """Stands in for ``ResourceHub.instance()``: ``get("llm:x")``."""
+    """Stands in for ``ResourceHub.instance()``: ``get("llm:x")`` serves the
+    scripted models; any other key goes to ``under`` (the hub that was
+    installed before), so an agent's tools keep their real resources — a
+    knowledge base's embedder, a vector store — while its model is scripted."""
 
-    def __init__(self, **llms: Any) -> None:
+    def __init__(self, under: Any = None, **llms: Any) -> None:
         self.llms = llms
+        self.under = under
 
     def get(self, key: str) -> Any:
         category, _, name = key.partition(":")
-        assert category == "llm", key
-        if name not in self.llms:
-            raise KeyError(f"Resource '{key}' not found")
-        return self.llms[name]
+        if category == "llm" and name in self.llms:
+            return self.llms[name]
+        if self.under is not None:
+            return self.under.get(key)
+        raise KeyError(f"Resource '{key}' not found")
+
+    def __getattr__(self, attr: str) -> Any:  # alias, has, ... of the hub underneath
+        under = self.__dict__.get("under")
+        if under is None:
+            raise AttributeError(attr)
+        return getattr(under, attr)
 
 
 def calls(*specs: Any, turn: int = 0) -> List[Dict[str, Any]]:
@@ -265,15 +276,16 @@ def says(text: str = "final", **kw: Any) -> ChatCompletion:
 
 @contextmanager
 def scripted(**llms: Any) -> Iterator[FakeHub]:
-    """Serve ``llms`` as ``llm:<name>`` resources inside the block: the
-    process's ``ResourceHub`` instance, put back as it was after."""
+    """Serve ``llms`` as ``llm:<name>`` resources inside the block, over the
+    process's ``ResourceHub`` instance (every other key still resolves there),
+    which is put back as it was after."""
     from operonx.core.registry.resource_hub import ResourceHub
 
     try:
         before = ResourceHub.instance()
     except RuntimeError:  # none installed yet
         before = None
-    hub = FakeHub(**llms)
+    hub = FakeHub(before, **llms)
     ResourceHub.set_instance(hub)
     try:
         yield hub
