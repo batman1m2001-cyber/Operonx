@@ -7,20 +7,23 @@ that follows them are durable together (docs/RUNTIME_R3_PLAN.md §2). A
 :class:`Journal` stores them; :class:`MemoryJournal` keeps them in a dict,
 :class:`SqliteJournal` in one SQLite file.
 
-Values are pickled: the journal must give back exactly what an op returned —
-a tuple stays a tuple — or a resumed run would differ from the one that
-crashed. It is trusted storage, like a checkpointer, never input from outside.
+Values are JSON (:mod:`.codec`): the journal gives back exactly what an op
+returned — a tuple stays a tuple, a dataclass that dataclass — or a resumed
+run would differ from the one that crashed; and reading a journal runs no
+code, so a journal others can write (a shared file, a Postgres table) is not
+a way into the workers that resume from it.
 """
 
 from __future__ import annotations
 
-import pickle
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol, Sequence, Tuple, Union, runtime_checkable
+
+from . import codec
 
 __all__ = [
     "END",
@@ -142,14 +145,14 @@ class MemoryJournal:
             self._runs[header.run_id] = (header, [])
 
     def append(self, run_id: str, steps: Sequence[Step]) -> None:
-        blobs = [_dump(s) for s in steps]  # pickled now: the caller may change them
+        blobs = [_dump(s) for s in steps]  # encoded now: the caller may change them
         with self._lock:
             self._get(run_id)[1].extend(blobs)
 
     def read(self, run_id: str) -> Tuple[RunHeader, List[Step]]:
         with self._lock:
             header, blobs = self._get(run_id)
-            return header, [pickle.loads(b) for b in blobs]
+            return header, [_load(b) for b in blobs]
 
     def set_status(self, run_id: str, status: str) -> None:
         _check_status(status)
@@ -164,7 +167,7 @@ class MemoryJournal:
     def load_thread(self, thread_id: str) -> Dict[str, Any]:
         with self._lock:
             blob = self._threads.get(thread_id)
-        return pickle.loads(blob) if blob is not None else {}
+        return _load(blob) if blob is not None else {}
 
     def save_thread(self, thread_id: str, values: Dict[str, Any]) -> None:
         blob = _dump(values)
@@ -276,14 +279,14 @@ class SqliteJournal:
             run_id=row[0],
             thread_id=row[1],
             fingerprint=row[2],
-            inputs=pickle.loads(row[3]),
+            inputs=_load(row[3]),
             status=row[4],
             created_at=row[5],
             updated_at=row[6],
-            carried=pickle.loads(row[7]) if row[7] is not None else {},
+            carried=_load(row[7]) if row[7] is not None else {},
         )
         steps = [
-            pickle.loads(b)
+            _load(b)
             for (b,) in conn.execute(
                 "SELECT step FROM steps WHERE run_id = ? ORDER BY seq", (run_id,)
             )
@@ -322,7 +325,7 @@ class SqliteJournal:
             .execute("SELECT vals FROM threads WHERE thread_id = ?", (thread_id,))
             .fetchone()
         )
-        return pickle.loads(row[0]) if row is not None else {}
+        return _load(row[0]) if row is not None else {}
 
     def save_thread(self, thread_id: str, values: Dict[str, Any]) -> None:
         self._conn().execute(
@@ -337,25 +340,29 @@ class SqliteJournal:
 
 def _dump(value: Any) -> bytes:
     try:
-        return pickle.dumps(value, protocol=5)
-    except Exception as exc:  # noqa: BLE001 — named below
-        raise JournalError(_unpicklable(value, exc)) from exc
+        return codec.dumps(value)
+    except codec.CodecError as exc:
+        raise JournalError(_unjournalable(value, exc)) from exc
 
 
-def _unpicklable(value: Any, exc: BaseException) -> str:
+def _load(blob: Any) -> Any:
+    try:
+        return codec.loads(blob)
+    except codec.CodecError as exc:
+        raise JournalError(f"the journal holds a value this process cannot read: {exc}") from exc
+
+
+def _unjournalable(value: Any, exc: BaseException) -> str:
     """Which write or event could not be journalled, by op and var."""
     if isinstance(value, Step):
         for op, var, _ctx, v in value.writes:
             try:
-                pickle.dumps(v, protocol=5)
-            except Exception:  # noqa: BLE001
+                codec.encode(v)
+            except codec.CodecError:
                 return (
                     f"{op}.{var} wrote a {type(v).__name__}, which cannot be journalled "
-                    f"({type(exc).__name__}: {exc}). A durable run's values must pickle: "
-                    "return plain data, or keep the object in a resource and pass its key"
+                    f"({exc}). Return plain data, or keep the object in a resource and "
+                    "pass its key"
                 )
-        return (
-            f"{value.op} yielded something that cannot be journalled "
-            f"({type(exc).__name__}: {exc}); a durable run's outputs must pickle"
-        )
-    return f"a {type(value).__name__} cannot be journalled ({type(exc).__name__}: {exc})"
+        return f"{value.op} yielded something that cannot be journalled ({exc})"
+    return f"a {type(value).__name__} cannot be journalled ({exc})"

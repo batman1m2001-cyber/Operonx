@@ -38,8 +38,6 @@ them. A resume runs them; ``answers`` give a parked interrupt its response.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import pickle
 import queue
 import threading
 from collections import Counter
@@ -49,6 +47,7 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence,
 
 from operonx.core.loggings import LOGGER
 
+from . import codec
 from .journal import END, PARKED, Journal, JournalError, Step
 
 __all__ = ["DURABILITY", "ON_RESUME", "NonDeterministicResume", "RunRecorder"]
@@ -99,26 +98,23 @@ class _Recorded:
 
 
 def _digest(op: str, event: Any) -> str:
-    """A yield's fingerprint, for checking it again on resume. Pickling it
+    """A yield's fingerprint, for checking it again on resume. Encoding it
     is also the first place a value that cannot be journalled shows: named
     here by op and var."""
     try:
-        blob = pickle.dumps(event, protocol=5)
-    except Exception as exc:  # noqa: BLE001 — named below
+        return codec.digest(event)
+    except codec.CodecError as exc:
         outputs = event[1] if isinstance(event, tuple) and len(event) == 2 else None
         for var, value in outputs.items() if isinstance(outputs, dict) else ():
             try:
-                pickle.dumps(value, protocol=5)
-            except Exception:  # noqa: BLE001
+                codec.encode(value)
+            except codec.CodecError:
                 raise JournalError(
                     f"{op}.{var} wrote a {type(value).__name__}, which cannot be journalled "
-                    f"({type(exc).__name__}: {exc}). A durable run's values must pickle: "
-                    "return plain data, or keep the object in a resource and pass its key"
+                    f"({exc}). Return plain data, or keep the object in a resource and "
+                    "pass its key"
                 ) from exc
-        raise JournalError(
-            f"{op} yielded something that cannot be journalled ({type(exc).__name__}: {exc})"
-        ) from exc
-    return hashlib.blake2b(blob, digest_size=16).hexdigest()
+        raise JournalError(f"{op} yielded something that cannot be journalled ({exc})") from exc
 
 
 class RunRecorder:

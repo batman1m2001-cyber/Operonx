@@ -45,7 +45,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yields are checked against the journal: one that yields otherwise raises
   `NonDeterministicResume`). `durability="sync" | "async" | "exit"` picks when steps reach
   the journal; `engine.runs(status)` lists them; a changed graph is refused unless
-  `allow_graph_change=True`. Values must pickle — one that does not names its op and var.
+  `allow_graph_change=True`. Values are journalled as tagged JSON (no pickle: reading a journal runs no code) and come back
+  exactly — tuples, sets, bytes, dates, dataclasses, pydantic models, enums; any other type names
+  its op and var.
   Without `journal=` nothing changes (no cost: same timing as before on a 3000-item stream).
   Guide 08 "Durable runs".
 - **Durable approvals and drains** (R3b). With a journal, an `InterruptOp` parks the run instead

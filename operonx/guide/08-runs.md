@@ -320,8 +320,9 @@ asyncio.run(main())
 - **`durability=`** `"async"` (the default: a background writer; a crash
   loses at most the last steps, which run again), `"sync"` (each step
   committed before the next op sees it), `"exit"` (written when the run ends).
-- **Values must pickle** (the journal gives back exactly what an op returned).
-  One that does not fails the run naming the op and the output.
+- **Values are journalled as JSON** and come back exactly: plain data, tuples, sets,
+  bytes, dates, Decimal, UUID, and dataclasses, pydantic models and enums of them.
+  Any other type fails the run, naming the op and the output.
 - **The graph must be the one that ran:** `resume` refuses a graph whose ops,
   code or wiring changed (`allow_graph_change=True` to resume anyway).
 - A generator that had yielded and not ended runs again, its first yields
