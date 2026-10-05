@@ -506,3 +506,94 @@ def test_align_exit_codes_and_its_record(project, capsys):
     assert rec.evaluator_version == "v1" and rec.passed is True
 
     assert _eval("align", "judge:polite", "--human", "review") == 2  # no such human scores
+
+
+# ── online eval and review queues (EVALS_PLAN §14) ─────────────────────────
+
+ONLINE_CHECKS = """
+def refund_said(output=None):
+    return (output or {}).get("label") != "refund"
+"""
+
+
+def _online_project(project):
+    (project / "online_checks.py").write_text(ONLINE_CHECKS)
+    (project / "traffic.jsonl").write_text(
+        "".join(
+            json.dumps(t) + "\n" for t in ["hello", "I want my money back", "hi", "money back now"]
+        )
+    )
+    (project / "resources.yaml").write_text(
+        f"run_store:main:\n  backend: sqlite\n  path: {project / 'runs.sqlite'}\n"
+        f"score_store:main:\n  backend: sqlite\n  path: {project / 'scores.sqlite'}\n"
+    )
+    (project / "operonx.toml").write_text(
+        """[project]
+name = "demo"
+
+[resources]
+overlay = "resources.yaml"
+
+[[job]]
+name       = "bot"
+graph      = "labels:flow"
+source     = "traffic.jsonl"
+item_input = "text"
+trace      = ["run_store:main"]
+
+[[job]]
+name       = "quality"
+runs       = { origin = "job", name = "bot" }
+store      = "run_store:main"
+scores     = "score_store:main"
+evaluators = ["online_checks:refund_said"]
+queue      = { to = "refunds", when = "any_failed" }
+schedule   = "*/10 * * * *"
+
+[[queue]]
+name      = "refunds"
+reviewers = 1
+rubric    = { resolved = "bool" }
+"""
+    )
+
+
+def test_an_online_eval_runs_from_the_manifest_and_fills_its_queue(project, capsys):
+    _online_project(project)
+    assert main(["run", "bot"]) == 0
+    assert main(["run", "quality"]) == 0
+    scores = open_score_store({"backend": "sqlite", "path": str(project / "scores.sqlite")})
+    got = scores.scores(ScoreFilter(rule="quality"))
+    assert len(got) == 4 and sum(1 for s in got if not s.passed) == 2
+
+    capsys.readouterr()
+    assert _eval("queue", "list", "refunds") == 0
+    assert "refunds: 2 waiting for 1 reviewer(s)" in capsys.readouterr().out
+
+    # a second live pass finds nothing new; a backfill judges the window again, same rows
+    assert main(["run", "quality"]) == 0
+    assert _eval("online", "backfill", "quality", "--since", "1d") == 0
+    assert "4 runs judged" in capsys.readouterr().out
+    assert len(scores.scores(ScoreFilter(rule="quality"))) == 4
+
+
+def test_queue_commands_refuse_an_undeclared_queue(project, capsys):
+    _online_project(project)
+    assert _eval("queue", "list", "nope") == 2
+    assert "no [[queue]] named 'nope'" in capsys.readouterr().err
+
+
+def test_migrate_reviews_writes_studio_reviews_as_scores(project, capsys):
+    _online_project(project)
+    (project / ".operonx").mkdir(exist_ok=True)
+    (project / ".operonx" / "reviews.jsonl").write_text(
+        json.dumps({"run": "t1", "verdict": "bad", "labels": [], "note": "", "user": "ann"}) + "\n"
+    )
+    (project / "operonx.toml").write_text(
+        (project / "operonx.toml").read_text() + '\n[evals]\nscores = "score_store:main"\n'
+    )
+    assert _eval("migrate-reviews") == 0
+    assert "1 reviews written" in capsys.readouterr().out
+    scores = open_score_store({"backend": "sqlite", "path": str(project / "scores.sqlite")})
+    (row,) = scores.scores(ScoreFilter(score_name="review"))
+    assert (row.trace_id, row.label, row.author) == ("t1", "bad", "ann")

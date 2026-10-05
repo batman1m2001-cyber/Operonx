@@ -565,6 +565,10 @@ def build_job(spec: Any, root: Path) -> Any:
         from .evals import Eval
 
         return Eval.from_spec(spec, root)
+    if (spec.options or {}).get("runs") is not None:
+        from .evals.online import OnlineEval
+
+        return OnlineEval.from_spec(spec, root)
     return Job.from_spec(spec, root)
 
 

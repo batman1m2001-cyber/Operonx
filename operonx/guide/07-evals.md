@@ -566,3 +566,91 @@ assert j["ties"] == 3  # the same labels both times: neither is better
 
 `operonx eval compare A B --pairwise judges:better` adds the same table to
 the comparison.
+
+## Production traffic: online evals
+
+An experiment has expected answers; production does not. An `OnlineEval`
+judges runs that already happened — read back from the run store, after
+the service answered — with checks that need no reference. Nothing runs on
+the service's path, so its latency cannot move.
+
+```python
+import asyncio
+
+from operonx.app.evals import OnlineEval
+from operonx.app.jobs import Job
+from operonx.telemetry.runs.sqlite import SqliteRunStore
+from operonx.telemetry.scores import ScoreFilter, open_score_store
+
+runs = SqliteRunStore(path="runs.sqlite")
+traffic = ["hello", "I want my money back", "money back please", "hi"]
+asyncio.run(Job("bot", graph="labels:flow", source=traffic, item_input="text", trace=[runs]).run())
+
+
+def no_refund(output) -> bool:  # reference-free: it reads only what the run said
+    return output["label"] != "refund"
+
+
+scores = open_score_store({"backend": "files"})
+online = OnlineEval(
+    "refund_watch",
+    runs={"origin": "job", "name": "bot"},  # which runs: a RunFilter
+    store=runs,
+    evaluators=[no_refund],
+    scores=scores,
+    sample=1.0,                             # production: 0.05, stable per trace id
+    queue={"to": "refunds", "when": "any_failed"},
+)
+run = asyncio.run(online.run())             # one pass; the next starts after it
+print(run.meta["online"]["checks"])          # {'no_refund': {'passed': 2, 'failed': 2, ...}}
+assert len(scores.scores(ScoreFilter(rule="refund_watch"))) == 4
+assert asyncio.run(online.run()).counts.get("ok", 0) == 0  # nothing new since
+```
+
+- Declared, it is a `[[job]]` with `runs = {…}` instead of a `graph` (plus
+  `store`, `scores`, `evaluators`, and optionally `sample`, `target`,
+  `budget_usd_per_day`, `queue`); cron calls `operonx run refund_watch`.
+- `sample` is stable — `sha1(trace_id)` under the rate — so a second
+  worker and a backfill judge the same runs.
+  `operonx eval online backfill refund_watch --since 7d` judges a past
+  window (a new judge on last week's traffic) and leaves the cursor alone.
+- `budget_usd_per_day` caps what judges spend in a UTC day across hosts;
+  past it, code checks still run and the item says `budget_exhausted`.
+- An evaluator taking `expected` is refused: production has no expected
+  answer. It gets `input`, `output` (the run's request and answer),
+  `trace`, `trace_summary`, `run` and `judging`.
+- An alert on `score_fail_rate:no_refund` or `score_mean:<score>` watches
+  the scores like `error_rate` watches runs.
+
+## Review queues: what people look at
+
+A queue is declared in `operonx.toml` (`[[queue]]` with `name`,
+`reviewers`, `rubric`) and filled by an online eval's `queue = {to = …}` or
+by `operonx eval queue add`. A review is a human score, so it is what a
+judge is aligned against.
+
+```python
+from operonx.app.evals import QueueSpec, pending, queue_agreement, review
+from operonx.telemetry.scores import open_score_store
+
+scores = open_score_store({"backend": "files"})  # the online eval's store, from above
+spec = QueueSpec("refunds", rubric={"resolved": "bool"}, reviewers=1)
+waiting = pending(scores, ".operonx/queues", spec)
+assert len(waiting) == 2  # the two runs the check failed
+item, reviewed_by = waiting[0]
+review(scores, author="ann", verdict="bad", rubric={"resolved": False},
+       note="promised a refund we do not give", trace_id=item.trace_id, queue="refunds")
+assert len(pending(scores, ".operonx/queues", spec)) == 1
+print(queue_agreement(scores, "refunds"))  # κ needs two people on ≥ 10 items
+```
+
+`operonx eval queue list refunds` prints what still waits, and
+`operonx eval queue add refunds --experiment <id> --failed` queues an
+experiment's failed cases.
+
+- `reviewers = 2` sends each item to two people; `queue_agreement`
+  reports Cohen's κ between them per rubric entry — if people disagree,
+  aligning a judge against them means little.
+- Studio's older `reviews.jsonl` reads as review scores
+  (`reviews_as_scores`); `operonx eval migrate-reviews` writes them to the
+  score store once.

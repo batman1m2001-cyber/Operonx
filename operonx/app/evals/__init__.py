@@ -62,6 +62,13 @@ any experiment back — from its record or the store — for :func:`compare`,
 reports (:mod:`.report`: Markdown, JSON, JUnit XML). ``operonx eval`` is
 the command line over all of it, and :mod:`.pytest_plugin` (opt-in) makes
 a pytest session one experiment.
+
+**Production traffic** is judged after the fact: :class:`OnlineEval` reads a
+service's stored runs, keeps a stable :func:`sampled` share, runs
+reference-free evaluators under a daily budget and writes scores with its
+``rule`` name — never on the service's path (:mod:`.online`). Runs worth a
+person's look go to a review queue (:mod:`.queues`); a :func:`review` is a
+human score, so :func:`~.align.align` measures judges against reviews.
 """
 
 from . import trajectory
@@ -73,8 +80,10 @@ from .experiments import ExperimentData, load_experiment
 from .gate import Gate
 from .job import Eval
 from .judges import GraphEvaluator, Judge, PairwiseJudge, judge, llm_judge, pairwise
+from .online import OnlineEval, sampled
 from .pairs import compare_pairwise
 from .publish import publish
+from .queues import QueueSpec, enqueue, pending, queue_agreement, review
 from .rescoring import Rescored, rescore
 from .traceview import OpRow, ToolCall, TraceView
 from .trajectory import budget
@@ -86,8 +95,10 @@ __all__ = [
     "Gate",
     "GraphEvaluator",
     "Judge",
+    "OnlineEval",
     "OpRow",
     "PairwiseJudge",
+    "QueueSpec",
     "Rescored",
     "ToolCall",
     "TraceView",
@@ -97,6 +108,7 @@ __all__ = [
     "compare_pairwise",
     "contains",
     "dataset_path",
+    "enqueue",
     "exact",
     "fuzzy",
     "json_match",
@@ -104,8 +116,12 @@ __all__ = [
     "llm_judge",
     "load_experiment",
     "pairwise",
+    "pending",
     "publish",
+    "queue_agreement",
     "rescore",
+    "review",
+    "sampled",
     "trajectory",
     "verdict_of",
 ]

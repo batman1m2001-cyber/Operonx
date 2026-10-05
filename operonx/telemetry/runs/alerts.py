@@ -179,7 +179,9 @@ def _evaluate_scores(
         rows = [s for s in rows if s.value is not None]
     st.runs = len(rows)
     if len(rows) < max(1, alert.min_runs):
-        st.note = f"{len(rows)} {name} scores in the window — fewer than {alert.min_runs}, not judged"
+        st.note = (
+            f"{len(rows)} {name} scores in the window — fewer than {alert.min_runs}, not judged"
+        )
         return st
     if kind == "score_fail_rate":
         st.value = sum(1 for s in rows if not s.passed) / len(rows)

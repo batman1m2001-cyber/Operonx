@@ -315,6 +315,36 @@ class OnlineEval(Job):
             **kwargs,
         )
 
+    @classmethod
+    def from_spec(cls, spec: Any, root: Union[str, Path, None] = None) -> "OnlineEval":
+        """An OnlineEval from a ``[[job]]`` block with ``runs = {…}``."""
+        from ..serve.registry import load_object
+
+        root = Path(root) if root is not None else Path.cwd()
+        opts = dict(spec.options)
+        evaluators = [
+            load_object(e, field=f"[[job]] {spec.name!r} evaluators") if isinstance(e, str) else e
+            for e in opts.get("evaluators") or []
+        ]
+        record_dir = Path(spec.record_dir) if spec.record_dir else Path("online")
+        return cls(
+            spec.name,
+            runs=opts["runs"],
+            store=opts["store"],
+            evaluators=evaluators,
+            scores=opts["scores"],
+            sample=float(opts.get("sample", 1.0)),
+            target=str(opts.get("target") or "trace"),
+            budget_usd_per_day=opts.get("budget_usd_per_day"),
+            queue=opts.get("queue"),
+            queues_dir=root / ".operonx" / "queues",
+            trace=list(spec.trace) if spec.trace is not None else (),
+            record_dir=record_dir if record_dir.is_absolute() else root / record_dir,
+            concurrency=spec.concurrency,
+            schedule=spec.schedule,
+            description=spec.description,
+        )
+
     # -- a pass ------------------------------------------------------------------
 
     @property

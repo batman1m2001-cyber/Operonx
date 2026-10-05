@@ -39,11 +39,13 @@ Exit status — ``run``, and ``compare`` with a ``--tolerance``:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import dataclasses
 import json
 import os
 import subprocess
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -903,7 +905,114 @@ def _parser() -> argparse.ArgumentParser:
     ds.add_argument("action", choices=("validate", "stats", "diff"))
     ds.add_argument("name", help="a dataset name (datasets/<name>.jsonl) or a path")
     ds.add_argument("--against", default="HEAD", help="diff: the git ref (default: HEAD)")
+
+    on = command("online", "judge a past window of stored runs (a live pass is `operonx run`)")
+    on.add_argument("action", choices=("backfill",))
+    on.add_argument("name", help="an online eval the project declares")
+    on.add_argument("--since", required=True, help="7d, 24h, 30m ago, or epoch seconds")
+    on.add_argument("--until", default=None, help="the window's end (default: now)")
+
+    qu = command("queue", "fill a review queue, or list what waits in it")
+    qu.add_argument("action", choices=("add", "list"))
+    qu.add_argument("queue", help="a [[queue]] the project declares")
+    qu.add_argument("--traces", nargs="+", default=None, metavar="ID", help="runs to add")
+    qu.add_argument("--experiment", default=None, help="add this experiment's cases")
+    qu.add_argument("--failed", action="store_true", help="with --experiment: failed cases only")
+
+    command("migrate-reviews", "write Studio's reviews.jsonl to the score store as human scores")
     return parser
+
+
+def _since(text: str, now: float) -> float:
+    """``7d``, ``24h``, ``30m`` ago, or epoch seconds."""
+    text = text.strip()
+    units = {"d": 86400, "h": 3600, "m": 60}
+    if text[-1:] in units and text[:-1].replace(".", "", 1).isdigit():
+        return now - float(text[:-1]) * units[text[-1]]
+    try:
+        return float(text)
+    except ValueError:
+        raise _Usage(f"{text!r} is not a duration (7d, 24h, 30m) or epoch seconds") from None
+
+
+def _cmd_online(project: _Project, args: argparse.Namespace) -> int:
+    from operonx.app.evals.online import OnlineEval
+
+    if project.app is None:
+        raise _Usage(f"no operonx.toml at or above {Path.cwd()}: online evals are declared there")
+    found = project.app.job(args.name)
+    if not isinstance(found, OnlineEval):
+        raise _Usage(f"{args.name!r} is a {type(found).__name__}, not an online eval")
+    now = time.time()
+    since = _since(args.since, now)
+    until = _since(args.until, now) if args.until else None
+    run = asyncio.run(found.backfill(since, until).run())
+    online = run.meta.get("online") or {}
+    print(
+        f"{args.name}: backfill {run.run_id} — {run.counts.get('ok', 0)} runs judged, "
+        f"{online.get('unsampled', 0)} not sampled, {online.get('queued', 0)} queued, "
+        f"${online.get('spent_usd_today', 0):.4f} spent today"
+    )
+    return 0 if run.status == "ok" else 1
+
+
+def _queue_spec(project: _Project, name: str) -> Any:
+    specs = {q.name: q for q in (project.app.manifest.queues if project.app else ())}
+    if name not in specs:
+        known = ", ".join(sorted(specs)) or "none"
+        raise _Usage(f"no [[queue]] named {name!r} in operonx.toml (declared: {known})")
+    return specs[name]
+
+
+def _cmd_queue(project: _Project, args: argparse.Namespace) -> int:
+    from operonx.app.evals.queues import enqueue, pending
+
+    spec = _queue_spec(project, args.queue)
+    queues_dir = project.root / ".operonx" / "queues"
+    if args.action == "add":
+        added = 0
+        for trace_id in args.traces or ():
+            enqueue(queues_dir, spec.name, trace_id=trace_id, source="cli")
+            added += 1
+        if args.experiment:
+            from operonx.app.evals import load_experiment
+
+            data = load_experiment(args.experiment, store=project.scores())
+            for item in data.items:
+                if args.failed and item.get("passed") is not False:
+                    continue
+                failed = [n for n, c in (item.get("checks") or {}).items() if not c.get("passed")]
+                enqueue(
+                    queues_dir,
+                    spec.name,
+                    target="item",
+                    experiment_id=data.experiment_id,
+                    case_id=str(item.get("case")),
+                    trace_id=item.get("trace_id"),
+                    source=f"experiment:{data.experiment_id}",
+                    reason=", ".join(failed),
+                )
+                added += 1
+        if not added:
+            raise _Usage("queue add takes --traces ID … or --experiment ID [--failed]")
+        print(f"{spec.name}: {added} added")
+        return 0
+    left = pending(project.scores(), queues_dir, spec)
+    for item, who in left:
+        what = item.trace_id or item.session_id or f"{item.experiment_id}/{item.case_id}"
+        by = f" (reviewed by {', '.join(who)})" if who else ""
+        print(f"{item.target:8} {what}  {item.reason or item.source}{by}")
+    print(f"{spec.name}: {len(left)} waiting for {spec.reviewers} reviewer(s)")
+    return 0
+
+
+def _cmd_migrate_reviews(project: _Project, args: argparse.Namespace) -> int:
+    from operonx.app.evals.queues import migrate_reviews
+
+    path = project.root / ".operonx" / "reviews.jsonl"
+    n = migrate_reviews(path, project.scores())
+    print(f"{n} reviews written to the score store from {path}")
+    return 0
 
 
 _COMMANDS = {
@@ -916,6 +1025,9 @@ _COMMANDS = {
     "align": _cmd_align,
     "list": _cmd_list,
     "dataset": _cmd_dataset,
+    "online": _cmd_online,
+    "queue": _cmd_queue,
+    "migrate-reviews": _cmd_migrate_reviews,
 }
 
 

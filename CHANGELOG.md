@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Online evals: production runs judged after the fact** (`operonx.app.evals.OnlineEval`).
+  A `[[job]]` with `runs = {origin = "service", name = "call"}` instead of a `graph` reads the
+  run store from a cursor, keeps a stable `sample` (by `sha1(trace_id)`), runs reference-free
+  evaluators (one taking `expected` is refused) and writes scores with `rule = <name>` and a
+  clipped `snapshot`. `budget_usd_per_day` caps judge spend per UTC day across hosts; failing
+  runs can go to a review queue (`queue = {to = …}`). `operonx eval online backfill <name>
+  --since 7d` judges a past window without moving the cursor. Nothing runs on the service's
+  path. `TraceView.input` / `.output` give a stored run's request and answer.
+- **Review queues** (`operonx.app.evals.queues`): `[[queue]]` in `operonx.toml` (`name`,
+  `rubric`, `reviewers`); `review()` writes a person's verdict as `source="human"` scores, so
+  `align` measures judges against reviews; `queue_agreement` reports κ between reviewers;
+  `operonx eval queue add|list`; Studio's `reviews.jsonl` reads as scores
+  (`reviews_as_scores`) and `operonx eval migrate-reviews` writes it to the score store.
+- **Alerts on scores:** `score_mean:<score>` (fires when the mean drops below) and
+  `score_fail_rate:<score>`, evaluated over the score store with `evaluate(..., scores=)`.
+
 - **`child()`'s handle takes `redact`** (`dict -> dict`), applied to the
   step's inputs and outputs by every exporter — `row_of` (every run store),
   the Local consumer's view and the Langfuse consumer — through

@@ -301,3 +301,48 @@ def test_cursor_round_trips(tmp_path):
     c.save(tmp_path / "c.json")
     assert Cursor.load(tmp_path / "c.json") == c
     assert Cursor.load(tmp_path / "missing.json") == Cursor()
+
+
+# ── never inline (D76) ───────────────────────────────────────────────────
+
+
+def test_a_served_request_runs_no_evaluator(runs, scores, tmp_path):
+    """The service writes its run and answers; the evaluator runs only when
+    the online pass reads the run later."""
+    pytest.importorskip("starlette")
+    from starlette.testclient import TestClient
+
+    from operonx import Operon
+    from operonx.app.manifest import ServeSpec
+    from operonx.app.serve import egress, ingress
+    from operonx.app.serve.app import build_app
+
+    calls = []
+
+    def watched(output) -> bool:
+        calls.append(output)
+        return True
+
+    @graph
+    def door():
+        src = ingress()
+        a = answer(text=src["item"])
+        out = egress(item=a["reply"])
+        START >> src >> a >> out >> END
+
+    online = OnlineEval(
+        "watch",
+        runs={"origin": "service"},
+        store=runs,
+        evaluators=[watched],
+        scores=scores,
+        record_dir=tmp_path / "online",
+    )
+    spec = ServeSpec(name="chat", kind="http", graph="x:y", path="/chat", method="POST")
+    app = build_app((spec,), engines={"chat": Operon(door, trace=[runs])})
+    with TestClient(app) as client:
+        assert client.post("/chat", json="hello").status_code == 200
+
+    assert calls == []
+    asyncio.run(online.run())
+    assert len(calls) == 1
