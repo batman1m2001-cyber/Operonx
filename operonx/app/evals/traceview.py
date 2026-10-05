@@ -267,6 +267,29 @@ class TraceView:
         return dict(self._meta.get("metadata") or {})
 
     @property
+    def input(self) -> Any:
+        """What came into the run: the first op's inputs at the root, or —
+        when that op takes none, a door's ingress or a source — what it put
+        out. ``None`` for a run with no ops."""
+        roots = self._roots()
+        if not roots:
+            return None
+        first = roots[0]
+        return first.inputs if first.inputs else first.outputs
+
+    @property
+    def output(self) -> Any:
+        """What the run answered: the last op's outputs at the root.
+        ``None`` for a run with no ops."""
+        roots = self._roots()
+        return roots[-1].outputs if roots else None
+
+    def _roots(self) -> List[OpRow]:
+        """The executions of the run's own ops, not of ops inside a
+        subgraph, nor steps an op recorded."""
+        return [r for r in self.counted if r.op_full_name.count(".") == 1 and not r.is_child]
+
+    @property
     def workflow(self) -> str:
         self._load()
         return str(self._meta.get("workflow_name") or "")
