@@ -34,7 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dies leaves a lease that lapses, and another runs the event again under the same run id (at
   least once; `max_attempts`, then `failed`). Rows of one thread run one at a time, in order. A
   schedule's ticks line up on the clock and each fires on one replica. `SqliteQueue` (one host)
-  and `PostgresQueue` (`FOR UPDATE SKIP LOCKED`) pass one contract suite.
+  and `PostgresQueue` (`FOR UPDATE SKIP LOCKED`) pass one contract suite. `requeue(id)` retries an ended
+  row by hand (same run id); `counts(service)` says how many rows are in each status.
 - **Threads carry cells between runs:** `Operon(g, journal=…, carry=["history"])`; a run started
   with `thread_id=T` begins with T's declared cells as its last run left them and saves them when
   it ends. `start`/`run` take `thread_id=`.

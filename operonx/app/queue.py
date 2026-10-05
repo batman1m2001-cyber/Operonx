@@ -285,6 +285,43 @@ class RunQueue:
             )
             return cur.rowcount == 1
 
+    def requeue(self, id: str) -> bool:  # noqa: A002
+        """Put an ended row back in the queue — a failed run retried by a
+        person, same run id, its attempts counted from zero again. Only a
+        row that ended without finishing (failed, stopped, discarded)."""
+        now = time.time()
+        with self._tx() as cur:
+            cur.execute(
+                self._sql(
+                    "UPDATE run_queue SET status = 'queued', attempts = 0, error = NULL, "
+                    "stop = NULL, worker = NULL, lease_until = NULL, available_at = ?, "
+                    "updated_at = ? WHERE id = ? AND status IN ('failed', 'stopped', 'discarded')"
+                ),
+                (now, now, id),
+            )
+            return cur.rowcount == 1
+
+    def counts(self, service: str) -> Dict[str, Any]:
+        """How many of *service*'s rows are in each status, and how long the
+        oldest queued one has waited (seconds; None when none waits)."""
+        with self._tx() as cur:
+            cur.execute(
+                self._sql(
+                    "SELECT status, COUNT(*), MIN(created_at) FROM run_queue "
+                    "WHERE service = ? GROUP BY status"
+                ),
+                (service,),
+            )
+            rows = cur.fetchall()
+        out: Dict[str, Any] = {status: 0 for status in STATUSES}
+        oldest = None
+        for status, n, first in rows:
+            out[status] = int(n)
+            if status == "queued" and first is not None:
+                oldest = time.time() - float(first)
+        out["oldest_queued_s"] = oldest
+        return out
+
     def fire_once(self, name: str, slot: str) -> bool:
         """True for exactly one caller per ``(name, slot)``, across every
         process sharing the queue: a schedule's tick fires on one replica."""
