@@ -281,6 +281,17 @@ else:
 """
 
 
+def _wait_ready(proc):
+    """Skip what the child logs to stdout (a leaked ``LOG_LEVEL=INFO`` logs
+    there) up to its READY line; its stderr is read only once it has exited,
+    since reading a live child's stderr waits for it forever."""
+    for line in proc.stdout:
+        if line.strip() == "READY":
+            return
+    proc.wait(10)
+    pytest.fail(f"the child exited before READY:\n{proc.stderr.read()}")
+
+
 def test_a_run_killed_mid_way_resumes_in_another_process(tmp_path):
     root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
     log = tmp_path / "calls.log"
@@ -297,7 +308,7 @@ def test_a_run_killed_mid_way_resumes_in_another_process(tmp_path):
         env={**os.environ, "HANG": "1"},
     )
     try:
-        assert proc.stdout.readline().strip() == "READY", proc.stderr.read()
+        _wait_ready(proc)
         os.kill(proc.pid, signal.SIGKILL)
         proc.wait(10)
     finally:
