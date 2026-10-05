@@ -110,11 +110,15 @@ res = await Runner.resume(
 from operonx.app import Application, http, websocket
 from operonx_agents import agent_service
 
-APP = Application("shop", services=[
-    agent_service(support, http("POST", "/support"), store=store),   # + POST /support/resume
-    agent_service(support, websocket("/support/ws"), store=store, max_inflight=64,
-                  name="support_ws"),
-])
+APP = Application(
+    "shop",
+    services=[
+        agent_service(support, http("POST", "/support"), store=store),  # + POST /support/resume
+        agent_service(
+            support, websocket("/support/ws"), store=store, max_inflight=64, name="support_ws"
+        ),
+    ],
+)
 # POST /support {"input": "..."}            -> {"status", "output", "run_id", "interruptions", ...}
 #   Accept: text/event-stream               -> one SSE frame per event, the last RunFinished
 # POST /support/resume {"run_id", "approvals": {"<id>": "approve" | "deny" | {"deny": "why"}}}
