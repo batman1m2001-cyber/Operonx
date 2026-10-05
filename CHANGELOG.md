@@ -247,6 +247,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An online eval accepts the default judge.** `judge(...)` defaults to `reference="auto"`
+  (it shows `expected` when a case has one), so it declares `expected`, and `OnlineEval`
+  refused every default judge. It now refuses only what cannot judge without a reference: a
+  judge with `reference=True`, or a function whose `expected` has no default.
+
 - **A subgraph no longer hands on its own input as an output when the op writing it failed.**
   An output named like one of the graph's inputs shares that input's cell. When the op
   writing it raised — or never ran, because an op before it raised — the cell still held what

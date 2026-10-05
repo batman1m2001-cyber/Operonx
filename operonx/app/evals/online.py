@@ -45,14 +45,17 @@ code checks still run, and the item says ``budget_exhausted``.
 **What an evaluator gets:** ``input`` and ``output`` (the run's request and
 answer, :attr:`TraceView.input` / :attr:`TraceView.output`), ``trace`` (the
 :class:`TraceView`), ``trace_summary``, ``run`` (the run's summary) and
-``judging``. One asking for ``expected``, ``case`` or ``row`` is refused when
-the eval is made.
+``judging``. One that cannot judge without ``expected``, ``case`` or ``row``
+(a judge with ``reference=True``, a function whose ``expected`` has no
+default) is refused when the eval is made; a judge's default
+``reference="auto"`` judges without one.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
@@ -272,7 +275,7 @@ class OnlineEval(Job):
             raise ValueError(f"online eval {name!r} has no evaluators")
         self._prepared = [prepare(ev) for ev in self.evaluators]
         for p in self._prepared:
-            asks = [a for a in OFFLINE_ONLY if p.params is not None and a in p.params]
+            asks = [a for a in OFFLINE_ONLY if _requires(p, a)]
             if asks:
                 raise ValueError(
                     f"online eval {name!r}: evaluator {p.name!r} takes {asks}, which only "
@@ -554,6 +557,23 @@ class OnlineEval(Job):
             "queue": self.queue,
         }
         return out
+
+
+def _requires(p: Any, name: str) -> bool:
+    """Whether evaluator *p* cannot judge without *name*. A judge with
+    ``reference="auto"`` (the default) shows ``expected`` only when there is
+    one, and a function's ``expected=None`` has a default: both judge a
+    production run as they are."""
+    if p.params is None or name not in p.params:
+        return False
+    reference = getattr(p.ev, "reference", None)
+    if reference is not None:  # a judge says what it needs
+        return reference is True and name == "expected"
+    try:
+        param = inspect.signature(p.fn).parameters.get(name)
+    except (TypeError, ValueError):
+        return True
+    return param is None or param.default is inspect.Parameter.empty
 
 
 def _check_queue(name: str, queue: Optional[Mapping[str, Any]]) -> Optional[Dict[str, Any]]:
