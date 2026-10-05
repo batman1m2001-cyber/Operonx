@@ -231,6 +231,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A subgraph no longer hands on its own input as an output when the op writing it failed.**
+  An output named like one of the graph's inputs shares that input's cell. When the op
+  writing it raised — or never ran, because an op before it raised — the cell still held what
+  came in, so the outputs were not all `None`, the failure went unnoticed, and the op after
+  the subgraph ran on the graph's input as if it were its answer. An output now counts only
+  when one of its writers finished without an error in that run; otherwise the subgraph
+  fails as any other whose op raised (`SubgraphError` in `$errors`, its successors skipped).
+  Declared cells are unchanged. A run without a failure pays nothing for the check.
+
 - **A subgraph whose branch went around its stream hands on its output.** A subgraph with a
   generator handed its parent one output per stream context; a run that took a branch around
   the stream (`if_(misses > 0, each).else_(done)`) had none, so the op after the subgraph
