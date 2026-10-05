@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-kb"
-version = "0.1.0"
+version = "0.2.0"
 description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
 readme = "README.md"
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 # Core: text, Markdown, HTML, DOCX/PPTX/XLSX (stdlib), SQLite catalog, local
 # blobs, in-memory index. Everything heavier is an extra (PLAN.md §1).
 dependencies = [
-    "operonx>=1.14",
+    "operonx>=1.15",
     "pydantic>=2.0",
     "defusedxml>=0.7.1",  # Office XML from untrusted files
     "httpx>=0.24",        # operonx.providers (EmbeddingOp) imports it eagerly
