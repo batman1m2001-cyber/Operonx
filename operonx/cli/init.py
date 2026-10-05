@@ -15,10 +15,11 @@ assistant reads it beside the code (what ``operonx guide --sync`` writes).
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 __all__ = ["TEMPLATES", "Template", "InitError", "plan", "init_project"]
 
@@ -107,8 +108,51 @@ def _render(text: str, values: Dict[str, str]) -> str:
     return text
 
 
-def plan(template: str, name: str) -> Dict[str, bytes]:
-    """Every file *template* writes for a project called *name*, by path."""
+def operonx_checkout(start: Path) -> Optional[Path]:
+    """The operonx source checkout *start* is inside, if any: the nearest
+    ``pyproject.toml`` above it that names the ``operonx`` project."""
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - 3.10
+        import tomli as tomllib
+
+    for folder in [start, *start.parents]:
+        manifest = folder / "pyproject.toml"
+        if not manifest.is_file():
+            continue
+        try:
+            name = (
+                tomllib.loads(manifest.read_text(encoding="utf-8")).get("project", {}).get("name")
+            )
+        except (OSError, ValueError):
+            continue
+        if name == "operonx":
+            return folder
+    return None
+
+
+def _sources(root: Path, editable: Optional[Path]) -> str:
+    """The pyproject's ``[tool.uv.sources]`` pinning an operonx checkout."""
+    if editable is None:
+        return ""
+    target = Path(editable).resolve()
+    if not (target / "operonx" / "__init__.py").is_file():
+        raise InitError(f"--editable {editable}: no operonx package there (no operonx/__init__.py)")
+    try:
+        where = Path(os.path.relpath(target, root.resolve())).as_posix()
+    except ValueError:  # another drive
+        where = target.as_posix()
+    return (
+        "\n# operonx from a checkout, not PyPI (`operonx init --editable`)\n"
+        f'[tool.uv.sources]\noperonx = {{ path = "{where}", editable = true }}\n'
+    )
+
+
+def plan(
+    template: str, name: str, *, root: Optional[Path] = None, editable: Optional[Path] = None
+) -> Dict[str, bytes]:
+    """Every file *template* writes for a project called *name*, by path.
+    With *editable*, the project's operonx is that checkout."""
     from operonx import __version__, guide
 
     if template not in TEMPLATES:
@@ -126,6 +170,7 @@ def plan(template: str, name: str) -> Dict[str, bytes]:
         "extras": t.extras,
         "summary": t.summary,
         "requires": "".join(f'\n    "{r}",' for r in t.requires),
+        "sources": _sources(Path(root or "."), editable),
     }
     files: Dict[str, bytes] = {}
     for layer in (COMMON, template):
@@ -141,14 +186,25 @@ def plan(template: str, name: str) -> Dict[str, bytes]:
 
 
 def init_project(
-    root: Path, *, template: str = "hello", name: str = None, force: bool = False
+    root: Path,
+    *,
+    template: str = "hello",
+    name: str = None,
+    force: bool = False,
+    editable: Optional[Path] = None,
 ) -> InitResult:
-    """Write *template* into *root*. An existing file is kept unless *force*."""
+    """Write *template* into *root*. An existing file is kept unless *force*.
+
+    *editable* pins operonx to that checkout (``[tool.uv.sources]``); a
+    project made inside an operonx checkout pins it without being asked —
+    there, PyPI's operonx is never the one being worked on."""
     root = Path(root)
     if root.exists() and not root.is_dir():
         raise InitError(f"{root} exists and is not a directory")
     name = name or root.resolve().name
-    files = plan(template, name)
+    if editable is None:
+        editable = operonx_checkout(root.resolve())
+    files = plan(template, name, root=root, editable=editable)
     result = InitResult(root=root, name=name, template=template)
     for rel, content in files.items():
         path = root / rel

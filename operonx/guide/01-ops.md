@@ -230,6 +230,11 @@ asyncio.run(main())
   request; without it a silent gateway holds a call for 120 s) and
   `structured_output: native | tool | prompted` (how the layer above asks
   it for schema-shaped answers; default `prompted`).
+- **Tests need no model:** `api_type: fake` answers from a `script:` of
+  turns, in order (the last repeats) — a string, `{tool_calls: [{name:
+  lookup, args: {id: 7}}]}`, `{status: 429}` (raises the SDK's error),
+  `{delay: 0.5, text: ...}`, `{echo: "Echo: "}` (the last user message
+  back). No network; `hub.get("llm:<key>").calls` holds what it was sent.
 
 ## Agents — a model that calls tools
 

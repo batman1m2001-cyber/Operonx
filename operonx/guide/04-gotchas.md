@@ -451,6 +451,15 @@ asyncio.run(main())
 - **Inputs and outputs are traced as JSON.** A dict with tuple keys breaks
   the trace; use string keys.
 - **HTTP doors reply after the run ends**; stream with a websocket door.
+- **A keyword your function takes is its input.** `@op def label(id, name)`
+  called `label(id=7, name="x")` gets both, though `id` and `name` are also
+  op settings. To give such a setting, `label.configure(name="labeller")(id=7,
+  name="x")`.
+- **A reducer cell's final value is `out["$cells"]`** (the root's declared
+  cells by name); `out["<cell>"]` is what the run wrote to it.
+- **Logs go to stderr**, at `OPERONX_LOG_LEVEL` (else `LOG_LEVEL`, else
+  WARNING). "Slow op" fires past `OPERONX_SLOW_OP_MS` (100), never for
+  model, store, graph, agent, door or generator ops.
 - **`trace_clickhouse` drops runs rather than wait.** Its queue is
   bounded (`queue_size`); while ClickHouse is down or slow, runs past the
   bound are dropped. A warning is logged once per outage, and the count is

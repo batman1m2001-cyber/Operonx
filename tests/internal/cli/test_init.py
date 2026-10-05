@@ -335,3 +335,47 @@ class TestGuide:
         with pytest.raises(SystemExit) as exc:
             main(["guide", "--path", "--sync"])
         assert exc.value.code == 2
+
+
+# ── an editable operonx (DX_PLAN X2) ────────────────────────────────────────
+
+
+def _checkout(root):
+    """A stand-in operonx checkout: its pyproject names operonx."""
+    (root / "operonx").mkdir(parents=True)
+    (root / "operonx" / "__init__.py").write_text("")
+    (root / "pyproject.toml").write_text('[project]\nname = "operonx"\n')
+    return root
+
+
+def test_init_editable_pins_the_checkout(tmp_path):
+    from operonx.cli.init import init_project
+
+    checkout = _checkout(tmp_path / "Operon")
+    init_project(tmp_path / "proj", template="hello", editable=checkout)
+    text = (tmp_path / "proj" / "pyproject.toml").read_text()
+    assert '[tool.uv.sources]\noperonx = { path = "../Operon", editable = true }' in text
+
+
+def test_init_inside_a_checkout_pins_it_unasked(tmp_path):
+    from operonx.cli.init import init_project
+
+    checkout = _checkout(tmp_path / "Operon")
+    init_project(checkout / "examples" / "demo", template="hello")
+    text = (checkout / "examples" / "demo" / "pyproject.toml").read_text()
+    assert 'operonx = { path = "../..", editable = true }' in text
+
+
+def test_init_elsewhere_uses_pypi(tmp_path):
+    from operonx.cli.init import init_project
+
+    init_project(tmp_path / "proj", template="hello")
+    text = (tmp_path / "proj" / "pyproject.toml").read_text()
+    assert "tool.uv.sources" not in text and "{{sources}}" not in text
+
+
+def test_init_editable_refuses_a_folder_without_operonx(tmp_path):
+    from operonx.cli.init import InitError, init_project
+
+    with pytest.raises(InitError, match="no operonx package"):
+        init_project(tmp_path / "proj", template="hello", editable=tmp_path)

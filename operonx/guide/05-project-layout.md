@@ -195,3 +195,7 @@ operonx run score_calls
 - **An eval** is a `datasets/<name>.jsonl` and an `Eval(...)` (a kind of
   job) in `app/main.py`; `operonx run <eval>` gates CI.
 - **Door hooks** (`on_session`, `on_close`) go in `app/`, beside `main.py`.
+- **While developing:** `operonx serve --reload` restarts on a change;
+  `--host`/`--port` bind elsewhere than declared. Every listener answers
+  `GET /healthz`. `operonx init --editable ../Operon` makes a project use an
+  operonx checkout (the default when made inside one).

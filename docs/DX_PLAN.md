@@ -1,6 +1,6 @@
 # DX §1.3 — developer experience
 
-Status: plan (2026-10-05). Roadmap `docs/roadmap/ROADMAP.md` §1.3, findings C16, C17.
+Status: done (2026-10-05). Roadmap `docs/roadmap/ROADMAP.md` §1.3, findings C16, C17.
 
 ## 1. Audit
 
