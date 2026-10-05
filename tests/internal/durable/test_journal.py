@@ -327,3 +327,39 @@ def test_a_run_killed_mid_way_resumes_in_another_process(tmp_path):
     # charged once across both processes; the shipping that was cut off ran again
     assert log.read_text().split() == ["charge", "ship", "ship"]
     assert time.monotonic() - started < 30
+
+
+def test_an_interrupt_an_op_yielded_is_replayed_on_resume():
+    from operonx.core import Interrupt
+
+    @op
+    async def stops(x: int):
+        yield {"y": x}
+        yield Interrupt(ctx_to_cancel=("main", "[9]"), reason="nothing there")
+
+    @op
+    def stops_self(y: int):
+        return Interrupt(reason="me")  # Interrupt.SELF: resolved on replay too
+
+    @graph
+    def g(x):
+        s = stops(x=x)
+        m = stops_self(y=s["y"])
+        START >> s >> m >> END
+
+    journal = MemoryJournal()
+    engine = Operon(g, params={"x": None}, journal=journal, durability="sync")
+
+    async def first():
+        handle = engine.start({"x": 1}, run_id="r")
+        await handle.collect()
+        return handle.interrupts
+
+    async def again():
+        handle = await engine.resume("r")
+        await handle.collect()
+        return handle.interrupts
+
+    seen = asyncio.run(first())
+    assert len(seen) == 2
+    assert asyncio.run(again()) == seen  # replayed, not lost

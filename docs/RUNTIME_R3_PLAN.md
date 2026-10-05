@@ -73,7 +73,7 @@ op's writes interleave inside one step.
 | Phase | Ships | Gate |
 |---|---|---|
 | **R3a** | journal protocol, `MemoryJournal`, `SqliteJournal`, the wrapper + write observer, restore + replay, `engine.resume`, fingerprint refusal, `durability` sync/async/exit | the property test (§5) green on 500 generated graphs; `test_crash_resume_skips_completed` across a real SIGKILL; journal off: callbot suite and `bench_stream` within noise |
-| **R3b** | durable interrupts (park + `resume(answers=)`), `drain()`, generator `on_resume`, door refusal | `test_durable_interrupt_across_processes`; drain then resume equals an uninterrupted run |
+| **R3b** (done) | durable interrupts (park + `resume(answers=)`), `drain()`, generator `on_resume`, door refusal | `test_durable_interrupt_across_processes`; drain then resume equals an uninterrupted run |
 
 ## 5. Tests (each fails before its change)
 

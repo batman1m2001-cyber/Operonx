@@ -85,6 +85,17 @@ def _go_live(consumer: "Consumer", trace: Any) -> None:
     trace._execution_listeners.append(on_execution)
 
 
+def _ingress_of(graph: Any) -> Optional[str]:
+    """The full name of an ingress door anywhere in *graph*, or None."""
+    for node in (getattr(graph, "_ops", None) or {}).values():
+        if getattr(node, "door", None) == "ingress":
+            return node.full_name
+        found = _ingress_of(node)
+        if found is not None:
+            return found
+    return None
+
+
 class ExecutionHandle:
     """Async-iterable handle for a running workflow execution.
 
@@ -334,6 +345,11 @@ class ExecutionHandle:
         errors = self.errors
         if errors:
             out["$errors"] = errors
+        stopped = getattr(self.state, "_durable", None)
+        if stopped is not None and stopped.stopped == "interrupted":
+            out["$interrupted"] = list(stopped.parked)
+        elif stopped is not None and stopped.stopped == "drained":
+            out["$drained"] = True
         return out
 
     async def collect(
@@ -411,6 +427,25 @@ class ExecutionHandle:
         if unwrap:
             return self._with_errors({k: v[0] if len(v) == 1 else v for k, v in out.items()})
         return self._with_errors(out)
+
+    async def drain(self) -> None:
+        """Stop the run for a deploy, without losing it: nothing new starts,
+        the ops in flight finish and are journalled, and the run stops with
+        status ``drained``. Returns once it has; ``result()`` then has
+        ``"$drained": True``. ``await engine.resume(run_id)`` — on any worker
+        — continues it. Needs ``Operon(journal=…)``.
+        """
+        recorder = getattr(self.state, "_durable", None)
+        if recorder is None:
+            raise RuntimeError(
+                "drain(): this run has no journal= to continue it from; cancel() it instead"
+            )
+        recorder.drain()
+        if not self._scheduler_task.done():
+            try:
+                await asyncio.shield(self._scheduler_task)
+            except (Exception, asyncio.CancelledError):
+                pass
 
     def cancel(self) -> None:
         """Cancel the workflow execution.
@@ -853,6 +888,7 @@ class Operon:
         self,
         run_id: str,
         *,
+        answers: Optional[Dict[str, Any]] = None,
         allow_graph_change: bool = False,
         checkpointer=None,
         context: Any = None,
@@ -868,11 +904,16 @@ class Operon:
         the run would have had. Any process with the same graph and a
         journal holding the run can resume it.
 
+        A run parked on interrupts (its result's ``"$interrupted"``) takes
+        their responses as ``answers={interrupt_id: value}``; one left
+        unanswered parks the run again. A drained run resumes as it is.
+
         Raises:
             RuntimeError: The engine has no ``journal=``.
-            JournalError: The journal has no such run, or the graph changed
+            JournalError: The journal has no such run, the graph changed
                 since the run started (``allow_graph_change=True`` resumes
-                anyway, at the caller's risk).
+                anyway, at the caller's risk), an answer names no question
+                the run asked, or the graph reads through a door.
         """
         from operonx.durable import JournalError
 
@@ -880,6 +921,13 @@ class Operon:
             raise RuntimeError(
                 f"resume({run_id!r}): this engine has no journal=; build it with the journal "
                 "the run was recorded in"
+            )
+        door = _ingress_of(self.graph)
+        if door is not None:
+            raise JournalError(
+                f"resume({run_id!r}): {door} is a door (ingress) — its items come from a live "
+                "connection, which the journal does not hold. A served graph's runs are "
+                "journalled for audit, not resumed"
             )
         header, steps = await asyncio.to_thread(self._journal.read, run_id)
         if header.fingerprint != self.fingerprint and not allow_graph_change:
@@ -900,6 +948,14 @@ class Operon:
         )
         recorder = self._recorder(run_id, state)
         recorder.restore(state, steps, lenient=allow_graph_change)
+        asked = set(recorder.questions.values())
+        for interrupt_id in answers or {}:
+            if interrupt_id not in asked:
+                raise JournalError(
+                    f"resume({run_id!r}): the run has no question {interrupt_id!r}; it asked "
+                    f"{sorted(asked) or 'none'}"
+                )
+        recorder.answers = dict(answers or {})
         await asyncio.to_thread(self._journal.set_status, run_id, "running")
         return self._launch(
             state,
@@ -1037,7 +1093,21 @@ class Operon:
             outcome = "ok"
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
+                if recorder is not None:
+                    recorder.on_quiet = None  # ended: a stop asked now is too late
             except asyncio.CancelledError:
+                if recorder is not None and recorder.stopping is not None and recorder._quiet:
+                    # Parked on an interrupt or drained: stopped on purpose,
+                    # by the recorder, once nothing could move — not a
+                    # cancel. The handle ends with what the run made.
+                    outcome = recorder.stopped = recorder.stopping
+                    try:  # closed before the handle ends: its result and
+                        # the journal's status agree
+                        await asyncio.to_thread(recorder.close, outcome)
+                    finally:
+                        recorder = None
+                        queue.put_nowait(None)
+                    return
                 outcome = "running"  # stopped, not finished: resumable
                 if recorder is not None:
                     recorder.close(outcome)
@@ -1107,6 +1177,8 @@ class Operon:
                 )
 
         scheduler_task = asyncio.create_task(_run())
+        if recorder is not None:
+            recorder.on_quiet = scheduler_task.cancel
         return ExecutionHandle(queue, scheduler_task, state, trace=_wf_trace, graph_name=self.name)
 
     async def run(

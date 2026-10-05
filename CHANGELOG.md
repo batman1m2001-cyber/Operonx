@@ -18,7 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the journal; `engine.runs(status)` lists them; a changed graph is refused unless
   `allow_graph_change=True`. Values must pickle — one that does not names its op and var.
   Without `journal=` nothing changes (no cost: same timing as before on a 3000-item stream).
-  Guide 08 "Durable runs". Interrupts across processes and `drain()` come next (R3b).
+  Guide 08 "Durable runs".
+- **Durable approvals and drains** (R3b). With a journal, an `InterruptOp` parks the run instead
+  of holding the process: the question is journalled, the ops in flight finish, nothing new
+  starts, and the run ends `interrupted` with `"$interrupted": [{interrupt_id, op, ctx,
+  payload}]` in its result. `await engine.resume(run_id, answers={interrupt_id: value})` — in
+  any process — continues it (an unanswered question parks it again; an answer to a question
+  the run never asked is refused). `await handle.drain()` stops a run for a deploy the same way
+  (status `drained`, `"$drained": True`); `resume` continues it. A graph with an `ingress` door
+  is journalled but `resume` refuses it. Proved by a property test: 500 runs drained at a
+  random step resume to the uninterrupted result.
 - **Online evals: production runs judged after the fact** (`operonx.app.evals.OnlineEval`).
   A `[[job]]` with `runs = {origin = "service", name = "call"}` instead of a `graph` reads the
   run store from a cursor, keeps a stable `sample` (by `sha1(trace_id)`), runs reference-free
@@ -257,6 +266,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A durable run's resume replays the `Interrupt`s its ops had yielded (they were not
+  journalled, so a resumed run lost them); `Interrupt.SELF` survives pickling.
 - **An online eval's budget holds when judges run at once.** Each judge checked what had been
   spent when it started, so judges running together all saw the same total: on 121 recorded
   calls a $0.05 budget spent $0.12. A judge in flight now counts at the day's cost per judged
