@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Second messages, stream reconnect, completion callbacks** (R4b). A queued webhook's
+  `multitask="enqueue"|"reject"|"interrupt"|"rollback"` decides what a second message on a busy
+  thread does (`interrupt`/`rollback` stop the running run through its queue row, on whichever
+  replica runs it). `callback_hosts=[...]` lets a request name `?callback=<url>`, POSTed `{run_id,
+  service, status, output, errors}` when the run ends. A streamed `http` door numbers its events
+  (`id:`); `?run_id=R&after_seq=N` (or `Last-Event-ID`) reads a dropped stream on from event N.
+  The `serve` extra now includes `httpx`.
 - **Durable triggers and a run queue** (`operonx.app.queue`, R4a). `Service(kind webhook|schedule,
   queue="runs.db")` (or `queue = {url = "postgresql://…"}`): a webhook writes the event to the
   queue before its `202`, and every replica claims events with a renewed lease — a replica that

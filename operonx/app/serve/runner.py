@@ -123,6 +123,8 @@ def _note_trace_id(session: Session, handle: Any) -> None:
     trace = getattr(handle, "trace", None)
     if trace is not None and hasattr(session, "trace_id"):
         session.trace_id = trace.trace_id
+    if hasattr(session, "handle"):  # a queued session: how its run is stopped
+        session.handle = handle
 
 
 class ServeRunner:

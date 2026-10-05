@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Dict, List, Optional, Union
+import time
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
 from operonx.app.manifest import door_codec
 from operonx.core.loggings import LOGGER
@@ -106,42 +107,65 @@ class HttpSession(BoundedSession):
 
     def __init__(self, payload: Any, meta: Optional[Dict[str, Any]] = None, stream: bool = False):
         super().__init__(meta=meta, max_inflight=None)
+        # Every item the run sent, in order: the reply, and what a stream's
+        # readers follow. The n-th item is event n (from 1) of the stream,
+        # so a reader that dropped asks for what came after the last it saw.
         self.replies: List[Any] = []
         self.finished = asyncio.Event()
+        self.ended_at: Optional[float] = None
         self.stream = stream
-        # Unbounded on purpose: a per-request run is bounded by its own
-        # work, and the run is never paced by a slow reader — a reader
-        # that leaves stops the queue growing (`gone`), not the run.
-        self._frames: Optional[asyncio.Queue] = asyncio.Queue() if stream else None
+        self._grew = asyncio.Event()
+        self._readers = 0
+        # A run is never paced by a reader: one that leaves makes items
+        # "not delivered" (`gone`) until another follows, not the run wait.
         self.gone = False
         self.feed_nowait(payload)
         self.end_input()
 
     async def _send(self, item: Any) -> bool:
         self.replies.append(item)
-        if self._frames is None:
+        self._grew.set()
+        if not self.stream:
             return True
-        if self.gone:
-            return False
-        self._frames.put_nowait(item)
-        return True
+        return not self.gone
+
+    async def follow(self, after: int = 0) -> AsyncIterator[Tuple[int, Any]]:
+        """``(n, item)`` for each item after the *after*-th — those sent
+        already, then each as it is sent, until the run ends. Only for a
+        session made with ``stream=True``; any number may follow at once."""
+        if not self.stream:
+            raise RuntimeError("follow() needs an HttpSession made with stream=True")
+        self._readers += 1
+        self.gone = False
+        seen = max(int(after), 0)
+        try:
+            while True:
+                while seen < len(self.replies):
+                    seen += 1
+                    yield seen, self.replies[seen - 1]
+                if self.finished.is_set():
+                    return
+                self._grew.clear()
+                if seen < len(self.replies) or self.finished.is_set():
+                    continue
+                await self._grew.wait()
+        finally:
+            self._readers -= 1
+            if self._readers == 0:
+                self.gone = True
 
     async def frames(self) -> AsyncIterator[Any]:
         """Each item the run sends, as it sends it, until the run ends.
         Only for a session made with ``stream=True``."""
-        if self._frames is None:
-            raise RuntimeError("frames() needs an HttpSession made with stream=True")
-        while True:
-            item = await self._frames.get()
-            if item is _END:
-                return
+        async for _, item in self.follow(0):
             yield item
 
     async def close(self) -> None:
         await super().close()
-        if self._frames is not None and not self.finished.is_set():
-            self._frames.put_nowait(_END)
+        if not self.finished.is_set():
+            self.ended_at = time.monotonic()
         self.finished.set()
+        self._grew.set()
 
     @property
     def reply(self) -> Any:
@@ -151,12 +175,36 @@ class HttpSession(BoundedSession):
         return self.replies[0] if len(self.replies) == 1 else self.replies
 
 
-#: The end of an `HttpSession`'s frames.
-_END = object()
+#: How long a streamed run's items stay readable after it ended, and how
+#: many ended streams are kept: a reconnect after that gets a 404.
+STREAM_KEEP_S = 15 * 60
+STREAM_KEEP_MAX = 1000
 
 
 class HttpTransport(AsgiTransport):
     """`session = "per_request"`: one request, one run, one response."""
+
+    def __init__(self, spec: Any = None):
+        super().__init__(spec)
+        self._streams: List[HttpSession] = []
+
+    def stream_of(self, run_id: str) -> Optional[HttpSession]:
+        """The streamed session of run *run_id*, while it is kept: in
+        this process only — a reconnect must reach the same replica."""
+        for session in self._streams:
+            if session.trace_id == run_id:
+                return session
+        return None
+
+    def _keep(self, session: HttpSession) -> None:
+        now = time.monotonic()
+        self._streams = [
+            s for s in self._streams if s.ended_at is None or now - s.ended_at < STREAM_KEEP_S
+        ]
+        ended = [s for s in self._streams if s.ended_at is not None]
+        for old in ended[: max(len(ended) - STREAM_KEEP_MAX + 1, 0)]:
+            self._streams.remove(old)
+        self._streams.append(session)
 
     async def handle(self, payload: Any, meta: Optional[Dict[str, Any]] = None) -> HttpSession:
         session = HttpSession(payload, meta=meta)
@@ -168,6 +216,7 @@ class HttpTransport(AsgiTransport):
         """Start the run for one request whose caller reads it as a stream;
         read what it sends from ``session.frames()``."""
         session = HttpSession(payload, meta=meta, stream=True)
+        self._keep(session)
         self.offer(session)
         return session
 
