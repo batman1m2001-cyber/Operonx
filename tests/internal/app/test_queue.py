@@ -145,3 +145,24 @@ def test_open_queue_reads_a_door_setting(tmp_path):
     assert (tmp_path / "runs.db").exists()
     with pytest.raises(ValueError, match="url"):
         open_queue({"path": "x"})
+
+
+def test_a_failed_row_is_requeued_by_hand(queue, svc):
+    put = queue.put(svc, 1, max_attempts=1)
+    queue.claim(svc, "dead", lease_s=0.05)
+    time.sleep(0.1)
+    assert queue.claim(svc, "w") is None  # failed: its only attempt lapsed
+    assert not queue.requeue("nope")
+    assert queue.requeue(put.id)
+    again = queue.claim(svc, "w")
+    assert again.id == put.id and again.attempts == 1 and again.error is None
+    assert not queue.requeue(put.id)  # running: not an ended row
+
+
+def test_counts_by_status(queue, svc):
+    queue.put(svc, 1)
+    queue.put(svc, 2)
+    queue.claim(svc, "w")
+    counts = queue.counts(svc)
+    assert counts["queued"] == 1 and counts["running"] == 1 and counts["failed"] == 0
+    assert counts["oldest_queued_s"] >= 0
