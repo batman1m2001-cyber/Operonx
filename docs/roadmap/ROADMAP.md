@@ -53,7 +53,7 @@ Each item ships on its own branch with its own tests. Each wave has a measured g
 | D1 | Agent loop inside one op, instead of a graph back-edge | Yes, if the W1 spike shows ≤ 2 ms/turn overhead and equal trace fidelity | End of W1 |
 | D2 | Agents as a separate repo `operonx-agents` | Yes | W1 |
 | D3 | Deprecate `operonx.agents` one release after `operonx-agents` 1.0 | Yes | W4 |
-| D4 | Reserved op keywords (`id`, `name`, `start`, `stream`, … 21 of them) move behind a namespace in 2.0 | Yes, deprecation in 1.x | W2 |
+| D4 | Reserved op keywords (`id`, `name`, `start`, `stream`, … 21 of them) move behind a namespace in 2.0 | **Changed 2026-10-05:** not needed. A keyword the function takes is now its input (DX_PLAN X3), so a flat setting never collides; a clashing setting goes through `f.configure(...)`. Flat settings stay, no deprecation (callbot has ~70 correct ones) | W2 |
 | D5 | First knowledge corpus (Edupia/educa or another) | Your call; it decides the first internal eval set | W1 |
 | D6 | CI gets ClickHouse credentials to write experiments; daily judge budget for online eval | Yes; budget to be set after W2 measurements | W2 |
 
