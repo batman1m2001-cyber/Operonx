@@ -196,6 +196,7 @@ async def main(args) -> None:
         "recorded_turns": len(turns),
         "usable_turns": len(usable),
         "traces": len({t["trace_id"] for t in turns}),
+        # a count, never the words: they are real callers' speech
         "distinct_utterances": len({t["utterance"] for t in turns}),
         "recorded_window": [
             min(t["start_time"] for t in turns),
@@ -209,7 +210,7 @@ async def main(args) -> None:
     out.write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n")
     print(
         json.dumps(
-            {k: v for k, v in report.items() if k != "distinct_utterances"},
+            report,
             indent=1,
             ensure_ascii=False,
         )
