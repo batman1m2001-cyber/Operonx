@@ -35,3 +35,19 @@ async def test_a_rule_answers_from_the_conversation():
     with scripted(m=ScriptedLLM(rule)):
         res = await Runner.run(Agent(name="echo", model=Model("m")), "hi")
     assert res.output == "you said hi"
+
+
+async def test_scripted_layers_over_the_hub_so_tools_keep_real_resources(tmp_path):
+    from operonx.core.registry.resource_hub import ResourceHub as Hub
+
+    path = tmp_path / "resources.yaml"
+    path.write_text("llm:real:\n  api_type: fake\n  script: []\n", encoding="utf-8")
+    real = Hub.from_yaml(path)
+    Hub.set_instance(real)
+    try:
+        with scripted(assistant=ScriptedLLM(says("x"))) as hub:
+            assert hub.get("llm:real") is real.get("llm:real")  # not scripted: from the hub below
+            assert hub.get("llm:assistant") is hub.llms["assistant"]
+        assert Hub.instance() is real
+    finally:
+        Hub.reset_instance()
