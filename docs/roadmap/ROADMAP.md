@@ -420,7 +420,7 @@ Query: Retriever(s) → Fuser (RRF) → Reranker → hydrate through catalog →
 | K1 (W1–3) | Catalog, blob store, parsers, chunkers, dense index, ingest Job, deletes, rebuild, verify | Re-ingest of an unchanged 200-doc corpus: 0 embed calls; one-paragraph edit: ≤ 3 re-embeds; purge leaves 0 entries |
 | K2 (W4–6) | Lexical, hybrid, rerank, citations, `KBFilter`, eval sets (incl. ≥ 100 Vietnamese cases) | Hybrid becomes default only if it beats dense on Recall@10 on 2 of 3 sets; citation precision ≥ 0.9 |
 | K3 (W7–8) | Admin API + Studio Knowledge tab | 20/20 sampled citations open the right page and box |
-| K4–K6 (W9+) | Contextual enrichment and tree, multimodal, graph | Each default-on only with a measured lift |
+| K4–K6 (W9+) | Contextual enrichment and tree, multimodal, graph | Each default-on only with a measured lift. K4 built (gate open: credits), K6 merged (opt-in). **⚠️ K5 multimodal OUTSTANDING — needs a GPU machine; see operonx-kb `BACKLOG.md`** |
 
 ### Upstream asks to operonx
 
