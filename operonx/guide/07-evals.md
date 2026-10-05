@@ -598,11 +598,11 @@ online = OnlineEval(
     store=runs,
     evaluators=[no_refund],
     scores=scores,
-    sample=1.0,                             # production: 0.05, stable per trace id
+    sample=1.0,  # production: 0.05, stable per trace id
     queue={"to": "refunds", "when": "any_failed"},
 )
-run = asyncio.run(online.run())             # one pass; the next starts after it
-print(run.meta["online"]["checks"])          # {'no_refund': {'passed': 2, 'failed': 2, ...}}
+run = asyncio.run(online.run())  # one pass; the next starts after it
+print(run.meta["online"]["checks"])  # {'no_refund': {'passed': 2, 'failed': 2, ...}}
 assert len(scores.scores(ScoreFilter(rule="refund_watch"))) == 4
 assert asyncio.run(online.run()).counts.get("ok", 0) == 0  # nothing new since
 ```
@@ -638,8 +638,15 @@ spec = QueueSpec("refunds", rubric={"resolved": "bool"}, reviewers=1)
 waiting = pending(scores, ".operonx/queues", spec)
 assert len(waiting) == 2  # the two runs the check failed
 item, reviewed_by = waiting[0]
-review(scores, author="ann", verdict="bad", rubric={"resolved": False},
-       note="promised a refund we do not give", trace_id=item.trace_id, queue="refunds")
+review(
+    scores,
+    author="ann",
+    verdict="bad",
+    rubric={"resolved": False},
+    note="promised a refund we do not give",
+    trace_id=item.trace_id,
+    queue="refunds",
+)
 assert len(pending(scores, ".operonx/queues", spec)) == 1
 print(queue_agreement(scores, "refunds"))  # κ needs two people on ≥ 10 items
 ```
