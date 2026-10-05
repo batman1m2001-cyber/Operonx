@@ -4,6 +4,9 @@ A package on **operonx** (editable from `../Operon`). Read `PLAN.md` before chan
 holds the decisions (no `docling` dependency, docling-parse behind `PdfBackend`, no shims for
 upstream gaps) and each phase's gate.
 
+> **Outstanding:** K5 (visual page retrieval) is not done — it needs a GPU machine. See
+> [BACKLOG.md](BACKLOG.md) before planning new KB work.
+
 ## Before you write code
 
 1. Read the operonx guide: `../Operon/operonx/guide/` (README, then 01–05). Do not write an operonx
