@@ -39,8 +39,12 @@ same runs.
 
 **Budget.** ``budget_usd_per_day`` caps what the judges spend in a UTC day,
 across hosts: the pass starts from the day's spend the score store already
-holds for this rule and counts as it goes. Past it, judges are not asked;
-code checks still run, and the item says ``budget_exhausted``.
+holds for this rule and counts as it goes — a judge still running counting
+at the day's cost per judged run, so items judged at once cannot all see
+the same total. A run is judged only while its estimated cost still fits:
+spend can pass the budget by the estimate's error, not by a pass's
+concurrency. Past it, judges are not asked; code checks still run, and the
+item says ``budget_exhausted``.
 
 **What an evaluator gets:** ``input`` and ``output`` (the run's request and
 answer, :attr:`TraceView.input` / :attr:`TraceView.output`), ``trace`` (the
@@ -300,7 +304,7 @@ class OnlineEval(Job):
         self._store: Optional[ScoreStore] = None
         self._writer: Optional[ScoreWriter] = None
         self._judging: Optional[Judging] = None
-        self._spent = 0.0
+        self._budget: Optional[_Budget] = None
         self._day = ""
         self._tally: Dict[str, Dict[str, int]] = {}
         self._queued = 0
@@ -413,7 +417,11 @@ class OnlineEval(Job):
     def begin(self, run_id: str, started: str) -> None:
         self._tally, self._queued, self._exhausted = {}, 0, 0
         self._day = _utc_day()
-        self._spent = self._spent_today() if self.budget_usd_per_day is not None else 0.0
+        self._budget = (
+            _Budget(self.budget_usd_per_day, *self._spent_today())
+            if self.budget_usd_per_day is not None
+            else None
+        )
         self._judging = Judging(
             trace=self.judge_trace,
             metadata={"job": self.name, "job_run": run_id, "rule": self.name},
@@ -422,17 +430,15 @@ class OnlineEval(Job):
         )
         self._writer = ScoreWriter(self._store, self.name)
 
-    def _spent_today(self) -> float:
+    def _spent_today(self) -> Tuple[float, int]:
+        """What this rule's judges spent today (UTC), across hosts, and on
+        how many runs."""
         start = datetime.strptime(self._day, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-        rows = self._store.scores(ScoreFilter(rule=self.name, since=start.timestamp()))
-        return sum(float(s.cost_usd) for s in rows if s.cost_usd is not None)
-
-    def _over_budget(self) -> bool:
-        if self.budget_usd_per_day is None:
-            return False
-        if _utc_day() != self._day:  # a pass running over midnight starts the new day
-            self._day, self._spent = _utc_day(), 0.0
-        return self._spent >= self.budget_usd_per_day
+        rows = self._store.scores(
+            ScoreFilter(rule=self.name, source="judge", since=start.timestamp())
+        )
+        priced = [s for s in rows if s.cost_usd is not None]
+        return sum(float(s.cost_usd) for s in priced), len({s.trace_id for s in priced})
 
     async def judge(self, raw: RunSummary, result: Any) -> None:
         """One stored run: read it back, judge it, write its scores."""
@@ -455,10 +461,13 @@ class OnlineEval(Job):
             }
             return
         prepared = self._prepared
-        exhausted = bool(self._judges) and self._over_budget()
-        if exhausted:
-            prepared = [p for p in prepared if p.name not in self._judges]
-            self._exhausted += 1
+        admitted = False
+        if self._judges and self._budget is not None:
+            admitted = await self._budget.admit()
+            if not admitted:
+                prepared = [p for p in prepared if p.name not in self._judges]
+                self._exhausted += 1
+        exhausted = bool(self._judges) and self._budget is not None and not admitted
         avail = {
             "input": view.input,
             "output": view.output,
@@ -467,10 +476,15 @@ class OnlineEval(Job):
             "run": raw,
             "judging": self._judging.for_case(key=raw.trace_id, judged_trace=raw.trace_id),
         }
-        checks = await judge_all(prepared, avail) if prepared else {}
-        for check in checks.values():
-            if check.get("cost_usd") is not None:
-                self._spent += float(check["cost_usd"])
+        checks: Dict[str, Any] = {}
+        try:
+            checks = await judge_all(prepared, avail) if prepared else {}
+        finally:
+            if admitted:
+                cost = [c["cost_usd"] for n, c in checks.items() if n in self._judges]
+                await self._budget.settle(
+                    sum(float(c) for c in cost if c is not None), bool(checks)
+                )
         for name, check in checks.items():
             t = self._tally.setdefault(name, {"passed": 0, "failed": 0, "errors": 0})
             if check.get("error"):
@@ -540,7 +554,7 @@ class OnlineEval(Job):
             "checks": self._tally,
             "queued": self._queued,
             "budget_usd_per_day": self.budget_usd_per_day,
-            "spent_usd_today": round(self._spent, 6),
+            "spent_usd_today": round(self._budget.spent, 6) if self._budget else None,
             BUDGET_EXHAUSTED: self._exhausted,
             "cursor": asdict(src.cursor) if src is not None and not self.is_backfill else None,
         }
@@ -557,6 +571,55 @@ class OnlineEval(Job):
             "queue": self.queue,
         }
         return out
+
+
+class _Budget:
+    """A day's judge spend, shared by a pass's items running at once.
+
+    A judge that has started counts before it finishes: at the day's cost
+    per judged run, so items running together cannot each see the same
+    total and all go over it. Until one run's cost is known, judges start
+    one at a time. A run is judged only when its estimated cost still fits;
+    an unpriced judge costs nothing and never runs out.
+    """
+
+    def __init__(self, limit: float, spent: float = 0.0, runs: int = 0):
+        self.limit, self.spent, self.runs = float(limit), float(spent), int(runs)
+        self.in_flight = 0
+        self.day = _utc_day()
+        self._cond = asyncio.Condition()
+
+    @property
+    def per_run(self) -> Optional[float]:
+        return self.spent / self.runs if self.runs else None
+
+    async def admit(self) -> bool:
+        """Whether one more run may be judged now; ``True`` holds a place
+        until :meth:`settle`."""
+        async with self._cond:
+            while True:
+                if _utc_day() != self.day:  # a pass running over midnight: a new day
+                    self.day, self.spent, self.runs = _utc_day(), 0.0, 0
+                cost = self.per_run
+                if cost is None and self.in_flight:
+                    await self._cond.wait()  # the first run's cost decides the rest
+                    continue
+                if (cost is None and self.spent >= self.limit) or (
+                    cost is not None and self.spent + (self.in_flight + 1) * cost > self.limit
+                ):
+                    return False
+                self.in_flight += 1
+                return True
+
+    async def settle(self, cost: float, judged: bool) -> None:
+        """A run admitted by :meth:`admit` is done: *cost* is what it spent;
+        a run whose judges never answered (``judged`` false) adds nothing."""
+        async with self._cond:
+            self.in_flight -= 1
+            if judged:
+                self.spent += cost
+                self.runs += 1
+            self._cond.notify_all()
 
 
 def _requires(p: Any, name: str) -> bool:

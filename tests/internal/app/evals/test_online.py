@@ -242,8 +242,9 @@ def test_sample_judges_only_the_sampled_runs(runs, scores, tmp_path):
 # ── budget ───────────────────────────────────────────────────────────────
 
 
-def _priced_judge(cost):
+def _priced_judge(cost, seconds=0.0):
     async def paid(output) -> dict:
+        await asyncio.sleep(seconds)
         return {"passed": True, "cost_usd": cost}
 
     paid.eval_kind = "judge"
@@ -261,12 +262,34 @@ def test_the_budget_stops_judges_and_code_checks_still_run(runs, scores, tmp_pat
 
     got = scores.scores(ScoreFilter(rule="quality"))
     assert len([s for s in got if s.score_name == "short"]) == 6
-    assert len([s for s in got if s.score_name == "paid"]) == 3  # 0.4 × 3 crosses 1.0
-    assert run.meta["online"]["budget_exhausted"] == 3
+    assert len([s for s in got if s.score_name == "paid"]) == 2  # a third would make 1.2
+    assert run.meta["online"]["budget_exhausted"] == 4
     # a second pass the same day starts from what the store says was spent
     _serve(runs, tmp_path, ["late"])
     again = asyncio.run(online.run())
     assert again.meta["online"]["budget_exhausted"] == 1
+
+
+def test_judges_running_at_once_do_not_overrun_the_budget(runs, scores, tmp_path):
+    """The gate on 121 recorded calls spent $0.12 of a $0.05 budget: each
+    judge looked at what had been spent when it started, and the ones
+    running at once all saw the same total. A judge in flight now counts at
+    the day's cost per run, and the first waits for a price to be known."""
+    _serve(runs, tmp_path, [f"q{i}" for i in range(12)])
+    online = _online(
+        runs,
+        scores,
+        tmp_path,
+        evaluators=[_priced_judge(0.4, seconds=0.05)],
+        budget_usd_per_day=1.0,
+        concurrency=4,
+    )
+    run = asyncio.run(online.run())
+
+    spent = sum(s.cost_usd or 0 for s in scores.scores(ScoreFilter(rule="quality")))
+    assert spent <= 1.0
+    assert run.meta["online"]["spent_usd_today"] <= 1.0
+    assert run.meta["online"]["budget_exhausted"] == 10
 
 
 # ── targets and queues ───────────────────────────────────────────────────

@@ -948,10 +948,15 @@ def _cmd_online(project: _Project, args: argparse.Namespace) -> int:
     until = _since(args.until, now) if args.until else None
     run = asyncio.run(found.backfill(since, until).run())
     online = run.meta.get("online") or {}
+    spent = online.get("spent_usd_today")
     print(
         f"{args.name}: backfill {run.run_id} — {run.counts.get('ok', 0)} runs judged, "
-        f"{online.get('unsampled', 0)} not sampled, {online.get('queued', 0)} queued, "
-        f"${online.get('spent_usd_today', 0):.4f} spent today"
+        f"{online.get('unsampled', 0)} not sampled, {online.get('queued', 0)} queued"
+        + (
+            f", ${spent:.4f} of ${online['budget_usd_per_day']:.2f} spent today"
+            if spent is not None
+            else ""
+        )
     )
     return 0 if run.status == "ok" else 1
 
