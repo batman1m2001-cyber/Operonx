@@ -135,6 +135,9 @@ class MemoryState:
         # by `Operon.start`; what `run_context()` reports. None for an op
         # driven outside an engine run.
         "_run_info",
+        # The run's journal recorder (`operonx.durable.RunRecorder`) when the
+        # engine has a `journal=`, else None. See docs/RUNTIME_R3_PLAN.md.
+        "_durable",
     )
 
     def __init__(
@@ -218,6 +221,7 @@ class MemoryState:
         self._edge_drops: Dict[str, int] = {}
         self._run_policy = None
         self._run_info = None
+        self._durable = None
 
         # Apply initial inputs
         if inputs:
@@ -475,6 +479,10 @@ class MemoryState:
             value: incoming write; will be merged with current value if a
                 reducer is registered
         """
+        if self._durable is not None and self._durable.suppressing():
+            # A resumed op repeating a yield the journal already holds: the
+            # cell was restored with what that yield wrote (RUNTIME_R3_PLAN §2).
+            return
         reducer = self.schema._reducers.get(idx)
         if reducer is not None:
             cell = self._cells[idx]

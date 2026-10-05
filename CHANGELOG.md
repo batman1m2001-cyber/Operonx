@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Durable runs: resume after a crash** (`operonx.durable`). `Operon(graph, journal=
+  SqliteJournal("runs.db"))` records each op's writes and events as it runs; after the process
+  dies, `await engine.resume(run_id)` in a fresh process restores the cells, replays what had
+  ended without running it again, and re-runs only what was cut off (a generator's earlier
+  yields are checked against the journal: one that yields otherwise raises
+  `NonDeterministicResume`). `durability="sync" | "async" | "exit"` picks when steps reach
+  the journal; `engine.runs(status)` lists them; a changed graph is refused unless
+  `allow_graph_change=True`. Values must pickle — one that does not names its op and var.
+  Without `journal=` nothing changes (no cost: same timing as before on a 3000-item stream).
+  Guide 08 "Durable runs". Interrupts across processes and `drain()` come next (R3b).
 - **Online evals: production runs judged after the fact** (`operonx.app.evals.OnlineEval`).
   A `[[job]]` with `runs = {origin = "service", name = "call"}` instead of a `graph` reads the
   run store from a cursor, keeps a stable `sample` (by `sha1(trace_id)`), runs reference-free

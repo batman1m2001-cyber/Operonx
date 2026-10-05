@@ -196,6 +196,8 @@ dev = [
     "clickhouse-connect>=0.7",
     # the eval reports' JUnit XML is validated against the JUnit schema
     "xmlschema>=3.0",
+    # the durable-execution property test generates graphs and crash points
+    "hypothesis>=6.100",
     # tests/internal/cli/ parses pyproject.toml to verify every
     # [project.scripts] target resolves; tomllib is stdlib only on 3.11+.
     "tomli>=2.0; python_version < '3.11'",

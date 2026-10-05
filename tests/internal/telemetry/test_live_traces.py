@@ -224,7 +224,12 @@ def test_killed_run_leaves_partial_trace(kind, request, tmp_path):
         [sys.executable, str(script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     )
     try:
-        assert proc.stdout.readline().strip() == "READY", proc.stderr.read()
+        for line in proc.stdout:  # skip what the child logs to stdout
+            if line.strip() == "READY":
+                break
+        else:  # read a child's stderr only once it has exited
+            proc.wait(10)
+            pytest.fail(f"the child exited before READY:\n{proc.stderr.read()}")
         # the first op's record is written while the second one runs
         end = time.monotonic() + 15
         while time.monotonic() < end:

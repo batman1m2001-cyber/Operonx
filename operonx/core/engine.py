@@ -482,6 +482,10 @@ class Operon:
         "inputs_expected",
         "_errors",
         "_max_concurrency",
+        "_journal",
+        "_durability",
+        "_on_resume",
+        "_fingerprint",
     ]
 
     def __init__(
@@ -492,6 +496,9 @@ class Operon:
         trace: Optional[Union[str, "Consumer", List[Union[str, "Consumer"]]]] = None,
         errors: str = "record",
         max_concurrency: Optional[int] = None,
+        journal: Any = None,
+        durability: str = "async",
+        on_resume: str = "restart",
     ):
         """Initialize Operon engine with a GraphOp or a graph factory.
 
@@ -547,6 +554,22 @@ class Operon:
                    that run as tasks (async, ``bound="cpu"``); a plain
                    ``def`` op runs inline and a subgraph holds no slot of
                    its own. ``None`` (the default): no shared cap.
+            journal: Makes runs durable: a :class:`~operonx.durable.Journal`
+                   (``MemoryJournal``, ``SqliteJournal``) records each
+                   execution's yields and end with the cell writes they made,
+                   and :meth:`resume` continues a run that stopped — after a
+                   crash, on any worker opening the same journal — without
+                   running again what had ended. ``None`` (the default): runs
+                   are not recorded, at the cost of one ``is None`` test per
+                   execution. See docs/RUNTIME_R3_PLAN.md.
+            durability: With a journal, when steps are written: ``"async"``
+                   (the default; a background writer, in order — a crash
+                   loses at most the unwritten tail, which runs again),
+                   ``"sync"`` (each step committed before the scheduler sees
+                   its event) or ``"exit"`` (all at the end of the run).
+            on_resume: An execution that had yielded and not ended when the
+                   run stopped: ``"restart"`` runs it again and checks its
+                   first yields against the journal; ``"fail"`` refuses.
 
         Raises:
             RuntimeError: If a provider op needs the hub but none has been
@@ -569,6 +592,23 @@ class Operon:
 
         self._errors = errors
         self._max_concurrency = max_concurrency
+        if journal is not None:
+            from operonx.durable import DURABILITY, ON_RESUME, Journal
+
+            if not isinstance(journal, Journal):
+                raise TypeError(
+                    f"journal= takes a Journal (MemoryJournal, SqliteJournal), not {journal!r}"
+                )
+            if durability not in DURABILITY:
+                raise ValueError(
+                    f"durability= is one of {', '.join(DURABILITY)}, got {durability!r}"
+                )
+            if on_resume not in ON_RESUME:
+                raise ValueError(f"on_resume= is one of {', '.join(ON_RESUME)}, got {on_resume!r}")
+        self._journal = journal
+        self._durability = durability
+        self._on_resume = on_resume
+        self._fingerprint: Optional[str] = None
         self.graph = graph
         self.name = graph.name
         self._trace_consumers = self._resolve_trace_consumers(trace)
@@ -709,6 +749,7 @@ class Operon:
         scratch: Optional[Dict[str, Any]] = None,
         checkpointer=None,
         context: Any = None,
+        run_id: Optional[str] = None,
     ) -> "ExecutionHandle":
         """Start workflow execution and return a streaming handle immediately.
 
@@ -733,6 +774,8 @@ class Operon:
                 ``run_context().context`` — a tenant, a feature flag set, a
                 typed dataclass of what the caller knows. Information only:
                 stored as given, never read by operonx.
+            run_id: The run's id — its trace id, and with a ``journal=`` the
+                key :meth:`resume` continues it by. Same as ``trace_id``.
 
         The run's ``run_context().run_id`` is its trace id (``trace_id``,
         else ``request_id``), and ``thread_id`` is ``session_id`` as given
@@ -742,6 +785,9 @@ class Operon:
             ExecutionHandle — async-iterable, supports ``await handle["op","var"]``
             and ``await handle.collect()``
         """
+        if run_id is not None and trace_id is not None and run_id != trace_id:
+            raise ValueError(f"run_id={run_id!r} and trace_id={trace_id!r} name one id; give one")
+        trace_id = trace_id or run_id
         thread_id = session_id
         user_id = user_id or str(uuid.uuid4())
         session_id = session_id or str(uuid.uuid4())
@@ -753,6 +799,142 @@ class Operon:
             session_id=session_id,
             request_id=request_id,
         )
+        if self._journal is not None:
+            from operonx.durable import RunHeader
+
+            recorder = self._recorder(trace_id or request_id, state)
+            self._journal.open_run(
+                RunHeader(
+                    run_id=recorder.run_id,
+                    fingerprint=self.fingerprint,
+                    inputs=dict(inputs),
+                    thread_id=thread_id,
+                )
+            )
+        return self._launch(
+            state,
+            request_id=request_id,
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=trace_id,
+            thread_id=thread_id,
+            scratch=scratch,
+            checkpointer=checkpointer,
+            context=context,
+        )
+
+    @property
+    def fingerprint(self) -> str:
+        """The compiled graph's structural fingerprint (what :meth:`resume`
+        checks): its ops, their code and their wiring."""
+        if self._fingerprint is None:
+            from operonx.durable import graph_fingerprint
+
+            self._fingerprint = graph_fingerprint(self.graph)
+        return self._fingerprint
+
+    def _recorder(self, run_id: str, state: Any) -> Any:
+        from operonx.durable import RunRecorder
+
+        names = {idx: key for key, idx in state.schema._var_to_idx.items()}
+        recorder = RunRecorder(
+            self._journal,
+            run_id,
+            names,
+            root=state.schema.name,
+            durability=self._durability,
+            on_resume=self._on_resume,
+        )
+        state._durable = recorder
+        state.subscribe_writes(recorder.on_write)
+        return recorder
+
+    async def resume(
+        self,
+        run_id: str,
+        *,
+        allow_graph_change: bool = False,
+        checkpointer=None,
+        context: Any = None,
+    ) -> "ExecutionHandle":
+        """Continue the journalled run *run_id* and return its handle::
+
+            handle = await engine.resume("order-42")
+            out = await handle.result()
+
+        Every cell is put back as the journal last had it; an execution that
+        ended is not run again — its yields are replayed, so what came after
+        it is dispatched as before — and the rest runs. The result is the one
+        the run would have had. Any process with the same graph and a
+        journal holding the run can resume it.
+
+        Raises:
+            RuntimeError: The engine has no ``journal=``.
+            JournalError: The journal has no such run, or the graph changed
+                since the run started (``allow_graph_change=True`` resumes
+                anyway, at the caller's risk).
+        """
+        from operonx.durable import JournalError
+
+        if self._journal is None:
+            raise RuntimeError(
+                f"resume({run_id!r}): this engine has no journal=; build it with the journal "
+                "the run was recorded in"
+            )
+        header, steps = await asyncio.to_thread(self._journal.read, run_id)
+        if header.fingerprint != self.fingerprint and not allow_graph_change:
+            raise JournalError(
+                f"run {run_id!r} ran graph {header.fingerprint} and this engine's graph is "
+                f"{self.fingerprint}: an op, its code or its wiring changed, so the journal's "
+                "steps may name other work. Resume with the graph it ran, or pass "
+                "allow_graph_change=True"
+            )
+        request_id = str(uuid.uuid4())
+        session_id = header.thread_id or str(uuid.uuid4())
+        user_id = str(uuid.uuid4())
+        state = self._schema.create_state(
+            inputs=header.inputs,
+            user_id=user_id,
+            session_id=session_id,
+            request_id=request_id,
+        )
+        recorder = self._recorder(run_id, state)
+        recorder.restore(state, steps, lenient=allow_graph_change)
+        await asyncio.to_thread(self._journal.set_status, run_id, "running")
+        return self._launch(
+            state,
+            request_id=request_id,
+            user_id=user_id,
+            session_id=session_id,
+            trace_id=run_id,
+            thread_id=header.thread_id,
+            scratch=None,
+            checkpointer=checkpointer,
+            context=context,
+        )
+
+    def runs(self, status: Optional[str] = None) -> List[Any]:
+        """The journalled runs (their headers), optionally only *status*
+        (``"running"``: stopped or still going, the ones to resume)."""
+        if self._journal is None:
+            raise RuntimeError("runs(): this engine has no journal=")
+        return self._journal.runs(status)
+
+    def _launch(
+        self,
+        state: Any,
+        *,
+        request_id: str,
+        user_id: str,
+        session_id: str,
+        trace_id: Optional[str],
+        thread_id: Optional[str],
+        scratch: Optional[Dict[str, Any]],
+        checkpointer: Any,
+        context: Any,
+    ) -> "ExecutionHandle":
+        """Run *state* in the background: the part of :meth:`start` that a
+        resume shares."""
         # `state.tracing` gates the per-op metric writes in `BaseOp.run`.
         # It is not dead and it is not back-compat: `MemoryState` defaults
         # it on, so an op driven directly — as several tests do — records
@@ -847,11 +1029,19 @@ class Operon:
             if _consumer.live:
                 _go_live(_consumer, _wf_trace)
 
+        recorder = state._durable
+
         async def _run() -> None:
+            nonlocal recorder
             v3_token = _v3_trace_var.set(_wf_trace)
+            outcome = "ok"
             try:
                 await self.graph._scheduler.run(state, ("main",), output_queue=queue)
             except asyncio.CancelledError:
+                outcome = "running"  # stopped, not finished: resumable
+                if recorder is not None:
+                    recorder.close(outcome)
+                    recorder = None
                 # Phase 2b3 T5: notify the checkpointer of run-level cancel so
                 # audit trails and speculative-chain teardown observers hear it.
                 if checkpointer is not None:
@@ -865,8 +1055,10 @@ class Operon:
                 # errors="raise": an op failed and the run was stopped. The
                 # carrier is a BaseException only to get past every
                 # `except Exception` on its way up; the caller gets OpFailed.
+                outcome = "error"
                 queue.put_nowait(e.failure)
             except BaseException as e:  # includes ObserveBudgetExceeded (Phase 2)
+                outcome = "error"
                 queue.put_nowait(e)
                 # Do NOT re-raise a BaseException — the ExecutionHandle re-raises
                 # it to the caller via _pump when the value is dequeued. Bubbling
@@ -874,6 +1066,11 @@ class Operon:
             finally:
                 _v3_trace_var.reset(v3_token)
                 _wf_trace.ended_at = perf_counter()
+                if recorder is not None:
+                    try:
+                        await asyncio.to_thread(recorder.close, outcome)
+                    except Exception:
+                        LOGGER.exception("journal: run %s could not be closed", _wf_trace.trace_id)
                 # Detach any Phase 2 observers bound at start().
                 if _cp_unsubscribe is not None:
                     try:
@@ -923,6 +1120,7 @@ class Operon:
         scratch: Optional[Dict[str, Any]] = None,
         checkpointer=None,
         context: Any = None,
+        run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Execute the workflow with given inputs.
 
@@ -944,6 +1142,7 @@ class Operon:
             scratch: Optional initial values for per-call scratch space.
             context: What the run's ops read as ``run_context().context``
                 (see :meth:`start`).
+            run_id: The run's id (see :meth:`start`).
 
         Returns:
             Dictionary containing workflow outputs plus "$state" key
@@ -965,6 +1164,7 @@ class Operon:
             scratch=scratch,
             checkpointer=checkpointer,
             context=context,
+            run_id=run_id,
         )
 
         try:

@@ -1,4 +1,4 @@
-# 8. Inside a run: run context, child steps, stream modes, live traces
+# 8. Inside a run: run context, child steps, stream modes, live traces, durable runs
 
 What an op body can know about the run it is in, how a loop that lives inside
 one op stays visible in the trace, and how to watch a run while it goes. None
@@ -258,3 +258,74 @@ asyncio.run(main())
   when the run ends.
 - `running` is all a store can say about a killed run: telling a dead writer
   from a slow op needs a lease, which durable runs bring.
+
+## Durable runs: resume after a crash
+
+With a `journal=`, each op's result and the cells it wrote are recorded as
+it ends. A run that stopped — the process killed, a deploy — continues
+with `resume`, on any worker that opens the same journal. What had ended is
+not run again; what had not, runs.
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, graph, op
+from operonx.durable import SqliteJournal
+
+CHARGED = []
+WORKER = {"dies": True}
+
+
+@op
+async def charge(order: int) -> dict:
+    CHARGED.append(order)  # a side effect that must not happen twice
+    return {"receipt": f"R-{order}"}
+
+
+@op
+async def ship(receipt: str) -> dict:
+    if WORKER["dies"]:
+        raise SystemExit("the worker died")  # the process stops here
+    return {"done": f"{receipt}:shipped"}
+
+
+@graph
+def order(order):
+    c = charge(order=order)
+    s = ship(receipt=c["receipt"])
+    START >> c >> s >> END
+
+
+async def main():
+    engine = Operon(order, params={"order": None}, journal=SqliteJournal("runs.db"))
+    try:
+        await engine.run({"order": 42}, run_id="order-42")
+    except SystemExit:
+        WORKER["dies"] = False  # in real life: a new process, the same journal
+    handle = await engine.resume("order-42")
+    out = await handle.result()
+    assert out["done"] == "R-42:shipped"
+    assert CHARGED == [42]  # charged once: `charge` had ended, so it was replayed
+    print([run.run_id for run in engine.runs(status="running")])  # the ones to resume
+
+
+asyncio.run(main())
+```
+
+- **What a resume keeps:** every cell as the journal last had it, and each
+  ended op's results, replayed so what came after it runs as before. An op
+  that was running when the process died runs again — at least once — with
+  the same `run_context().idempotency_key`, which is what an external call
+  deduplicates on.
+- **`durability=`** `"async"` (the default: a background writer; a crash
+  loses at most the last steps, which run again), `"sync"` (each step
+  committed before the next op sees it), `"exit"` (written when the run ends).
+- **Values must pickle** (the journal gives back exactly what an op returned).
+  One that does not fails the run naming the op and the output.
+- **The graph must be the one that ran:** `resume` refuses a graph whose ops,
+  code or wiring changed (`allow_graph_change=True` to resume anyway).
+- A generator that had yielded and not ended runs again, its first yields
+  checked against the journal (`NonDeterministicResume` if they differ;
+  `on_resume="fail"` refuses instead).
+- Without `journal=` nothing is recorded, and the scheduler pays one
+  `is None` test per op.
