@@ -9,9 +9,13 @@ over a trailing window and fires when a number crosses its threshold:
 * ``cost_per_hour`` — priced cost in the window, per hour (unpriced runs
   are counted beside it, never as $0);
 * ``runs`` — fires when there are *fewer* than the threshold (a service that
-  went quiet).
+  went quiet);
+* ``score_mean:<score>`` — the mean of a score an online eval wrote for those
+  runs; fires when it *drops below* the threshold (quality going down);
+* ``score_fail_rate:<score>`` — the share of those scores that failed.
 
-It is evaluated from what the run store already keeps — summaries and op
+The score metrics read a score store (``evaluate(..., scores=)``) over the
+scores written in the window; ``min_runs`` counts scores there. It is evaluated from what the run store already keeps — summaries and op
 rollups, no extra recording. ``min_runs`` keeps a window of two runs from
 paging anyone. :func:`step` turns an evaluation into what to send: a
 ``firing`` once when it crosses, a reminder every ``repeat_min`` while it
@@ -31,9 +35,27 @@ from typing import Any, Dict, Optional
 from .base import RunStore
 from .model import RunFilter, percentile
 
-__all__ = ["METRICS", "Alert", "AlertState", "deliver", "evaluate", "message", "step"]
+__all__ = [
+    "METRICS",
+    "SCORE_METRICS",
+    "Alert",
+    "AlertState",
+    "deliver",
+    "evaluate",
+    "message",
+    "step",
+]
 
 METRICS = ("error_rate", "p95_ms", "cost_per_hour", "runs")
+#: Metrics over a score, named ``<metric>:<score name>``.
+SCORE_METRICS = ("score_mean", "score_fail_rate")
+
+
+def score_metric(metric: str) -> Optional[tuple]:
+    """``("score_mean", "polite")`` for ``"score_mean:polite"``; ``None``
+    for a run metric."""
+    kind, sep, name = metric.partition(":")
+    return (kind, name) if sep and kind in SCORE_METRICS else None
 
 
 @dataclass
@@ -51,8 +73,17 @@ class Alert:
     enabled: bool = True
 
     def __post_init__(self) -> None:
-        if self.metric not in METRICS:
-            raise ValueError(f"alert {self.name!r}: metric is one of {', '.join(METRICS)}")
+        scored = score_metric(self.metric)
+        if scored is not None and not scored[1]:
+            raise ValueError(
+                f"alert {self.name!r}: {self.metric!r} names no score; "
+                f"write {scored[0]}:<score name>"
+            )
+        if self.metric not in METRICS and scored is None:
+            raise ValueError(
+                f"alert {self.name!r}: metric is one of {', '.join(METRICS)}, "
+                f"or {' / '.join(f'{m}:<score name>' for m in SCORE_METRICS)}"
+            )
         if self.metric != "p95_ms" and self.op:
             raise ValueError(f"alert {self.name!r}: `op` narrows p95_ms only")
         self.threshold = float(self.threshold)
@@ -85,10 +116,16 @@ class AlertState:
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
-def evaluate(store: RunStore, alert: Alert, now: Optional[float] = None) -> AlertState:
-    """The alert's number over its window, and whether it crosses."""
+def evaluate(
+    store: RunStore, alert: Alert, now: Optional[float] = None, *, scores: Any = None
+) -> AlertState:
+    """The alert's number over its window, and whether it crosses. A score
+    metric reads *scores* (a ScoreStore)."""
     now = time.time() if now is None else now
     since = now - alert.window_min * 60
+    scored = score_metric(alert.metric)
+    if scored is not None:
+        return _evaluate_scores(scores, alert, scored, since, now)
     f = RunFilter(origin=alert.origin, name=alert.target, since=since, until=now)
     runs = store.list_runs(f, "started_desc", 5000).items
     st = AlertState(runs=len(runs), since=since, until=now, evaluated_at=now)
@@ -119,6 +156,37 @@ def evaluate(store: RunStore, alert: Alert, now: Optional[float] = None) -> Aler
             return st
         st.value = sum(priced) / (alert.window_min / 60)
     st.firing = st.value is not None and st.value > alert.threshold
+    return st
+
+
+def _evaluate_scores(
+    scores: Any, alert: Alert, scored: tuple, since: float, now: float
+) -> AlertState:
+    st = AlertState(since=since, until=now, evaluated_at=now)
+    if scores is None:
+        st.note = f"{alert.metric} reads a score store, and none was given"
+        return st
+    from operonx.telemetry.scores import ScoreFilter
+
+    kind, name = scored
+    where = ScoreFilter(
+        score_name=name, origin=alert.origin, name=alert.target, since=since, until=now
+    )
+    rows = scores.scores(where)
+    if kind == "score_fail_rate":
+        rows = [s for s in rows if s.passed is not None]
+    else:
+        rows = [s for s in rows if s.value is not None]
+    st.runs = len(rows)
+    if len(rows) < max(1, alert.min_runs):
+        st.note = f"{len(rows)} {name} scores in the window — fewer than {alert.min_runs}, not judged"
+        return st
+    if kind == "score_fail_rate":
+        st.value = sum(1 for s in rows if not s.passed) / len(rows)
+        st.firing = st.value > alert.threshold
+    else:
+        st.value = sum(float(s.value) for s in rows) / len(rows)
+        st.firing = st.value < alert.threshold
     return st
 
 
