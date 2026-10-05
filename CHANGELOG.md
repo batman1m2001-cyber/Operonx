@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`rate_limit:` on a resource** (`resources.yaml`): `{concurrency: N, per_second | per_minute: M}`,
+  one limiter per key for the whole process — every op, run and nested graph calling it waits its
+  turn; an async generator method holds its slot until it ends; a call from inside another call to
+  the same resource passes through. Applied to the instance the hub builds, so its class is unchanged.
 - **Second messages, stream reconnect, completion callbacks** (R4b). A queued webhook's
   `multitask="enqueue"|"reject"|"interrupt"|"rollback"` decides what a second message on a busy
   thread does (`interrupt`/`rollback` stop the running run through its queue row, on whichever

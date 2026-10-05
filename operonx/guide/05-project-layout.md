@@ -188,6 +188,10 @@ operonx run score_calls
   `graph.py` and `ops.py`, and one more entry in `app/main.py`.
 - **A model** is an `llm:` entry in `resources.yaml` and an
   `LLMOp.of(resource=...)` in the feature's `graph.py`; its key goes in `.env`.
+  Its provider's limits go on the entry, for the whole process:
+  `rate_limit: {concurrency: 8, per_minute: 500}` (or `per_second`) — every
+  op and run calling that key waits its turn; a stream holds its slot until
+  it ends.
 - **An eval** is a `datasets/<name>.jsonl` and an `Eval(...)` (a kind of
   job) in `app/main.py`; `operonx run <eval>` gates CI.
 - **Door hooks** (`on_session`, `on_close`) go in `app/`, beside `main.py`.
