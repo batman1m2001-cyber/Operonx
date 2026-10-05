@@ -385,3 +385,45 @@ asyncio.run(main())
   `resume(run_id)` on the next worker continues it.
 - A graph that reads through a door (`ingress`) is journalled but not
   resumable: its items came from a live connection the journal does not hold.
+
+### Threads: cells a conversation keeps between runs
+
+`carry=` names declared cells a thread keeps: a run started with
+`thread_id=T` begins with them as T's last run left them, and saves them
+when it ends. Threads live in the journal, so any process sees them.
+
+```python
+import asyncio
+import operator
+
+from operonx import END, PARENT, START, Operon, graph, op
+from operonx.durable import SqliteJournal
+
+
+@op
+def answer(text: str, history: list) -> dict:
+    return {"said": [text], "turn": len(history) + 1}
+
+
+@graph
+def chat(text):
+    PARENT.declare(history=[], reducers={"history": operator.add})
+    a = answer(text=text, history=PARENT["history"])
+    a["said"] >> PARENT["history"]
+    START >> a >> END
+
+
+async def main():
+    engine = Operon(chat, params={"text": None}, journal=SqliteJournal("chat.db"), carry=["history"])
+    await engine.run({"text": "hello"}, thread_id="cust-7")
+    out = await engine.run({"text": "and again"}, thread_id="cust-7")
+    state = out["$state"]
+    assert state[state.schema.name, "history"] == ["hello", "and again"]
+
+
+asyncio.run(main())
+```
+
+- Only declared cells (`PARENT.declare`) can be carried; a run without a
+  `thread_id` starts fresh. A resumed run starts from what its thread gave
+  it when it began, not from what the thread holds now.

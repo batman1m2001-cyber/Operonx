@@ -49,7 +49,8 @@ class JournalError(RuntimeError):
 @dataclass
 class RunHeader:
     """A journalled run: its id, its thread, the fingerprint of the graph it
-    ran, the inputs it started with, and how far it got."""
+    ran, the inputs it started with, the cells its thread carried into it,
+    and how far it got."""
 
     run_id: str
     fingerprint: str
@@ -58,6 +59,10 @@ class RunHeader:
     status: str = "running"
     created_at: float = 0.0
     updated_at: float = 0.0
+    #: The declared cells the run started with from its thread (``carry=``):
+    #: kept here so a resume seeds the same values, whatever the thread has
+    #: saved since.
+    carried: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -111,6 +116,10 @@ class Journal(Protocol):
 
     def runs(self, status: Optional[str] = None) -> List[RunHeader]: ...
 
+    def load_thread(self, thread_id: str) -> Dict[str, Any]: ...
+
+    def save_thread(self, thread_id: str, values: Dict[str, Any]) -> None: ...
+
 
 def _check_status(status: str) -> None:
     if status not in STATUSES:
@@ -122,6 +131,7 @@ class MemoryJournal:
 
     def __init__(self) -> None:
         self._runs: Dict[str, Tuple[RunHeader, List[bytes]]] = {}
+        self._threads: Dict[str, bytes] = {}
         self._lock = threading.Lock()
 
     def open_run(self, header: RunHeader) -> None:
@@ -151,6 +161,16 @@ class MemoryJournal:
         with self._lock:
             return [h for h, _ in self._runs.values() if status is None or h.status == status]
 
+    def load_thread(self, thread_id: str) -> Dict[str, Any]:
+        with self._lock:
+            blob = self._threads.get(thread_id)
+        return pickle.loads(blob) if blob is not None else {}
+
+    def save_thread(self, thread_id: str, values: Dict[str, Any]) -> None:
+        blob = _dump(values)
+        with self._lock:
+            self._threads[thread_id] = blob
+
     def _get(self, run_id: str) -> Tuple[RunHeader, List[bytes]]:
         found = self._runs.get(run_id)
         if found is None:
@@ -166,7 +186,13 @@ CREATE TABLE IF NOT EXISTS runs (
     inputs      BLOB NOT NULL,
     status      TEXT NOT NULL,
     created_at  REAL NOT NULL,
-    updated_at  REAL NOT NULL
+    updated_at  REAL NOT NULL,
+    carried     BLOB
+);
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id  TEXT PRIMARY KEY,
+    vals       BLOB NOT NULL,
+    updated_at REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS steps (
     run_id TEXT NOT NULL,
@@ -202,7 +228,7 @@ class SqliteJournal:
         header.created_at = header.updated_at = now
         try:
             self._conn().execute(
-                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     header.run_id,
                     header.thread_id,
@@ -211,6 +237,7 @@ class SqliteJournal:
                     header.status,
                     now,
                     now,
+                    _dump(header.carried),
                 ),
             )
         except sqlite3.IntegrityError:
@@ -239,8 +266,8 @@ class SqliteJournal:
     def read(self, run_id: str) -> Tuple[RunHeader, List[Step]]:
         conn = self._conn()
         row = conn.execute(
-            "SELECT run_id, thread_id, fingerprint, inputs, status, created_at, updated_at "
-            "FROM runs WHERE run_id = ?",
+            "SELECT run_id, thread_id, fingerprint, inputs, status, created_at, updated_at, "
+            "carried FROM runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
         if row is None:
@@ -253,6 +280,7 @@ class SqliteJournal:
             status=row[4],
             created_at=row[5],
             updated_at=row[6],
+            carried=pickle.loads(row[7]) if row[7] is not None else {},
         )
         steps = [
             pickle.loads(b)
@@ -287,6 +315,21 @@ class SqliteJournal:
             )
             for r in self._conn().execute(sql + " ORDER BY created_at", args)
         ]
+
+    def load_thread(self, thread_id: str) -> Dict[str, Any]:
+        row = (
+            self._conn()
+            .execute("SELECT vals FROM threads WHERE thread_id = ?", (thread_id,))
+            .fetchone()
+        )
+        return pickle.loads(row[0]) if row is not None else {}
+
+    def save_thread(self, thread_id: str, values: Dict[str, Any]) -> None:
+        self._conn().execute(
+            "INSERT INTO threads VALUES (?, ?, ?) ON CONFLICT (thread_id) DO UPDATE "
+            "SET vals = excluded.vals, updated_at = excluded.updated_at",
+            (thread_id, _dump(values), time.time()),
+        )
 
     def __repr__(self) -> str:
         return f"SqliteJournal({str(self.path)!r})"

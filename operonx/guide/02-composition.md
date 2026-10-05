@@ -184,6 +184,15 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
   starts a run per tick, inside the server on that port; the ingress item is
   `{"tick": n, "at": ...}`. A tick that lands while the last run is still
   going is skipped and counted; a failing run does not stop the clock.
+- `queue="runs.db"` (or `queue={url="postgresql://…"}` in `operonx.toml`)
+  on a webhook or schedule makes it durable: a webhook writes the event to
+  the queue **before** its `202`, and every replica claims events from it.
+  A replica that dies mid-run stops renewing its lease (`lease=30` seconds);
+  another replica runs the event again with the same `run_id` (at least
+  once — make side effects idempotent on `run_context().idempotency_key`).
+  A schedule's ticks line up on the clock and each fires on one replica.
+  Rows of one `thread_id` run one at a time, in order. Inspect it with
+  `SqliteQueue("runs.db").items("<service>")`.
 - `on_session=fn` turns the request into the graph's inputs
   (`RunRequest(inputs={...})`, or `None` to refuse). Without it the query
   string becomes the inputs.

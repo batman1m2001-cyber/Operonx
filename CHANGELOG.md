@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Durable triggers and a run queue** (`operonx.app.queue`, R4a). `Service(kind webhook|schedule,
+  queue="runs.db")` (or `queue = {url = "postgresql://…"}`): a webhook writes the event to the
+  queue before its `202`, and every replica claims events with a renewed lease — a replica that
+  dies leaves a lease that lapses, and another runs the event again under the same run id (at
+  least once; `max_attempts`, then `failed`). Rows of one thread run one at a time, in order. A
+  schedule's ticks line up on the clock and each fires on one replica. `SqliteQueue` (one host)
+  and `PostgresQueue` (`FOR UPDATE SKIP LOCKED`) pass one contract suite.
+- **Threads carry cells between runs:** `Operon(g, journal=…, carry=["history"])`; a run started
+  with `thread_id=T` begins with T's declared cells as its last run left them and saves them when
+  it ends. `start`/`run` take `thread_id=`.
 - **Durable runs: resume after a crash** (`operonx.durable`). `Operon(graph, journal=
   SqliteJournal("runs.db"))` records each op's writes and events as it runs; after the process
   dies, `await engine.resume(run_id)` in a fresh process restores the cells, replays what had
