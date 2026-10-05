@@ -631,8 +631,12 @@ class Scheduler:
                 # A durable run (`journal=`) records — or, on resume,
                 # replays — each execution; otherwise one `is None` test.
                 durable = state._durable
-                source = op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
-                async for item_ctx, result in source:
+                # Not bound to a name: a cancelled pump's traceback keeps its
+                # frame — and its locals — alive, and a generator held there
+                # is never finalized, so its `finally` never runs.
+                async for item_ctx, result in (
+                    op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
+                ):
                     if isinstance(result, Interrupt):
                         # Validated before stamping. Raising from inside
                         # this `async for` would throw into a suspended
@@ -827,10 +831,9 @@ class Scheduler:
                 op = g._ops[op_name]
                 try:
                     durable = state._durable
-                    source = (
+                    async for item_ctx, result in (
                         op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
-                    )
-                    async for item_ctx, result in source:
+                    ):
                         if isinstance(result, Interrupt):
                             # Validated before stamping. Raising from inside
                             # this `async for` would throw into a suspended

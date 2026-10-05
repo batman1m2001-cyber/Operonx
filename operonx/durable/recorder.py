@@ -209,48 +209,54 @@ class RunRecorder:
         # is held until it has ended, so the event and the end are one step
         # and a crash between them cannot run it again.
         single = not getattr(op, "is_gen", True) and not hasattr(op, "_ops")
-        held: List[Any] = []
-        index = 0
-        while True:
-            repeating = index < len(known)
-            exec_token = _EXEC.set(live)
-            quiet_token = _SUPPRESS.set(repeating)
-            try:
-                event = await source.__anext__()
-            except StopAsyncIteration:
-                break
-            finally:
-                _SUPPRESS.reset(quiet_token)
-                _EXEC.reset(exec_token)
-            if _is_interrupt(event):
-                yield event  # parked interrupts are R3b; a live one passes through
-                continue
-            digest = _digest(op.full_name, event)
-            if repeating:
-                if digest != known[index]:
-                    raise NonDeterministicResume(
-                        f"{op.full_name} at {'/'.join(ctx)}: yield {index} differs from the "
-                        "journal's on resume — the op is not deterministic in what it yielded "
-                        "before the run stopped. Make it so, or resume with on_resume='fail'"
-                    )
-                live.take()  # already in the journal, and restored
-                yield event
-            elif single:
-                held.append(event)
-            else:
-                await self._commit(live, index, event=event, digest=digest)
-                yield event
-            index += 1
-        error_idx = state.schema.get_index(op.full_name, "error")
-        error = state._cells[error_idx].contexts.get(ctx) if error_idx >= 0 else None
-        await self._commit(
-            live,
-            END,
-            event=tuple(held) if held else None,
-            status="error" if error is not None else "ok",
-            error=error,
-            error_record=state._op_errors.get(op.full_name),
-        )
+        try:
+            held: List[Any] = []
+            index = 0
+            while True:
+                repeating = index < len(known)
+                exec_token = _EXEC.set(live)
+                quiet_token = _SUPPRESS.set(repeating)
+                try:
+                    event = await source.__anext__()
+                except StopAsyncIteration:
+                    break
+                finally:
+                    _SUPPRESS.reset(quiet_token)
+                    _EXEC.reset(exec_token)
+                if _is_interrupt(event):
+                    yield event  # parked interrupts are R3b; a live one passes through
+                    continue
+                digest = _digest(op.full_name, event)
+                if repeating:
+                    if digest != known[index]:
+                        raise NonDeterministicResume(
+                            f"{op.full_name} at {'/'.join(ctx)}: yield {index} differs from the "
+                            "journal's on resume — the op is not deterministic in what it yielded "
+                            "before the run stopped. Make it so, or resume with on_resume='fail'"
+                        )
+                    live.take()  # already in the journal, and restored
+                    yield event
+                elif single:
+                    held.append(event)
+                else:
+                    await self._commit(live, index, event=event, digest=digest)
+                    yield event
+                index += 1
+            error_idx = state.schema.get_index(op.full_name, "error")
+            error = state._cells[error_idx].contexts.get(ctx) if error_idx >= 0 else None
+            await self._commit(
+                live,
+                END,
+                event=tuple(held) if held else None,
+                status="error" if error is not None else "ok",
+                error=error,
+                error_record=state._op_errors.get(op.full_name),
+            )
+        finally:
+            # Closed here, in this task: a cancelled run's pump frame stays
+            # alive in its traceback, and a generator it holds would never be
+            # finalized — the op's `finally` would never run.
+            await source.aclose()
         for event in held:
             yield event
 
