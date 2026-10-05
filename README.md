@@ -49,5 +49,6 @@ operonx.bootstrap()  # operonx serve loads no resources for an asgi service
 Service("kb_admin", asgi("/kb", port=8021), app=kb_admin_app(llm="assistant"))
 ```
 
+Outstanding work (K5 visual retrieval needs a GPU): [BACKLOG.md](BACKLOG.md).
 Design and phase gates: [PLAN.md](PLAN.md); measured gates: [docs/bench](docs/bench).
 Contributor and agent rules: [AGENTS.md](AGENTS.md).
