@@ -18,6 +18,7 @@ from operonx.core.configs import OpType
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
+from operonx.providers.ops._runtime_resource import RESOURCE_PARAM, per_call, take_resource
 from operonx.providers.ops._utils import resolve_hub
 
 __all__ = ["VectorSearchOp", "VectorStoreOpBase"]
@@ -33,7 +34,7 @@ class VectorStoreOpBase(BaseOp):
     :meth:`_ports` and its work in ``_process``.
     """
 
-    __slots__ = ["resource", "backend", "_initialized"]
+    __slots__ = ["resource", "backend", "_initialized", "_dynamic", "_bound"]
 
     def __init__(
         self,
@@ -58,15 +59,19 @@ class VectorStoreOpBase(BaseOp):
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
+        resource, inputs, self._dynamic = take_resource(resource, inputs)
+        self._bound = {}
         self.resource = resource
 
         input_schema, output_schema = self._ports()
+        if self._dynamic:
+            input_schema = {**input_schema, "resource": RESOURCE_PARAM}
         self.inputs = self._merge_params(input_schema, inputs)
         self.outputs = self._merge_params(output_schema, outputs)
 
         self.backend = None
         self._initialized = False
-        self._set_core(self._process)
+        self._set_core(per_call(self, "_process") if self._dynamic else self._process)
 
     @abstractmethod
     def _ports(self) -> Tuple[Dict[str, Param], Dict[str, Param]]:
@@ -79,6 +84,8 @@ class VectorStoreOpBase(BaseOp):
 
     def warmup(self) -> None:
         """Eagerly resolve the backend on engine startup."""
+        if self._dynamic:  # the key arrives with each call
+            return
         self._ensure_initialized()
 
     def _ensure_initialized(self):
@@ -106,7 +113,8 @@ class VectorStoreOpBase(BaseOp):
 
     def serialize(self) -> dict:
         """Serialize, including the resolved resource config."""
-        self._ensure_initialized()
+        if not self._dynamic:  # a runtime resource has no backend to describe
+            self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource
         if self.backend and hasattr(self.backend, "config"):

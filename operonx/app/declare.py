@@ -199,7 +199,7 @@ def Service(  # noqa: N802 — reads as a declaration
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
     parses to, with objects where the manifest has ``module:attr``.
 
-    ``graph`` is a ``@graph`` (or a factory, with ``variants``), ``app`` an
+    ``graph`` is a module-level ``@graph`` (``variants`` bind its parameters), ``app`` an
     ASGI app for an ``asgi`` listener. ``on_startup`` hooks run before the
     listener accepts, in each of its worker processes and nowhere else — a
     model warmed for the call workers is not warmed again for an admin

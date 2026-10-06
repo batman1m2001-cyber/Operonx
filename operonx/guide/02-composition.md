@@ -209,8 +209,11 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
 - `on_session=fn` turns the request into the graph's inputs
   (`RunRequest(inputs={...})`, or `None` to refuse). Without it the query
   string becomes the inputs.
-- Also: `replay=True` (keep requests for replay), `key_ops=[...]`,
-  `variants={...}`.
+- `variants={"formal": {"style": formal}, "casual": {"style": casual}}`
+  compiles the door's module-level `@graph` once per variant, each with
+  those parameters fixed; `on_session` picks one with
+  `RunRequest(variant=...)`. A graph factory is refused (see 05).
+- Also: `replay=True` (keep requests for replay), `key_ops=[...]`.
 
 ## Application and `operonx.toml`
 

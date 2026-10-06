@@ -1,9 +1,10 @@
 <!-- requires: operonx_agents -->
 # Agents: operonx-agents
 
-Agents live in their own package, **operonx-agents** (`import
-operonx_agents`), built on operonx. `operonx.agents` is deprecated: it
-warns on import, and `MIGRATION.md` maps each of its names to the new one.
+Agents live in their own package, **operonx-agents**, built on operonx and
+imported as `operonx.agents` (an alias of `operonx_agents`; both names are
+the same modules). The old built-in `operonx.agents` was removed in 1.16;
+`MIGRATION.md` maps each of its names to the new one.
 
 ```bash
 pip install operonx-agents    # until it is on PyPI: from its repository
@@ -28,7 +29,7 @@ llm:assistant:
 ```
 
 ```python file=orders.py
-from operonx_agents import Agent, Model, UsageLimits, tool
+from operonx.agents import Agent, Model, UsageLimits, tool
 
 ORDERS = {"A1": "shipped", "A2": "processing"}
 
@@ -56,7 +57,7 @@ support = Agent(
 import asyncio
 
 import operonx
-from operonx_agents import Runner
+from operonx.agents import Runner
 
 from orders import support
 
@@ -98,7 +99,7 @@ not wait in the process: it saves its state and ends `interrupted`, and
 import asyncio
 
 import operonx
-from operonx_agents import Agent, Approve, Model, Runner, SQLiteStateStore, tool
+from operonx.agents import Agent, Approve, Model, Runner, SQLiteStateStore, tool
 
 REFUNDED = []
 
@@ -141,7 +142,7 @@ list it in the `Application` like any other, and `operonx serve` runs it.
 
 ```python file=shop.py
 from operonx.app import Application, http
-from operonx_agents import Agent, InMemoryStateStore, Model, agent_service, tool
+from operonx.agents import Agent, InMemoryStateStore, Model, agent_service, tool
 
 
 @tool(idempotent=False, approval=lambda ctx, args: args["amount"] > 500)
@@ -255,8 +256,8 @@ evaluators read how the answer was reached from the case's trace.
 import operonx
 from operonx.app import http
 from operonx.app.evals import Eval, trajectory
-from operonx_agents import InMemoryStateStore, agent_service
-from operonx_agents.evals import no_tool_errors, output_valid, tool_not_called, turns_at_most
+from operonx.agents import InMemoryStateStore, agent_service
+from operonx.agents.evals import no_tool_errors, output_valid, tool_not_called, turns_at_most
 
 from orders import support
 
@@ -291,8 +292,8 @@ assert (s["cases"], s["pass_rate"]) == (3, 1.0)
 ```python
 import asyncio
 
-from operonx_agents import Runner
-from operonx_agents.testing import ScriptedLLM, asks, says, scripted
+from operonx.agents import Runner
+from operonx.agents.testing import ScriptedLLM, asks, says, scripted
 
 from orders import support
 

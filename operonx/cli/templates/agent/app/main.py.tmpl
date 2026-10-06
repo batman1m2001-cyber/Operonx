@@ -8,8 +8,8 @@ Every service and job of the project is declared here; operonx.toml only
 points at `APP`.
 """
 
+from operonx.agents import SQLiteStateStore, agent_service
 from operonx.app import Application, env, http
-from operonx_agents import SQLiteStateStore, agent_service
 
 from assistant.graph import ASSISTANT
 

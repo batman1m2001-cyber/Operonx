@@ -2,9 +2,9 @@
 
 import asyncio
 
+from operonx.agents import Runner
+from operonx.agents.testing import ScriptedLLM, asks, says, scripted
 from operonx.app.serve.app import build_app
-from operonx_agents import Runner
-from operonx_agents.testing import ScriptedLLM, asks, says, scripted
 from starlette.testclient import TestClient
 
 from app.main import APP

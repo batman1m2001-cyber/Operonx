@@ -519,7 +519,7 @@ def check_resume(resume: Any, kind: str, variants: Any, label: str) -> None:
 
 
 def _variants(raw: Any, where: str, label: str, kind: str) -> Dict[str, Dict[str, Any]]:
-    """`[serve.variants]`: a table of tables, each binding the factory."""
+    """`[serve.variants]`: a table of tables, each binding parameters of the `@graph`."""
     if raw is None:
         return {}
     if kind == "asgi":
@@ -530,7 +530,7 @@ def _variants(raw: Any, where: str, label: str, kind: str) -> Dict[str, Dict[str
     for name, bind in raw.items():
         if not isinstance(bind, dict):
             raise ManifestError(
-                f"{where}: {label} variant {name!r} must be a table of factory "
+                f"{where}: {label} variant {name!r} must be a table of the graph's "
                 f"parameters, got {type(bind).__name__}"
             )
         out[str(name)] = dict(bind)

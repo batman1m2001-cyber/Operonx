@@ -1,8 +1,9 @@
 """One door, several compiled graphs: `[serve.variants]`.
 
-A door whose graph is a factory over some part that differs per caller —
-a callbot with one turn graph per agent — declares the variants in the
-manifest, gets one engine per variant at boot, and `on_session` names
+A door whose graph has parameters that differ per caller — a callbot
+with one turn graph per agent — declares the variants in the manifest
+(each binds some of the module-level `@graph`'s parameters), gets one
+engine per variant at boot, and `on_session` names
 one per session with `RunRequest.variant`. The gate refuses a session
 that names none or an unknown one, so a bad name is a refusal at the
 door and never a run that fails on its first item.
@@ -35,7 +36,7 @@ name = "call"
 kind = "http"
 path = "/call"
 port = 8080
-graph = "demo.call:build"
+graph = "demo.call:styled"
 [serve.variants]
 loud  = { style = "demo.styles:LOUD",  suffix = "!" }
 quiet = { style = "demo.styles:QUIET", suffix = "." }
@@ -54,7 +55,7 @@ def test_variants_parse_as_a_table_of_bindings():
 
 
 def test_variants_must_be_tables_and_never_on_an_asgi_mount():
-    with pytest.raises(ManifestError, match="must be a table of factory parameters"):
+    with pytest.raises(ManifestError, match="must be a table of the graph's parameters"):
         Manifest.from_dict(
             {"serve": [{"name": "c", "kind": "http", "graph": "a:b", "variants": {"x": 1}}]}
         )
@@ -68,27 +69,10 @@ def test_variants_must_be_tables_and_never_on_an_asgi_mount():
         )
 
 
-# -- the factory ---------------------------------------------------------
+# -- the graph -----------------------------------------------------------
 
 LOUD = str.upper
 QUIET = str.lower
-
-
-def build(style, suffix: str):
-    """A factory: bound once per variant, returns the graph."""
-
-    @op(bound="sync")
-    def shout(item: str = "") -> dict:
-        return {"reply": style(item) + suffix}
-
-    @graph
-    def pipeline():
-        src = ingress()
-        loud = shout(item=src["item"])
-        out = egress(item=loud["reply"])
-        START >> src >> loud >> out >> END
-
-    return pipeline
 
 
 @graph
@@ -116,12 +100,28 @@ def shout(item: str = "", style=None, suffix: str = "") -> dict:
 ME = __name__
 
 
-def test_compile_graph_binds_the_factory_and_loads_entry_point_values():
-    engine = compile_graph(f"{ME}:build", bind={"style": f"{ME}:LOUD", "suffix": "!"})
+def build(style, suffix: str):
+    """A graph factory: refused (graphs are defined at module level)."""
+
+    @graph
+    def pipeline():
+        src = ingress()
+        START >> src >> END
+
+    return pipeline
+
+
+def test_compile_graph_loads_entry_point_values_and_keeps_literals():
+    engine = compile_graph(f"{ME}:styled", bind={"style": f"{ME}:LOUD", "suffix": "!"})
     assert isinstance(engine, Operon)
     # a value that does not read as module:attr is a literal
-    engine = compile_graph(f"{ME}:build", bind={"style": f"{ME}:QUIET", "suffix": "a:b:c"})
+    engine = compile_graph(f"{ME}:styled", bind={"style": f"{ME}:QUIET", "suffix": "a:b:c"})
     assert isinstance(engine, Operon)
+
+
+def test_a_graph_factory_is_refused_naming_the_rule():
+    with pytest.raises(TypeError, match="plain function.*module level.*guide 05"):
+        compile_graph(f"{ME}:build", bind={"style": f"{ME}:LOUD", "suffix": "!"})
 
 
 def test_a_graph_binds_its_own_parameters():
@@ -132,8 +132,6 @@ def test_a_graph_binds_its_own_parameters():
 def test_binding_a_parameter_the_graph_does_not_have_says_so():
     with pytest.raises(TypeError, match="has no parameter \\['style'\\]"):
         compile_graph(f"{ME}:plain", bind={"style": f"{ME}:LOUD"})
-    with pytest.raises(TypeError, match="could not take \\['nope'\\]"):
-        compile_graph(f"{ME}:build", bind={"nope": 1})
 
 
 # -- the gate ------------------------------------------------------------
@@ -152,8 +150,8 @@ def _runner(transport, on_session):
         spec,
         transport=transport,
         variants={
-            "loud": compile_graph(f"{ME}:build", bind={"style": f"{ME}:LOUD", "suffix": "!"}),
-            "quiet": compile_graph(f"{ME}:build", bind={"style": f"{ME}:QUIET", "suffix": "."}),
+            "loud": compile_graph(f"{ME}:styled", bind={"style": f"{ME}:LOUD", "suffix": "!"}),
+            "quiet": compile_graph(f"{ME}:styled", bind={"style": f"{ME}:QUIET", "suffix": "."}),
         },
     )
     runner._on_session = on_session
@@ -193,19 +191,16 @@ from operonx.core import END, START, graph, op
 from operonx.app.serve import egress, ingress
 from styles import LOUD
 
-def build(style, suffix: str):
-    @op(bound="sync")
-    def shout(item: str = "") -> dict:
-        return {"reply": style(item) + suffix}
+@op(bound="sync")
+def shout(item: str = "", style=None, suffix: str = "") -> dict:
+    return {"reply": style(item) + suffix}
 
-    @graph
-    def pipeline():
-        src = ingress()
-        loud = shout(item=src["item"])
-        out = egress(item=loud["reply"])
-        START >> src >> loud >> out >> END
-
-    return pipeline
+@graph
+def pipeline(style, suffix):
+    src = ingress()
+    loud = shout(item=src["item"], style=style, suffix=suffix)
+    out = egress(item=loud["reply"])
+    START >> src >> loud >> out >> END
 
 def open_call(session):
     from operonx.app.serve import RunRequest
@@ -236,7 +231,7 @@ def project(tmp_path, monkeypatch):
         kind  = "http"
         path  = "/call"
         port  = 8124
-        graph = "{name}:build"
+        graph = "{name}:pipeline"
         on_session = "{name}:open_call"
         [serve.variants]
         loud  = {{ style = "styles:LOUD",  suffix = "!" }}
@@ -257,13 +252,13 @@ def test_src_roots_go_on_sys_path_and_variants_are_graphs(project):
     d = app.describe()
     assert d["services"][0]["variants"] == ["loud", "quiet"]
     assert [(g["name"], g["bind"]) for g in d["graphs"]] == [
-        ("build[loud]", {"style": "styles:LOUD", "suffix": "!"}),
-        ("build[quiet]", {"style": "styles:QUIET", "suffix": "."}),
+        ("pipeline[loud]", {"style": "styles:LOUD", "suffix": "!"}),
+        ("pipeline[quiet]", {"style": "styles:QUIET", "suffix": "."}),
     ]
     assert name not in sys.modules  # describe() imported nothing
     app.bootstrap()
     assert str(root / "src") in sys.path
-    engine = next(g for g in app.graphs if g.name == "build[quiet]").compile()
+    engine = next(g for g in app.graphs if g.name == "pipeline[quiet]").compile()
     assert isinstance(engine, Operon)
 
 

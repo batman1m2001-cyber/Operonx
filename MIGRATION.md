@@ -1,8 +1,10 @@
 # Migrating operonx
 
+- [To 1.16.0](#migrating-to-operonx-1160) — the built-in `operonx.agents` is removed
+  (`operonx.agents` now names the operonx-agents package); variants bind a
+  `@graph`'s parameters, graph factories are refused
 - [`operonx.agents` → `operonx-agents`](#migrating-from-operonxagents-to-operonx-agents) —
-  `operonx.agents` is deprecated; it warns on import and is removed one
-  release after operonx-agents 1.0
+  the name map from the old built-in agents API
 - [To 1.2.0](#migrating-to-operonx-120) — `OnnxOp` and `TritonOp` removed;
   `operonx.tools` → `operonx.cli`
 - [To 1.0.0](#migrating-to-operonx-100) — `PARENT.shared`, `GraphOp.loop`,
@@ -10,14 +12,43 @@
 
 ---
 
+# Migrating to operonx 1.16.0
+
+- **The built-in `operonx.agents` is gone.** `operonx.agents` is now an alias of the separately
+  installed operonx-agents package (`pip install operonx-agents`): `from operonx.agents import
+  Agent, Runner, tool` is `from operonx_agents import ...`, the same modules. Code that used the
+  old API (`build_react_agent`, `operonx.agents.mcp`, `.memory`, `.policy`) moves to the new one —
+  the map is below. Likewise `operonx.kb` is operonx-kb (`operonx_kb`).
+- **Variants bind a `@graph`'s parameters.** `Service(graph=build, variants={...})` with `build` a
+  plain function returning a graph is refused. Define the graph at module level with the
+  per-variant parts as parameters:
+
+```python
+# Before
+def build(style, sign_off):
+    @graph
+    def greet(): ...
+    return greet
+
+# After
+@graph
+def greet(style, sign_off): ...
+
+Service("greet", http(...), graph=greet, variants={"formal": {"style": formal, "sign_off": "Regards"}})
+```
+
+- **New:** a provider op's `resource=` may be a graph input (`LLMOp.of(resource=model, ...)` in
+  `@graph def chat(model, ...)`), so a graph that serves several models or stores no longer needs
+  to be generated per resource.
+
+---
+
 # Migrating from `operonx.agents` to `operonx-agents`
 
 Agents moved out of operonx into their own distribution, `operonx-agents`
-(`import operonx_agents`; design: `docs/roadmap/track3_agents.md` §4, plan:
-`docs/AGENTS_V2_PLAN.md`). `operonx.agents` keeps working, unchanged, and
-warns once when it is imported (`DeprecationWarning`). It is removed one
-release after operonx-agents 1.0. Nothing else in operonx imports it, so a
-project that never imports it sees no warning.
+(imported as `operonx.agents` since 1.16, or `operonx_agents`; design:
+`docs/roadmap/track3_agents.md` §4, plan: `docs/AGENTS_V2_PLAN.md`). The old
+built-in module was removed in 1.16.
 
 The new package runs the agent loop as plain async code inside one op —
 not as a back-edge graph — and records every turn, model call and tool

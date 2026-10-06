@@ -22,6 +22,7 @@ from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
 from operonx.providers.llms.base import normalize_tool_call
+from operonx.providers.ops._runtime_resource import RESOURCE_PARAM, per_call, take_resource
 from operonx.providers.ops._utils import resolve_hub
 from operonx.providers.parsing import (
     ExtractField,
@@ -240,6 +241,8 @@ class LLMOp(BaseOp):
         "retry_hint",
         "on_failure",
         "_extract_fields",
+        "_dynamic",
+        "_bound",
     ]
 
     type: OpType = "llm"
@@ -321,6 +324,14 @@ class LLMOp(BaseOp):
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
+        # ``resource=`` given as a graph input: chosen per call (_runtime_resource).
+        resource, inputs, self._dynamic = take_resource(resource, inputs)
+        self._bound = {}
+        if self._dynamic and (ratios is not None or batch_mode):
+            raise ValueError(
+                "LLMOp: resource= as a graph input takes one key per call; ratios= and "
+                "batch_mode= need their resources fixed when the graph is built"
+            )
         self.batch_mode = batch_mode
         self.contain_generation = True
         self.fallback = fallback
@@ -421,6 +432,8 @@ class LLMOp(BaseOp):
             "n": Param(type=int, default=None),
             "user": Param(type=str, default=None),
         }
+        if self._dynamic:
+            input_schema["resource"] = RESOURCE_PARAM
 
         output_schema = {
             "role": Param(type=str, default="assistant"),
@@ -484,10 +497,8 @@ class LLMOp(BaseOp):
         self._initialized = False
 
         # Core: stream → _stream_core, else → _generate_core
-        if self.stream:
-            self._set_core(self._stream_core)
-        else:
-            self._set_core(self._generate_core)
+        core = "_stream_core" if self.stream else "_generate_core"
+        self._set_core(per_call(self, core) if self._dynamic else getattr(self, core))
 
     # =========================================================================
     # Prompt formatting (absorbed from PromptOp)
@@ -594,6 +605,8 @@ class LLMOp(BaseOp):
 
     def warmup(self) -> None:
         """Eagerly initialize LLM backends on engine startup."""
+        if self._dynamic:  # the key arrives with each call
+            return
         self._ensure_initialized()
 
     def _ensure_initialized(self):
@@ -1628,7 +1641,8 @@ class LLMOp(BaseOp):
 
     def serialize(self) -> dict:
         """Serialize LLMOp, including the resolved backend configs."""
-        self._ensure_initialized()
+        if not self._dynamic:  # a runtime resource has no backend to describe
+            self._ensure_initialized()
         base = super().serialize()
 
         base["resource"] = self.resource
