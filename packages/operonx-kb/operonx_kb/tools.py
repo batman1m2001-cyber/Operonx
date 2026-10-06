@@ -29,7 +29,7 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Union
 from operonx_kb.errors import MissingExtraError
 from operonx_kb.model.filter import KBFilter, document_payload, matches
 
-__all__ = ["kb_tools"]
+__all__ = ["kb_tools", "search_passages", "read_passage"]
 
 Scope = Union[
     None, KBFilter, Mapping[str, Any], Callable[[Any], Union[None, KBFilter, Mapping[str, Any]]]
@@ -54,6 +54,42 @@ def _hit(h: Mapping[str, Any]) -> Dict[str, Any]:
         "section": " > ".join(h.get("heading_path") or []),
         "pages": h.get("pages") or [],
         "text": text if len(text) <= HIT_CHARS else text[: HIT_CHARS - 1] + "…",
+    }
+
+
+async def search_passages(
+    kb: Any, collection: str, query: str, *, k: int = 5, max_k: int = 20,
+    mode: Optional[str] = None, filter: Optional[dict] = None,
+) -> List[Dict[str, Any]]:  # fmt: skip
+    """The best passages for ``query`` in ``collection`` under ``filter``: what
+    ``kb_search`` returns, here and over MCP (:mod:`operonx_kb.mcp`)."""
+    found = await kb.search(collection, query, k=max(1, min(int(k), max_k)), mode=mode,
+                            filter=filter)  # fmt: skip
+    return [_hit(h) for h in found["hits"]]
+
+
+def read_passage(
+    kb: Any, collection: str, id: str, *, filter: Optional[dict] = None, around: int = 1,
+    prefix: str = "kb",
+) -> Dict[str, Any]:  # noqa: A002 — the hit's own field name  # fmt: skip
+    """A passage by its id with ``around`` chunks either side, if ``filter`` lets the
+    caller see its document: what ``kb_read`` returns."""
+    spec = kb.collection(collection).spec
+    flt = KBFilter.of(filter).checked(spec)
+    found = kb.catalog.active_chunks(collection, [id]).get(id)
+    if found is None or not matches(flt, collection, document_payload(spec, found.document)):
+        return {"error": f"no passage {id!r} in {collection} (use an id from {prefix}_search)"}
+    occurrences = kb.catalog.version_chunks(found.occurrence.version_id)
+    at = found.occurrence.ordinal
+    near = [o for o in occurrences if abs(o.ordinal - at) <= around]
+    chunks = kb.catalog.get_chunks([o.chunk_id for o in near])
+    return {
+        "id": id,
+        "document": found.document.title or found.document.key,
+        "key": found.document.key,
+        "section": " > ".join(found.chunk.heading_path or []),
+        "pages": sorted({p for o in near for p in (o.pages or [])}),
+        "text": "\n\n".join(chunks[o.chunk_id].text for o in near if o.chunk_id in chunks),
     }
 
 
@@ -91,31 +127,14 @@ def kb_tools(
         raise MissingExtraError("Agent tools (operonx_kb.tools)", "agents", exc) from exc
 
     kb.collection(collection)  # an unknown collection fails here, not on the first call
-    spec = kb.collection(collection).spec
 
     async def search(ctx: RunContext, query: str, k: int = k) -> List[Dict[str, Any]]:
-        found = await kb.search(collection, query, k=max(1, min(int(k), max_k)), mode=mode,
-                                filter=_filter(scope, ctx))  # fmt: skip
-        return [_hit(h) for h in found["hits"]]
+        return await search_passages(kb, collection, query, k=k, max_k=max_k, mode=mode,
+                                     filter=_filter(scope, ctx))  # fmt: skip
 
     async def read(ctx: RunContext, id: str) -> Dict[str, Any]:  # noqa: A002 — the hit's own field name
-        flt = KBFilter.of(_filter(scope, ctx)).checked(spec)
-        active = kb.catalog.active_chunks(collection, [id])
-        found = active.get(id)
-        if found is None or not matches(flt, collection, document_payload(spec, found.document)):
-            return {"error": f"no passage {id!r} in {collection} (use an id from {prefix}_search)"}
-        occurrences = kb.catalog.version_chunks(found.occurrence.version_id)
-        at = found.occurrence.ordinal
-        near = [o for o in occurrences if abs(o.ordinal - at) <= around]
-        chunks = kb.catalog.get_chunks([o.chunk_id for o in near])
-        return {
-            "id": id,
-            "document": found.document.title or found.document.key,
-            "key": found.document.key,
-            "section": " > ".join(found.chunk.heading_path or []),
-            "pages": sorted({p for o in near for p in (o.pages or [])}),
-            "text": "\n\n".join(chunks[o.chunk_id].text for o in near if o.chunk_id in chunks),
-        }
+        return read_passage(kb, collection, id, filter=_filter(scope, ctx), around=around,
+                            prefix=prefix)  # fmt: skip
 
     search.__doc__ = (
         f"Search the {collection!r} knowledge base. Returns the best passages, each with an id "

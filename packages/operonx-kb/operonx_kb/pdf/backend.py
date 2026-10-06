@@ -96,6 +96,8 @@ class PdfPage:
     words: List[Word] = field(default_factory=list)
     rules: List[Rule] = field(default_factory=list)
     images: List[BBox] = field(default_factory=list)
+    #: The words were read from the page image (:class:`~operonx_kb.pdf.ocr.OcrBackend`).
+    ocr: bool = False
 
 
 # Font-name tokens, after docling's utils/font_style.py: strip the subset

@@ -87,13 +87,17 @@ class PdfParser(Parser):
             blocks=out,
             pages=[
                 PageInfo(
-                    page_no=p.page_no, width=p.width, height=p.height, text_layer=bool(p.words)
+                    page_no=p.page_no,
+                    width=p.width,
+                    height=p.height,
+                    text_layer=bool(p.words) and not p.ocr,
                 )
                 for p in pages
             ],
             parser=self.name,
             stats={
                 "pages": len(pages),
+                "ocr_pages": sum(1 for p in pages if p.ocr),
                 "backend_s": round(parsed_at - started, 4),
                 "layout_s": round(time.perf_counter() - parsed_at, 4),
             },

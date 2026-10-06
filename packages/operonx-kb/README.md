@@ -67,6 +67,19 @@ tools = kb_tools(kb, "handbook", scope=lambda ctx: {"acl_any": ctx.deps.principa
 agent = Agent(name="hr", model=Model("assistant"), tools=[tools])
 ```
 
+A client outside your code (Claude Desktop, an IDE) gets the same two tools over MCP (extra
+`mcp`). The scope is the server's, fixed when it starts — one server per audience:
+
+```bash
+operonx-kb mcp handbook --acl team:hr
+```
+
+Scanned PDFs: a page with no text layer is read by OCR when the collection asks for it (extra
+`ocr`, plus the `tesseract` binary with its language data) — `CollectionSpec(ocr=OcrSpec(languages="vie+eng"))`.
+
+Files from S3 or Google Drive (extras `s3`, `drive`): `S3Source("bucket", prefix="hr/")` and
+`DriveSource(folder_id)` are job sources, like a folder, so an ingest job reads them and resumes.
+
 Studio's Knowledge tab reads a knowledge base through its admin API (extra `admin`), served as
 one of the project's services:
 

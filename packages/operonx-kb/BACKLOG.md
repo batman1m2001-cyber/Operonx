@@ -28,9 +28,8 @@ first, then build, then measure; keep the CPU suite green (GPU tests behind a ma
 
 ## Other open items
 
-- MCP server (`kb_search` / `kb_read` over MCP) — only when a client outside our code needs the KB
-  (Claude Desktop, an IDE, another language). Our flows and agents use it in process (PLAN K7).
-- Other track5 P7 items on demand: S3 / Drive / crawl connectors, Qdrant hybrid, LanceDB, wiki export.
+- Other track5 P7 items on demand: crawl connector, Qdrant hybrid, LanceDB, wiki export. (MCP, S3
+  and Drive shipped in 0.2.3.)
 
 - K4 gate (optional — K4 is built and opt-in; this only decides default-on). Decided 2026-10-06: run
   it on the **in-house model** (`google/gemma-4-E2B-it`, the callbot gateway), not OpenAI. Probed: plain
@@ -52,4 +51,4 @@ first, then build, then measure; keep the CPU suite green (GPU tests behind a ma
   ```
   Reusing the same `WORK` folder resumes for free (answers are cached in its catalog). Run it when
   nobody is testing the callbot: it shares that gateway.
-- Human check of the 30 answers in `docs/bench/d5_answers.jsonl`; OCR for scanned PDFs.
+- OCR on a real scanned corpus (0.2.3 shipped it opt-in; D5 had no scans: `docs/bench/ocr.md`).

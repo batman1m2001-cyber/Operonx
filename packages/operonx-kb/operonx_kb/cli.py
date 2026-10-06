@@ -15,6 +15,7 @@
     operonx-kb query wiki "who directed the film that won in 1999" --mode graph
     operonx-kb query handbook "how many days of leave" --answer assistant
     operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
+    operonx-kb mcp handbook --acl team:hr        # kb_search / kb_read over MCP (stdio)
 
 Resources come from ``resources.yaml`` (``--resources`` to point elsewhere).
 The dense index is an operonx ``vector_store:``; an in-memory FAISS index
@@ -221,6 +222,15 @@ def _cmd_eval(kb: KnowledgeBase, args) -> int:
     return 1 if report["errors"] else 0
 
 
+def _cmd_mcp(kb, args) -> int:
+    from operonx_kb.mcp import mcp_server
+
+    server = mcp_server(kb, args.collection, scope=_filter(args), mode=args.mode,
+                        prefix=args.prefix)  # fmt: skip
+    server.run("stdio")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="operonx-kb", description="operonx-kb: documents in, provenance kept."
@@ -312,6 +322,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--answer", metavar="LLM", help="answer with this llm resource, with citations")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=_cmd_query)
+
+    p = sub.add_parser(
+        "mcp", help="serve kb_search / kb_read over MCP (stdio), scoped by these flags"
+    )
+    p.add_argument("collection")
+    p.add_argument("--mode", choices=list(MODES))
+    p.add_argument("--tag", action="append", help="only documents with this tag (repeatable)")
+    p.add_argument("--acl", action="append", help="the clients' principal (repeatable)")
+    p.add_argument("--filter", help="a KBFilter as JSON: what every client may see")
+    p.add_argument("--prefix", default="kb", help="the tools' name prefix")
+    p.set_defaults(fn=_cmd_mcp)
 
     p = sub.add_parser("eval", help="evaluate search (or answers) of a collection on a dataset")
     p.add_argument("collection")
