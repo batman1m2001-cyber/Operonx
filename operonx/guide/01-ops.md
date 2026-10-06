@@ -239,8 +239,8 @@ asyncio.run(main())
 ## Agents — a model that calls tools
 
 Agents are the **operonx-agents** package: an `Agent` spec, `Runner`, and
-`AgentOp.of(agent=..., input=...)` for a step of a graph — see
-[agents](09-agents.md). The older built-in `operonx.agents`
+`AgentOp.of(agent=..., input=...)` for a step of a graph — see the
+operonx-agents guide (`.operonx/guide/agents/` once it is installed). The older built-in `operonx.agents`
 (`build_react_agent`, `@tool(schema=...)`) was removed in 1.16;
 `MIGRATION.md` maps it to the new API.
 

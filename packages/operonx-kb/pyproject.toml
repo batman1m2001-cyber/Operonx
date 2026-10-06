@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-kb"
-version = "0.2.4"
+version = "0.2.5"
 description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
 readme = "README.md"
 license = "Apache-2.0"
@@ -58,6 +58,9 @@ operonx-kb = "operonx_kb.cli:main"
 
 # operonx finds the KB's resource categories without importing the package
 # (the entry point's name is the category).
+[project.entry-points."operonx.guides"]
+kb = "operonx_kb.guide"
+
 [project.entry-points."operonx.resources"]
 kb_catalog = "operonx_kb.registry:register_catalog"
 kb_blob = "operonx_kb.registry:register_blob"

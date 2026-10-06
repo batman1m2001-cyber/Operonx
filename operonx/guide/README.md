@@ -24,8 +24,12 @@ websocket, and an **Application** bundles a product's jobs and services.
    `operonx eval`, reports, calibrate, the pytest plugin.
 8. [Inside a run](08-runs.md): `run_context()`, `child()`, several stream
    modes at once and `tasks`, live traces.
-9. [Agents](09-agents.md): operonx-agents — `Agent`, `Runner`, approvals,
-   `agent_service` (HTTP, server-sent events, websocket), trajectory evals.
+
+Other operonx packages ship their own guides beside this one, in the
+project's `.operonx/guide/` (its `README.md` indexes them all):
+**operonx-agents** (`agents/`: `Agent`, `Runner`, approvals,
+`agent_service`, trajectory evals) and **operonx-kb** (`kb/`: ingest,
+search, citations, `kb_tools`, MCP).
 
 ## Install
 
@@ -45,8 +49,9 @@ operonx init myapp          # the hello template; also --template http | chat | 
 It writes the layout of [project layout](05-project-layout.md): `operonx.toml`,
 `resources.yaml`, `.env.example`, `app/main.py` with the `Application`, one
 feature in `src/<feature>/`, its tests, and `AGENTS.md` (with `CLAUDE.md`
-pointing at it) for coding assistants. It also copies this guide into
-`myapp/.operonx/guide/`. Existing files are kept unless `--force`.
+pointing at it) for coding assistants. It also copies the guide of every
+installed operonx package into `myapp/.operonx/guide/`. Existing files are
+kept unless `--force`.
 
 ## Imports
 
@@ -97,7 +102,11 @@ from operonx.providers.ops import (
 It ships inside the package, so it always matches the installed version:
 
 ```bash
-operonx guide --path           # where the installed guide is
-operonx guide --sync           # copy it into the project's .operonx/guide/ (after an upgrade)
-python -m operonx.guide        # this page's path and the table of contents
+operonx guide                  # sync .operonx/guide/ with the installed packages
+operonx guide --check          # exit 1 when that copy is stale (CI)
+operonx guide --path           # where the installed core guide is
+python -m operonx.guide        # every installed guide and its pages
 ```
+
+`uv add operonx-agents` (or `operonx-kb`) adds that package's guide at the
+next `operonx` command run in the project; `uv remove` takes it away.

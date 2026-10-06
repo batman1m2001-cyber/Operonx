@@ -18,7 +18,8 @@ approvals as interruptions, `as_tool` / `as_op`, hooks, redaction and MCP
 over stdio and streamable HTTP; phase A5 (this state) `agent_service`
 (HTTP JSON / server-sent events / websocket, approvals on `/resume`),
 trajectory evaluators, `dataset_from_runs` and `operonx_agents.testing`.
-The guide page with tested snippets is operonx's `operonx/guide/09-agents.md`.
+The guide page with tested snippets is `operonx_agents/guide/01-agents.md`; a project's
+`operonx guide` copies it to `.operonx/guide/agents/`.
 
 ```python
 from operonx.agents import Choice, Model, ModelSettings, llm_step
@@ -414,7 +415,7 @@ trip; a 20-case eval; Workflow-view screenshots (§2b).** All hold.
 | `dataset_from_runs` | `tests/test_evals.py::TestDatasetFromRuns`: recorded `agent_service` runs → cases (input from the first turn's record, the calls as the reference trajectory, the answer as `expected`) → an `Eval` of the same service graph passes 2/2; a resumed run is not a case; `agent=` filter. The runner now records the run's input on its first turn (`tests/test_redact.py::…the_first_turn_says_what_the_run_was_asked_scrubbed_on_export`) |
 | **a 20-case eval** | `evals/` (20 support cases, a rule model, through `agent_service`'s graph; the trajectory evaluators + core `trajectory.tool_calls`): `pytest evals -p operonx.app.evals.pytest_plugin --operonx-eval-name support --operonx-eval-dir results/eval_a5` → **20/20, gate pass (exit 0)**, `results/eval_a5.txt`, record `results/eval_a5/support/20261004T162511-650606`. **Run locally, not in CI**: this repo has no GitHub repo/CI yet. Control: raising the approval threshold to 1000 fails exactly the two cases it should (18/20, gate failed, exit 1) |
 | `operonx init --template agent` on the new API | core `tests/internal/cli/test_init.py::test_the_agent_template_is_built_on_operonx_agents` (declares `operonx-agents`, no `operonx.agents`), and the generated project's own tests, CLIs and ruff (`TestTheGeneratedProject[agent]`, run where operonx-agents is installed: 52/52) |
-| a guide page with tested snippets | core `operonx/guide/09-agents.md` (6 snippets: a run, approvals + resume, `agent_service` JSON/SSE/resume, `as_op`, a trajectory eval, a scripted model), run by core `tests/guide` where `operonx_agents` is installed (`<!-- requires: operonx_agents -->`; the stand-in model now calls tools) |
+| a guide page with tested snippets | `operonx_agents/guide/01-agents.md` (6 snippets: a run, approvals + resume, `agent_service` JSON/SSE/resume, `as_op`, a trajectory eval, a scripted model), run by this package's `tests/test_guide.py` (`-m slow`) |
 | shims for `operonx.agents` (D3) | core `tests/internal/agents/test_deprecation.py`: one `DeprecationWarning` on import naming operonx-agents and `MIGRATION.md`; everything still works (the 22 `operonx.agents` test files pass); `import operonx` alone does not warn. Callbot (`refactor/operonx-studio`, which does not import it): 303 passed |
 | Studio: `graphForRun` on root records | studio `tests/studio/test_runs.py::test_a_run_names_the_ops_it_ran_at_its_root` (`root_ops`, `child` on tree rows), `tests/js/agentsteps.test.mjs` (`rootOps`). The live run's IR graph has 3 ops; 7 op names ran (+ turn, model, order_status, refund): the old score 3/7 < 0.5 drew "isn't drawn here" |
 | Studio: the canvas opens an agent op into turn → model/tool | `tests/js/agentsteps.test.mjs` (turns chain, a model call fans out to its tools, ids unique across executions, the Flow tab's graph untouched); screenshots below |

@@ -1,4 +1,3 @@
-<!-- requires: operonx_agents -->
 # Agents: operonx-agents
 
 Agents live in their own package, **operonx-agents**, built on operonx and
