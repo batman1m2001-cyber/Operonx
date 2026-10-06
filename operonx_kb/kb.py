@@ -13,31 +13,19 @@ traced exactly like a served one.
 
 from __future__ import annotations
 
+import inspect
 import re
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence
 
 from operonx import Operon
 
-from operonx_kb.errors import CatalogError, KBError
-from operonx_kb.graphs.answer import answer_graph
-from operonx_kb.graphs.ingest import build_ingest_graph
-from operonx_kb.graphs.maintenance import (
-    build_delete_graph,
-    build_drop_index_graph,
-    build_gc_graph,
-    build_lexical_drop_graph,
-    build_lexical_rebuild_graph,
-    build_rebuild_graph,
-)
-from operonx_kb.graphs.retrieve import (
-    dense_retriever,
-    graph_retriever,
-    hybrid_retriever,
-    lexical_retriever,
-    reranked,
-    search_graph,
-    tree_retriever,
-)
+from operonx_kb.errors import CatalogError, IngestError, KBError, QueryError  # noqa: F401
+from operonx_kb.graphs.answer import answer as answer_graph
+from operonx_kb.graphs.ingest import ingest_document
+from operonx_kb.graphs.maintenance import collect_garbage, delete_document, drop_index, drop_lexical
+from operonx_kb.graphs.maintenance import rebuild_index as rebuild_index_graph
+from operonx_kb.graphs.maintenance import rebuild_lexical as rebuild_lexical_graph
+from operonx_kb.graphs.retrieve import ranked_search
 from operonx_kb.maintenance import VerifyReport, verify
 from operonx_kb.model.collection import (
     Collection,
@@ -49,26 +37,19 @@ from operonx_kb.model.document import Document
 from operonx_kb.model.filter import KBFilter
 from operonx_kb.model.ids import document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
+from operonx_kb.ops.settings import MODES, check_mode, default_mode
 
 __all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
 
 #: Retrieval modes of :meth:`KnowledgeBase.search`. ``tree`` needs the collection's
 #: ``tree`` spec (PLAN E7), ``graph`` its ``graph`` spec (PLAN G4); both are seeded
 #: by the collection's default mode.
-MODES = ("dense", "lexical", "hybrid", "tree", "graph")
+
 #: The mode a search uses unless told otherwise, for a collection that has both a
 #: dense and a lexical index. Hybrid beat dense on Recall@10 on all three K2 eval
 #: sets (the PLAN gate asks for two of three; the table is in ``docs/bench/k2.md``).
 #: A collection with only one index uses that one (:meth:`KnowledgeBase.default_mode`).
 DEFAULT_MODE = "hybrid"
-
-
-class IngestError(KBError):
-    """A KB graph run failed; the message holds the failing op and its error."""
-
-
-class QueryError(KBError):
-    """A search or an answer run failed; the message holds the failing op and its error."""
 
 
 _EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit|Interrupt)\b.*")
@@ -104,7 +85,7 @@ class KnowledgeBase:
         self.trace = trace
         self.catalog = catalog_of(catalog)
         self.blobs = blobs_of(blobs)
-        self._engines: Dict[Tuple[str, str, str], Operon] = {}
+        self._engines: Dict[str, Operon] = {}  # graph name -> engine, shared by every collection
 
     # collections -----------------------------------------------------------------
 
@@ -114,7 +95,6 @@ class KnowledgeBase:
         """Create a collection, or update its spec."""
         collection = Collection(id=collection_id, spec=spec or CollectionSpec())
         self.catalog.put_collection(collection)
-        self._engines = {k: v for k, v in self._engines.items() if k[1] != collection_id}
         return collection
 
     def collection(self, collection_id: str) -> Collection:
@@ -133,23 +113,20 @@ class KnowledgeBase:
             )
         return dense
 
-    def _engine(
-        self, kind: str, collection_id: str, factory: Callable[[], Any], params: Sequence[str],
-        config: str,
-    ) -> Operon:  # fmt: skip
-        key = (kind, collection_id, config)
-        if key not in self._engines:
-            self._engines[key] = Operon(
-                factory(), params={**{p: None for p in params}, "name": kind}, trace=self.trace
-            )
-        return self._engines[key]
+    def _engine(self, graph_: Any) -> Operon:
+        """One engine per module-level graph, shared by every collection: what differs
+        per collection arrives as the run's inputs."""
+        name = graph_.__name__
+        if name not in self._engines:
+            params = {name: None for name in inspect.signature(graph_).parameters}
+            self._engines[name] = Operon(graph_, params={**params, "name": name},
+                                                trace=self.trace)  # fmt: skip
+        return self._engines[name]
 
     async def _run_graph(
         self,
-        kind: str,
+        graph_: Any,
         collection_id: str,
-        factory: Callable[[], Any],
-        config: str,
         inputs: Dict[str, Any],
         output: Optional[str],
         error: type = IngestError,
@@ -157,13 +134,18 @@ class KnowledgeBase:
         trace_id: Optional[str] = None,
     ) -> Any:
         """Run a graph; return ``out[output]``, or every output when ``output`` is ``None``.
-        ``trace_id`` is the run's id (default: a new one).
+        ``catalog`` and ``blobs`` are this knowledge base's keys; ``trace_id`` is the run's
+        id (default: a new one).
 
         Raises:
             error: An op failed, or an expected output is missing.
         """
-        engine = self._engine(kind, collection_id, factory, list(inputs), config)
-        out = await engine.run(inputs=inputs, trace_id=trace_id)
+        kind = graph_.__name__
+        engine = self._engine(graph_)
+        wanted = set(inspect.signature(graph_).parameters)
+        base = {"catalog": self.catalog_key, "blobs": self.blobs_key}
+        full = {**{k: v for k, v in base.items() if k in wanted}, **inputs}
+        out = await engine.run(inputs=full, trace_id=trace_id)
         expected = [*required, *([output] if output is not None else [])]
         if "$errors" in out or any(name not in out for name in expected):
             errors = out.get("$errors") or {kind: {"message": "the run produced no result"}}
@@ -176,25 +158,6 @@ class KnowledgeBase:
                 {"ops": sorted(errors)},
             )
         return out[output] if output is not None else out
-
-    async def _run(
-        self,
-        kind: str,
-        collection_id: str,
-        build,
-        inputs: Dict[str, Any],
-        output: Optional[str],
-        dense: Optional[DenseIndexSpec] = None,
-    ) -> Any:
-        """Run a graph built from the collection's dense and lexical index specs."""
-        dense = dense or self._dense(collection_id)
-        lexical = self.collection(collection_id).spec.lexical
-        config = dense.model_dump_json() + (lexical.model_dump_json() if lexical else "")
-
-        def factory():
-            return build(dense, lexical=lexical, catalog=self.catalog_key, blobs=self.blobs_key)
-
-        return await self._run_graph(kind, collection_id, factory, config, inputs, output)
 
     # ingest ------------------------------------------------------------------------
 
@@ -226,14 +189,9 @@ class KnowledgeBase:
                                 "mime": mime, "title": title, "tags": list(tags or []), "acl": list(acl or []),
                                 "metadata": metadata or {}}  # fmt: skip
         doc_key = key or (str(path) if path is not None else "")
-        dense, spec = self._dense(collection_id), self.collection(collection_id).spec
-
-        def factory():
-            return build_ingest_graph(dense, lexical=spec.lexical, contextual=spec.contextual,
-                                      tree=spec.tree, catalog=self.catalog_key, blobs=self.blobs_key)  # fmt: skip
-
+        self._dense(collection_id)  # no dense index: refused before a run
         try:
-            return await self._run_graph("ingest_document", collection_id, factory, spec.model_dump_json(),
+            return await self._run_graph(ingest_document, collection_id,
                                          {"item": item, "collection": collection_id}, "result")  # fmt: skip
         except IngestError as exc:
             self.catalog.log_ingest(
@@ -266,66 +224,18 @@ class KnowledgeBase:
 
     def default_mode(self, collection_id: str) -> str:
         """:data:`DEFAULT_MODE` when the collection has both indexes, else the one it has."""
-        spec = self.collection(collection_id).spec
-        if spec.dense is not None and spec.lexical is not None:
-            return DEFAULT_MODE
-        return "dense" if spec.dense is not None else "lexical"
+        return default_mode(self.collection(collection_id).spec)
 
-    def retriever(self, collection_id: str, mode: Optional[str] = None):
-        """The collection's retriever graph for ``mode`` (``dense``, ``lexical``, ``hybrid``,
-        ``tree``, ``graph``; default :meth:`default_mode`). An explicit mode the collection cannot
-        serve raises.
+    def check_mode(self, collection_id: str, mode: Optional[str] = None) -> str:
+        """``mode`` (default :meth:`default_mode`) if the collection can serve it.
 
         Raises:
             QueryError: Unknown mode, or the collection lacks the index it needs.
         """
         spec = self.collection(collection_id).spec
-        mode = mode or self.default_mode(collection_id)
-        if mode not in MODES:
-            raise QueryError(f"unknown retrieval mode {mode!r}; use one of {list(MODES)}")
-        if mode == "tree":
-            if spec.tree is None:
-                raise QueryError(
-                    f"collection {collection_id!r} has no tree index for mode 'tree'; set "
-                    "CollectionSpec(tree=TreeSpec(llm=...)) and re-add its documents"
-                )
-            seed = self.retriever(collection_id, self.default_mode(collection_id))
-            return tree_retriever(seed, spec.tree, catalog=self.catalog_key)
-        if mode == "graph":
-            if spec.graph is None:
-                raise QueryError(
-                    f"collection {collection_id!r} has no concept graph for mode 'graph'; set "
-                    "CollectionSpec(graph=GraphSpec()) and re-add its documents"
-                )
-            seed = self.retriever(collection_id, self.default_mode(collection_id))
-            return graph_retriever(seed, spec.graph, catalog=self.catalog_key)
-        if mode in ("dense", "hybrid") and spec.dense is None:
-            raise QueryError(f"collection {collection_id!r} has no dense index for mode {mode!r}")
-        if mode in ("lexical", "hybrid") and spec.lexical is None:
-            raise QueryError(
-                f"collection {collection_id!r} has no lexical index for mode {mode!r}; set "
-                "CollectionSpec(lexical=LexicalIndexSpec(...)) and run rebuild_lexical()"
-            )
-        if mode == "dense":
-            return dense_retriever(spec.dense, catalog=self.catalog_key)
-        if mode == "lexical":
-            return lexical_retriever(spec.lexical, catalog=self.catalog_key)
-        return hybrid_retriever(
-            dense_retriever(spec.dense, catalog=self.catalog_key),
-            lexical_retriever(spec.lexical, catalog=self.catalog_key),
-        )
-
-    def search_graph(
-        self,
-        collection_id: str,
-        mode: Optional[str] = None,
-        reranker: Optional[str] = None,
-        rerank_depth: int = 30,
-    ):
-        """The search graph: the retriever, the hydration gate, and with ``reranker``
-        (a ``reranking:`` resource name) a rerank of ``rerank_depth`` hits."""
-        search = search_graph(self.retriever(collection_id, mode), catalog=self.catalog_key)
-        return reranked(search, reranker, depth=rerank_depth) if reranker else search
+        mode = mode or default_mode(spec)
+        check_mode(collection_id, spec, mode)
+        return mode
 
     async def search(
         self,
@@ -352,38 +262,15 @@ class KnowledgeBase:
         Raises:
             QueryError: An op failed (a filter on an undeclared field, a missing index…).
         """
-        mode = mode or self.default_mode(collection_id)
+        mode = self.check_mode(collection_id, mode)
         flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
-        spec = self.collection(collection_id).spec
-        config = f"{mode}|{reranker}|{rerank_depth}|{spec.model_dump_json()}"
         out = await self._run_graph(
-            "search", collection_id,
-            lambda: self.search_graph(collection_id, mode, reranker, rerank_depth), config,
-            {"query": query, "collection": collection_id, "filter": flt, "k": k}, None,
-            error=QueryError, required=("hits",), trace_id=trace_id,
+            ranked_search, collection_id,
+            {"query": query, "collection": collection_id, "filter": flt, "k": k, "mode": mode,
+             "reranker": reranker, "rerank_depth": rerank_depth},
+            None, error=QueryError, required=("hits",), trace_id=trace_id,
         )  # fmt: skip
         return {"hits": out["hits"], "stats": out.get("stats", {})}
-
-    def answer_graph(
-        self,
-        collection_id: str,
-        llm: str,
-        *,
-        mode: Optional[str] = None,
-        reranker: Optional[str] = None,
-        rerank_depth: int = 30,
-        budget_tokens: int = 1500,
-        neighbours: int = 1,
-    ):
-        """The answer graph: this collection's search, the context, ``llm`` and citation checks."""
-        return answer_graph(
-            self.search_graph(collection_id, mode, reranker, rerank_depth),
-            llm,
-            budget_tokens=budget_tokens,
-            neighbours=neighbours,
-            catalog=self.catalog_key,
-            blobs=self.blobs_key,
-        )
 
     async def ask(
         self,
@@ -412,16 +299,13 @@ class KnowledgeBase:
         Raises:
             QueryError: An op failed, or the model's reply did not parse.
         """
-        mode = mode or self.default_mode(collection_id)
+        mode = self.check_mode(collection_id, mode)
         flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
-        spec = self.collection(collection_id).spec
-        config = f"{llm}|{mode}|{reranker}|{rerank_depth}|{budget_tokens}|{neighbours}|{spec.model_dump_json()}"
         return await self._run_graph(
-            "answer", collection_id,
-            lambda: self.answer_graph(collection_id, llm, mode=mode, reranker=reranker,
-                                      rerank_depth=rerank_depth, budget_tokens=budget_tokens,
-                                      neighbours=neighbours),
-            config, {"query": question, "collection": collection_id, "filter": flt, "k": k},
+            answer_graph, collection_id,
+            {"query": question, "collection": collection_id, "filter": flt, "k": k, "mode": mode,
+             "reranker": reranker, "rerank_depth": rerank_depth, "llm": llm,
+             "budget_tokens": budget_tokens, "neighbours": neighbours},
             "answer", error=QueryError, trace_id=trace_id,
         )  # fmt: skip
 
@@ -429,16 +313,18 @@ class KnowledgeBase:
 
     async def delete(self, collection_id: str, key: str, *, purge: bool = False) -> Dict[str, Any]:
         """Tombstone a document and delete its vectors; with ``purge``, erase it and prove it."""
-        return await self._run("delete_document", collection_id, build_delete_graph,
-                               {"collection": collection_id, "key": key, "purge": purge}, "report")  # fmt: skip
+        self._dense(collection_id)
+        return await self._run_graph(delete_document, collection_id,
+                                     {"collection": collection_id, "key": key, "purge": purge}, "report")  # fmt: skip
 
     async def gc(
         self, collection_id: str, *, blobs: bool = False, blob_grace_seconds: float = 3600.0
     ) -> Dict[str, Any]:
         """Delete vectors no active version holds; with ``blobs``, unreferenced blobs too."""
-        return await self._run("collect_garbage", collection_id, build_gc_graph,
-                               {"collection": collection_id, "blobs_enabled": blobs, "grace_seconds": blob_grace_seconds},
-                               "report")  # fmt: skip
+        self._dense(collection_id)
+        return await self._run_graph(collect_garbage, collection_id,
+                                     {"collection": collection_id, "blobs_enabled": blobs,
+                                      "grace_seconds": blob_grace_seconds}, "report")  # fmt: skip
 
     async def rebuild(
         self,
@@ -463,12 +349,22 @@ class KnowledgeBase:
                 "collection": collection if collection is not None else current.collection,
             }
         )
-        report = await self._run("rebuild_index", collection_id, build_rebuild_graph,
-                                 {"collection": collection_id, "switch": switch}, "report", dense=target)  # fmt: skip
+        report = await self._run_graph(
+            rebuild_index_graph, collection_id,
+            {"collection": collection_id, "switch": switch, "embedder": target.embedder,
+             "store": target.store, "vector_collection": target.collection,
+             "vcollection": target.collection or "", "batch_size": target.batch_size,
+             "passage_template": target.passage_template},
+            "report",
+        )  # fmt: skip
         moved = (target.store, target.collection or "") != (current.store, current.collection or "")
         if drop_previous and switch and moved:
-            out = await self._run("drop_index", collection_id, build_drop_index_graph,
-                                  {"collection": collection_id}, None, dense=current)  # fmt: skip
+            out = await self._run_graph(
+                drop_index, collection_id,
+                {"collection": collection_id, "store": current.store,
+                 "vector_collection": current.collection, "vcollection": current.collection or ""},
+                None,
+            )  # fmt: skip
             report["previous_deleted"] = out.get("deleted")
         return report
 
@@ -491,9 +387,9 @@ class KnowledgeBase:
                 f"collection {collection_id!r} has no lexical index; pass one to rebuild_lexical()"
             )
         report = await self._run_graph(
-            "rebuild_lexical", collection_id,
-            lambda: build_lexical_rebuild_graph(target, catalog=self.catalog_key, blobs=self.blobs_key),
-            target.model_dump_json(), {"collection": collection_id, "switch": switch}, "report",
+            rebuild_lexical_graph, collection_id,
+            {"collection": collection_id, "switch": switch, "lexical": target.model_dump(mode="json")},
+            "report",
         )  # fmt: skip
         moved = current is not None and (target.index, target.collection) != (
             current.index,
@@ -501,9 +397,8 @@ class KnowledgeBase:
         )
         if drop_previous and switch and moved:
             out = await self._run_graph(
-                "drop_lexical", collection_id,
-                lambda: build_lexical_drop_graph(current, catalog=self.catalog_key, blobs=self.blobs_key),
-                current.model_dump_json(), {"collection": collection_id}, None,
+                drop_lexical, collection_id,
+                {"collection": collection_id, "lexical": current.model_dump(mode="json")}, None,
             )  # fmt: skip
             report["previous_deleted"] = out.get("deleted")
         return report

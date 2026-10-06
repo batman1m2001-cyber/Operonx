@@ -174,18 +174,11 @@ async def ingest(project: Path, corpus: Path, llm_block: str) -> Dict[str, Any]:
 KBAPP = '''"""The K3 gate's knowledge base: its admin app and its search flow."""
 
 import operonx
-from operonx_kb.admin import kb_admin_app
-from operonx_kb.graphs.retrieve import build_search_flow, dense_retriever, hybrid_retriever, \\
-    lexical_retriever, search_graph
-from operonx_kb.model.collection import AnalyzerSpec, DenseIndexSpec, LexicalIndexSpec
-
-DENSE = DenseIndexSpec(embedder="e5", store="vector_store:vi_public", batch_size=32,
-                       passage_template="passage: {{text}}", query_template="query: {{text}}")
-LEXICAL = LexicalIndexSpec(analyzer=AnalyzerSpec(kind="vi", fold_diacritics=True))
+from operonx.kb.admin import kb_admin_app
+from operonx.kb.graphs import search_flow  # module level; mode etc. are the run's inputs
 
 operonx.bootstrap()  # ./resources.yaml: operonx serve loads none for an asgi service
 APP = kb_admin_app(llm="{llm}")
-search_flow = build_search_flow(search_graph(hybrid_retriever(dense_retriever(DENSE), lexical_retriever(LEXICAL))))
 '''
 
 MANIFEST = """\

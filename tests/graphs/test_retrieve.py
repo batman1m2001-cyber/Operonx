@@ -176,15 +176,15 @@ def test_a_mode_without_its_index_is_refused(kb):
 def test_the_search_flow_runs_as_a_job(loaded, tmp_path):
     from operonx.app.jobs import Job
 
-    from operonx_kb.graphs.retrieve import build_search_flow
+    from operonx_kb.graphs.retrieve import search_flow
 
-    flow = build_search_flow(loaded.search_graph("docs", mode="hybrid"))
     got = {}  # items run concurrently: collect by key, not by arrival
 
     def sink(key, item):
         got[key] = item
 
-    job = Job("search_docs", graph=flow, source=[
+    job = Job("search_docs", graph=search_flow, inputs={"mode": "hybrid", "catalog": "kb_catalog:main"},
+              source=[
         {"id": "q1", "query": "annual leave", "collection": "docs", "k": 2},
         {"id": "q2", "query": "taxi", "collection": "docs", "filter": {"tags_any": ["finance"]}},
     ], sink=sink, key="id", record_dir=str(tmp_path / "jobs"))  # fmt: skip

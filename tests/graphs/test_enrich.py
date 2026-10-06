@@ -339,4 +339,4 @@ def test_tree_mode_needs_a_tree_spec(hub, model):
 
     kb = _kb(hub, _spec())
     with pytest.raises(QueryError, match="no tree index"):
-        kb.retriever("docs", "tree")
+        kb.check_mode("docs", "tree")

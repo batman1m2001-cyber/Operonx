@@ -96,8 +96,11 @@ def pipeline_enrichers(spec: CollectionSpec, stages: Dict[str, str]) -> Dict[str
 
 @op(bound="cpu", exclude={"trace": ["requests", "misses"]}, show_keys="count")
 def lookup_answers(requests: list, enrichers: dict, kind: str, catalog: str) -> dict:
-    """Split ``requests`` into answers the cache holds and misses (one per key)."""
-    fp = enrichers[kind]
+    """Split ``requests`` into answers the cache holds and misses (one per key). A stage
+    the collection does not enable has no fingerprint and no requests: nothing to do."""
+    fp = enrichers.get(kind)
+    if fp is None:
+        return {"misses": [], "found": {}, "count": 0, "cached": 0}
     unique = list({r["key"]: r for r in requests}.values())
     cached = catalog_of(catalog).get_enrichments(fp, [r["key"] for r in unique])
     misses = [r for r in unique if r["key"] not in cached]
@@ -212,8 +215,11 @@ def apply_contexts(fresh: list, drafted: list, keys: dict, answers: dict, stats:
         keys: A new chunk's id → its context request's key.
 
     Reused chunks are not touched: their catalog rows already hold their
-    contextualized embed text.
+    contextualized embed text. Without contextual enrichment (no keys) the chunks
+    are kept as chunked.
     """
+    if not keys:
+        return {"todo": fresh, "chunks": drafted, "stats": {}}
     done: Dict[str, Dict[str, Any]] = {}
     for c in fresh:
         text = ctx.with_context(answers[keys[c["id"]]], c["embed_text"])
@@ -240,8 +246,11 @@ def _title(plan: dict) -> str:
 
 @op(bound="cpu", exclude={"trace": ["tree", "requests", "blocks"]}, show_keys="stats")
 def plan_toc(tree: dict, plan: dict) -> dict:
-    """Table-of-contents requests for a version without headings (PLAN E5); none otherwise."""
+    """Table-of-contents requests for a version without headings (PLAN E5); none otherwise,
+    and none for a collection without a tree index."""
     spec = CollectionSpec.model_validate(plan["spec"]).tree
+    if spec is None:
+        return {"requests": [], "ranges": [], "blocks": [], "stats": {}}
     vt = tree_from_dict(tree)
     if not trees.needs_toc(vt, spec.toc_min_tokens, _TOKENIZER):
         return {"requests": [], "ranges": [], "blocks": [], "stats": {"toc": False}}
@@ -271,8 +280,10 @@ def plan_summaries(
     tree: dict, plan: dict, blocks: list, ranges: list, toc: dict, requests: list
 ) -> dict:
     """The version's nodes (headings, or the synthesized table of contents) and a
-    summary request for each (PLAN E5, E6)."""
+    summary request for each (PLAN E5, E6); none without a tree index."""
     spec = CollectionSpec.model_validate(plan["spec"]).tree
+    if spec is None:
+        return {"drafts": [], "keys": {}, "requests": [], "stats": {}}
     vt = tree_from_dict(tree)
     dropped = 0
     if ranges:
@@ -311,7 +322,9 @@ def finish_tree(
     tree: dict, plan: dict, drafts: list, keys: dict, answers: dict, toc: dict, summaries: dict,
     shape: dict,
 ) -> dict:  # fmt: skip
-    """The version's tree nodes, with ids, pages and summaries."""
+    """The version's tree nodes, with ids, pages and summaries (none without a tree index)."""
+    if not drafts:
+        return {"nodes": [], "stats": {}}
     vt = tree_from_dict(tree)
     leaves = [e for e in vt.elements if e.span is not None and e.regions]
     nodes: List[Dict[str, Any]] = []

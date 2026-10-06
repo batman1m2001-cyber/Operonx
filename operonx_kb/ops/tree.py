@@ -1,4 +1,4 @@
-"""Tree search ops: the logic of :func:`operonx_kb.graphs.retrieve.tree_retriever` (PLAN E7).
+"""Tree search ops: the logic of :func:`operonx_kb.graphs.retrieve.tree_retrieve` (PLAN E7).
 
 The seed retriever's hits name the candidate documents; the navigator (an
 ``LLMOp`` in the graph) walks their trees a step at a time; the picked nodes

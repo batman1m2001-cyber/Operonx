@@ -1,4 +1,4 @@
-"""The ingest ops: the logic of :func:`operonx_kb.graphs.ingest.build_ingest_graph`.
+"""The ingest ops: the logic of :func:`operonx_kb.graphs.ingest.ingest_document`.
 
 Every op takes resource keys, not objects, and hands small JSON-safe values
 on. The heavy ones (the parsed document, the tree, the chunk lists) are kept

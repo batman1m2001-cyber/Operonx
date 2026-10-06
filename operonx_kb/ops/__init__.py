@@ -1,6 +1,6 @@
 """operonx-kb ops: the logic. Graphs in :mod:`operonx_kb.graphs` only wire them."""
 
-from operonx_kb.ops.embed import EmbedChunksOp, embedder_fingerprint
+from operonx_kb.ops.embed import embed_chunks, embedder_fingerprint
 from operonx_kb.ops.ingest import (
     build_tree,
     chunk_version,
@@ -15,7 +15,7 @@ from operonx_kb.ops.ingest import (
 )
 
 __all__ = [
-    "EmbedChunksOp",
+    "embed_chunks",
     "build_tree",
     "chunk_version",
     "forget_index_writes",
