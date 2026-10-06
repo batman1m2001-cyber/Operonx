@@ -302,7 +302,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--mode",
         choices=list(MODES),
-        help="retrieval mode (default: hybrid when the collection has both indexes)",
+        help="retrieval mode (default: auto on a collection with a graph, else hybrid when it has both indexes)",
     )
     p.add_argument("--k", type=int, default=5)
     p.add_argument("--tag", action="append", help="only documents with this tag (repeatable)")

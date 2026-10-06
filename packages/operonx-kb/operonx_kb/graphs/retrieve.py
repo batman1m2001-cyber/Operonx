@@ -7,7 +7,7 @@ vector store, lexical index, tree and graph specs — is read from the catalog
 by :func:`~operonx_kb.ops.settings.search_settings` when the run starts. The
 retrieval mode is a branch, not a generated graph::
 
-    retrieve ─► search_settings ─► mode = tree    ─► tree_retrieve  ─┐
+    retrieve ─► search_settings ─► mode = tree    ─► tree_retrieve  ─┐   (auto: routed here)
                                    mode = graph   ─► graph_retrieve ─┤
                                    else           ─► seed_retrieve  ─┴► pick_hits
     seed_retrieve:  dense ─► dense_retrieve | lexical ─► lexical_retrieve | hybrid_retrieve
@@ -192,8 +192,9 @@ def graph_retrieve(query, collection, filter, k, catalog):
 @graph
 def retrieve(query, collection, filter, k, mode, catalog):
     """The collection's retriever for ``mode`` (default: hybrid with both indexes, else
-    the one it has). A mode the collection cannot serve fails in ``search_settings``."""
-    s = search_settings(collection=collection, catalog=catalog, mode=mode)
+    the one it has; ``auto`` routes on the query). A mode the collection cannot serve
+    fails in ``search_settings``."""
+    s = search_settings(collection=collection, catalog=catalog, mode=mode, query=query)
     t = tree_retrieve(query=query, collection=collection, filter=filter, k=k, catalog=catalog)
     g = graph_retrieve(query=query, collection=collection, filter=filter, k=k, catalog=catalog)
     plain = seed_retrieve(query=query, collection=collection, filter=filter, k=k,

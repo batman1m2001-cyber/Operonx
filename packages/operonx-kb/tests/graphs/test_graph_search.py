@@ -34,7 +34,9 @@ def wiki(hub, tmp_path):
     from operonx_kb.testing import RecordingConsumer
 
     hub.alias("embedding:hash", "fake_embedding:hash")
-    kb = KnowledgeBase(trace=RecordingConsumer())
+    recorder = RecordingConsumer()
+    kb = KnowledgeBase(trace=recorder)
+    kb.recorder = recorder
     kb.create_collection(
         "wiki",
         CollectionSpec(
@@ -130,3 +132,44 @@ def test_expand_caps_what_the_walk_brings_and_needs_no_re_ingest(wiki):
     ]
     got = run(wiki.add("wiki", str(wiki.tmp / "film.md"), key="film.md", metadata={"dept": "open"}))
     assert got["action"] == "skip"  # query-time settings are not in the pipeline fingerprint
+
+
+# ── mode="auto": the router (track5 §9.8) ─────────────────────────────────
+RELATION = "Who is the mother of the director of the 2009 picture Polish War?"
+
+
+def routed(kb):
+    """The outermost ``search_settings``' ``(mode, route)`` in the last search's trace."""
+    settings = [n for n in kb.recorder.traces[-1].nodes if n.outputs and "route" in n.outputs]
+    node = min(settings, key=lambda n: n.op_full_name.count("."))
+    return node.outputs["mode"], node.outputs["route"]
+
+
+def test_auto_sends_a_relation_question_to_the_graph_and_says_why(wiki):
+    wiki.recorder.clear()
+    out = run(wiki.search("wiki", RELATION, mode="auto", k=4))
+    assert routed(wiki) == ("graph", "role chain")
+    assert any(h["retriever"] == "graph" for h in out["hits"])
+    assert keys(out) == keys(run(wiki.search("wiki", RELATION, mode="graph", k=4)))
+
+
+def test_auto_sends_any_other_question_to_the_default_mode(wiki):
+    wiki.recorder.clear()
+    out = run(wiki.search("wiki", QUESTION, mode="auto", k=4))
+    assert routed(wiki) == ("hybrid", None)
+    assert keys(out) == keys(run(wiki.search("wiki", QUESTION, mode="hybrid", k=4)))
+
+
+def test_auto_without_a_graph_is_the_default_mode(kbx, tmp_path):
+    (tmp_path / "a.md").write_text("# Leave\n\nEvery employee has twelve days of leave.\n")
+    run(kbx.add("docs", str(tmp_path / "a.md"), key="a.md"))
+    kbx.recorder.clear()
+    out = run(kbx.search("docs", RELATION, mode="auto", k=2))
+    assert routed(kbx) == ("hybrid", None) and keys(out) == ["a.md"]
+
+
+def test_a_collection_with_a_graph_searches_in_auto_by_default(wiki):
+    assert wiki.default_mode("wiki") == "auto"
+    wiki.recorder.clear()
+    run(wiki.search("wiki", RELATION, k=4))
+    assert routed(wiki) == ("graph", "role chain")

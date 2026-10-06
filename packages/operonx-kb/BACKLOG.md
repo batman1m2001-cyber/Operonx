@@ -52,5 +52,4 @@ first, then build, then measure; keep the CPU suite green (GPU tests behind a ma
   ```
   Reusing the same `WORK` folder resumes for free (answers are cached in its catalog). Run it when
   nobody is testing the callbot: it shares that gateway.
-- K6 follow-up: a query router (track5 §9.8) sending relation questions to `mode="graph"`.
 - Human check of the 30 answers in `docs/bench/d5_answers.jsonl`; OCR for scanned PDFs.

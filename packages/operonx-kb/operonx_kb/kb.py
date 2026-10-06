@@ -37,7 +37,7 @@ from operonx_kb.model.document import Document
 from operonx_kb.model.filter import KBFilter
 from operonx_kb.model.ids import document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
-from operonx_kb.ops.settings import MODES, check_mode, default_mode
+from operonx_kb.ops.settings import MODES, check_mode, search_mode
 
 __all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
 
@@ -223,8 +223,10 @@ class KnowledgeBase:
     # retrieval ------------------------------------------------------------------------------
 
     def default_mode(self, collection_id: str) -> str:
-        """:data:`DEFAULT_MODE` when the collection has both indexes, else the one it has."""
-        return default_mode(self.collection(collection_id).spec)
+        """The mode a search uses when it names none: ``auto`` on a collection with a
+        concept graph; else :data:`DEFAULT_MODE` when it has both indexes, else the
+        one it has."""
+        return search_mode(self.collection(collection_id).spec)
 
     def check_mode(self, collection_id: str, mode: Optional[str] = None) -> str:
         """``mode`` (default :meth:`default_mode`) if the collection can serve it.
@@ -233,7 +235,7 @@ class KnowledgeBase:
             QueryError: Unknown mode, or the collection lacks the index it needs.
         """
         spec = self.collection(collection_id).spec
-        mode = mode or default_mode(spec)
+        mode = mode or search_mode(spec)
         check_mode(collection_id, spec, mode)
         return mode
 
