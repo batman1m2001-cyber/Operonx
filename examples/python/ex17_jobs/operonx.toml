@@ -19,9 +19,5 @@ name  = "score_call"
 entry = "main:score_call"
 
 [[graph]]
-name  = "passthrough"
-entry = "main:passthrough"
-
-[[graph]]
-name  = "summarise_flow"
-entry = "main:summarise_flow"
+name  = "report"
+entry = "main:report"

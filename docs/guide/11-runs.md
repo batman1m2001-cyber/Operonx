@@ -176,7 +176,7 @@ store = next(s for s in project_stores("/srv/callbot") if s.backend == "clickhou
 
 `project_stores(root)` reads `[tracing]` in `operonx.toml` — the
 project-wide `sinks`, every `[tracing.services.<n>]` and
-`[tracing.jobs.<n>]`, and the `trace =` of any `[[serve]]` or `[[job]]`
+`[tracing.jobs.<n>]`, and the `trace =` of any `[[serve]]` block
 they do not override — and returns each sink once, as a
 `StoreSource`: its `spec` for `open_run_store`, the `levels` that name it,
 `source` in one line, and `describe()` without credentials.

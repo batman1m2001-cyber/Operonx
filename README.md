@@ -199,23 +199,25 @@ pip install "operonx[all]"           # Everything except torch / HuggingFace
 
 ## Jobs: the same graph over a file
 
-A served graph gets its work from a listener. A `Job` gives it work from a
-source — a JSONL file, an iterable, a `source:` resource — one run per
-item, and leaves a record per run: which items were `ok`, `failed`,
-`empty` (ran, sent nothing) or timed out, each with its trace id.
+A served graph gets its work from a listener. A `Job` gives it work from
+`items` — a list, a `.jsonl` file, or a function that yields them — one run
+per item, keeps every result, and leaves a record per run: which items were
+`ok`, `failed`, `empty` (ran, sent nothing) or timed out, each with its
+trace id.
 
 ```python
-from operonx.app.jobs import Job, Runbook
+from operonx.app.jobs import Job
 
-score = Job("score_calls", graph=score_call, source="data/calls.jsonl",
-            sink="out/scores.jsonl", key="call_id", on_error="retry:2")
+score = Job("score_calls", graph=score_call, items="data/calls.jsonl",
+            key="call_id", reduce=report)
 run = score.run_sync()                 # ok=98 failed=2 …; run.failed names them
+run.results                            # {key: result}; run.reduced is the report
 run = score.run_sync(resume=True)      # only the two
 
-nightly = Runbook("nightly", extract >> [embed >> cluster, score])   # >> sequential, [ ] parallel
+nightly = Job("nightly", steps=[extract, score])   # jobs in order, one command
 ```
 
-`[[job]]` blocks live in `operonx.toml` beside `[[serve]]`;
+Jobs are declared in `Application(jobs=[...])` beside the services;
 `operonx run <name>` runs one from a shell with an exit status a cron
 can read. See the [guide](docs/guide/10-jobs.md) and `examples/python/ex17_jobs`.
 A door whose graph differs by caller declares `[serve.variants]`: one

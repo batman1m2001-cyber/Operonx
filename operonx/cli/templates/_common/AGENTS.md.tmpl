@@ -29,7 +29,7 @@ services and jobs.
 - **Application**: `APP` in `app/main.py`. Declare every service and job
   there.
 - **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`. Never
-  put `[[serve]]` or `[[job]]` blocks in it.
+  put `[[serve]]` blocks in it.
 
 ## Never define a `@graph` inside a function
 

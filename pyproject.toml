@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx"
-version = "1.16.0"
+version = "1.17.0"
 description = "High-performance workflow engine for AI applications"
 readme = "README.md"
 license = "Apache-2.0"
@@ -277,15 +277,21 @@ testpaths = ["tests"]
 # Deselected by default; an explicit `-m` on the command line overrides
 # this one, so nothing is hidden:
 #
-#     pytest                      # 30s, offline, deterministic
+#     pytest                      # offline, deterministic, fast
 #     pytest -m integration       # the API-calling ones
+#     pytest -m slow              # the slow ones: real sleeps, subprocesses
 #     pytest -m ""                # everything
+#
+# `slow` is for tests that are correct but spend seconds waiting: a timeout
+# that must really elapse, a child interpreter, every guide snippet. They
+# still run before a release (`-m ""`).
 #
 # `tests/live/` is separate again and needs OPERONX_LIVE=1 — see its
 # conftest.
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not slow'"
 markers = [
     "integration: marks tests as integration tests (may require external services)",
+    "slow: correct but seconds-long (real sleeps, subprocesses); skipped by default, run with -m slow or -m \"\"",
     "unit: marks a provider test as a fast mock-only unit test (opts out of the default integration auto-mark in tests/internal/providers/conftest.py)",
     "public: live test against a public endpoint — needs the open internet",
     "vpn: live test against a private endpoint — needs the corporate VPN",

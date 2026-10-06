@@ -1,11 +1,11 @@
 # operonx.app
 
 The application layer: what puts work into an Operon. Services listen
-(`[[serve]]`), jobs read a source (`[[job]]`), `operonx.toml` declares
-both, and `Application` is that declaration loaded. Graphs never import
+(`Service`), jobs loop over items (`Job`), and `Application` declares
+both. Graphs never import
 this package; the dependency runs one way.
 
-Guides: [Deployment](../guide/08-deployment.md), [Jobs and runbooks](../guide/10-jobs.md),
+Guides: [Deployment](../guide/08-deployment.md), [Jobs](../guide/10-jobs.md),
 [The playground bridge](../guide/12-playground.md), [Evals](../guide/13-evals.md).
 
 ## Application

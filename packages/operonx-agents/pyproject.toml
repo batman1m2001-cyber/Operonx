@@ -57,7 +57,10 @@ include = ["operonx_agents", "README.md", "LICENSE", "pyproject.toml"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Live and slow tests run with `-m live`, `-m slow`, or `-m ""` for all.
+addopts = "-m 'not live and not slow'"
 markers = [
+    "slow: correct but seconds-long (subprocesses, real sleeps)",
     "live: calls a real model gateway (needs the callbot .env); deselect with -m 'not live'",
 ]
 

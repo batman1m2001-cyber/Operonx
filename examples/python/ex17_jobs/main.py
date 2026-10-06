@@ -4,25 +4,27 @@ The graph is the same shape every served graph has::
 
     ingress ─► score ─► egress
 
-`[[serve]]` would mint one run per request from a listener. A ``Job``
-mints one run per *item* from a source — here a JSONL file — and writes
-what `egress` sends to a sink. The graph cannot tell the difference,
-which is the point: nothing in ``score_call`` knows it is in a batch.
+A ``Service`` mints one run per request. A ``Job`` mints one run per
+*item* — here each line of ``data/calls.jsonl`` — and keeps what `egress`
+sends as that item's result. The graph cannot tell the difference, which
+is the point: nothing in ``score_call`` knows it is in a batch.
 
 What a Job adds over a for-loop is the **record**. Every run leaves::
 
     /tmp/operonx_jobs/ex17/jobs/score_calls/<run_id>/
-      run.json      status, counts, what ran
-      items.jsonl   one line per call: key, status, error, trace_id, ms, sent
+      run.json       status, counts, what ran
+      items.jsonl    one line per call: key, status, error, trace_id, ms
+      results.jsonl  one line per call that finished: key, result
 
-One of the three calls in ``data/calls.jsonl`` has an empty transcript
-and fails. The first run says ``ok=2 failed=1`` and names it; fix the
-line and ``--resume`` runs only that one. Run from this directory::
+One of the three calls has an empty transcript and fails. The first run
+says ``ok=2 failed=1`` and names it; fix the line and ``--resume`` runs
+only that one. Run from this directory::
 
     uv sync
     uv run python main.py                          # ok=2 failed=1
     # …edit data/calls.jsonl, give call c3 a transcript…
-    uv run operonx run main:score_calls --resume   # ok=1 skipped=2
+    uv run operonx run score_calls --resume        # ok=1 skipped=2
+    uv run operonx run nightly                     # score, then the report
 """
 
 from __future__ import annotations
@@ -30,17 +32,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import operonx
 from operonx.app import Application, Service, env, http
-from operonx.app.jobs import Job, Runbook
+from operonx.app.jobs import Job
 from operonx.app.serve import egress, ingress
 from operonx.core import END, START, graph, op
 
 HERE = Path(__file__).resolve().parent
 OUT = Path("/tmp/operonx_jobs/ex17")
-
-# The `source:` / `sink:` blocks in resources.yaml, for the second job.
-operonx.bootstrap(resources=HERE / "resources.yaml")
 
 
 # ── the graph ────────────────────────────────────────────────────────────
@@ -70,108 +68,60 @@ def score_call():
     START >> src >> scored >> out >> END
 
 
+# ── once over every result ───────────────────────────────────────────────
+
+
+@op(bound="sync")
+def tally(results: list = None) -> dict:
+    verdicts = [r["verdict"] for r in results or []]
+    return {"report": {"calls": len(verdicts), "engaged": verdicts.count("engaged")}}
+
+
+@graph
+def report(results):
+    t = tally(results=results)
+    START >> t >> END
+
+
 # ── the jobs ─────────────────────────────────────────────────────────────
 
-#: Paths straight on the Job: the quickest way to say where things are.
+#: One run per line of the file; every result kept in the record, also
+#: exported to scores.jsonl as it finishes, and reduced to one report.
 score_calls = Job(
     "score_calls",
     graph=score_call,
-    source=HERE / "data" / "calls.jsonl",
-    sink=OUT / "scores.jsonl",
+    items=HERE / "data" / "calls.jsonl",
     key="call_id",
+    output=OUT / "scores.jsonl",
+    reduce=report,
     concurrency=2,
-    on_error="skip",
     record_dir=OUT / "jobs",
     description="Score every call in data/calls.jsonl; one run per call.",
 )
 
-#: The same job through resources.yaml, which is where a deployment
-#: names its inputs and outputs — the graph and the job stay literal.
-score_from_resources = Job(
-    "score_from_resources",
+
+def recent_calls():
+    """A custom loader: any function that yields items. Called on every run."""
+    yield {"call_id": "r1", "transcript": "vâng em nghe máy rồi ạ, chị cứ nói"}
+    yield {"call_id": "r2", "transcript": "để sau nhé"}
+
+
+score_recent = Job(
+    "score_recent",
     graph=score_call,
-    source="source:calls",
-    sink="sink:scores",
-    key="call_id",
-    concurrency=2,
-    on_error="retry:1",
-    record_dir=OUT / "jobs",
-    description="score_calls, with source and sink declared as resources.",
-)
-
-
-# ── after the scores: two more jobs, and a runbook that runs all three ─
-# Hand-off is by naming the same file: `score_calls` writes scores.jsonl,
-# the two below read it. Nothing is rewired at run time.
-
-
-@graph
-def passthrough():
-    """A graph that only moves items: here, from JSONL to CSV."""
-    src = ingress()
-    out = egress(item=src["item"])
-    START >> src >> out >> END
-
-
-@op(bound="sync")
-def bucket(row: dict = None) -> dict:
-    return {"line": {"call_id": row["call_id"], "bucket": row["verdict"], "words": row["words"]}}
-
-
-@graph
-def summarise_flow():
-    src = ingress()
-    b = bucket(row=src["item"])
-    out = egress(item=b["line"])
-    START >> src >> b >> out >> END
-
-
-export_csv = Job(
-    "export_csv",
-    graph=passthrough,
-    source=OUT / "scores.jsonl",
-    sink=OUT / "scores.csv",
+    items=recent_calls,
     key="call_id",
     record_dir=OUT / "jobs",
-    description="scores.jsonl → scores.csv, one run per row.",
+    description="The same graph over a loader function.",
 )
 
-summarise = Job(
-    "summarise",
-    graph=summarise_flow,
-    source=OUT / "scores.jsonl",
-    sink=OUT / "summary.jsonl",
-    session="stream",
-    record_dir=OUT / "jobs",
-    description="All scores through one run.",
-)
-
-#: `>>` wires, a list is one wire per element: score first, then the two
-#: readers side by side. A runbook is a record (jobs/nightly/<run>/run.json
-#: holds the wires and each job's own run id), never a span.
-nightly = Runbook(
+#: Jobs in order, as one command. The first step that is not ok stops the
+#: rest; each step keeps its own record.
+nightly = Job(
     "nightly",
-    score_calls >> [export_csv, summarise],
-    # `score_calls` skips a bad call and reports the run as failed; the
-    # readers should still run over what it did score. `"stop"` (the
-    # default) would skip both readers — they are downstream of it.
-    on_error="continue",
+    steps=[score_recent, score_calls],
     record_dir=OUT / "jobs",
-    description="Score every call, then export and summarise in parallel.",
-)
-
-
-# One run fed every call through `ingress`: the callbot's shape. One
-# trace, shared state, and no per-item accounting — the record counts
-# what was fed and what egress sent.
-score_stream = Job(
-    "score_stream",
-    graph=score_call,
-    source="data/calls.jsonl",
-    sink="/tmp/operonx_jobs/ex17/scores_stream.jsonl",
-    session="stream",
-    record_dir="/tmp/operonx_jobs/ex17/jobs",
-    description="All calls through one run.",
+    description="Score the recent calls, then the file.",
 )
 
 # The application: the same graph behind an HTTP route and under the
@@ -187,11 +137,11 @@ APP = Application(
             description="One call in, one score out.",
         ),
     ],
-    jobs=[score_calls, score_from_resources, score_stream, nightly],
+    jobs=[score_calls, score_recent, nightly],
     # Every run — a request the service answered, an item a job scored —
     # is recorded here unless it names its own consumers: one directory
-    # per run under .operonx/runs, filed by origin (services/score/<day>/…,
-    # jobs/score_calls/<run>/…). The studio's Runs screen reads it.
+    # per run under .operonx/runs, filed by origin. The studio's Runs
+    # screen reads it.
     trace=["trace_local:default"],
     description="One graph: served as HTTP, and run over a JSONL file by a Job with a record per run.",
 )
@@ -201,7 +151,7 @@ if __name__ == "__main__":
     run = score_calls.run_sync(resume="--resume" in sys.argv)
     print(run.summary())
     print(f"  record: {run.path}")
-    print(f"  scores: {OUT / 'scores.jsonl'}")
+    print(f"  report: {run.reduced}")
     for item in run.failed:
         print(f"  failed {item.key}: {item.error}")
     raise SystemExit(0 if run.status == "ok" else 1)

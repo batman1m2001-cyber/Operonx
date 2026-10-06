@@ -107,8 +107,10 @@ run.reduced                    # what `reduce` returned (None without one)
 | `description` | One line, for `--list` and the studio. |
 
 **Removed:** `source`, `sink`, `session`, `max_inflight`, `item_input`
-(renamed `input`), `item_timeout` (now `timeout`), `on_item` (moved to
-`run(on_item=)`), `record_dir` (a project setting, §2.5), `schedule` (§2.6).
+(renamed `input`), `item_timeout` (now `timeout`), `schedule` (§2.6).
+**Kept after all** (as built): `on_item` and `record_dir` stay optional `Job`
+arguments — qc-snatcher passes both — and `run(on_item=, record_dir=)`
+overrides them for one run.
 
 ### 2.1 `items`: something you can loop over, or a `.jsonl` file
 
@@ -221,8 +223,8 @@ ingest, report).
 ```
 
 The folder is `.operonx/jobs` under the project root, or `[jobs] dir` in
-`operonx.toml`. `Job(..., record_dir=)` is gone; `run(record_dir=)` stays for
-tests.
+`operonx.toml`. `Job(..., record_dir=)` overrides it (kept: qc-snatcher
+records under its own `RUNS`); `run(record_dir=)` overrides it for one run.
 
 ### 2.6 Schedules
 

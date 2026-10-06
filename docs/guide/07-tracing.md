@@ -82,7 +82,7 @@ not name its own inherits them:
 APP = Application(
     "callbot",
     services=[Service("call", websocket("/ws/call"), graph=call_graph)],
-    jobs=[Job("score_calls", graph=score_call, source="data/calls.jsonl")],
+    jobs=[Job("score_calls", graph=score_call, items="data/calls.jsonl")],
     trace=["trace_local:default", "trace_langfuse:default"],
 )
 ```
@@ -118,14 +118,14 @@ The most specific setting wins:
 | Level | Where | |
 |---|---|---|
 | 1 | `[tracing.services.<name>]` / `[tracing.jobs.<name>]` | the operator, for one service or job |
-| 2 | `Service(trace=...)` / `Job(trace=...)`, or `trace =` on a `[[serve]]` / `[[job]]` block | the code, for one service or job |
+| 2 | `Service(trace=...)` / `Job(trace=...)`, or `trace =` on a `[[serve]]` block | the code, for one service or job |
 | 3 | `[tracing] sinks` | the operator, for the project |
 | 4 | `Application(trace=...)` (or `[project] trace`) | the code, for the project |
 | 5 | the built-in default | a job records locally; a service is not traced |
 
 An explicit `sinks = []` (or `trace=[]`) means "not traced" at its level;
-it does not fall through. A runbook's entry, `[tracing.jobs.<runbook>]`,
-reaches each of its jobs; a member can still be named on its own.
+it does not fall through. A steps job's entry, `[tracing.jobs.<name>]`,
+reaches each of its steps; a step can still be named on its own.
 
 `[project] trace` and `[tracing] sinks` cannot both be set: they sit at
 different levels (`Application(trace=...)` beats the first and loses to
@@ -166,7 +166,7 @@ tags, a run store indexes it.
 | Origin | Set by | Also carries |
 |---|---|---|
 | `service` | a served door | `service`, `transport`, `variant` |
-| `job` | a job's item | `job`, `job_run`, `key` (and `runbook`, `runbook_run` inside a runbook) |
+| `job` | a job's item | `job`, `job_run`, `key` (and `runbook`, `runbook_run` when run as a step) |
 | `eval` | an eval's case | as a job |
 | `playground` | the studio's playground | `service`, the session's script |
 | `adhoc` | anything else: a test, a script | — |
