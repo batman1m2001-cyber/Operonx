@@ -182,13 +182,13 @@ def stalling(x):
 
 
 @graph
-def outer_errors_raise_on_a_subgraph_timeout(x):
+def timed_out_subgraph(x):
     sub = stalling(x=x, timeout=Timeout(run=0.1))
     START >> sub >> END
 
 
 async def test_errors_raise_on_a_subgraph_timeout():
-    engine = Operon(outer_errors_raise_on_a_subgraph_timeout, params={"x": None}, errors="raise")
+    engine = Operon(timed_out_subgraph, params={"x": None}, errors="raise")
     with pytest.raises(OpFailed) as caught:
         await engine.run({"x": 1})
     assert caught.value.op == f"{engine.name}.sub"

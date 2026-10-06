@@ -109,7 +109,7 @@ def shown(total: int = 0, note: str = "none") -> dict:
 
 
 @graph
-def g_get_reads_an_optional_output_with_the_readers_default(x):
+def optional_get(x):
     m = make(x=x)
     s = shown(total=m["total"], note=m.get("note"))
     START >> m >> s >> END
@@ -118,9 +118,7 @@ def g_get_reads_an_optional_output_with_the_readers_default(x):
 async def test_get_reads_an_optional_output_with_the_readers_default():
     """`op.get("key")`: not checked at build, the reader's default at run."""
 
-    out = await Operon(
-        g_get_reads_an_optional_output_with_the_readers_default, params={"x": None}
-    ).run(inputs={"x": 1})
+    out = await Operon(optional_get, params={"x": None}).run(inputs={"x": 1})
     assert out["line"] == "2/none"
 
 
@@ -132,7 +130,7 @@ def transformed(x):
 
 
 @graph
-def mixed_get_survives_transforms_and_a_plain_read_is_still_checked(x):
+def mixed_get(x):
     m = make(x=x)
     s = show(total=m.get("totl") + m["totl"])  # read plainly too: checked
     START >> m >> s >> END
@@ -142,4 +140,4 @@ def test_get_survives_transforms_and_a_plain_read_is_still_checked():
     Operon(transformed, params={"x": None})  # builds
 
     with pytest.raises(GraphValidationError, match="did you mean 'total'"):
-        Operon(mixed_get_survives_transforms_and_a_plain_read_is_still_checked, params={"x": None})
+        Operon(mixed_get, params={"x": None})

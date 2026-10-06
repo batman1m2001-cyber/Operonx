@@ -129,7 +129,7 @@ def detect(prompt: str, transcript: str):
 
 
 @graph
-def detect_static_prompt_works_in_graph(transcript: str):
+def detect_static(transcript: str):
     c = LLMOp.of(
         resource="gpt-4",
         prompt="Analyze: {transcript}",
@@ -160,7 +160,7 @@ class TestLLMStructuredInsideGraph:
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_hub.instance.return_value = _mock_resource_hub()
 
-            node = detect_static_prompt_works_in_graph(transcript="Hello world")
+            node = detect_static(transcript="Hello world")
 
         llm_op = next(iter(node._ops.values()))
         assert "transcript" in llm_op.inputs

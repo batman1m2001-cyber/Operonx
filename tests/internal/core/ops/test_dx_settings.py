@@ -31,13 +31,13 @@ def test_a_keyword_the_function_takes_reaches_it():
 
 
 @graph
-def g_configure_gives_a_colliding_setting(x):
+def colliding_setting(x):
     lbl = label.configure(name="labeller", retry=Retry(max_attempts=2))(id=x, name="order")
     START >> lbl >> END
 
 
 def test_configure_gives_a_colliding_setting():
-    engine = Operon(g_configure_gives_a_colliding_setting, params={"x": None})
+    engine = Operon(colliding_setting, params={"x": None})
     assert "labeller" in engine.graph._ops
     assert asyncio.run(engine.run({"x": 3}))["text"] == "order#3"
 
@@ -53,7 +53,7 @@ def add(n: int) -> dict:
 
 
 @graph
-def g_cells_holds_the_final_values(n):
+def final_cells(n):
     PARENT.declare(seen=[], reducers={"seen": operator.add})
     a = add(n=n)
     b = add(n=n)
@@ -63,5 +63,5 @@ def g_cells_holds_the_final_values(n):
 
 
 def test_cells_holds_the_final_values():
-    out = asyncio.run(Operon(g_cells_holds_the_final_values, params={"n": None}).run({"n": 5}))
+    out = asyncio.run(Operon(final_cells, params={"n": None}).run({"n": 5}))
     assert out["$cells"] == {"seen": [5, 5]}

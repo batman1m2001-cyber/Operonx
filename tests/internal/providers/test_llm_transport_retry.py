@@ -330,7 +330,6 @@ class TestPrepareParamsStripping:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.unit
 @op(retry=Retry(max_attempts=4, initial=0.001, jitter=False))
 async def ask(q: str, llm=None, calls=None) -> dict:
     async def down(**kw):
@@ -346,6 +345,7 @@ def ask_graph(q, llm, calls):
     START >> a >> END
 
 
+@pytest.mark.unit
 class TestComposesWithOpRetry:
     """The transport retry and ``@op(retry=...)`` never both retry one error.
 

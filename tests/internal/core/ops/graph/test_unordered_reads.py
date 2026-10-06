@@ -45,7 +45,7 @@ def test_build_rejects_a_read_nothing_orders():
 
 
 @graph
-def g_a_read_beside_the_producer_is_rejected(x):
+def read_beside_producer(x):
     f = make(x=x)
     s = use(y=f["y"])
     START >> [f, s]
@@ -54,11 +54,11 @@ def g_a_read_beside_the_producer_is_rejected(x):
 
 def test_a_read_beside_the_producer_is_rejected():
     with pytest.raises(GraphValidationError, match="nothing makes 'f' run first"):
-        Operon(g_a_read_beside_the_producer_is_rejected, params={"x": None})
+        Operon(read_beside_producer, params={"x": None})
 
 
 @graph
-def g_the_push_form_is_checked_too(x):
+def push_form(x):
     f = make(x=x)
     s = use()
     f["y"] >> s["y"]
@@ -68,18 +68,18 @@ def g_the_push_form_is_checked_too(x):
 
 def test_the_push_form_is_checked_too():
     with pytest.raises(GraphValidationError, match="op 's' is fed 'f'\\['y'\\]"):
-        Operon(g_the_push_form_is_checked_too, params={"x": None})
+        Operon(push_form, params={"x": None})
 
 
 @graph
-def g_ordered_reads_build_and_run(x):
+def ordered_reads(x):
     f = make(x=x)
     s = use(y=f["y"])
     START >> f >> s >> END
 
 
 async def test_ordered_reads_build_and_run():
-    assert (await Operon(g_ordered_reads_build_and_run, params={"x": None}).run({"x": 1}))["z"] == 2
+    assert (await Operon(ordered_reads, params={"x": None}).run({"x": 1}))["z"] == 2
 
 
 @op
@@ -199,7 +199,7 @@ def other() -> dict:
 
 
 @graph
-def g_an_op_with_no_edges_is_said_to_run():
+def edgeless_op():
     lonely()
     other()
 
@@ -207,7 +207,7 @@ def g_an_op_with_no_edges_is_said_to_run():
 def test_an_op_with_no_edges_is_said_to_run():
     """The build said such an op 'will never be executed'; it runs, as an entry."""
 
-    built = g_an_op_with_no_edges_is_said_to_run()
+    built = edgeless_op()
     built.build()
     messages = [i.message for i in built.validate().issues]
     assert any("runs as an entry of the graph" in m for m in messages), messages

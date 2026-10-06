@@ -103,7 +103,7 @@ def stopper(x: int) -> dict:
 
 
 @graph
-def child_a_child_interrupt_does_not_take_the_parent_down(x):
+def interrupting_child(x):
     s = stopper(x=x)
     START >> s >> END
 
@@ -181,7 +181,7 @@ class TestNestedGraphIsolation:
 
         with GraphOp(name="nest_int") as g:
             sd = seed(n=PARENT["n"])
-            sub = child_a_child_interrupt_does_not_take_the_parent_down(x=sd["x"])
+            sub = interrupting_child(x=sd["x"])
             slow = slow_sibling(n=sd["x"])
             START >> sd
             sd >> sub

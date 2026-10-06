@@ -505,7 +505,7 @@ class TestErrorCases:
 
 
 @op
-def gate_branch_merge_inside_loop_body_gets_auto_softened():
+def loop_gate():
     return {"go": True}
 
 
@@ -532,9 +532,7 @@ def tail(y: int):
 @graph
 def branchy():
     PARENT.declare(count=0)
-    g = gate_branch_merge_inside_loop_body_gets_auto_softened(
-        name="gate_branch_merge_inside_loop_body_gets_auto_softened"
-    )
+    g = loop_gate(name="gate_branch_merge_inside_loop_body_gets_auto_softened")
     a1 = a(name="a")
     b1 = b(name="b")
     m = merge(name="m", a_x=a1["x"], b_x=b1["x"])

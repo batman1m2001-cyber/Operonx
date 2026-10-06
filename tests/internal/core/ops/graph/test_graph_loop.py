@@ -216,7 +216,7 @@ class TestLoopInsideGraph:
 
 
 @op
-def step_branch_inside_loop(value: int):
+def branch_step(value: int):
     if value % 2 == 0:
         return {"value": value // 2}
     else:
@@ -226,7 +226,7 @@ def step_branch_inside_loop(value: int):
 @graph
 def collatz():
     PARENT.declare(value=6)
-    s = step_branch_inside_loop(value=PARENT["value"])
+    s = branch_step(value=PARENT["value"])
     s["value"] >> PARENT["value"]
     START >> s >> if_(PARENT["value"] == 1, END).else_(s)
 
@@ -267,7 +267,7 @@ def halve_loop(seed: int):
 
 
 @graph
-def outer_upstream_initial():
+def upstream_initial():
     starter = get_start()
     loop = halve_loop(seed=starter["start"])
     START >> starter >> loop >> END
@@ -276,7 +276,7 @@ def outer_upstream_initial():
 class TestLoopInitialFromUpstream:
     @pytest.mark.asyncio
     async def test_upstream_initial(self):
-        g = outer_upstream_initial()
+        g = upstream_initial()
         g.build()
         state = StateSchema(g).create_state()
         async for _, _ in g.run(state):

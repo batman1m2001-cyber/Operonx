@@ -66,7 +66,7 @@ def g():
 
 
 @graph
-def g_plain_backedge_still_terminates():
+def plain_backedge():
     PARENT.declare(count=0, done=False)
     s = step(count=PARENT["count"])
     s["count"] >> PARENT["count"]
@@ -82,7 +82,7 @@ def step_wide_zero(count: int = 0) -> dict:
 
 
 @graph
-def g_generator_yielding_nothing_terminates():
+def empty_generator_loop():
     PARENT.declare(count=0, done=False)
     s = step_wide_zero(count=PARENT["count"])
     s["count"] >> PARENT["count"]
@@ -150,7 +150,7 @@ class TestLoopWithGeneratorInside:
         """The pre-existing path must be untouched — including the branch
         source case, where firing depends on which target was chosen."""
 
-        built, result = await self._run(g_plain_backedge_still_terminates)
+        built, result = await self._run(plain_backedge)
         assert result["$state"][built.full_name, "count"] == 3
 
     @pytest.mark.asyncio
@@ -158,5 +158,5 @@ class TestLoopWithGeneratorInside:
         """A fan-out over an empty list means the back-edge source never
         runs — the loop must stop rather than spin to max_iterations."""
 
-        built, result = await self._run(g_generator_yielding_nothing_terminates)
+        built, result = await self._run(empty_generator_loop)
         assert result["$state"][built.full_name, "count"] == 1

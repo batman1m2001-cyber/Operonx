@@ -119,7 +119,7 @@ async def odd_fails(i: int) -> dict:
 
 
 @graph
-def g_error_edge_per_item(n):
+def per_item_handler(n):
     it = items(n=n)
     w = odd_fails(i=it["i"])
     n_ = note()
@@ -129,7 +129,7 @@ def g_error_edge_per_item(n):
 
 
 async def test_error_edge_per_item():
-    out = await Operon(g_error_edge_per_item, params={"n": None}).run({"n": 4})
+    out = await Operon(per_item_handler, params={"n": None}).run({"n": 4})
     assert out["ok"] == [0, 2]
     assert out["noted"] == ["ValueError: odd 1", "ValueError: odd 3"]
 
@@ -151,7 +151,7 @@ def failing_sub(x):
 
 
 @graph
-def g_error_edge_on_a_subgraph(x):
+def subgraph_handler(x):
     sub = failing_sub(x=x)
     n = note()
     START >> sub >> END
@@ -160,7 +160,7 @@ def g_error_edge_on_a_subgraph(x):
 
 
 async def test_error_edge_on_a_subgraph():
-    out = await Operon(g_error_edge_on_a_subgraph, params={"x": None}).run({"x": 1})
+    out = await Operon(subgraph_handler, params={"x": None}).run({"x": 1})
     assert out["noted"].startswith("SubgraphError")
 
 

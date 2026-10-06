@@ -241,7 +241,7 @@ def inner(x):
 
 
 @graph
-def inner_nested_with_io_child_is_task(x):
+def nested_io_child(x):
     d = async_double(x=x)  # io bound
     START >> d >> END
 
@@ -269,7 +269,7 @@ class TestNestedGraph:
     @pytest.mark.asyncio
     async def test_nested_with_io_child_is_task(self):
         with GraphOp(name="outer") as g:
-            sub = inner_nested_with_io_child_is_task(x=PARENT["x"])
+            sub = nested_io_child(x=PARENT["x"])
             START >> sub >> END
         g.build()
         assert g._ops["sub"].bound == "io"
@@ -355,13 +355,13 @@ class TestInlineBranch:
 
 
 @graph(bound="io")
-def inner_graph_bound_io_forces_task(x):
+def io_bound_inner(x):
     d = double(x=x)  # all inline children
     START >> d >> END
 
 
 @graph(bound="io")
-def inner_graph_bound_io_still_correct(x):
+def io_bound_inner_checked(x):
     d = double(x=x)
     START >> d >> END
 
@@ -370,7 +370,7 @@ class TestGraphOpBoundOverride:
     @pytest.mark.asyncio
     async def test_graph_bound_io_forces_task(self):
         with GraphOp(name="outer") as g:
-            sub = inner_graph_bound_io_forces_task(x=PARENT["x"])
+            sub = io_bound_inner(x=PARENT["x"])
             START >> sub >> END
         g.build()
         # Should be io despite all children being sync
@@ -379,7 +379,7 @@ class TestGraphOpBoundOverride:
     @pytest.mark.asyncio
     async def test_graph_bound_io_still_correct(self):
         with GraphOp(name="outer") as g:
-            sub = inner_graph_bound_io_still_correct(x=PARENT["x"])
+            sub = io_bound_inner_checked(x=PARENT["x"])
             START >> sub >> END
 
         result = await Operon(g).run(inputs={"x": 5})

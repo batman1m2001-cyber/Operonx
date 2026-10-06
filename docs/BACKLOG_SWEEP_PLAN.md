@@ -39,5 +39,8 @@ copied or replayed against a model; callbot never toward staging.
 | B10 | Pinned to operonx 1.16, 303 tests pass. Live traces are left off (`live: false`): measuring them would mean opening the team ClickHouse with the new operonx. | callbot `refactor/operonx-studio` b41be1b |
 | B11 | `qwen-turbo` was retired at the gateway; the fallback now uses `qwen3.7-flash`. | callbot `refactor/operonx-studio` 26416e6 |
 
-Still open: operonx core's own tests define 186 graphs inside test functions. Many of them
-test graph-building errors and are left as they are; the rest are next.
+Core tests: of the 186 `@graph`s defined inside test functions, 181 are now module level.
+Values they closed over became module-level records (cleared per test), graph inputs, or
+build-time graph parameters (`allow_race`, `parallel`, `sub`). Five stay inside `pytest.raises`:
+each deliberately references an op outside the graph's scope, which only a closure can do.
+The same 3442 tests are selected as on main; 3299 pass and the rest skip, as on main.

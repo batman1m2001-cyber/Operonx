@@ -69,7 +69,7 @@ class TestRefCondition:
 
 
 @graph
-def flow_on_a_graph_parameter(n):
+def param_flow(n):
     b, s = big(), small()
     START >> if_(is_big(n=n), b).else_(s)
     b >> END
@@ -97,7 +97,7 @@ class TestPredicateCondition:
 
     @pytest.mark.parametrize("n,want", CASES)
     async def test_on_a_graph_parameter(self, n, want):
-        out = await Operon(flow_on_a_graph_parameter, params={"n": None}).run(inputs={"n": n})
+        out = await Operon(param_flow, params={"n": None}).run(inputs={"n": n})
         assert out["w"] == want
 
     @pytest.mark.parametrize("n,want", CASES)

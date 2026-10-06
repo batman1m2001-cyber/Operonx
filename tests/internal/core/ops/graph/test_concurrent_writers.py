@@ -97,7 +97,7 @@ def small(n: int) -> dict:
 
 
 @graph
-def g_branch_arms_are_not_concurrent(n):
+def branch_arms(n):
     PARENT.declare(label=None)
     c = check(n=n)
     b, s = big(n=n), small(n=n)
@@ -108,7 +108,7 @@ def g_branch_arms_are_not_concurrent(n):
 
 
 async def test_branch_arms_are_not_concurrent():
-    engine = Operon(g_branch_arms_are_not_concurrent, params={"n": None})
+    engine = Operon(branch_arms, params={"n": None})
     assert (await engine.run({"n": 30}))["label"] == "big"
 
 
@@ -123,7 +123,7 @@ def fallback(error: str) -> dict:
 
 
 @graph
-def g_an_op_and_its_error_handler_are_not_concurrent(x):
+def op_and_handler(x):
     PARENT.declare(v=None)
     m = may_fail(x=x)
     f = fallback()
@@ -135,7 +135,7 @@ def g_an_op_and_its_error_handler_are_not_concurrent(x):
 
 
 def test_an_op_and_its_error_handler_are_not_concurrent():
-    Operon(g_an_op_and_its_error_handler_are_not_concurrent, params={"x": None})
+    Operon(op_and_handler, params={"x": None})
 
 
 @op
@@ -149,7 +149,7 @@ def side(x: int) -> dict:
 
 
 @graph
-def g_a_loop_racing_a_sibling_is_reported(x):
+def loop_beside_sibling(x):
     PARENT.declare(n=0)
     s = step(n=PARENT["n"])
     o = side(x=x)
@@ -162,4 +162,4 @@ def g_a_loop_racing_a_sibling_is_reported(x):
 
 def test_a_loop_racing_a_sibling_is_reported():
     with pytest.raises(GraphValidationError, match=r"'s' \(in a loop\)"):
-        Operon(g_a_loop_racing_a_sibling_is_reported, params={"x": None})
+        Operon(loop_beside_sibling, params={"x": None})
