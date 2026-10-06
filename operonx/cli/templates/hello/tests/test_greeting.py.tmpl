@@ -12,18 +12,16 @@ def test_greet_titles_the_name():
 
 
 def test_the_flow_greets_every_person(tmp_path):
-    got = []
     job = Job(
         "t",
         graph=greet_flow,
-        source=[{"id": "a", "name": "ada"}, {"id": "b", "name": ""}],
-        sink=got,
+        items=[{"id": "a", "name": "ada"}, {"id": "b", "name": ""}],
         key="id",
         record_dir=tmp_path,
     )
     run = asyncio.run(job.run())
     assert run.status == "ok"
-    assert sorted(got, key=lambda r: r["id"]) == [
-        {"id": "a", "greeting": "Hello, Ada!"},
-        {"id": "b", "greeting": "Hello, stranger!"},
-    ]
+    assert run.results == {
+        "a": {"id": "a", "greeting": "Hello, Ada!"},
+        "b": {"id": "b", "greeting": "Hello, stranger!"},
+    }

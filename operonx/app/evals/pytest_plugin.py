@@ -16,7 +16,7 @@ judges it. The dataset becomes parametrised unit tests::
 
     @pytest.mark.parametrize("case", cases("dataset:labels"))
     async def test_labels(case, run_case):
-        got = await run_case(flow, case, evaluators=[exact("label")], item_input="text")
+        got = await run_case(flow, case, evaluators=[exact("label")], input="text")
         assert got.trace.path() == ["classify"]       # anything else about the run
 
 ``run_case`` runs the graph once through the job runner's own per-item
@@ -80,7 +80,6 @@ from .fingerprint import case_hash, config_spec, digest, fingerprint, graph_spec
 from .gate import Gate
 from .job import (
     _ask_git,
-    _Capture,
     case_verdict,
     gate_run,
     git_baseline,
@@ -235,20 +234,20 @@ class CaseRunner:
         case: Any,
         *,
         evaluators: Sequence[Any] = (),
-        item_input: Optional[str] = None,
+        input: Optional[str] = None,
         inputs: Optional[Dict[str, Any]] = None,
         timeout: Optional[float] = None,
     ) -> CaseRun:
         """Run *graph* on *case* (a dataset row — ``{"id", "input",
         "expected", …}`` — or the bare input) and judge it with
-        *evaluators*. ``item_input`` binds the input to a graph with no
+        *evaluators*. ``input`` binds the input to a graph with no
         doors; ``inputs`` are static inputs; ``timeout`` in seconds."""
         return await self._experiment.run_case(
             self._nodeid,
             graph,
             case,
             evaluators=evaluators,
-            item_input=item_input,
+            input=input,
             inputs=inputs or {},
             timeout=timeout,
         )
@@ -328,21 +327,19 @@ class _Experiment:
     def open(self) -> RunRecord:
         if self.record is None:
             self.code = _ask_git(self.root)
-            meta = {"kind": "eval", "graph": None, "variant": "pytest", "session": "per_item"}
+            meta = {"kind": "eval", "graph": None, "variant": "pytest"}
             self.record = RunRecord(self.record_dir, self.name, meta=meta)
         return self.record
 
-    def job(
-        self, graph: Any, item_input: Optional[str], inputs: Dict[str, Any], timeout: Any
-    ) -> Job:
-        key = (id(graph), item_input, json.dumps(inputs, sort_keys=True, default=str), timeout)
+    def job(self, graph: Any, input: Optional[str], inputs: Dict[str, Any], timeout: Any) -> Job:
+        key = (id(graph), input, json.dumps(inputs, sort_keys=True, default=str), timeout)
         if key not in self.jobs:
             self.jobs[key] = _CaseJob(
                 self.name,
                 graph=graph,
-                item_input=item_input,
+                input=input,
                 inputs=inputs,
-                item_timeout=timeout,
+                timeout=timeout,
                 record_dir=self.record_dir,
             )
         return self.jobs[key]
@@ -354,7 +351,7 @@ class _Experiment:
         case: Any,
         *,
         evaluators: Sequence[Any],
-        item_input: Optional[str],
+        input: Optional[str],
         inputs: Dict[str, Any],
         timeout: Optional[float],
     ) -> CaseRun:
@@ -368,15 +365,15 @@ class _Experiment:
         record = self.open()
         row = dict(case) if isinstance(case, Mapping) and "input" in case else {"input": case}
         row["id"] = case_id(row)
-        job = self.job(graph, item_input, inputs, timeout)
+        job = self.job(graph, input, inputs, timeout)
         engine = job.engine()
-        capture = _Capture()
-        result = await _attempt(job, engine, capture, row, nodeid, record.run_id)
-        sent = capture.by_key.pop(nodeid, [])
+        result = await _attempt(job, engine, row, nodeid, record.run_id)
+        output, result.result = result.result, None
+        sent = output if result.sent > 1 else ([output] if output is not None else [])
         got = CaseRun(
             key=nodeid,
             row=row,
-            output=sent[0] if len(sent) == 1 else (sent or None),
+            output=output,
             outputs=sent,
             result=result,
             _seen=self.saw,

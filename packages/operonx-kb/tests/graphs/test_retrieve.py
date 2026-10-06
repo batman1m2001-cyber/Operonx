@@ -178,18 +178,14 @@ def test_the_search_flow_runs_as_a_job(loaded, tmp_path):
 
     from operonx_kb.graphs.retrieve import search_flow
 
-    got = {}  # items run concurrently: collect by key, not by arrival
-
-    def sink(key, item):
-        got[key] = item
-
     job = Job("search_docs", graph=search_flow, inputs={"mode": "hybrid", "catalog": "kb_catalog:main"},
-              source=[
+              items=[
         {"id": "q1", "query": "annual leave", "collection": "docs", "k": 2},
         {"id": "q2", "query": "taxi", "collection": "docs", "filter": {"tags_any": ["finance"]}},
-    ], sink=sink, key="id", record_dir=str(tmp_path / "jobs"))  # fmt: skip
+    ], key="id", record_dir=str(tmp_path / "jobs"))  # fmt: skip
     record = run(job.run())
     assert record.status == "ok", record
+    got = record.results
     assert len(got["q1"]["hits"]) <= 2 and got["q2"]["hits"][0]["key"] == "travel.md"
 
 

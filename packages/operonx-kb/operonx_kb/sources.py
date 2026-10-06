@@ -1,14 +1,14 @@
 """Where documents come from besides a folder: S3 and Google Drive (track5 P7).
 
-Each is a job source like operonx's ``DirSource``: ``items()`` yields one ingest
-item per file, ``{"path", "key", "name", "metadata"}``, so the same ``ingest_flow``
-(a ``Job``) or ``KnowledgeBase.add`` reads it. The file is downloaded to a local
+Each is an async iterable — ``Job(items=S3Source(...))`` loops over it — yielding
+one ingest item per file, ``{"path", "key", "name", "metadata"}``, so the same
+``ingest_flow`` (a ``Job``) or ``KnowledgeBase.add`` reads it. The file is downloaded to a local
 ``cache`` folder first — an item never carries the bytes, so neither the job's
 records nor its trace do — and its ``key`` is stable across runs
 (``s3://bucket/key``, ``gdrive:<file id>``), so a job resumes and an unchanged file
 is skipped by its hash::
 
-    job = Job("ingest_s3", graph=ingest_flow, source=S3Source("docs-bucket", prefix="hr/"),
+    job = Job("ingest_s3", graph=ingest_flow, items=S3Source("docs-bucket", prefix="hr/"),
               key="key", inputs={"collection": "handbook", ...})
 
 The cloud client is created from the default credentials (boto3's chain; a Google
@@ -109,7 +109,7 @@ class S3Source:
             "metadata": {"source": "s3", "etag": str(obj.get("ETag", "")).strip('"')},
         }
 
-    async def items(self) -> AsyncIterator[Dict[str, Any]]:
+    async def __aiter__(self) -> AsyncIterator[Dict[str, Any]]:
         objects = await asyncio.to_thread(lambda: sorted(self._objects(), key=lambda o: o["Key"]))
         for obj in objects:
             yield await asyncio.to_thread(self._fetch, obj)
@@ -227,7 +227,7 @@ class DriveSource:
             "metadata": {"source": "gdrive", "modified": f.get("modifiedTime", "")},
         }
 
-    async def items(self) -> AsyncIterator[Dict[str, Any]]:
+    async def __aiter__(self) -> AsyncIterator[Dict[str, Any]]:
         found = await asyncio.to_thread(lambda: sorted(self._files(self.folder_id),
                                                        key=lambda f: (f["name"], f["id"])))  # fmt: skip
         for f in found:

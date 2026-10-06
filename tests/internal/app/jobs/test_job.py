@@ -1,13 +1,15 @@
-"""A Job: one run per item, a record per run, and the graph unchanged.
+"""`Job`: items in, one run per item, every result kept; `reduce`; `steps`.
 
-The gate is `test_resume_runs_only_what_failed`: three items, one
-failing, the record says 2 ok / 1 failed, and a resumed run touches only
-the one — the shape the plan promised for phase 1.
+The gates of docs/JOBS_AND_GUIDES_PLAN.md phase A1: each form of
+``items``, the binding rules (and their errors naming the field), results
+kept so ``--resume`` and ``reduce`` see every key, ``output``, the failure
+policy, and a job of steps.
 """
 
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 
 import pytest
@@ -22,511 +24,440 @@ from operonx.app.jobs import (
     RUN_OK,
     RUN_STOPPED,
     Job,
-    ListSink,
-    last_run,
 )
 from operonx.app.serve import egress, ingress
-from operonx.core import END, PARENT, START, graph, op
+from operonx.core import END, START, graph, op
+from operonx.core.policy import Retry
 
-# -- the graph under test ---------------------------------------------------
-
-FAIL: set = set()  # item ids that raise every time
-FAIL_ONCE: set = set()  # item ids that raise on their first attempt only
-ATTEMPTS: dict = {}  # id -> how many times `score` ran for it
-INFLIGHT = {"now": 0, "max": 0}
-
-
-@op(bound="io")
-async def score(item: dict = None) -> dict:
-    ATTEMPTS[item["id"]] = ATTEMPTS.get(item["id"], 0) + 1
-    INFLIGHT["now"] += 1
-    INFLIGHT["max"] = max(INFLIGHT["max"], INFLIGHT["now"])
-    try:
-        await asyncio.sleep(0.01)
-        if item["id"] in FAIL_ONCE:
-            FAIL_ONCE.discard(item["id"])
-            raise ValueError(f"flaky {item['id']}")
-        if item["id"] in FAIL:
-            raise ValueError(f"cannot score {item['id']}")
-        return {"scored": {"id": item["id"], "score": len(item["text"])}}
-    finally:
-        INFLIGHT["now"] -= 1
-
-
-@graph
-def score_flow():
-    src = ingress()
-    scored = score(item=src["item"])
-    out = egress(item=scored["scored"])
-    START >> src >> scored >> out >> END
-
-
-@graph
-def no_egress_flow():
-    src = ingress()
-    scored = score(item=src["item"])
-    START >> src >> scored >> END
-
-
-@op(bound="sync")
-def double(x: int = 0) -> dict:
-    return {"result": x * 2}
-
-
-@graph
-def doubling(val):
-    d = double(x=val)
-    START >> d >> END
-
-
-ITEMS = [
-    {"id": "a", "text": "xx"},
-    {"id": "b", "text": "yyy"},
-    {"id": "c", "text": "z"},
-]
+#: Item values `square` refuses; set per test.
+FAIL = set()
+#: Every value `square` was called with.
+CALLS = []
 
 
 @pytest.fixture(autouse=True)
-def _reset_op_state():
+def _fresh():
     FAIL.clear()
-    FAIL_ONCE.clear()
-    ATTEMPTS.clear()
-    INFLIGHT["now"] = INFLIGHT["max"] = 0
-    yield
-
-
-def make_job(tmp_path, **overrides) -> Job:
-    kwargs = dict(
-        graph=score_flow,
-        source=list(ITEMS),
-        sink=None,
-        key="id",
-        record_dir=tmp_path / "jobs",
-        concurrency=1,
-    )
-    kwargs.update(overrides)
-    return Job("score", **kwargs)
-
-
-def _lines(path):
-    return [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
-    ]
-
-
-# -- the record ---------------------------------------------------------------
-
-
-async def test_per_item_runs_every_item_and_records_each(tmp_path):
-    FAIL.add("b")
-    got: list = []
-    job = make_job(tmp_path, sink=got)
-
-    run = await job.run()
-
-    assert run.status == RUN_FAILED
-    assert run.counts[ITEM_OK] == 2 and run.counts[ITEM_FAILED] == 1
-    assert [g["id"] for g in got] == ["a", "c"]
-
-    (failed,) = run.failed
-    assert failed.key == "b"
-    assert failed.error.startswith("scored: ") and "cannot score b" in failed.error
-    assert failed.trace_id  # the run is findable in the traces
-    assert all(i.trace_id for i in run.items)
-    assert all(i.sent == 1 for i in run.ok)
-
-    # On disk: what a second process (the studio, a cron mail) reads.
-    assert run.path.is_dir()
-    meta = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
-    assert meta["status"] == "failed" and meta["ended"]
-    assert meta["counts"] == {"ok": 2, "failed": 1, "empty": 0, "skipped": 0, "timeout": 0}
-    assert meta["graph"] == "score_flow" and meta["key"] == "id"
-    rows = _lines(run.path / "items.jsonl")
-    assert [(r["key"], r["status"]) for r in rows] == [("a", "ok"), ("b", "failed"), ("c", "ok")]
-
-
-async def test_resume_runs_only_what_failed(tmp_path):
-    """The phase 1 gate."""
-    FAIL.add("b")
-    job = make_job(tmp_path)
-    first = await job.run()
-    assert (first.counts[ITEM_OK], first.counts[ITEM_FAILED]) == (2, 1)
-
-    FAIL.clear()  # "fixed"
-    ATTEMPTS.clear()
-    second = await job.run(resume=True)
-
-    assert second.status == RUN_OK
-    assert second.resume_from == first.run_id
-    assert second.counts == {"ok": 1, "failed": 0, "empty": 0, "skipped": 2, "timeout": 0}
-    assert ATTEMPTS == {"b": 1}  # a and c never ran again
-    assert last_run(tmp_path / "jobs", "score").run_id == second.run_id
-
-
-async def test_resume_with_no_earlier_run_runs_everything(tmp_path):
-    run = await make_job(tmp_path).run(resume=True)
-    assert run.resume_from is None
-    assert run.counts[ITEM_OK] == 3
-
-
-async def test_a_resumed_run_is_itself_resumable(tmp_path):
-    """Skipped counts as done: three runs, and the third touches nothing."""
-    FAIL.add("b")
-    job = make_job(tmp_path)
-    await job.run()
-    FAIL.clear()
-    await job.run(resume=True)
-    ATTEMPTS.clear()
-    third = await job.run(resume=True)
-    assert third.counts[ITEM_SKIPPED] == 3 and ATTEMPTS == {}
-
-
-# -- failure policy -----------------------------------------------------------
-
-
-async def test_skip_carries_on_and_the_run_is_failed(tmp_path):
-    FAIL.update({"a", "c"})
-    run = await make_job(tmp_path, on_error="skip").run()
-    assert run.status == RUN_FAILED
-    assert [i.status for i in run.items] == [ITEM_FAILED, ITEM_OK, ITEM_FAILED]
-
-
-async def test_stop_starts_nothing_after_a_failure(tmp_path):
-    FAIL.add("b")
-    run = await make_job(tmp_path, on_error="stop", concurrency=1).run()
-    assert run.status == RUN_STOPPED
-    assert [i.key for i in run.items] == ["a", "b"]
-    assert "c" not in ATTEMPTS  # never dispatched
-
-
-async def test_retry_tries_again_and_counts_the_attempts(tmp_path):
-    FAIL_ONCE.add("b")
-    run = await make_job(tmp_path, on_error="retry:2").run()
-    assert run.status == RUN_OK
-    by_key = {i.key: i for i in run.items}
-    assert by_key["b"].status == ITEM_OK and by_key["b"].attempts == 2
-    assert by_key["a"].attempts == 1
-
-
-async def test_retry_exhausted_is_a_failure_and_the_run_goes_on(tmp_path):
-    FAIL.add("b")
-    run = await make_job(tmp_path, on_error="retry:1").run()
-    assert run.status == RUN_FAILED
-    by_key = {i.key: i for i in run.items}
-    assert by_key["b"].status == ITEM_FAILED and by_key["b"].attempts == 2
-    assert ATTEMPTS == {"a": 1, "b": 2, "c": 1}
-
-
-def test_a_bad_policy_is_refused_at_declaration(tmp_path):
-    with pytest.raises(ValueError, match="on_error"):
-        make_job(tmp_path, on_error="ignore")
-    with pytest.raises(ValueError, match="retry"):
-        make_job(tmp_path, on_error="retry:x")
-    # Words that merely start with "retry" were read as retry:1.
-    for typo in ("retry3", "retryfoo"):
-        with pytest.raises(ValueError, match="on_error"):
-            make_job(tmp_path, on_error=typo)
-    with pytest.raises(ValueError, match="session"):
-        make_job(tmp_path, session="per_request")
-
-
-# -- what "nothing came out" looks like ---------------------------------------
-
-
-async def test_a_run_that_sends_nothing_is_empty_not_ok(tmp_path):
-    """The Analyze bug: 90 of 90 wrote nothing and the runner said OK."""
-    got: list = []
-    run = await make_job(tmp_path, graph=no_egress_flow, sink=got).run()
-    assert run.status == RUN_OK  # nothing failed…
-    assert run.counts[ITEM_EMPTY] == 3  # …but the record says nothing came out
-    assert got == []
-    assert all(i.sent == 0 for i in run.items)
-
-
-async def test_a_sink_that_cannot_write_fails_the_item(tmp_path):
-    class Broken:
-        async def write(self, key, item):
-            raise OSError("disk full")
-
-        async def close(self):
-            pass
-
-    run = await make_job(tmp_path, sink=Broken()).run()
-    assert run.status == RUN_FAILED
-    assert all(i.status == ITEM_FAILED and "disk full" in i.error for i in run.items)
-
-
-# -- identity -------------------------------------------------------------------
-
-
-async def test_key_from_a_function_and_from_nothing(tmp_path):
-    by_fn = await make_job(tmp_path, key=lambda it: it["id"].upper()).run()
-    assert [i.key for i in by_fn.items] == ["A", "B", "C"]
-
-    anonymous = await make_job(tmp_path, key=None).run()
-    keys = [i.key for i in anonymous.items]
-    assert len(set(keys)) == 3 and all(len(k) == 12 for k in keys)
-
-
-async def test_an_item_without_its_key_is_a_failed_item(tmp_path):
-    items = [{"id": "a", "text": "x"}, {"text": "no id"}, {"id": "", "text": "blank"}]
-    run = await make_job(tmp_path, source=items).run()
-    assert run.counts[ITEM_OK] == 1 and run.counts[ITEM_FAILED] == 2
-    errors = [i.error for i in run.failed]
-    assert any("no field 'id'" in e for e in errors)
-    assert any("is empty" in e for e in errors)
-
-
-# -- concurrency and the no-door shape -------------------------------------------
-
-
-async def test_concurrency_bounds_items_in_flight(tmp_path):
-    items = [{"id": str(n), "text": "t"} for n in range(8)]
-    await make_job(tmp_path, source=items, concurrency=3).run()
-    assert INFLIGHT["max"] == 3
-
-
-async def test_a_graph_without_doors_takes_the_item_as_an_input(tmp_path):
-    """`engine.batch()` as a Job: the run's result is the item's result."""
-    got: list = []
-    job = Job(
-        "double",
-        graph=doubling(val=PARENT["val"]),
-        source=[1, 2, 3],
-        sink=got,
-        item_input="val",
-        record_dir=tmp_path / "jobs",
-    )
-    run = await job.run()
-    assert run.status == RUN_OK and run.counts[ITEM_OK] == 3
-    assert [g["result"] for g in got] == [2, 4, 6]
-
-
-async def test_a_doorless_failure_no_trace_node_carries_fails_the_item(tmp_path, monkeypatch):
-    """A subgraph that fails around its children leaves no errored trace
-    node — only the run's own record (`handle.errors`, `"$errors"`) knows.
-    The item is failed, and `"$errors"` never reaches the sink as if it
-    were the item's result."""
-    from operonx.core import GraphOp
-
-    real = GraphOp.get_inputs
-
-    def failing(self, state, context_id=None):
-        if self.name == "inner":
-            raise LookupError("subgraph inputs unreadable")
-        return real(self, state, context_id)
-
-    with GraphOp(name="outer") as g:
-        with GraphOp(name="inner") as sub:
-            d = double(x=PARENT["val"])
-            START >> d >> END
-        START >> sub >> END
-
-    monkeypatch.setattr(GraphOp, "get_inputs", failing)
-    got: list = []
-    job = Job(
-        "nested",
-        graph=g,
-        source=[1],
-        sink=got,
-        item_input="val",
-        record_dir=tmp_path / "jobs",
-    )
-    run = await job.run()
-    assert got == []
-    assert run.counts[ITEM_FAILED] == 1
-    assert run.items[0].error == "inner: LookupError: subgraph inputs unreadable"
-
-
-async def test_the_sink_is_closed_once_after_the_last_item(tmp_path):
-    sink = ListSink()
-    await make_job(tmp_path, sink=sink).run()
-    assert sink.closed and len(sink.pairs) == 3
-
-
-def test_run_sync_from_a_script(tmp_path):
-    run = make_job(tmp_path).run_sync()
-    assert run.status == RUN_OK
-
-
-def test_describe_names_things_without_leaking_values(tmp_path):
-    job = make_job(tmp_path, source="data/calls.jsonl", sink="sink:scores", description="nightly")
-    d = job.describe()
-    assert d["graph"] == "score_flow" and d["source"] == "data/calls.jsonl"
-    assert d["sink"] == "sink:scores" and d["key"] == "id" and d["description"] == "nightly"
-    assert "Job('score'" in repr(job)
-
-
-# -- stream mode ----------------------------------------------------------------
-
-
-async def test_stream_feeds_every_item_through_one_run(tmp_path):
-    got: list = []
-    run = await make_job(tmp_path, session="stream", sink=got).run()
-    assert run.status == RUN_OK
-    assert run.counts["fed"] == 3 and run.counts["sent"] == 3
-    assert run.items == []  # no per-item outcomes in one run
-    assert run.meta["trace_id"]  # …but the one trace is named
-    assert [g["id"] for g in got] == ["a", "b", "c"]
-    assert set(ATTEMPTS) == {"a", "b", "c"}
-    assert "fed=3 sent=3" in run.summary()
-    meta = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
-    assert meta["counts"]["fed"] == 3 and meta["session"] == "stream"
-
-
-async def test_stream_failure_names_the_op_and_fails_the_run(tmp_path):
-    FAIL.add("b")
-    got: list = []
-    run = await make_job(tmp_path, session="stream", sink=got).run()
-    assert run.status == RUN_FAILED
-    assert run.meta["error"].startswith("scored: ") and "cannot score b" in run.meta["error"]
-    assert run.counts["fed"] == 3 and run.counts["sent"] == 2
-    assert [g["id"] for g in got] == ["a", "c"]
-
-
-async def test_stream_cannot_resume(tmp_path):
-    with pytest.raises(ValueError, match="cannot resume"):
-        await make_job(tmp_path, session="stream").run(resume=True)
-
-
-async def test_stream_bound_is_the_sessions_bound(tmp_path):
-    items = [{"id": str(n), "text": "t"} for n in range(20)]
-    run = await make_job(tmp_path, session="stream", source=items, max_inflight=2).run()
-    assert run.status == RUN_OK and run.counts["fed"] == 20 and run.counts["sent"] == 20
-    with pytest.raises(ValueError, match="max_inflight"):
-        make_job(tmp_path, session="stream", max_inflight=0)
-
-
-# -- what the trace carries ----------------------------------------------------------
-
-
-class Capture:
-    """A trace consumer that keeps every trace it is handed."""
-
-    def __init__(self):
-        from operonx.telemetry.consumer import Consumer
-
-        outer = self
-
-        class _C(Consumer):
-            def consume(self, trace):
-                outer.traces.append(trace)
-
-        self.traces: list = []
-        self.consumer = _C()
-
-
-async def test_every_run_carries_the_job_on_its_trace(tmp_path):
-    cap = Capture()
-    run = await make_job(tmp_path, trace=[cap.consumer]).run()
-    assert len(cap.traces) == 3  # one per item, and all of them flushed
-    by_id = {t.trace_id: t for t in cap.traces}
-    for item in run.items:
-        t = by_id[item.trace_id]  # the record's trace id is the trace's
-        md = t.metadata
-        assert md["job"] == "score" and md["job_run"] == run.run_id and md["key"] == item.key
-        assert md["origin"] == "job"
-        assert md["tags"] == ["origin:job", "job:score", f"job_run:{run.run_id}", f"key:{item.key}"]
-
-
-async def test_a_stream_run_is_one_trace_tagged_without_a_key(tmp_path):
-    cap = Capture()
-    run = await make_job(tmp_path, session="stream", trace=[cap.consumer]).run()
-    assert len(cap.traces) == 1
-    (t,) = cap.traces
-    assert t.trace_id == run.meta["trace_id"]
-    assert t.metadata["job"] == "score" and t.metadata["job_run"] == run.run_id
-    assert "key" not in t.metadata
-    assert t.metadata["tags"] == ["origin:job", "job:score", f"job_run:{run.run_id}"]
-
-
-# -- a deadline per item --------------------------------------------------------------
-
-
-@op(bound="io")
-async def slow(item: dict = None) -> dict:
-    await asyncio.sleep(0.4)
-    return {"scored": item}
+    CALLS.clear()
+
+
+@op
+def square(n: int) -> dict:
+    CALLS.append(n)
+    if n in FAIL:
+        raise ValueError(f"no {n}")
+    return {"sq": n * n}
 
 
 @graph
-def slow_flow():
+def sq(n):
+    s = square(n=n)
+    START >> s >> END
+
+
+@op
+def power(n: int, p: int) -> dict:
+    return {"value": n**p}
+
+
+@graph
+def pw(n, p):
+    s = power(n=n, p=p)
+    START >> s >> END
+
+
+@op
+def nothing(n: int) -> dict:
+    return {}
+
+
+@graph
+def quiet(n):
+    s = nothing(n=n)
+    START >> s >> END
+
+
+@op
+async def slow(n: int) -> dict:
+    await asyncio.sleep(1.0)
+    return {"sq": n}
+
+
+@graph
+def slow_flow(n):
+    s = slow(n=n)
+    START >> s >> END
+
+
+@op
+def total(results: list) -> dict:
+    return {"sum": sum(r["sq"] for r in results), "order": [r["sq"] for r in results]}
+
+
+@graph
+def add_up(results):
+    t = total(results=results)
+    START >> t >> END
+
+
+@op
+def boom(results: list) -> dict:
+    raise RuntimeError("cannot add")
+
+
+@graph
+def broken_reduce(results):
+    b = boom(results=results)
+    START >> b >> END
+
+
+@graph
+def no_results(n):
+    s = square(n=n)
+    START >> s >> END
+
+
+@op
+def shout(item: dict) -> dict:
+    return {"out": item["text"].upper()}
+
+
+@graph
+def door_flow():
     src = ingress()
-    s = slow(item=src["item"])
-    out = egress(item=s["scored"])
+    s = shout(item=src["item"])
+    out = egress(item=s["out"])
     START >> src >> s >> out >> END
 
 
-async def test_an_item_past_its_deadline_is_recorded_timeout(tmp_path):
-    got: list = []
-    run = await make_job(
-        tmp_path, graph=slow_flow, sink=got, item_timeout=0.05, concurrency=3
-    ).run()
-    assert run.status == RUN_FAILED
-    assert run.counts["timeout"] == 3 and run.counts["ok"] == 0
-    assert all(i.error == "run exceeded 0.05s" for i in run.timed_out)
-    assert "timeout=3" in run.summary()
-    assert got == []
-    assert all(i.ms < 300 for i in run.items)  # cancelled, not waited out
-
-
-async def test_a_timeout_is_retried_and_stops_like_a_failure(tmp_path):
-    run = await make_job(tmp_path, graph=slow_flow, item_timeout=0.05, on_error="retry:1").run()
-    assert all(i.status == ITEM_TIMEOUT and i.attempts == 2 for i in run.items)
-
-    stopped = await make_job(tmp_path, graph=slow_flow, item_timeout=0.05, on_error="stop").run()
-    assert stopped.status == RUN_STOPPED and len(stopped.items) == 1
-
-
-async def test_a_timed_out_item_runs_again_on_resume(tmp_path):
-    job = make_job(tmp_path, graph=slow_flow, item_timeout=0.05)
-    await job.run()
-    job.item_timeout = None  # "fixed": no deadline
-    again = await job.run(resume=True)
-    assert again.counts["ok"] == 3 and again.counts["skipped"] == 0
-
-
-def test_item_timeout_must_be_positive(tmp_path):
-    with pytest.raises(ValueError, match="item_timeout"):
-        make_job(tmp_path, item_timeout=0)
-    assert make_job(tmp_path, item_timeout=2).describe()["item_timeout"] == 2.0
-
-
-# -- retry:N waits between attempts; a timed-out item keeps its trace (F33) ----
-
-STAMPS: dict = {}  # id -> perf_counter() of each attempt
-
-
-@op(bound="io")
-async def always_fails(item: dict = None) -> dict:
-    import time
-
-    STAMPS.setdefault(item["id"], []).append(time.perf_counter())
-    raise ConnectionError(f"down for {item['id']}")
-    return {"scored": item}  # never reached; names the output
+@op
+async def twice(item: dict):
+    yield {"out": item["text"]}
+    yield {"out": item["text"] + "!"}
 
 
 @graph
-def failing_flow():
+def echo_twice():
     src = ingress()
-    f = always_fails(item=src["item"])
-    out = egress(item=f["scored"])
-    START >> src >> f >> out >> END
+    t = twice(item=src["item"])
+    out = egress(item=t["out"])
+    START >> src >> t >> out >> END
 
 
-async def test_retry_backs_off_between_attempts(tmp_path):
-    """Retries used to fire back to back: three attempts inside a millisecond."""
-    STAMPS.clear()
-    run = await make_job(tmp_path, graph=failing_flow, source=[ITEMS[0]], on_error="retry:2").run()
-    assert run.items[0].attempts == 3
-    first, second = (b - a for a, b in zip(STAMPS["a"], STAMPS["a"][1:]))
-    # The default Retry: 0.5 s then 1 s, each jittered down to half at most.
-    assert 0.25 <= first <= 0.6, first
-    assert 0.5 <= second <= 1.1, second
+def _run(job, tmp_path, **kw):
+    return job.run_sync(record_dir=tmp_path / "rec", **kw)
 
 
-async def test_a_timed_out_item_keeps_its_trace_id(tmp_path):
-    run = await make_job(tmp_path, graph=slow_flow, item_timeout=0.05).run()
-    assert run.counts["timeout"] == 3
-    ids = [i.trace_id for i in run.items]
-    assert all(ids) and len(set(ids)) == 3  # the hung run can be found
+# -- items --------------------------------------------------------------------
+
+
+def test_a_list_runs_each_item_and_keeps_its_result(tmp_path):
+    run = _run(Job("j", graph=sq, items=[{"n": 2}, {"n": 3}], key="n"), tmp_path)
+    assert run.status == RUN_OK and run.counts[ITEM_OK] == 2
+    assert run.results == {"2": {"sq": 4}, "3": {"sq": 9}}
+    assert (run.path / "results.jsonl").exists()
+
+
+def test_a_function_is_called_on_every_run(tmp_path):
+    loads = []
+
+    def load():
+        loads.append(1)
+        yield {"n": len(loads)}
+
+    job = Job("j", graph=sq, items=load, key="n")
+    assert _run(job, tmp_path).results == {"1": {"sq": 1}}
+    assert _run(job, tmp_path).results == {"2": {"sq": 4}}  # read again
+
+
+def test_an_async_generator_feeds_the_job(tmp_path):
+    async def load():
+        for n in (1, 2):
+            yield {"n": n}
+
+    assert _run(Job("j", graph=sq, items=load, key="n"), tmp_path).counts[ITEM_OK] == 2
+
+
+def test_a_jsonl_path_is_one_item_per_line(tmp_path):
+    path = tmp_path / "items.jsonl"
+    path.write_text('{"n": 4}\n\n{"n": 5}\n', encoding="utf-8")
+    assert _run(Job("j", graph=sq, items=path, key="n"), tmp_path).results == {
+        "4": {"sq": 16},
+        "5": {"sq": 25},
+    }
+
+
+def test_no_items_runs_the_graph_once(tmp_path):
+    run = _run(Job("j", graph=pw, inputs={"n": 2, "p": 3}), tmp_path)
+    assert run.status == RUN_OK and list(run.results.values()) == [{"value": 8}]
+
+
+@pytest.mark.parametrize(
+    "items,match",
+    [
+        ("items.csv", "must be a .jsonl file"),
+        ({"n": 1}, "pass a list of items"),
+        (42, "pass a list, an iterable"),
+    ],
+)
+def test_what_items_cannot_be_is_refused_at_declaration(items, match):
+    with pytest.raises((TypeError, ValueError), match=match):
+        Job("j", graph=sq, items=items)
+
+
+# -- binding ------------------------------------------------------------------
+
+
+def test_a_dict_item_fills_the_parameters_by_name(tmp_path):
+    run = _run(Job("j", graph=pw, items=[{"n": 2, "p": 5}], key="n"), tmp_path)
+    assert run.results == {"2": {"value": 32}}
+
+
+def test_an_unknown_field_fails_the_item_naming_it(tmp_path):
+    run = _run(Job("j", graph=sq, items=[{"m": 1}]), tmp_path)
+    (error,) = run.errors.values()
+    assert "['m']" in error and "input=" in error and run.status == RUN_FAILED
+
+
+def test_input_hands_the_whole_item_to_one_parameter(tmp_path):
+    run = _run(Job("j", graph=sq, items=[7], input="n", key=lambda x: x), tmp_path)
+    assert run.results == {"7": {"sq": 49}}
+
+
+def test_a_plain_item_goes_to_the_only_free_parameter(tmp_path):
+    run = _run(Job("j", graph=pw, items=[3], inputs={"p": 2}, key=lambda x: x), tmp_path)
+    assert run.results == {"3": {"value": 9}}
+
+
+def test_a_plain_item_with_two_free_parameters_asks_for_input(tmp_path):
+    run = _run(Job("j", graph=pw, items=[3]), tmp_path)
+    assert "pass input=" in next(iter(run.errors.values()))
+
+
+def test_a_graph_with_doors_takes_the_item_through_ingress(tmp_path):
+    run = _run(Job("j", graph=door_flow, items=[{"text": "hi"}], key="text"), tmp_path)
+    assert run.results == {"hi": "HI"}
+
+
+def test_several_sends_are_a_list(tmp_path):
+    run = _run(Job("j", graph=echo_twice, items=[{"text": "a"}], key="text"), tmp_path)
+    assert run.results == {"a": ["a", "a!"]} and run.items[0].sent == 2
+
+
+def test_a_run_that_produces_nothing_is_empty(tmp_path):
+    run = _run(Job("j", graph=quiet, items=[{"n": 1}], key="n"), tmp_path)
+    assert run.items[0].status == ITEM_EMPTY and run.results == {}
+
+
+# -- output -------------------------------------------------------------------
+
+
+def test_output_jsonl_is_fresh_per_run_and_appended_on_resume(tmp_path):
+    out = tmp_path / "out" / "scores.jsonl"
+    FAIL.add(2)
+    job = Job("j", graph=sq, items=[{"n": 1}, {"n": 2}], key="n", output=out, concurrency=1)
+    _run(job, tmp_path)
+    assert [json.loads(line)["key"] for line in out.read_text().splitlines()] == ["1"]
+    FAIL.clear()
+    _run(job, tmp_path, resume=True)
+    lines = [json.loads(line) for line in out.read_text().splitlines()]
+    assert lines == [{"key": "1", "result": {"sq": 1}}, {"key": "2", "result": {"sq": 4}}]
+    _run(job, tmp_path)  # a fresh run starts the file over
+    assert len(out.read_text().splitlines()) == 2
+
+
+def test_output_function_sees_each_success(tmp_path):
+    got = {}
+
+    async def save(key, result):
+        got[key] = result
+
+    FAIL.add(2)
+    _run(Job("j", graph=sq, items=[{"n": 1}, {"n": 2}], key="n", output=save), tmp_path)
+    assert got == {"1": {"sq": 1}}
+
+
+def test_an_output_that_raises_fails_its_item(tmp_path):
+    def save(key, result):
+        raise OSError("disk full")
+
+    run = _run(Job("j", graph=sq, items=[{"n": 1}], key="n", output=save), tmp_path)
+    assert run.items[0].status == ITEM_FAILED and "disk full" in run.items[0].error
+
+
+def test_an_output_path_must_be_jsonl():
+    with pytest.raises(ValueError, match=".jsonl"):
+        Job("j", graph=sq, output="out.csv")
+
+
+# -- reduce -------------------------------------------------------------------
+
+
+def test_reduce_runs_once_over_every_result_in_key_order(tmp_path):
+    job = Job("j", graph=sq, items=[{"n": 3}, {"n": 1}, {"n": 2}], key="n", reduce=add_up)
+    run = _run(job, tmp_path)
+    assert run.reduced == {"sum": 14, "order": [1, 4, 9]}
+
+
+def test_a_resumed_run_reduces_over_every_key(tmp_path):
+    FAIL.add(2)
+    job = Job("j", graph=sq, items=[{"n": i} for i in range(4)], key="n", reduce=add_up)
+    first = _run(job, tmp_path)
+    assert first.status == RUN_FAILED and first.reduced == {"sum": 10, "order": [0, 1, 9]}
+    FAIL.clear()
+    CALLS.clear()
+    again = _run(job, tmp_path, resume=True)
+    assert CALLS == [2]  # only the failed key ran again
+    assert again.counts[ITEM_SKIPPED] == 3 and again.status == RUN_OK
+    assert again.reduced == {"sum": 14, "order": [0, 1, 4, 9]}
+    assert set(again.results) == {"0", "1", "2", "3"}
+
+
+def test_a_failing_reduce_fails_the_run(tmp_path):
+    run = _run(Job("j", graph=sq, items=[{"n": 1}], key="n", reduce=broken_reduce), tmp_path)
+    assert run.status == RUN_FAILED and "cannot add" in run.meta["error"]
+
+
+def test_a_reduce_needs_a_results_parameter(tmp_path):
+    with pytest.raises(TypeError, match="results"):
+        _run(Job("j", graph=sq, items=[{"n": 1}], reduce=no_results), tmp_path)
+
+
+def test_reduce_needs_the_results_kept():
+    with pytest.raises(ValueError, match="keep_results"):
+        Job("j", graph=sq, reduce=add_up, keep_results=False)
+
+
+def test_without_kept_results_nothing_is_written(tmp_path):
+    run = _run(Job("j", graph=sq, items=[{"n": 1}], key="n", keep_results=False), tmp_path)
+    assert run.status == RUN_OK and run.results == {}
+    assert not (run.path / "results.jsonl").exists()
+
+
+# -- failures -----------------------------------------------------------------
+
+
+def test_stop_starts_nothing_new_and_does_not_reduce(tmp_path):
+    FAIL.add(1)
+    job = Job(
+        "j",
+        graph=sq,
+        items=[{"n": i} for i in range(4)],
+        key="n",
+        on_error="stop",
+        concurrency=1,
+        reduce=add_up,
+    )
+    run = _run(job, tmp_path)
+    assert run.status == RUN_STOPPED and CALLS == [0, 1] and run.reduced is None
+
+
+def test_retry_runs_a_failed_item_again(tmp_path):
+    FAIL.add(1)
+    retry = Retry(max_attempts=3, initial=0.01, jitter=False)
+    run = _run(Job("j", graph=sq, items=[{"n": 1}], key="n", retry=retry), tmp_path)
+    assert CALLS == [1, 1, 1] and run.items[0].attempts == 3
+
+
+def test_timeout_cancels_an_item(tmp_path):
+    run = _run(Job("j", graph=slow_flow, items=[{"n": 1}], key="n", timeout=0.1), tmp_path)
+    assert run.items[0].status == ITEM_TIMEOUT and run.status == RUN_FAILED
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"on_error": "record"}, "'skip' or 'stop'"),
+        ({"retry": 3}, "Retry"),
+        ({"timeout": 0}, "positive"),
+        ({"concurrency": 0}, "at least 1"),
+    ],
+)
+def test_settings_are_checked_at_declaration(kwargs, match):
+    with pytest.raises((TypeError, ValueError), match=match):
+        Job("j", graph=sq, **kwargs)
+
+
+def test_unreachable_preflight_fails_before_any_item(tmp_path, monkeypatch):
+    from operonx.app.jobs import runner
+
+    monkeypatch.setattr(runner, "preflight_error", lambda keys: "preflight: llm:x is down")
+    run = _run(Job("j", graph=sq, items=[{"n": 1}], preflight=["llm:x"]), tmp_path)
+    assert run.status == RUN_FAILED and CALLS == [] and "llm:x" in run.meta["error"]
+
+
+# -- steps --------------------------------------------------------------------
+
+
+def test_steps_run_in_order_and_each_keeps_its_record(tmp_path):
+    a = Job("a", graph=sq, items=[{"n": 2}], key="n")
+    b = Job("b", graph=sq, items=[{"n": 3}], key="n")
+    run = _run(Job("ab", steps=[a, b]), tmp_path)
+    assert run.status == RUN_OK and CALLS == [2, 3]
+    assert [s["name"] for s in run.meta["steps"]] == ["a", "b"]
+    assert all((tmp_path / "rec" / s / "").is_dir() for s in ("a", "b", "ab"))
+
+
+def test_a_failed_step_stops_the_rest(tmp_path):
+    FAIL.add(2)
+    a = Job("a", graph=sq, items=[{"n": 2}], key="n")
+    b = Job("b", graph=sq, items=[{"n": 3}], key="n")
+    run = _run(Job("ab", steps=[a, b]), tmp_path)
+    assert run.status == RUN_FAILED and CALLS == [2]
+    assert [(i.key, i.status) for i in run.items] == [("a", ITEM_FAILED), ("b", ITEM_SKIPPED)]
+
+
+def test_resume_reaches_every_step(tmp_path):
+    FAIL.add(2)
+    a = Job("a", graph=sq, items=[{"n": 1}, {"n": 2}], key="n")
+    _run(Job("ab", steps=[a]), tmp_path)
+    FAIL.clear()
+    CALLS.clear()
+    assert _run(Job("ab", steps=[a]), tmp_path, resume=True).status == RUN_OK
+    assert CALLS == [2]
+
+
+def test_a_job_of_steps_takes_nothing_of_its_own():
+    a = Job("a", graph=sq)
+    with pytest.raises(ValueError, match="no graph"):
+        Job("x", steps=[a], graph=sq)
+    with pytest.raises(ValueError, match="at least one"):
+        Job("x", steps=[])
+    with pytest.raises(TypeError, match="a step is a Job"):
+        Job("x", steps=[sq])
+    with pytest.raises(ValueError, match="needs a graph"):
+        Job("x")
+
+
+# -- where runs go ------------------------------------------------------------
+
+
+def test_runs_go_under_the_project_by_default(tmp_path, monkeypatch):
+    (tmp_path / "operonx.toml").write_text('[project]\nname = "p"\n', encoding="utf-8")
+    sub = tmp_path / "deep"
+    sub.mkdir()
+    monkeypatch.chdir(sub)
+    run = Job("j", graph=sq, items=[{"n": 1}]).run_sync()
+    assert run.path.parent == tmp_path / ".operonx" / "jobs" / "j"
+
+
+def test_run_overrides_are_for_that_run_only(tmp_path):
+    seen = []
+    job = Job("j", graph=sq, items=[{"n": 1}], key="n")
+    job.run_sync(record_dir=tmp_path / "once", on_item=seen.append)
+    assert job.record_dir is None and job.on_item is None and len(seen) == 1
+
+
+def test_a_copy_reads_its_own_items(tmp_path):
+    class Fed(Job):
+        def __init__(self):
+            super().__init__("fed", graph=sq, items=self._mine, key="n")
+            self.n = 1
+
+        def _mine(self):
+            yield {"n": self.n}
+
+    original = Fed()
+    clone = copy.copy(original)
+    clone.n = 5
+    assert _run(clone, tmp_path).results == {"5": {"sq": 25}}

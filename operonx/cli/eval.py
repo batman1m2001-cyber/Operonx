@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import dataclasses
 import json
 import os
@@ -101,31 +102,20 @@ class _Project:
             found = self.app.job(name)
         if not isinstance(found, Eval):
             raise _Usage(f"{name!r} is a {type(found).__name__}, not an Eval")
-        return found
+        # a copy: this command's flags (--baseline, --strict, a selection) are
+        # for this run, not for the object the application declared — a
+        # long-lived process (the studio) would keep them for every later run
+        ev = copy.copy(found)
+        ev.inputs = dict(found.inputs)
+        return ev
 
     def evals(self) -> List[Dict[str, Any]]:
         """Every eval, described without running it: name, dataset path,
-        repeats, record dir. A TOML project is read without its code."""
+        repeats, record dir."""
         from operonx.app.evals import Eval, dataset_path
 
         out: List[Dict[str, Any]] = []
         if self.app is None:
-            return out
-        specs = self.app.manifest.jobs
-        if specs:
-            for spec in specs:
-                opts = spec.options
-                if opts.get("dataset") is None:
-                    continue
-                record = Path(spec.record_dir or "evals")
-                out.append(
-                    {
-                        "name": spec.name,
-                        "dataset": dataset_path(opts["dataset"], self.root),
-                        "repeats": int(opts.get("repeats") or 1),
-                        "record_dir": record if record.is_absolute() else self.root / record,
-                    }
-                )
             return out
         for job in self.app.jobs:
             if isinstance(job, Eval):
@@ -134,7 +124,7 @@ class _Project:
                         "name": job.name,
                         "dataset": job.dataset.path,
                         "repeats": job.repeats,
-                        "record_dir": Path(job.record_dir),
+                        "record_dir": job.records(),
                     }
                 )
         return out

@@ -87,7 +87,7 @@ def _eval(root: Path, store, gate=None, broken=False, name="labels", **kw) -> Ev
     return Eval(
         name,
         graph=flow,
-        item_input="text",
+        input="text",
         inputs={"broken": broken},
         dataset=root / "datasets" / "labels.jsonl",
         evaluators=[exact("label")],

@@ -287,7 +287,7 @@ def _eval(tmp_path, store, gate=None):
     return Eval(
         "aligned",
         graph=bot,
-        item_input="text",
+        input="text",
         dataset=path,
         evaluators=[polite, contains("please")],
         gate=gate,

@@ -90,6 +90,25 @@ class Upper(Codec):
 
     def from_door(self, item):
         return {"kind": "text", "text": str(item).upper()}
+
+
+from operonx.app import Application, Job, Listener, Service, http, websocket
+
+APP = Application(
+    "playdemo",
+    trace=["trace_local:default"],
+    on_startup=[warm],
+    services=[
+        Service("score", http("POST", "/score", port=8124), graph=score_flow),
+        Service("chat", websocket("/chat", port=8124), graph=chat_flow, max_inflight=8,
+                on_session=gate, on_close=closed),
+        Service("raw", Listener("memory", "/raw"), graph=score_flow, max_inflight=4),
+        Service("custom", Listener("memory", "/custom"), graph=score_flow, max_inflight=4,
+                playground=Upper),
+    ],
+    jobs=[Job("nightly", graph=score_flow, items=[{"call_id": "j1", "text": "a b"}],
+              key="call_id")],
+)
 """
 
 
@@ -99,54 +118,7 @@ def project(tmp_path, monkeypatch):
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(PROJECT), encoding="utf-8")
     (tmp_path / "resources.yaml").write_text("trace_local:\n  default: {}\n", encoding="utf-8")
     (tmp_path / "operonx.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "playdemo"
-        trace = ["trace_local:default"]
-        on_startup = ["{name}:warm"]
-
-        [resources]
-        overlay = "resources.yaml"
-
-        [[job]]
-        name   = "nightly"
-        graph  = "{name}:score_flow"
-        source = [{{call_id = "j1", text = "a b"}}]
-        key    = "call_id"
-
-        [[serve]]
-        name  = "score"
-        kind  = "http"
-        path  = "/score"
-        port  = 8124
-        graph = "{name}:score_flow"
-
-        [[serve]]
-        name  = "chat"
-        kind  = "websocket"
-        path  = "/chat"
-        port  = 8124
-        max_inflight = 8
-        graph = "{name}:chat_flow"
-        on_session = "{name}:gate"
-        on_close = "{name}:closed"
-
-        [[serve]]
-        name  = "raw"
-        kind  = "memory"
-        path  = "/raw"
-        max_inflight = 4
-        graph = "{name}:score_flow"
-
-        [[serve]]
-        name  = "custom"
-        kind  = "memory"
-        path  = "/custom"
-        max_inflight = 4
-        graph = "{name}:score_flow"
-        playground = "{name}:Upper"
-    """),
-        encoding="utf-8",
+        f'[project]\nname = "playdemo"\napp = "{name}:APP"\n', encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPERONX_RUNS_DIR", raising=False)

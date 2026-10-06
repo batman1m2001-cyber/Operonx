@@ -1,27 +1,23 @@
 """Jobs: running Operons over data that does not talk back.
 
-`[[serve]]` puts work into a graph from a listener. A :class:`Job` puts
-it in from a source — a file, a table, a Python iterable — one run per
-item, writes what `egress` sends to a sink, and leaves a record saying
-what happened to every item. The graph is the same graph; see
-:mod:`operonx.app.jobs.session` for why.
-
-::
+A service puts work into a graph from a listener. A :class:`Job` puts it in
+from its ``items`` — a list, a function that yields them, a ``.jsonl`` file
+— one run per item, keeps every result, and leaves a record saying what
+happened to each item::
 
     from operonx.app.jobs import Job
 
-    score = Job("score_calls", graph=score_call,
-                source="data/calls.jsonl", sink="out/scores.jsonl",
-                key="call_id", on_error="skip")
-    run = score.run_sync()
-    print(run.summary())            # score_calls 2026…  ok=98 failed=2 empty=0 skipped=0
+    greet = Job("greet", graph=greet_flow, items="people.jsonl", key="id")
+    run = greet.run_sync()
+    print(run.summary())        # greet 2026…  ok=98 failed=2 empty=0 skipped=0
+    run.results                 # {key: result}
 
-Design: ``docs/JOB_PLAN.md``.
+``reduce=`` runs one graph over every result; ``steps=[...]`` runs jobs in
+order as one command. Design: ``docs/JOBS_AND_GUIDES_PLAN.md``.
 """
 
-from operonx.core.registry import REGISTRY
-
-from .job import SESSION_MODES, Job
+from .items import iter_items
+from .job import ON_ERROR, Job, default_record_dir
 from .record import (
     ITEM_EMPTY,
     ITEM_FAILED,
@@ -36,35 +32,11 @@ from .record import (
     RunRecord,
     done_keys,
     last_run,
+    load_results,
     runs_of,
 )
-from .runbook import Flow, NodeReport, Parallel, Runbook, RunbookRun, Sequential
-from .runner import ErrorPolicy, parse_on_error, run_job, run_per_item, run_stream
+from .runner import run_job, run_steps
 from .session import JobSession
-from .sinks import (
-    CsvSink,
-    DirSink,
-    JsonlSink,
-    ListSink,
-    NullSink,
-    PythonSink,
-    Sink,
-    SinkConfig,
-    as_sink,
-    create_sink,
-    open_sink,
-)
-from .sources import (
-    CsvSource,
-    DirSource,
-    JsonlSource,
-    PythonSource,
-    Source,
-    SourceConfig,
-    as_source,
-    create_source,
-    open_source,
-)
 
 __all__ = [
     "Job",
@@ -72,18 +44,11 @@ __all__ = [
     "JobSession",
     "ItemResult",
     "RunRecord",
-    "Runbook",
-    "RunbookRun",
-    "Flow",
-    "Sequential",
-    "Parallel",
-    "NodeReport",
-    "SESSION_MODES",
-    "ErrorPolicy",
-    "parse_on_error",
+    "ON_ERROR",
+    "default_record_dir",
+    "iter_items",
     "run_job",
-    "run_per_item",
-    "run_stream",
+    "run_steps",
     "ITEM_OK",
     "ITEM_FAILED",
     "ITEM_EMPTY",
@@ -94,40 +59,6 @@ __all__ = [
     "RUN_STOPPED",
     "done_keys",
     "last_run",
+    "load_results",
     "runs_of",
-    "Source",
-    "JsonlSource",
-    "CsvSource",
-    "PythonSource",
-    "DirSource",
-    "SourceConfig",
-    "as_source",
-    "create_source",
-    "open_source",
-    "Sink",
-    "JsonlSink",
-    "CsvSink",
-    "ListSink",
-    "PythonSink",
-    "NullSink",
-    "DirSink",
-    "SinkConfig",
-    "as_sink",
-    "create_sink",
-    "open_sink",
-    "register",
 ]
-
-
-def register() -> None:
-    """Make ``source:`` and ``sink:`` resource categories known to the hub.
-
-    Idempotent, and safe to call again after a registry reset — the two
-    ``as_*`` resolvers call it before a hub lookup so a test that cleared
-    the registry still resolves.
-    """
-    REGISTRY.register(SourceConfig, create_source)
-    REGISTRY.register(SinkConfig, create_sink)
-
-
-register()

@@ -52,13 +52,12 @@ TOKEN_REF_PREFIXES = ("keycloak", "oauth2")
 #: The modules that register operonx's own categories when imported:
 #: llm, embedding, reranking, vector_store, doc_store, onnx, keycloak,
 #: oauth2 (providers); langfuse, trace_local, trace_langfuse,
-#: trace_clickhouse, run_store (telemetry); source, sink (jobs).
+#: trace_clickhouse, run_store (telemetry).
 _BUILTIN_CATEGORY_MODULES = (
     "operonx.providers.registry",
     "operonx.telemetry",
     "operonx.telemetry.consumers",
     "operonx.telemetry.runs",
-    "operonx.app.jobs",
 )
 
 #: Entry-point group a package uses to declare the categories it

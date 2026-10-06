@@ -157,9 +157,7 @@ APP = Application(
     "scorer",
     services=[Service("score", http("POST", "/score", port=env("PORT", 8017)), graph=score_flow)],
     jobs=[
-        Job(
-            "score_calls", graph=score_flow, source="calls.jsonl", sink="out/scored.jsonl", key="id"
-        )
+        Job("score_calls", graph=score_flow, items="calls.jsonl", output="out/scored.jsonl", key="id")
     ],
 )
 ```
@@ -184,18 +182,16 @@ def test_score_counts_words():
 
 
 def test_the_flow_scores_every_call():
-    got = []
     run = asyncio.run(
         Job(
             "t",
             graph=score_flow,
-            source=[{"id": "a", "text": "hi"}],
-            sink=got,
+            items=[{"id": "a", "text": "hi"}],
             key="id",
             record_dir="out/test-jobs",
         ).run()
     )
-    assert run.status == "ok" and got == [{"id": "a", "words": 1, "verdict": "brief"}]
+    assert run.status == "ok" and run.results == {"a": {"id": "a", "words": 1, "verdict": "brief"}}
 ```
 
 ```bash run

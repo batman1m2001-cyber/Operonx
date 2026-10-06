@@ -76,12 +76,16 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
     cache key of its answers, PLAN E1); the pipeline fingerprint includes them.
 
     Item keys: ``path`` or ``data``; optional ``key`` (default: the path),
-    ``name``, ``mime``, ``title``, ``tags``, ``acl``, ``metadata``.
+    ``name``, ``mime``, ``title``, ``tags``, ``acl``, ``metadata``. A bare path
+    (``str`` or ``Path``, as ``Job(items=lambda: folder.glob("*.pdf"))``
+    yields) is ``{"path": ...}``.
 
     It also builds the document's index payload (PLAN R3), so a metadata value
     of the wrong type for a declared ``filterable`` field fails here, before
     anything is parsed.
     """
+    if isinstance(item, (str, Path)):
+        item = {"path": str(item)}
     cat = catalog_of(catalog)
     coll = cat.get_collection(collection)
     if coll is None:
@@ -89,7 +93,7 @@ def plan_ingest(item: dict, collection: str, catalog: str, blobs: str) -> dict:
             f"collection {collection!r} does not exist; create it with KnowledgeBase.create_collection"
         )
     data = _read(item)
-    # A file path names the file; DirSource's "name" is only the stem.
+    # A file path names the file, with its extension (the parser sniffs it).
     name = Path(item["path"]).name if item.get("path") else item.get("name")
     key = str(item.get("key") or item.get("path") or "")
     if not key:

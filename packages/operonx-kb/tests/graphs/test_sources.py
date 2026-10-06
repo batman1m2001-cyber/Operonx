@@ -73,7 +73,7 @@ class FakeDrive:
 
 def items(source):
     async def collect():
-        return [i async for i in source.items()]
+        return [i async for i in source]
 
     return run(collect())
 
@@ -119,19 +119,19 @@ def test_an_s3_bucket_ingests_as_a_job_and_a_rerun_skips(kbx, tmp_path):
     s3 = FakeS3({"hr/policy.md": POLICY, "hr/travel.md": TRAVEL})
 
     def job(name):
-        return Job(name, graph=ingest_flow, source=S3Source("docs", prefix="hr/", cache=str(tmp_path / "c"), client=s3),
-                   sink=(got := []), key="key", record_dir=str(tmp_path / "jobs"),
-                   inputs={"collection": "docs", "catalog": "kb_catalog:main", "blobs": "kb_blob:main"}), got  # fmt: skip
+        return Job(name, graph=ingest_flow, items=S3Source("docs", prefix="hr/", cache=str(tmp_path / "c"), client=s3),
+                   key="key", record_dir=str(tmp_path / "jobs"),
+                   inputs={"collection": "docs", "catalog": "kb_catalog:main", "blobs": "kb_blob:main"})  # fmt: skip
 
-    first, got = job("ingest_s3")
-    assert run(first.run()).status == "ok"
-    assert sorted(r["action"] for r in got) == ["new", "new"]
+    first = run(job("ingest_s3").run())
+    assert first.status == "ok"
+    assert sorted(r["action"] for r in first.results.values()) == ["new", "new"]
     assert sorted(d.key for d in kbx.documents("docs")) == [
         "s3://docs/hr/policy.md",
         "s3://docs/hr/travel.md",
     ]
     out = run(kbx.search("docs", "annual leave", k=1))
     assert out["hits"][0]["key"] == "s3://docs/hr/policy.md"
-    again, got = job("ingest_s3_again")
-    assert run(again.run()).status == "ok"
-    assert [r["action"] for r in got] == ["skip", "skip"]
+    again = run(job("ingest_s3_again").run())
+    assert again.status == "ok"
+    assert [r["action"] for r in again.results.values()] == ["skip", "skip"]

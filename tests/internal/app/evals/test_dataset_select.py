@@ -77,7 +77,7 @@ def test_a_selection_is_the_experiments_dataset(tmp_path):
     run = Eval(
         "sel",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=ds,
         evaluators=[lambda output=None: True],
         record_dir=tmp_path / "evals",

@@ -8,7 +8,7 @@ runtime (doors or not), the verdict lands on the item record, run.json
 carries the pass rate, the run fails when a case does (or when the rate is
 under a threshold), and the traces are ``origin=eval``; a broken case or
 evaluator fails its case rather than the eval; the LLM judge parses a
-structured verdict and keeps its cost; ``[[job]]`` with ``dataset`` builds
+structured verdict and keeps its cost; an application's declared Eval builds
 an Eval and ``operonx run`` gates on it; a plain job's record is unchanged.
 """
 
@@ -129,7 +129,7 @@ def _eval(tmp_path, evaluators, rows=CASES, **kw):
     return Eval(
         "classify_eval",
         graph=classify_flow,
-        item_input="text",
+        input="text",
         dataset=_cases(tmp_path / "cases.jsonl", rows),
         evaluators=evaluators,
         record_dir=tmp_path / "evals",
@@ -296,6 +296,13 @@ def flow(text: str = ""):
 
 def label_ok(output=None, expected=None):
     return output["label"] == expected["label"]
+
+from operonx.app import Application, Eval
+
+APP = Application("evdemo", jobs=[
+    Eval("labels", graph=flow, input="text", dataset="dataset:labels",
+         evaluators=[label_ok], threshold=0.5),
+])
 """
 
 
@@ -306,33 +313,22 @@ def project(tmp_path, monkeypatch):
     (tmp_path / "datasets").mkdir()
     _cases(tmp_path / "datasets" / "labels.jsonl", CASES)
     (tmp_path / "operonx.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "evdemo"
-
-        [[job]]
-        name       = "labels"
-        graph      = "{name}:flow"
-        item_input = "text"
-        dataset    = "dataset:labels"
-        evaluators = ["{name}:label_ok"]
-        threshold  = 0.5
-    """),
-        encoding="utf-8",
+        f'[project]\nname = "evdemo"\napp = "{name}:APP"\n', encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
     yield name, tmp_path
     sys.modules.pop(name, None)
 
 
-def test_a_job_block_with_a_dataset_is_an_eval(project):
+def test_an_eval_the_application_declares_is_found_and_described(project):
     name, root = project
     with warnings.catch_warnings():
-        warnings.simplefilter("error")  # dataset/evaluators/threshold are read, not typos
+        warnings.simplefilter("error")
         app = Application.find(root)
     described = app.describe()["jobs"][0]
-    assert described["kind"] == "eval" and described["dataset"] == "dataset:labels"
-    assert described["evaluators"] == [f"{name}:label_ok"]
+    assert described["kind"] == "eval"
+    assert described["dataset"] == str(root / "datasets" / "labels.jsonl")
+    assert described["evaluators"] == ["label_ok"]
     ev = app.job("labels")
     assert (
         isinstance(ev, Eval)
@@ -340,7 +336,7 @@ def test_a_job_block_with_a_dataset_is_an_eval(project):
         and ev.dataset.path == root / "datasets" / "labels.jsonl"
     )
     d = ev.describe()
-    assert d["source"] == str(root / "datasets" / "labels.jsonl") and d["sink"] is None
+    assert d["items"] == str(root / "datasets" / "labels.jsonl")
     run = app.run_sync("labels")
     assert run.status == "ok" and run.meta["eval"]["passed"] == 2  # 2/3 ≥ 0.5
     assert run.path.parent == root / "evals" / "labels"
@@ -350,8 +346,8 @@ def test_operonx_run_gates_on_an_eval(project):
     import subprocess
 
     name, root = project
-    toml = root / "operonx.toml"
-    toml.write_text(toml.read_text().replace("threshold  = 0.5", "threshold  = 0.9"))
+    module = root / f"{name}.py"
+    module.write_text(module.read_text().replace("threshold=0.5", "threshold=0.9"))
     proc = subprocess.run(
         [sys.executable, "-m", "operonx.cli.run", "labels"],
         cwd=root,
@@ -367,8 +363,8 @@ def test_a_plain_job_record_is_unchanged(tmp_path):
     run = Job(
         "plain",
         graph=classify_flow,
-        item_input="text",
-        source=["hello"],
+        input="text",
+        items=["hello"],
         record_dir=tmp_path / "jobs",
         trace=[],
     ).run_sync()

@@ -4,7 +4,7 @@
     operonx guide                   # the guide's index (README.md)
     operonx guide --path            # where the installed guide is
     operonx guide --sync [DIR]      # copy it into DIR/.operonx/guide/
-    operonx run ...                 # run a job or runbook   (operonx.cli.run)
+    operonx run ...                 # run a job              (operonx.cli.run)
     operonx serve ...               # serve the services     (operonx.cli.serve)
     operonx play ...                # drive a served door    (operonx.app.play)
     operonx eval ...                # experiments: run, compare, report (operonx.cli.eval)
@@ -29,7 +29,7 @@ __all__ = ["main", "TEMPLATES", "DELEGATED"]
 
 #: Subcommands that are another module's ``main(argv)``: name → (module, help).
 DELEGATED = {
-    "run": ("operonx.cli.run", "run a job or runbook the application declares"),
+    "run": ("operonx.cli.run", "run a job the application declares"),
     "serve": ("operonx.cli.serve", "serve the application's services"),
     "play": ("operonx.app.play", "the playground bridge: drive a service's doors over JSON lines"),
     "eval": ("operonx.cli.eval", "run experiments, compare and report them, size them"),

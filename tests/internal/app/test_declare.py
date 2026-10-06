@@ -101,7 +101,7 @@ def build_app_object(**overrides):
             ),
         ],
         on_startup=[warm],
-        jobs=[Job("score_two", graph=styled, source=[{"item": "x"}], sink=[])],
+        jobs=[Job("score_two", graph=styled, items=[{"item": "x"}])],
     )
     kwargs.update(overrides)
     return Application("demo", **kwargs)
@@ -132,11 +132,10 @@ def test_describe_names_objects_the_way_a_manifest_would():
             "name": "score_two",
             "kind": "job",
             "graph": "styled",
-            "runbook": None,
-            "session": "per_item",
-            "source": "[{'item': 'x'}]",
-            "sink": "[]",
-            "schedule": None,
+            "steps": None,
+            "items": "1 items",
+            "key": None,
+            "reduce": None,
             "description": "",
             "sinks": ["local"],  # nothing configured: a job records locally
             "sinks_from": "default",

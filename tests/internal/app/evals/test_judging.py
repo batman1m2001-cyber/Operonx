@@ -39,7 +39,7 @@ def _eval(tmp_path: Path, evaluators, rows=CASES, **kw) -> Eval:
     return Eval(
         "judging",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=path,
         evaluators=evaluators,
         record_dir=tmp_path / "evals",

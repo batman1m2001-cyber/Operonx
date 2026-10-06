@@ -18,14 +18,13 @@ def test_reply_reports_a_failed_model_call():
 
 
 def test_the_flow_answers_with_the_model(fake_model, tmp_path):
-    got = []
     job = Job(
         "t",
         graph=chat_flow,
-        source=[{"id": "q1", "question": "Hello?"}],
-        sink=got,
+        items=[{"id": "q1", "question": "Hello?"}],
+        key="id",
         record_dir=tmp_path,
     )
     run = asyncio.run(job.run())
     assert run.status == "ok"
-    assert got == [{"answer": "Echo: Hello?", "error": None}]
+    assert run.results == {"q1": {"answer": "Echo: Hello?", "error": None}}

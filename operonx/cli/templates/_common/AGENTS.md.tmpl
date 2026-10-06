@@ -20,8 +20,10 @@ services and jobs.
 - **op**: `@op` in `ops.py`. One step of logic; it returns a dict literal.
 - **graph**: `@graph` in `graph.py`. Wires ops with `>>`. `ingress()` and
   `egress()` are its doors: items in, items out.
-- **Job / Runbook**: a Job runs a graph once per item of a source and
-  writes a sink. A Runbook runs jobs in order.
+- **Job**: runs a graph once per item of its `items` (a list, a function
+  that yields them, or a `.jsonl` file) and keeps every result in its
+  record. `reduce=` runs one graph over all the results; `steps=[...]`
+  runs jobs in order as one command.
 - **Service**: a graph behind `http(...)`, `websocket(...)`, `webhook(...)`
   or `schedule(...)`.
 - **Application**: `APP` in `app/main.py`. Declare every service and job

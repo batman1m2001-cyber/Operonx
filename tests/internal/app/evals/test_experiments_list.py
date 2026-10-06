@@ -47,7 +47,7 @@ def _run(tmp_path, store, broken=False):
     return Eval(
         "labels",
         graph=flow,
-        item_input="text",
+        input="text",
         inputs={"broken": broken},
         dataset=tmp_path / "cases.jsonl",
         evaluators=[exact("label")],

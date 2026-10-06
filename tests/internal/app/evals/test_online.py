@@ -57,9 +57,9 @@ def _serve(runs, tmp_path, texts, kind=Job, name="bot"):
     job = kind(
         name,
         graph=bot,
-        source=items,
+        items=items,
         key="id",
-        item_input="text",
+        input="text",
         trace=[runs],
         record_dir=tmp_path / "jobs",
     )

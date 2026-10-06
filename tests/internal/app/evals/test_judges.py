@@ -100,7 +100,7 @@ def _eval(tmp_path, evaluators, *, graph_=bot, rows=CASES, name="judged", **kw) 
     return Eval(
         name,
         graph=graph_,
-        item_input="text",
+        input="text",
         dataset=_dataset(tmp_path, rows),
         evaluators=evaluators,
         record_dir=tmp_path / "evals",

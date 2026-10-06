@@ -51,7 +51,7 @@ from labels import flow
 ev = Eval(
     "labels",
     graph=flow,
-    item_input="text",  # no doors: each case's input is bound to `text`
+    input="text",  # no doors: each case's input is bound to `text`
     dataset="dataset:labels",
     evaluators=[exact("label")],
     repeats=3,  # each case three times: a flaky case shows up as flaky
@@ -91,7 +91,7 @@ def make():
     return Eval(
         "labels_vs_latest",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset="dataset:labels",
         evaluators=[exact("label")],
         gate=Gate(baseline="latest", tolerance=0.05),  # a drop over 5 points matters
@@ -196,7 +196,7 @@ def planned_the_lookup(output=None, trace=None):  # any evaluator can read the r
 ev = Eval(
     "agent",
     graph=agent,
-    item_input="text",
+    input="text",
     dataset="dataset:agent",
     evaluators=[
         trajectory.ops(mode="strict"),  # the case's trajectory.ops, in order
@@ -252,7 +252,7 @@ store = open_score_store({"backend": "files"})  # or "score_store:team" from res
 ev = Eval(
     "labels_stored",
     graph=flow,
-    item_input="text",
+    input="text",
     dataset="dataset:labels",
     evaluators=[exact("label")],
     scores=store,
@@ -277,10 +277,9 @@ assert len(store.scores(ScoreFilter(experiment_id=run.run_id))) == 3
 - A score's id comes from what it judges (experiment, case, repeat,
   check), so writing the same verdict twice is one row.
 - In `resources.yaml`: `score_store: {team: {backend: clickhouse, host: …,
-  database: …}}`; in `operonx.toml`: `scores = "score_store:team"` on the
-  `[[job]]`.
+  database: …}}`; on the eval: `Eval(..., scores="score_store:team")`.
 
-## Declared in `operonx.toml`
+## Declared in the application
 
 ```python file=checks.py
 from operonx.app.evals import exact
@@ -288,20 +287,33 @@ from operonx.app.evals import exact
 label = exact("label")
 ```
 
+```python file=app.py
+from operonx.app import Application, Eval
+from operonx.app.evals import Gate
+
+from checks import label
+from labels import flow
+
+APP = Application(
+    "evaldemo",
+    jobs=[
+        Eval(
+            "labels",
+            graph=flow,
+            input="text",
+            dataset="dataset:labels",
+            evaluators=[label],
+            repeats=2,
+            gate=Gate(threshold=0.9),
+        )
+    ],
+)
+```
+
 ```toml file=operonx.toml
 [project]
 name = "evaldemo"
-
-[[job]]
-name       = "labels"
-graph      = "labels:flow"
-item_input = "text"
-dataset    = "dataset:labels"
-evaluators = ["checks:label"]
-repeats    = 2
-
-[job.gate]
-threshold = 0.9
+app  = "app:APP"
 ```
 
 ```bash run
@@ -397,7 +409,7 @@ from labels import flow
 
 @pytest.mark.parametrize("case", cases("dataset:labels"))
 def test_label(case, run_case):
-    got = run_case.sync(flow, case, evaluators=[exact("label")], item_input="text")
+    got = run_case.sync(flow, case, evaluators=[exact("label")], input="text")
     assert got.trace.path() == ["c"]  # ops as the graph names them: `c = classify(...)`
 ```
 
@@ -452,7 +464,7 @@ def make():
     return Eval(
         "judged",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset="dataset:labels",
         evaluators=[refund],
         scores=store,
@@ -584,7 +596,7 @@ from operonx.telemetry.scores import ScoreFilter, open_score_store
 
 runs = SqliteRunStore(path="runs.sqlite")
 traffic = ["hello", "I want my money back", "money back please", "hi"]
-asyncio.run(Job("bot", graph="labels:flow", source=traffic, item_input="text", trace=[runs]).run())
+asyncio.run(Job("bot", graph="labels:flow", items=traffic, input="text", trace=[runs]).run())
 
 
 def no_refund(output) -> bool:  # reference-free: it reads only what the run said
@@ -607,9 +619,8 @@ assert len(scores.scores(ScoreFilter(rule="refund_watch"))) == 4
 assert asyncio.run(online.run()).counts.get("ok", 0) == 0  # nothing new since
 ```
 
-- Declared, it is a `[[job]]` with `runs = {…}` instead of a `graph` (plus
-  `store`, `scores`, `evaluators`, and optionally `sample`, `target`,
-  `budget_usd_per_day`, `queue`); cron calls `operonx run refund_watch`.
+- Declared, it is an `OnlineEval` in `Application(jobs=[...])`; cron (or a
+  CI schedule) calls `operonx run refund_watch`.
 - `sample` is stable — `sha1(trace_id)` under the rate — so a second
   worker and a backfill judge the same runs.
   `operonx eval online backfill refund_watch --since 7d` judges a past

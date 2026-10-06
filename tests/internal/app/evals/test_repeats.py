@@ -59,7 +59,7 @@ def _eval(tmp_path: Path, rows=CASES, **kw) -> Eval:
     return Eval(
         "answers",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=path,
         evaluators=[exact("label")],
         record_dir=tmp_path / "evals",

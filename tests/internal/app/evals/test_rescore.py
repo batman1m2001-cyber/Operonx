@@ -59,7 +59,7 @@ def ran(tmp_path, llm):
     ev = Eval(
         "rescored",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=_write(tmp_path / "cases.jsonl", CASES),
         evaluators=_evaluators(),
         repeats=2,
@@ -108,7 +108,7 @@ async def test_eval_rescore_uses_the_eval_s_evaluators_and_skips_its_judges(ran)
     judged = Eval(
         "rescored",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=ev.dataset,
         evaluators=[*_evaluators(), llm_judge("llm:bot", "Is it polite?")],
         record_dir=ev.record_dir,
@@ -141,7 +141,7 @@ async def test_judges_are_refused_and_a_trace_check_needs_a_store(ran):
     from operonx.app.jobs import Job
 
     plain = await Job(
-        "plain", graph=flow, source=[{"text": "hi"}], item_input="text", record_dir=ev.record_dir
+        "plain", graph=flow, items=[{"text": "hi"}], input="text", record_dir=ev.record_dir
     ).run()
     with pytest.raises(ValueError, match="not an eval run"):
         await rescore(plain, [exact()])
@@ -162,7 +162,7 @@ async def test_an_output_the_record_clipped_cannot_be_rescored(tmp_path):
     ev = Eval(
         "clipped",
         graph=verbose,
-        item_input="text",
+        input="text",
         dataset=_write(
             tmp_path / "c.jsonl", [{"id": "big", "input": "ab"}, {"id": "small", "input": ""}]
         ),
