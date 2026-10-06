@@ -1,0 +1,15 @@
+llm:inhouse (google/gemma-4-E2B-it)
+  json_schema   enforced: in-enum under an adversarial prompt; an invalid schema is rejected
+  forced tool   unsupported (tool_choice="function=ChatCompletionNamedFunction(name='classify') type='function'" requires --tool-call-parser to be set)
+  logprobs      returned
+  declare       structured_output: native
+llm:qwen3.7-plus (qwen3.7-plus)
+  json_schema   constrains a valid schema, but an invalid one is silently ignored (200)
+  forced tool   forced, but arguments not schema-checked {"intent": "banana"}
+  logprobs      returned
+  declare       structured_output: tool
+llm:qwen-turbo (qwen-turbo)
+  json_schema   unavailable (no vendors found for model: qwen-turbo)
+  forced tool   unavailable (no vendors found for model: qwen-turbo)
+  logprobs      unavailable (no vendors found for model: qwen-turbo)
+  declare       (endpoint not up; nothing to declare)

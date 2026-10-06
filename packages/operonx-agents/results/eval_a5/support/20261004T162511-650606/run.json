@@ -1,0 +1,193 @@
+{
+  "job": "support",
+  "run_id": "20261004T162511-650606",
+  "status": "ok",
+  "started": "2026-10-04T16:25:11+00:00",
+  "ended": "2026-10-04T16:25:11+00:00",
+  "resume_from": null,
+  "counts": {
+    "ok": 20,
+    "failed": 0,
+    "empty": 0,
+    "skipped": 0,
+    "timeout": 0
+  },
+  "error": null,
+  "kind": "eval",
+  "graph": "support_service",
+  "variant": "pytest",
+  "session": "per_item",
+  "eval": {
+    "dataset": null,
+    "threshold": null,
+    "cases": 20,
+    "passed": 20,
+    "failed": 0,
+    "errored": 0,
+    "pass_rate": 1.0,
+    "checks": {
+      "trajectory.tool_calls(strict, args=exact)": {
+        "passed": 20,
+        "cases": 20
+      },
+      "no_tool_errors()": {
+        "passed": 20,
+        "cases": 20
+      },
+      "turns_at_most(3)": {
+        "passed": 20,
+        "cases": 20
+      },
+      "ended_as_expected": {
+        "passed": 20,
+        "cases": 20
+      },
+      "output_valid(str)": {
+        "passed": 17,
+        "cases": 17
+      },
+      "tool_not_called(cancel_order)": {
+        "passed": 7,
+        "cases": 7
+      },
+      "tool_called(refund, times=1)": {
+        "passed": 7,
+        "cases": 7
+      },
+      "tool_not_called(order_status)": {
+        "passed": 2,
+        "cases": 2
+      },
+      "tool_not_called(refund)": {
+        "passed": 2,
+        "cases": 2
+      }
+    },
+    "p50_ms": 3.3919629640877247,
+    "p95_ms": 5.743538448587088,
+    "cost_usd": null,
+    "judge_cost_usd": null,
+    "repeats": 1,
+    "trials": 20,
+    "metrics": {
+      "pass": {
+        "n": 20,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.838875,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "ended_as_expected": {
+        "n": 20,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.838875,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "no_tool_errors()": {
+        "n": 20,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.838875,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "output_valid(str)": {
+        "n": 17,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.815682,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "tool_called(refund, times=1)": {
+        "n": 7,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.64567,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "tool_not_called(cancel_order)": {
+        "n": 7,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.64567,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "tool_not_called(order_status)": {
+        "n": 2,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.34238,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "tool_not_called(refund)": {
+        "n": 2,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.34238,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "trajectory.tool_calls(strict, args=exact)": {
+        "n": 20,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.838875,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      },
+      "turns_at_most(3)": {
+        "n": 20,
+        "mean": 1.0,
+        "se": 0.0,
+        "ci_lo": 0.838875,
+        "ci_hi": 1.0,
+        "method": "wilson"
+      }
+    },
+    "variant": "pytest",
+    "fingerprint": {
+      "code_version": "58b75d289ee3",
+      "version_dirty": true,
+      "graph_hash": "13182f46a009",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "8ad833f3f71f",
+      "evaluators": {
+        "trajectory.tool_calls(strict, args=exact)": "b2c1eeb5a8c4",
+        "no_tool_errors()": "c5ccfb056aba",
+        "turns_at_most(3)": "002dfce31f23",
+        "ended_as_expected": "a2dce0c91730",
+        "output_valid(str)": "3e53ea3998b1",
+        "tool_not_called(cancel_order)": "bd49fb20b024",
+        "tool_called(refund, times=1)": "0f3f815061ee",
+        "tool_not_called(order_status)": "92a70f418626",
+        "tool_not_called(refund)": "f17008841fc7"
+      },
+      "evaluators_hash": "b7e8ba4cefdc",
+      "operonx_version": "1.14.0"
+    },
+    "gate": {
+      "verdict": "pass",
+      "exit_code": 0,
+      "reasons": []
+    }
+  },
+  "evaluators": [
+    "ended_as_expected",
+    "no_tool_errors()",
+    "output_valid(str)",
+    "tool_called(refund, times=1)",
+    "tool_not_called(cancel_order)",
+    "tool_not_called(order_status)",
+    "tool_not_called(refund)",
+    "trajectory.tool_calls(strict, args=exact)",
+    "turns_at_most(3)"
+  ]
+}

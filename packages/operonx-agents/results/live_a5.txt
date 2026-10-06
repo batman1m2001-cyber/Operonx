@@ -1,0 +1,6 @@
+# A5 live gate, 2026-10-04: tests/live/test_live_serve.py on qwen3.7-plus
+# (gate venv: operonx feat/a5 + operonx-agents a5; credentials from the callbot .env, not printed)
+# PYTHONPATH unset; A5_TRACE_DIR=<studio demo project>/.operonx/runs
+[live A5 http] trace 54bbdf78-4862-491d-8b10-d5f092cabfdc: 8 events ['RunStarted', 'TurnStarted', 'ToolCallStarted', 'ToolCallFinished', 'TurnFinished', 'TurnStarted', 'ApprovalRequired', 'RunFinished'] parked in 5.1s; resumed → completed: 'Refunded 900 on order A1B2C3D4. Reference: R-0001.' (3 turns, {'input_tokens': 1663, 'output_tokens': 107, 'cached_input_tokens': 0, 'reasoning_tokens': 0, 'requests': 3, 'cost_usd': None})
+[live A5 websocket] ['RunStarted', 'TurnStarted', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'ToolCallStarted', 'ToolCallFinished', 'TurnFinished', 'TurnStarted', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'ApprovalRequired', 'RunFinished'] then ['RunStarted', 'TurnStarted', 'ToolCallStarted', 'ToolCallFinished', 'TurnFinished', 'TurnStarted', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TextDelta', 'TurnFinished', 'RunFinished'] → 'Refund of 700 processed successfully. Reference: R-0001.'
+2 passed in 17.98s

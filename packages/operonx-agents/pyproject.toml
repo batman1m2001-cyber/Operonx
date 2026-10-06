@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "operonx-agents"
+version = "0.1.1"
+description = "Typed LLM steps and agents on the operonx workflow engine"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Operon Team" }]
+dependencies = [
+    # K7 (operonx main 2279cea): one tool-call shape, `timeout:` and
+    # `structured_output:` on llm: resources, logprobs on streams.
+    "operonx[openai,anthropic]>=1.16.0",
+    "pydantic>=2.0",
+    "httpx>=0.24",
+    "python-dotenv>=1.0",   # `operonx-agents probe --env`
+]
+
+[project.optional-dependencies]
+# RedisSession / RedisStateStore (a Redis or a Redis Cluster).
+redis = ["redis>=5.0"]
+# MCPToolset: tools on MCP servers, over stdio and streamable HTTP.
+mcp = ["mcp>=2.0"]
+# agent_service behind `operonx serve`: HTTP (server-sent events) and websocket.
+serve = ["operonx[serve]"]
+
+[project.scripts]
+operonx-agents = "operonx_agents.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "jsonschema>=4.20",
+    "ruff>=0.5",
+    "pyyaml>=6.0",
+    "hypothesis>=6.100",
+    "redis>=5.0",
+    "mcp>=2.0",
+    "websockets>=11.0",   # the live agent_service websocket test's client
+]
+
+[tool.uv.sources]
+# Editable from the sibling checkout; needs operonx main 2c5feb9 (#91,
+# Service(resume=), SSE doors) or later. The relative path is why this repo is
+# not worked on from git worktrees: ../Operon would not resolve there.
+operonx = { path = "../Operon", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["operonx_agents"]
+
+# The source archive is the package, not the repo: no results/, evals/ or scripts/.
+[tool.hatch.build.targets.sdist]
+include = ["operonx_agents", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "live: calls a real model gateway (needs the callbot .env); deselect with -m 'not live'",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

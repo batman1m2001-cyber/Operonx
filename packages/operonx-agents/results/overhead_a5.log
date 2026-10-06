@@ -1,0 +1,31 @@
+# A5 overhead: scripts/bench_overhead.py --variants runner,stream --concurrency 5, main (0675f68 + operonx 10fe40a) vs a5 (+ operonx feat/a5), interleaved, 3 rounds
+## round 1 main
+runner  calls=1 conc= 5  turn p50   1.303 ms  p95   1.456  cpu/turn  0.264  lag p99   3.54 max   3.68
+stream  calls=1 conc= 5  turn p50   1.515 ms  p95   1.736  cpu/turn  0.313  lag p99   4.14 max   5.14
+runner  calls=3 conc= 5  turn p50   2.027 ms  p95   2.246  cpu/turn  0.429  lag p99   1.93 max  41.16
+stream  calls=3 conc= 5  turn p50   2.494 ms  p95   2.622  cpu/turn  0.518  lag p99   2.36 max  41.67
+## round 1 a5
+runner  calls=1 conc= 5  turn p50   1.272 ms  p95   1.387  cpu/turn  0.258  lag p99   3.32 max   3.36
+stream  calls=1 conc= 5  turn p50   1.523 ms  p95   1.701  cpu/turn  0.308  lag p99   4.39 max   4.80
+runner  calls=3 conc= 5  turn p50   2.021 ms  p95   2.229  cpu/turn  0.425  lag p99   1.92 max  40.63
+stream  calls=3 conc= 5  turn p50   2.422 ms  p95   2.661  cpu/turn  0.502  lag p99   2.32 max  40.43
+## round 2 main
+runner  calls=1 conc= 5  turn p50   1.343 ms  p95   1.457  cpu/turn  0.270  lag p99   3.24 max   3.73
+stream  calls=1 conc= 5  turn p50   1.596 ms  p95   1.713  cpu/turn  0.321  lag p99   4.31 max   4.61
+runner  calls=3 conc= 5  turn p50   2.029 ms  p95   2.131  cpu/turn  0.415  lag p99   1.91 max  37.99
+stream  calls=3 conc= 5  turn p50   2.128 ms  p95   2.241  cpu/turn  0.449  lag p99   2.00 max  39.16
+## round 2 a5
+runner  calls=1 conc= 5  turn p50   1.278 ms  p95   1.422  cpu/turn  0.259  lag p99   3.17 max   3.84
+stream  calls=1 conc= 5  turn p50   1.538 ms  p95   1.662  cpu/turn  0.310  lag p99   4.04 max   4.53
+runner  calls=3 conc= 5  turn p50   2.029 ms  p95   2.223  cpu/turn  0.425  lag p99   1.92 max  39.66
+stream  calls=3 conc= 5  turn p50   2.429 ms  p95   2.706  cpu/turn  0.508  lag p99   2.30 max  43.69
+## round 3 main
+runner  calls=1 conc= 5  turn p50   1.319 ms  p95   1.486  cpu/turn  0.269  lag p99   3.28 max   3.52
+stream  calls=1 conc= 5  turn p50   1.635 ms  p95   1.766  cpu/turn  0.324  lag p99   4.56 max   5.14
+runner  calls=3 conc= 5  turn p50   2.073 ms  p95   2.225  cpu/turn  0.437  lag p99   1.94 max  41.08
+stream  calls=3 conc= 5  turn p50   2.513 ms  p95   2.792  cpu/turn  0.522  lag p99   2.42 max  41.97
+## round 3 a5
+runner  calls=1 conc= 5  turn p50   1.302 ms  p95   1.441  cpu/turn  0.266  lag p99   3.16 max   3.23
+stream  calls=1 conc= 5  turn p50   1.556 ms  p95   1.789  cpu/turn  0.323  lag p99   4.78 max   5.29
+runner  calls=3 conc= 5  turn p50   2.088 ms  p95   2.307  cpu/turn  0.437  lag p99   1.93 max  38.79
+stream  calls=3 conc= 5  turn p50   2.143 ms  p95   2.234  cpu/turn  0.448  lag p99   2.00 max  38.35

@@ -1,0 +1,46 @@
+{
+ "source": "ClickHouse callbot_traces.nodes, op_name=llm_classify, status=ok",
+ "recorded_turns": 58,
+ "usable_turns": 58,
+ "traces": 35,
+ "distinct_utterances": 7,
+ "recorded_window": [
+  2120193.400185185,
+  2123706.878527331
+ ],
+ "passes": 4,
+ "first_pass": {
+  "pairs": 58,
+  "agreement": 58,
+  "agreement_pct": 100.0,
+  "step_vs_recorded": 58,
+  "control_vs_recorded": 58,
+  "control_in_allow_list": 58,
+  "step_outcomes": {
+   "ok": 58
+  },
+  "control_p50_ms": 86.8,
+  "control_p95_ms": 103.1,
+  "step_p50_ms": 88.9,
+  "step_p95_ms": 105.9,
+  "step_confidence_p50": 1.0,
+  "disagreements": []
+ },
+ "all_passes": {
+  "pairs": 232,
+  "agreement": 232,
+  "agreement_pct": 100.0,
+  "step_vs_recorded": 232,
+  "control_vs_recorded": 232,
+  "control_in_allow_list": 232,
+  "step_outcomes": {
+   "ok": 232
+  },
+  "control_p50_ms": 86.6,
+  "control_p95_ms": 103.8,
+  "step_p50_ms": 88.7,
+  "step_p95_ms": 105.9,
+  "step_confidence_p50": 1.0,
+  "disagreements": []
+ }
+}
