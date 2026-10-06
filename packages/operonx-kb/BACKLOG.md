@@ -49,6 +49,10 @@ first, then build, then measure; keep the CPU suite green (GPU tests behind a ma
   OMP_NUM_THREADS=8 uv run python scripts/bench_k4.py WORK --llm inhouse --llm-resources llm.yaml \
       --env ../educa-reminder-agent/.env
   ```
-  Reusing the same `WORK` folder resumes for free (answers are cached in its catalog). Run it when
+  Reusing the same `WORK` folder resumes for free (answers are cached in its catalog). `--cases N --docs M`
+  samples it (both collections of a set get the same sample; the 56 documents already ingested are
+  kept, since they are free). Measured by the text still to process, against the full run:
+  `--cases 100 --docs 150` 57%, `100/100` 49%, `60/80` 46%, `30/40` 38%. It about halves the run,
+  not more: xquad's 48 documents are all cited, and the cited legal PDFs are the long ones. Run it when
   nobody is testing the callbot: it shares that gateway.
 - OCR on a real scanned corpus (0.2.3 shipped it opt-in; D5 had no scans: `docs/bench/ocr.md`).
