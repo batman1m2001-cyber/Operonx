@@ -17,6 +17,7 @@ from operonx.telemetry.consumers.langfuse import build_tree
 
 from operonx_agents import (
     Agent,
+    AgentOp,
     Approve,
     InMemoryStateStore,
     Model,
@@ -175,6 +176,64 @@ class TestAgentAsTool:
         }
         assert parent_of["flow.c.turn.ask_billing.turn"] == "ask_billing"
         assert parent_of["flow.c.turn.ask_billing.turn.balance"] == "turn"
+
+
+TELLER = Agent(name="teller", model=Model("m"), tools=[balance])
+SEEN_DEPS = []
+
+
+def _greeter_instructions(ctx) -> str:
+    SEEN_DEPS.append(ctx.deps)
+    return "You greet."
+
+
+GREETER = Agent(name="greeter", model=Model("m"), instructions=_greeter_instructions)
+
+
+@op
+def shout(output: str, status: str) -> dict:
+    return {"loud": f"{status}: {output.upper()}!"}
+
+
+@graph
+def told(question):
+    t = AgentOp.of(agent=TELLER, input=question)
+    s = shout(output=t["output"], status=t["status"])
+    START >> t >> s >> END
+
+
+@graph
+def greeted(question, notes):
+    g = AgentOp.of(agent=GREETER, input=question, deps=notes)
+    s = shout(output=g["output"], status=g["status"])
+    START >> g >> s >> END
+
+
+class TestAgentOp:
+    """``AgentOp.of(agent=..., input=...)``: the agent as a step, like any op's ``.of``."""
+
+    async def test_outputs_bind_downstream(self, hub):
+        hub(m=ScriptedLLM(asks(("balance", {"account": "9"})), says("1200")))
+        out = await Operon(told, params={"question": None}).run({"question": "balance?"})
+        assert out["loud"] == "completed: 1200!"
+        assert RAN == ["balance:9"]
+
+    async def test_deps_reach_the_run(self, hub):
+        SEEN_DEPS.clear()
+        hub(m=ScriptedLLM(says("hello")))
+        engine = Operon(greeted, params={"question": None, "notes": None})
+        out = await engine.run({"question": "hi", "notes": ["vip"]})
+        assert out["loud"] == "completed: HELLO!"
+        assert SEEN_DEPS == [["vip"]]
+
+    def test_options_default_like_as_op(self):
+        made = AgentOp.of(agent=TELLER, input="hi")
+        assert (made.stream, made.store, made.sessions, made.durability) == (
+            False,
+            None,
+            None,
+            "turn",
+        )
 
 
 class TestAgentAsOp:

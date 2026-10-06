@@ -147,7 +147,7 @@ APP = Application(
 | `run/interruption.py` | `Interruption`, `Approve`, `Deny`: approvals as data, ids from operonx's `invocation_key` |
 | `safety/hooks.py` | `Hooks` (before/after model and tool, on_output), `Ask`, `Tripwire` → `blocked` |
 | `safety/redact.py` | `Redactor` (ported), `RunRedaction` (a run's records' export-time `redact`), `RedactToolOutput` |
-| `compose.py` | `Agent.as_tool` (a child run per call) and `Agent.as_op` (`AgentOp`) |
+| `compose.py` | `Agent.as_tool` (a child run per call) and `AgentOp` (`AgentOp.of(agent=..., input=...)`: an agent as a graph step; `Agent.as_op` binds its options) |
 | `tools/mcp.py` | `MCPServer`, `MCPClient`, `MCPToolset`: stdio and streamable HTTP (ported) |
 | `serve.py` | `agent_service`: an agent as an operonx `Service` (http: JSON or SSE, `POST <path>/resume`; websocket) |
 | `evals.py` | `tool_called`, `tool_not_called`, `no_tool_errors`, `turns_at_most`, `output_valid`, `cost_at_most`, `dataset_from_runs` |
