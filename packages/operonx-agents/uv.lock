@@ -789,7 +789,7 @@ wheels = [
 [[package]]
 name = "operonx"
 version = "1.16.0"
-source = { editable = "../Operon" }
+source = { editable = "../../" }
 dependencies = [
     { name = "orjson" },
     { name = "pydantic" },
@@ -956,8 +956,8 @@ dev = [
 requires-dist = [
     { name = "httpx", specifier = ">=0.24" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0" },
-    { name = "operonx", extras = ["openai", "anthropic"], editable = "../Operon" },
-    { name = "operonx", extras = ["serve"], marker = "extra == 'serve'", editable = "../Operon" },
+    { name = "operonx", extras = ["openai", "anthropic"], editable = "../../" },
+    { name = "operonx", extras = ["serve"], marker = "extra == 'serve'", editable = "../../" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },

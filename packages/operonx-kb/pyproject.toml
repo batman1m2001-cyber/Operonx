@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.0",
     "defusedxml>=0.7.1",  # Office XML from untrusted files
     "httpx>=0.24",        # operonx.providers (EmbeddingOp) imports it eagerly
+    "numpy>=1.24",        # the concept graph walk (retrieval/graph.py), imported by the graphs
 ]
 
 [project.optional-dependencies]
@@ -65,10 +66,13 @@ dev = [
     "starlette>=0.27",  # the admin API (tests/admin)
     "pypdfium2>=4.30",  # page images (tests/admin)
     "pillow>=10",
+    "operonx-agents",  # kb_tools on a real Agent (tests/graphs/test_agent_tools.py)
 ]
 
 [tool.uv.sources]
-operonx = { path = "../Operon", editable = true }
+# Editable from this repo's own operonx (the package lives in packages/).
+operonx = { path = "../..", editable = true }
+operonx-agents = { path = "../operonx-agents", editable = true }
 # CPU-only torch for the `layout` extra: the default PyPI wheel pulls ~3 GB of CUDA.
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }
@@ -80,6 +84,10 @@ explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["operonx_kb"]
+
+# The source archive is the package, not the repo: no docs/, datasets/ or scripts/.
+[tool.hatch.build.targets.sdist]
+include = ["operonx_kb", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

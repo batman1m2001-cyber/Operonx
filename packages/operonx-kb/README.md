@@ -1,6 +1,6 @@
 # operonx-kb
 
-Knowledge base and document intelligence on [operonx](../Operon): files become versioned documents
+Knowledge base and document intelligence on [operonx](https://github.com/batman1m2001-cyber/Operonx): files become versioned documents
 whose every character has an address (version, span → page, bbox), indexed for retrieval, and
 answers cite spans that were checked against the text they quote.
 

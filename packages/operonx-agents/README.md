@@ -1,6 +1,6 @@
 # operonx-agents
 
-Typed LLM steps and agents on the [operonx](../Operon) workflow engine.
+Typed LLM steps and agents on the [operonx](https://github.com/batman1m2001-cyber/Operonx) workflow engine.
 Design: `Operon/docs/roadmap/track3_agents.md` §4; plan and phases:
 `Operon/docs/AGENTS_V2_PLAN.md`.
 
@@ -172,10 +172,8 @@ REDIS_URL=redis://127.0.0.1:6391/0 uv run pytest   # also the Redis session/stor
 uv sync --extra mcp                  # MCPToolset; tests/test_mcp_reference.py also needs npx
 ```
 
-operonx is an editable path dependency on `../Operon`. That relative path
-is why this repo is not worked on from git worktrees. The checkout at
-`../Operon` must contain `Service(resume=)` and SSE doors (operonx main `2c5feb9`, #91, or later); to test
-against another checkout, put it first on `PYTHONPATH`.
+Run these from `packages/operonx-agents/` in the [Operonx](https://github.com/batman1m2001-cyber/Operonx)
+repo: operonx is an editable path dependency on the repo's own `operonx/` (`../..`).
 
 ## A2 gate (2026-10-04)
 

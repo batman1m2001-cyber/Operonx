@@ -5,7 +5,7 @@ Items deliberately deferred. Each one is **not done**: pick it up when its preco
 ## ⚠️ K5 · Visual page retrieval — OUTSTANDING (needs a GPU machine)
 
 **Status:** not started. Deferred 2026-10-05 because the dev machine has no GPU; to be done on a
-GPU PC. K6 (graph) was done first instead. Design: `../Operon/docs/roadmap/track5_knowledge.md`
+GPU PC. K6 (graph) was done first instead. Design: `../../docs/roadmap/track5_knowledge.md`
 §9.7 and §18 P5; phase row in `PLAN.md` §4.
 
 **Scope (track5 P5):**

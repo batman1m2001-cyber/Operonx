@@ -1,7 +1,7 @@
 """The K2 gate (PLAN §4, §6): dense vs lexical vs hybrid vs hybrid+rerank on the eval sets.
 
     uv run python scripts/bench_k2.py WORK [--pg-dsn DSN] [--answers N --llm-resources
-        ../Operon/resources.yaml --llm gpt-4o-mini --env ../Operon/.env]
+        ../../resources.yaml --llm gpt-4o-mini --env ../../.env]
 
 Builds the three sets (``scripts/prepare_eval.py``) under ``WORK/sets``, ingests each
 corpus into its own collection with a real embedder (``intfloat/multilingual-e5-small``

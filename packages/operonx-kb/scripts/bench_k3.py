@@ -1,7 +1,7 @@
 """K3 gate: Studio's Knowledge tab on the Vietnamese public corpus (track5 §18 P3).
 
     uv run --with playwright python scripts/bench_k3.py WORK --studio ../operonx-studio \
-        [--pdfs 20 --html 12 --citations 20 --llm gpt-4o-mini --env ../Operon/.env]
+        [--pdfs 20 --html 12 --citations 20 --llm gpt-4o-mini --env ../../.env]
 
 1. A collection from the D5 corpus (``prepare_vi_public``, from its download cache): ``--pdfs``
    legal PDFs and ``--html`` Wikipedia articles, chosen with a fixed seed; e5 embeddings in a

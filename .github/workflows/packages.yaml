@@ -1,0 +1,59 @@
+name: Packages
+
+# The distributions under packages/: each runs its own suite against this
+# repo's operonx (an editable path dependency on ../..).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["packages/**", "operonx/**", ".github/workflows/packages.yaml"]
+  pull_request:
+    branches: [main]
+    paths: ["packages/**", "operonx/**", ".github/workflows/packages.yaml"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  operonx-agents:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/operonx-agents
+    services:
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras
+      - name: lint
+        run: uv run ruff check . && uv run ruff format --check . --exclude "*.md"
+      - name: offline tests
+        run: uv run pytest -m "not live" -q
+      - name: the 20-case support eval (one experiment, gated)
+        run: >
+          PYTHONPATH=. uv run pytest evals -q -p operonx.app.evals.pytest_plugin
+          --operonx-eval-name support --operonx-eval-dir ${{ runner.temp }}/evals
+
+  operonx-kb:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/operonx-kb
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra pdf --extra answer --extra admin --extra faiss
+      - name: lint
+        run: uv run ruff check . && uv run ruff format --check . --exclude "*.md"
+      - name: tests (Postgres and Qdrant conformance skip without their URLs)
+        run: uv run pytest -q -m "not corpus"

@@ -9,7 +9,9 @@ Operonx is a high-performance workflow engine that runs anything as a workflow �
 
 ## Repository Structure
 
-Single Python package; the Python scheduler is the only runtime.
+`operonx` at the root, plus two separate distributions under `packages/`
+(own `pyproject.toml`, version, tests and lock; run uv inside their directory).
+The Python scheduler is the only runtime.
 
 ```
 Operonx/
@@ -29,11 +31,14 @@ Operonx/
 │   │   ├── rerankers/             # vLLM, TEI, HuggingFace, ONNX, Pinecone
 │   │   ├── auth/                  # Keycloak token provider
 │   │   └── registry/              # Plugin registrations to core ResourceHub
-│   ├── agents/                    # Tools, ReAct graph, sessions, MCP, heartbeat
+│   ├── _aliases.py                # operonx.agents / operonx.kb → the packages below
 │   ├── app/                       # Job / Service / Runbook / Application, operonx.toml, serving, playground, evals
 │   ├── guide/                     # Usage guide for coding assistants (ships in the wheel)
 │   └── telemetry/                 # V3 Consumers — local, Langfuse, OTEL
 │       └── consumers/             # LocalConsumer, LangfuseConsumer
+├── packages/
+│   ├── operonx-agents/            # pip install operonx-agents (import operonx.agents)
+│   └── operonx-kb/                # pip install operonx-kb (import operonx.kb)
 ├── examples/python/               # Runnable examples (ex01..ex18)
 ├── tests/
 │   ├── internal/                  # Backend-specific unit tests
@@ -193,7 +198,8 @@ Workflows run automatically on every PR:
 | Tests | [.github/workflows/tests.yaml](.github/workflows/tests.yaml) | Pytest + extras-smoke matrix + example smoke tests |
 | Python Compatibility | [.github/workflows/python-compatibility.yaml](.github/workflows/python-compatibility.yaml) | Python 3.10/3.11/3.12 matrix |
 | Docs | [.github/workflows/docs.yaml](.github/workflows/docs.yaml) | mkdocs build --strict + deploy to GitHub Pages |
-| Publish | [.github/workflows/publish.yaml](.github/workflows/publish.yaml) | PyPI (on version bump) |
+| Packages | [.github/workflows/packages.yaml](.github/workflows/packages.yaml) | Lint + tests of `packages/operonx-agents` and `packages/operonx-kb` |
+| Publish | [.github/workflows/publish.yaml](.github/workflows/publish.yaml) | PyPI, one job per distribution, each on its own version bump (tags `vX`, `operonx-agents-vX`, `operonx-kb-vX`) |
 
 ### Git Commits
 

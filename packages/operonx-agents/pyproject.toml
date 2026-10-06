@@ -44,10 +44,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-# Editable from the sibling checkout; needs operonx main 2c5feb9 (#91,
-# Service(resume=), SSE doors) or later. The relative path is why this repo is
-# not worked on from git worktrees: ../Operon would not resolve there.
-operonx = { path = "../Operon", editable = true }
+# Editable from this repo's own operonx (the package lives in packages/).
+operonx = { path = "../..", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["operonx_agents"]

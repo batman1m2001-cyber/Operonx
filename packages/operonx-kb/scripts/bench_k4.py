@@ -1,7 +1,7 @@
 """The K4 gate (PLAN §9): contextual enrichment and tree search against hybrid.
 
     uv run python scripts/bench_k4.py WORK [--sets vi_public,xquad_vi,xquad_en,corpus_vi]
-        [--llm gpt-4o-mini --llm-resources ../Operon/resources.yaml --env ../Operon/.env]
+        [--llm gpt-4o-mini --llm-resources ../../resources.yaml --env ../../.env]
         [--tree-cases 100] [--embeddings OLD_CATALOG.db ...] [--budget 8]
 
 For each set (built by ``scripts/prepare_eval.py`` / ``prepare_vi_public.py`` under

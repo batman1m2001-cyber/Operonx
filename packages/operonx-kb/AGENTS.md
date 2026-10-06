@@ -1,6 +1,6 @@
 # AGENTS.md — operonx-kb
 
-A package on **operonx** (editable from `../Operon`). Read `PLAN.md` before changing anything: it
+A package on **operonx** (editable from this repo, `../..`). Read `PLAN.md` before changing anything: it
 holds the decisions (no `docling` dependency, docling-parse behind `PdfBackend`, no shims for
 upstream gaps) and each phase's gate.
 
@@ -9,7 +9,7 @@ upstream gaps) and each phase's gate.
 
 ## Before you write code
 
-1. Read the operonx guide: `../Operon/operonx/guide/` (README, then 01–05). Do not write an operonx
+1. Read the operonx guide: `../../operonx/guide/` (README, then 01–05). Do not write an operonx
    API from memory.
 2. `operonx_kb/ops/*` holds op logic; `operonx_kb/graphs/*` only wires (no logic, no I/O, no Python
    `if`; branch with `if_`).
