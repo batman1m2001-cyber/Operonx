@@ -43,6 +43,14 @@ def _entries(g):
     return sorted(g.entries)
 
 
+@graph
+def flow(n):
+    b, s = big(), small()
+    START >> if_(n > 5, b).else_(s)
+    b >> END
+    s >> END
+
+
 class TestRefCondition:
     @pytest.mark.parametrize("n,want", CASES)
     async def test_on_a_parent_input(self, n, want):
@@ -56,15 +64,16 @@ class TestRefCondition:
 
     @pytest.mark.parametrize("n,want", CASES)
     async def test_on_a_graph_parameter(self, n, want):
-        @graph
-        def flow(n):
-            b, s = big(), small()
-            START >> if_(n > 5, b).else_(s)
-            b >> END
-            s >> END
-
         out = await Operon(flow, params={"n": None}).run(inputs={"n": n})
         assert out["w"] == want
+
+
+@graph
+def param_flow(n):
+    b, s = big(), small()
+    START >> if_(is_big(n=n), b).else_(s)
+    b >> END
+    s >> END
 
 
 class TestPredicateCondition:
@@ -88,14 +97,7 @@ class TestPredicateCondition:
 
     @pytest.mark.parametrize("n,want", CASES)
     async def test_on_a_graph_parameter(self, n, want):
-        @graph
-        def flow(n):
-            b, s = big(), small()
-            START >> if_(is_big(n=n), b).else_(s)
-            b >> END
-            s >> END
-
-        out = await Operon(flow, params={"n": None}).run(inputs={"n": n})
+        out = await Operon(param_flow, params={"n": None}).run(inputs={"n": n})
         assert out["w"] == want
 
     @pytest.mark.parametrize("n,want", CASES)

@@ -100,13 +100,14 @@ def shout(item: str = "", style=None, suffix: str = "") -> dict:
 ME = __name__
 
 
+@graph
+def pipeline():
+    src = ingress()
+    START >> src >> END
+
+
 def build(style, suffix: str):
     """A graph factory: refused (graphs are defined at module level)."""
-
-    @graph
-    def pipeline():
-        src = ingress()
-        START >> src >> END
 
     return pipeline
 

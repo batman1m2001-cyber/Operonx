@@ -26,6 +26,8 @@ import pytest
 
 from operonx.app import Application
 from operonx.app.play import Bridge, PcmCodec, add_noise, pcm_frames
+from operonx.app.serve import egress, ingress
+from operonx.core import END, START, graph, op
 from operonx.core.registry import ResourceHub
 from operonx.telemetry.runs.files import FilesRunStore
 
@@ -382,13 +384,24 @@ def test_what_a_simulated_user_cannot_drive_it_refuses(project):
 # ── where a playground run is recorded ────────────────────────────────────
 
 
+@op(bound="sync")
+def up(item=None) -> dict:
+    return {"out": str(item).upper()}
+
+
+@graph
+def upper_flow():
+    src = ingress()
+    u = up(item=src["item"])
+    out = egress(item=u["out"])
+    START >> src >> u >> out >> END
+
+
 def test_playground_runs_stay_local_unless_asked(tmp_path, monkeypatch):
     """A service that also ships to a remote tracer (Langfuse, say): a
     playground session records locally only; `remote: true` sends it on."""
     from operonx.app import Service, websocket
     from operonx.app.play import _split_consumers
-    from operonx.app.serve import egress, ingress
-    from operonx.core import END, START, graph, op
     from operonx.telemetry.consumer import Consumer
     from operonx.telemetry.consumers.local import LocalConsumer
 
@@ -398,17 +411,6 @@ def test_playground_runs_stay_local_unless_asked(tmp_path, monkeypatch):
 
         def consume(self, trace):
             self.got.append(trace.trace_id)
-
-    @op(bound="sync")
-    def up(item=None) -> dict:
-        return {"out": str(item).upper()}
-
-    @graph
-    def upper_flow():
-        src = ingress()
-        u = up(item=src["item"])
-        out = egress(item=u["out"])
-        START >> src >> u >> out >> END
 
     monkeypatch.chdir(tmp_path)
     remote, local = Remote(), LocalConsumer({"root": str(tmp_path / "runs")})

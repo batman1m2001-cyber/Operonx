@@ -14,6 +14,7 @@ import time
 import pytest
 
 from operonx import END, START, Operon, graph, op
+from operonx.core import Interrupt
 from operonx.durable import (
     END as STEP_END,
 )
@@ -149,14 +150,15 @@ def test_a_resumed_run_does_not_run_again_what_ended():
     assert [h.status for h in journal.runs()] == ["ok"]
 
 
+@graph
+def rewired(x):  # the run's graph, changed: one op fewer
+    a = first(x=x)
+    START >> a >> END
+
+
 def test_resume_refuses_a_changed_graph():
     journal = MemoryJournal()
     asyncio.run(Operon(chain, params={"x": None}, journal=journal).run({"x": 1}, run_id="r"))
-
-    @graph
-    def rewired(x):  # the run's graph, changed: one op fewer
-        a = first(x=x)
-        START >> a >> END
 
     other = Operon(rewired, params={"x": None}, journal=journal)
     with pytest.raises(JournalError, match="this engine's graph is"):
@@ -164,16 +166,18 @@ def test_resume_refuses_a_changed_graph():
     assert _resume(other, allow_graph_change=True) is not None
 
 
+@op
+async def opens(x: int) -> dict:
+    return {"handle": lambda: x}  # a lambda does not pickle
+
+
+@graph
+def g(x):
+    o = opens(x=x)
+    START >> o >> END
+
+
 def test_an_unjournalable_value_names_the_op_and_var():
-    @op
-    async def opens(x: int) -> dict:
-        return {"handle": lambda: x}  # a lambda does not pickle
-
-    @graph
-    def g(x):
-        o = opens(x=x)
-        START >> o >> END
-
     engine = Operon(g, params={"x": None}, journal=MemoryJournal(), durability="sync")
     with pytest.raises(JournalError, match=r"\.o\.handle wrote a function"):
         asyncio.run(engine.run({"x": 1}, run_id="r"))
@@ -192,33 +196,39 @@ def test_every_durability_resumes_to_the_same_result(durability):
     assert CALLS == []  # everything had ended: replayed, nothing run
 
 
+@op
+async def sink(v: int) -> dict:
+    return {"w": v}
+
+
+#: How often ``drift`` started.
+DRIFTS = {"n": 0}
+
+
+@op
+async def drift(x: int):
+    DRIFTS["n"] += 1
+    yield {"v": x + DRIFTS["n"]}  # differs on the second run
+    yield {"v": 0}
+
+
+@graph
+def drifting(x):
+    d = drift(x=x)
+    s = sink(v=d["v"])
+    START >> d >> s >> END
+
+
 def test_a_generator_that_yields_otherwise_on_resume_is_refused():
-    seen = {"n": 0}
-
-    @op
-    async def drift(x: int):
-        seen["n"] += 1
-        yield {"v": x + seen["n"]}  # differs on the second run
-        yield {"v": 0}
-
-    @op
-    async def sink(v: int) -> dict:
-        return {"w": v}
-
-    @graph
-    def g(x):
-        d = drift(x=x)
-        s = sink(v=d["v"])
-        START >> d >> s >> END
-
+    DRIFTS["n"] = 0
     journal = _StopAfter(1)  # the first yield is recorded, the generator never ends
-    engine = Operon(g, params={"x": None}, journal=journal, durability="sync")
+    engine = Operon(drifting, params={"x": None}, journal=journal, durability="sync")
     asyncio.run(_stopped(engine, {"x": 1}))
     journal.after = 10**9
     with pytest.raises(NonDeterministicResume, match="yield 0 differs"):
         _resume(engine)
 
-    strict = Operon(g, params={"x": None}, journal=journal, on_resume="fail")
+    strict = Operon(drifting, params={"x": None}, journal=journal, on_resume="fail")
     with pytest.raises(NonDeterministicResume, match="on_resume='fail'"):
         _resume(strict)
 
@@ -329,26 +339,27 @@ def test_a_run_killed_mid_way_resumes_in_another_process(tmp_path):
     assert time.monotonic() - started < 30
 
 
+@op
+async def stops(x: int):
+    yield {"y": x}
+    yield Interrupt(ctx_to_cancel=("main", "[9]"), reason="nothing there")
+
+
+@op
+def stops_self(y: int):
+    return Interrupt(reason="me")  # Interrupt.SELF: resolved on replay too
+
+
+@graph
+def interrupted(x):
+    s = stops(x=x)
+    m = stops_self(y=s["y"])
+    START >> s >> m >> END
+
+
 def test_an_interrupt_an_op_yielded_is_replayed_on_resume():
-    from operonx.core import Interrupt
-
-    @op
-    async def stops(x: int):
-        yield {"y": x}
-        yield Interrupt(ctx_to_cancel=("main", "[9]"), reason="nothing there")
-
-    @op
-    def stops_self(y: int):
-        return Interrupt(reason="me")  # Interrupt.SELF: resolved on replay too
-
-    @graph
-    def g(x):
-        s = stops(x=x)
-        m = stops_self(y=s["y"])
-        START >> s >> m >> END
-
     journal = MemoryJournal()
-    engine = Operon(g, params={"x": None}, journal=journal, durability="sync")
+    engine = Operon(interrupted, params={"x": None}, journal=journal, durability="sync")
 
     async def first():
         handle = engine.start({"x": 1}, run_id="r")

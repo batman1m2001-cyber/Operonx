@@ -93,12 +93,13 @@ async def test_events_from_the_bus_resume_too():
     assert (await asyncio.wait_for(handle.result(), timeout=2))["done"] == "ok"
 
 
-async def test_updates_without_an_interrupt_op_are_only_dicts():
-    @graph
-    def plain(x):
-        p = plan(x=x)
-        START >> p >> END
+@graph
+def plain(x):
+    p = plan(x=x)
+    START >> p >> END
 
+
+async def test_updates_without_an_interrupt_op_are_only_dicts():
     engine = Operon(plain, params={"x": None})
     seen = [item async for item in engine.stream({"x": 1}, mode="updates")]
     assert seen and all(isinstance(s, dict) for s in seen)

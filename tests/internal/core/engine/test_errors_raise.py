@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from operonx import END, PARENT, START, Operon, OpFailed, Retry, graph, op
+from operonx import END, PARENT, START, Operon, OpFailed, Retry, Timeout, graph, op
 from operonx.core.ops import if_
 
 SEEN = {"slow_done": 0, "after": 0}
@@ -74,13 +74,14 @@ def sync_bad(x: int) -> dict:
     raise KeyError("missing")
 
 
-async def test_errors_raise_from_an_inline_op():
-    @graph
-    def g(x):
-        b = sync_bad(x=x)
-        a = after(y=b["y"])
-        START >> b >> a >> END
+@graph
+def g(x):
+    b = sync_bad(x=x)
+    a = after(y=b["y"])
+    START >> b >> a >> END
 
+
+async def test_errors_raise_from_an_inline_op():
     SEEN["after"] = 0
     with pytest.raises(OpFailed, match="missing"):
         await Operon(g, params={"x": None}, errors="raise").run({"x": 1})
@@ -93,14 +94,15 @@ def inner(x):
     START >> b >> END
 
 
-async def test_errors_raise_inside_subgraph():
-    @graph
-    def outer(x):
-        sub = inner(x=x)
-        s = slow_sibling(x=x)
-        START >> [sub, s]
-        [sub, s] >> END
+@graph
+def outer(x):
+    sub = inner(x=x)
+    s = slow_sibling(x=x)
+    START >> [sub, s]
+    [sub, s] >> END
 
+
+async def test_errors_raise_inside_subgraph():
     SEEN["slow_done"] = 0
     engine = Operon(outer, params={"x": None}, errors="raise")
     with pytest.raises(OpFailed) as caught:
@@ -110,22 +112,27 @@ async def test_errors_raise_inside_subgraph():
     assert SEEN["slow_done"] == 0
 
 
+#: The arguments ``down`` was called with.
+DOWN_CALLS = []
+
+
+@op(retry=Retry(max_attempts=3, initial=0.01, jitter=False))
+async def down(x: int) -> dict:
+    DOWN_CALLS.append(x)
+    raise ConnectionError("refused")
+
+
+@graph
+def down_graph(x):
+    d = down(x=x)
+    START >> d >> END
+
+
 async def test_errors_raise_after_the_last_retry():
-    calls = []
-
-    @op(retry=Retry(max_attempts=3, initial=0.01, jitter=False))
-    async def down(x: int) -> dict:
-        calls.append(x)
-        raise ConnectionError("refused")
-
-    @graph
-    def g(x):
-        d = down(x=x)
-        START >> d >> END
-
+    DOWN_CALLS.clear()
     with pytest.raises(OpFailed, match="refused"):
-        await Operon(g, params={"x": None}, errors="raise").run({"x": 1})
-    assert len(calls) == 3
+        await Operon(down_graph, params={"x": None}, errors="raise").run({"x": 1})
+    assert len(DOWN_CALLS) == 3
 
 
 async def test_errors_raise_through_stream_and_handle():
@@ -144,14 +151,15 @@ def step(n: int) -> dict:
     return {"n": n + 1, "done": False}
 
 
-async def test_errors_raise_on_loop_limit():
-    @graph
-    def spin():
-        PARENT.declare(n=0)
-        s = step(n=PARENT["n"])
-        s["n"] >> PARENT["n"]
-        START >> s >> if_(s["done"] == True, END, max_iterations=3).else_(s)  # noqa: E712
+@graph
+def spin():
+    PARENT.declare(n=0)
+    s = step(n=PARENT["n"])
+    s["n"] >> PARENT["n"]
+    START >> s >> if_(s["done"] == True, END, max_iterations=3).else_(s)  # noqa: E712
 
+
+async def test_errors_raise_on_loop_limit():
     with pytest.raises(OpFailed, match="LoopLimitExceeded"):
         await Operon(spin, errors="raise").run({})
 
@@ -173,15 +181,14 @@ def stalling(x):
     START >> s >> END
 
 
+@graph
+def timed_out_subgraph(x):
+    sub = stalling(x=x, timeout=Timeout(run=0.1))
+    START >> sub >> END
+
+
 async def test_errors_raise_on_a_subgraph_timeout():
-    from operonx import Timeout
-
-    @graph
-    def outer(x):
-        sub = stalling(x=x, timeout=Timeout(run=0.1))
-        START >> sub >> END
-
-    engine = Operon(outer, params={"x": None}, errors="raise")
+    engine = Operon(timed_out_subgraph, params={"x": None}, errors="raise")
     with pytest.raises(OpFailed) as caught:
         await engine.run({"x": 1})
     assert caught.value.op == f"{engine.name}.sub"

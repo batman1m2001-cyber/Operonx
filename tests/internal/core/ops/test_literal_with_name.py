@@ -33,17 +33,18 @@ def inner(x, thing):
     START >> a >> END
 
 
+RECORD = Record(name="educa", tag="hello")
+
+
+@graph
+def outer(x):
+    i = inner(x=x, thing=RECORD)  # bound when the graph is built
+    i["out"] >> PARENT["out"]
+    START >> i >> END
+
+
 def test_a_named_record_bound_into_a_nested_graph_is_a_literal():
-    def build(record):
-        @graph
-        def outer(x):
-            i = inner(x=x, thing=record)
-            i["out"] >> PARENT["out"]
-            START >> i >> END
-
-        return outer
-
-    engine = Operon(build(Record(name="educa", tag="hello")), params={"x": None})
+    engine = Operon(outer, params={"x": None})
     assert asyncio.run(engine.run(inputs={"x": 7}))["out"] == "educa/hello:7"
 
 

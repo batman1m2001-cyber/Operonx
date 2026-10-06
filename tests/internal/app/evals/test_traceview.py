@@ -295,22 +295,25 @@ async def test_trajectory_reads_skip_a_retried_attempt_and_what_ran_under_it(tmp
 # ── a whole run's input and output (online evaluators read these) ────────
 
 
+@op
+def shout(text: str) -> dict:
+    return {"loud": text.upper()}
+
+
+@op
+def wrap(loud: str) -> dict:
+    return {"reply": f"<{loud}>"}
+
+
+@graph
+def g(text):
+    s = shout(text=text)
+    w = wrap(loud=s["loud"])
+    START >> s >> w >> END
+
+
 def test_a_runs_input_is_its_first_ops_inputs_and_its_output_its_last_ops_outputs(tmp_path):
     from operonx import END, START, graph, op
-
-    @op
-    def shout(text: str) -> dict:
-        return {"loud": text.upper()}
-
-    @op
-    def wrap(loud: str) -> dict:
-        return {"reply": f"<{loud}>"}
-
-    @graph
-    def g(text):
-        s = shout(text=text)
-        w = wrap(loud=s["loud"])
-        START >> s >> w >> END
 
     store = _store("files", tmp_path)
     import asyncio

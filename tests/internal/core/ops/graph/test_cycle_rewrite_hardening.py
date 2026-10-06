@@ -19,23 +19,40 @@ from operonx.core.ops.graph.graph_op import END, START, GraphOp
 # =========================================================================
 
 
+@op
+def tick(counter: int):
+    return {"counter": counter + 1}
+
+
+@graph
+def selfloop():
+    PARENT.declare(count=0)
+    t = tick(counter=PARENT["count"], name="t")
+    t["counter"] >> PARENT["count"]
+    # The natural while-loop shape: branch chooses END vs self.
+    START >> t >> if_(PARENT["count"] >= 3, END).else_(t)
+
+
+@op
+def marker(counter: int):
+    return {"counter": counter}
+
+
+@graph
+def two_backs():
+    PARENT.declare(count=0)
+    t = tick(counter=PARENT["count"], name="t")
+    m = marker(counter=t["counter"], name="m")
+    t["counter"] >> PARENT["count"]
+    # Branch routes to t (loop back) or END.
+    START >> t >> m >> if_(PARENT["count"] >= 4, END).else_(t)
+
+
 class TestBug1BranchAwareTermination:
     """Pre-fix: back-edge source was a BranchOp → end_time always present →
     scheduler thought the back-edge always fired → ran to max_iterations."""
 
     async def test_compact_self_loop_via_branch_terminates(self):
-        @op
-        def tick(counter: int):
-            return {"counter": counter + 1}
-
-        @graph
-        def selfloop():
-            PARENT.declare(count=0)
-            t = tick(counter=PARENT["count"], name="t")
-            t["counter"] >> PARENT["count"]
-            # The natural while-loop shape: branch chooses END vs self.
-            START >> t >> if_(PARENT["count"] >= 3, END).else_(t)
-
         g = selfloop()
         result = await Operon(g).run(inputs={"count": 0})
         state = result["$state"]
@@ -45,23 +62,6 @@ class TestBug1BranchAwareTermination:
     async def test_branch_source_multiple_back_edges_only_one_matches(self):
         """When the branch has two candidates that both loop back (to different
         loop targets), only the chosen one should count as a back-edge fire."""
-
-        @op
-        def tick(counter: int):
-            return {"counter": counter + 1}
-
-        @op
-        def marker(counter: int):
-            return {"counter": counter}
-
-        @graph
-        def two_backs():
-            PARENT.declare(count=0)
-            t = tick(counter=PARENT["count"], name="t")
-            m = marker(counter=t["counter"], name="m")
-            t["counter"] >> PARENT["count"]
-            # Branch routes to t (loop back) or END.
-            START >> t >> m >> if_(PARENT["count"] >= 4, END).else_(t)
 
         g = two_backs()
         result = await Operon(g).run(inputs={"count": 0})
@@ -75,30 +75,33 @@ class TestBug1BranchAwareTermination:
 # =========================================================================
 
 
+@op
+def bump(v: int):
+    return {"v": v + 1}
+
+
+@op
+def relay(v: int):
+    return {"v": v}
+
+
+@graph
+def multi_exit():
+    PARENT.declare(count=0)
+    a = bump(v=PARENT["count"], name="a")
+    b = relay(v=a["v"], name="b")  # outside SCC exit
+    c = relay(v=a["v"], name="c")  # inside SCC (back-edge source below)
+    a["v"] >> PARENT["count"]
+    START >> a >> if_(PARENT["count"] >= 3, b).else_(c)
+    b >> END
+    c >> a  # back-edge
+
+
 class TestBug2E3MultiExitBranch:
     """Pre-fix: branch's candidates list still named outside-SCC ops after
     rewrite → hidden loop's _validate_branch_targets errored."""
 
     async def test_branch_candidate_pointing_outside_scc_is_legal(self):
-        @op
-        def bump(v: int):
-            return {"v": v + 1}
-
-        @op
-        def relay(v: int):
-            return {"v": v}
-
-        @graph
-        def multi_exit():
-            PARENT.declare(count=0)
-            a = bump(v=PARENT["count"], name="a")
-            b = relay(v=a["v"], name="b")  # outside SCC exit
-            c = relay(v=a["v"], name="c")  # inside SCC (back-edge source below)
-            a["v"] >> PARENT["count"]
-            START >> a >> if_(PARENT["count"] >= 3, b).else_(c)
-            b >> END
-            c >> a  # back-edge
-
         g = multi_exit()
         result = await Operon(g).run(inputs={"count": 0})
         state = result["$state"]
@@ -111,31 +114,24 @@ class TestBug2E3MultiExitBranch:
 # =========================================================================
 
 
+@graph
+def multi_end():
+    PARENT.declare(count=0)
+    a = bump(v=PARENT["count"], name="a")
+    b = relay(v=a["v"], name="b")  # b in SCC (back-edges to a below)
+    c = relay(v=a["v"], name="c")  # c stays outside SCC, refs a
+    a["v"] >> PARENT["count"]
+    START >> a
+    a >> b >> END
+    a >> c >> END
+    b >> a
+
+
 class TestBug3OuterRefIntoSCC:
     """Pre-fix: non-SCC outer op with Ref to a moved SCC op → validation error
     blaming the user for a scope violation on legal user code."""
 
     def test_outer_op_can_reference_moved_scc_op(self):
-        @op
-        def bump(v: int):
-            return {"v": v + 1}
-
-        @op
-        def relay(v: int):
-            return {"v": v}
-
-        @graph
-        def multi_end():
-            PARENT.declare(count=0)
-            a = bump(v=PARENT["count"], name="a")
-            b = relay(v=a["v"], name="b")  # b in SCC (back-edges to a below)
-            c = relay(v=a["v"], name="c")  # c stays outside SCC, refs a
-            a["v"] >> PARENT["count"]
-            START >> a
-            a >> b >> END
-            a >> c >> END
-            b >> a
-
         g = multi_end()
         # Just needs to BUILD successfully — pre-fix this raised ValueError.
         g.build()
@@ -208,23 +204,25 @@ class TestBug5DanglingLookback:
 # =========================================================================
 
 
+@op
+def s(x=None):
+    return {"x": 1}
+
+
+@graph
+def cycling(x):
+    a = s(name="a", x=x)
+    b = s(name="b", x=a["x"])
+    START >> a >> b >> END
+    b >> a  # back-edge
+
+
 class TestBug6StrictDagKwarg:
     """Pre-fix: passing strict_dag as a call-site kwarg on a @graph function
     dropped it into input_mappings instead of GraphOp init kwargs, so the
     documented opt-out silently did nothing."""
 
     def test_strict_dag_via_call_site_kwarg_works(self):
-        @op
-        def s(x=None):
-            return {"x": 1}
-
-        @graph
-        def cycling(x):
-            a = s(name="a", x=x)
-            b = s(name="b", x=a["x"])
-            START >> a >> b >> END
-            b >> a  # back-edge
-
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             g = cycling(x=1, strict_dag=True)
@@ -240,47 +238,53 @@ class TestBug6StrictDagKwarg:
 # =========================================================================
 
 
+@op
+def inc_i(i: int):
+    return {"i": i + 1}
+
+
+@op
+def pass_i(i: int):
+    return {"i": i}
+
+
+@op
+def inc_o(o: int):
+    return {"o": o + 1}
+
+
+@op
+def pass_o(o: int):
+    return {"o": o}
+
+
+@graph
+def inner_g():
+    PARENT.declare(i=0)
+    ii = inc_i(i=PARENT["i"], name="ii")
+    ic = pass_i(i=ii["i"], name="ic")
+    ii["i"] >> PARENT["i"]
+    START >> ii >> if_(PARENT["i"] >= 3, END).else_(ic)
+    ic >> ii
+
+
+@graph
+def outer_g():
+    PARENT.declare(o=0)
+    oi = inc_o(o=PARENT["o"], name="oi")
+    oc = pass_o(o=oi["o"], name="oc")
+    inner = inner_g(name="inner")
+    oi["o"] >> PARENT["o"]
+    START >> oi >> if_(PARENT["o"] >= 2, END).else_(oc)
+    oc >> inner >> oi
+
+
 class TestHazardNestedSyntheticCtxNamespace:
     """Pre-fix: nested synthetic loops both bumped ctx to ``('main','loop_1')``
     → collision on state cells. Fix uses per-op-instance ctx segments
     (``{full_name}#{n}``)."""
 
     async def test_nested_synthetic_loops_produce_unique_ctxs(self):
-        @op
-        def inc_i(i: int):
-            return {"i": i + 1}
-
-        @op
-        def pass_i(i: int):
-            return {"i": i}
-
-        @op
-        def inc_o(o: int):
-            return {"o": o + 1}
-
-        @op
-        def pass_o(o: int):
-            return {"o": o}
-
-        @graph
-        def inner_g():
-            PARENT.declare(i=0)
-            ii = inc_i(i=PARENT["i"], name="ii")
-            ic = pass_i(i=ii["i"], name="ic")
-            ii["i"] >> PARENT["i"]
-            START >> ii >> if_(PARENT["i"] >= 3, END).else_(ic)
-            ic >> ii
-
-        @graph
-        def outer_g():
-            PARENT.declare(o=0)
-            oi = inc_o(o=PARENT["o"], name="oi")
-            oc = pass_o(o=oi["o"], name="oc")
-            inner = inner_g(name="inner")
-            oi["o"] >> PARENT["o"]
-            START >> oi >> if_(PARENT["o"] >= 2, END).else_(oc)
-            oc >> inner >> oi
-
         g = outer_g()
         result = await Operon(g).run(inputs={"o": 0, "i": 0})
         state = result["$state"]

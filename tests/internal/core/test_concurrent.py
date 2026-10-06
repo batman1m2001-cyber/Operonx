@@ -158,15 +158,16 @@ class TestCcuBranch:
 # =============================================================================
 
 
+@graph
+def double_flow(val):
+    step = double(x=val)
+    START >> step >> END
+
+
 class TestCcuNestedGraph:
     @pytest.mark.asyncio
     async def test_ccu_nested(self):
         """5 concurrent runs on nested @graph workflows."""
-
-        @graph
-        def double_flow(val):
-            step = double(x=val)
-            START >> step >> END
 
         with GraphOp(name="nested") as g:
             d1 = double_flow(val=PARENT["x"])
@@ -186,6 +187,23 @@ class TestCcuNestedGraph:
 # =============================================================================
 
 
+@op
+def inc_and_check(counter: int, target: int):
+    # Return the done flag directly — comparing a Ref to another
+    # Ref inside if_() doesn't resolve the RHS Ref, so we compute
+    # the boolean here and branch on ``inc["done"] == True``.
+    new_counter = counter + 1
+    return {"counter": new_counter, "done": new_counter >= target}
+
+
+@graph
+def counter(target):
+    PARENT.declare(counter=0)
+    inc = inc_and_check(counter=PARENT["counter"], target=target)
+    inc["counter"] >> PARENT["counter"]
+    START >> inc >> if_(inc["done"] == True, END).else_(inc)  # noqa: E712
+
+
 class TestCcuLoop:
     @pytest.mark.asyncio
     async def test_ccu_loop(self):
@@ -194,21 +212,6 @@ class TestCcuLoop:
         Migrated to 1.0.0 back-edge syntax — GraphOp.loop was removed.
         """
         from operonx.core.ops.flow.branch_op import if_
-
-        @op
-        def inc_and_check(counter: int, target: int):
-            # Return the done flag directly — comparing a Ref to another
-            # Ref inside if_() doesn't resolve the RHS Ref, so we compute
-            # the boolean here and branch on ``inc["done"] == True``.
-            new_counter = counter + 1
-            return {"counter": new_counter, "done": new_counter >= target}
-
-        @graph
-        def counter(target):
-            PARENT.declare(counter=0)
-            inc = inc_and_check(counter=PARENT["counter"], target=target)
-            inc["counter"] >> PARENT["counter"]
-            START >> inc >> if_(inc["done"] == True, END).else_(inc)  # noqa: E712
 
         # target=None → _build_fn_args maps it to PARENT["target"] Ref, which
         # the schema turns into a graph input resolvable at engine.run().

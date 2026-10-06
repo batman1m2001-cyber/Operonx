@@ -14,6 +14,7 @@ import httpx
 import openai
 import pytest
 
+from operonx import END, START, Operon, Retry, graph, op
 from operonx.providers.llms.config import LLMType, OpenAIConfig
 from operonx.providers.ops.llm import LLMOp, _is_empty_completion
 
@@ -329,6 +330,21 @@ class TestPrepareParamsStripping:
 # ---------------------------------------------------------------------------
 
 
+@op(retry=Retry(max_attempts=4, initial=0.001, jitter=False))
+async def ask(q: str, llm=None, calls=None) -> dict:
+    async def down(**kw):
+        calls.append(1)
+        raise openai.APIConnectionError(request=httpx.Request("POST", "http://localhost"))
+
+    return {"a": await _Op()._call_with_retry(down, llm=llm)}
+
+
+@graph
+def ask_graph(q, llm, calls):
+    a = ask(q=q, llm=llm, calls=calls)
+    START >> a >> END
+
+
 @pytest.mark.unit
 class TestComposesWithOpRetry:
     """The transport retry and ``@op(retry=...)`` never both retry one error.
@@ -340,24 +356,9 @@ class TestComposesWithOpRetry:
 
     @staticmethod
     async def _run(max_retries, calls):
-        from operonx import END, START, Operon, Retry, graph, op
-
-        async def down(**kw):
-            calls.append(1)
-            raise openai.APIConnectionError(request=httpx.Request("POST", "http://localhost"))
-
         llm = _llm(_config(max_retries=max_retries))
-
-        @op(retry=Retry(max_attempts=4, initial=0.001, jitter=False))
-        async def ask(q: str) -> dict:
-            return {"a": await _Op()._call_with_retry(down, llm=llm)}
-
-        @graph
-        def g(q):
-            a = ask(q=q)
-            START >> a >> END
-
-        return await Operon(g, params={"q": None}).run({"q": "hi"})
+        engine = Operon(ask_graph, params={"q": None, "llm": None, "calls": None})
+        return await engine.run({"q": "hi", "llm": llm, "calls": calls})
 
     @pytest.mark.asyncio
     async def test_transport_retry_not_doubled(self):

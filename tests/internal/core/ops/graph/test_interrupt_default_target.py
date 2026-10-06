@@ -18,6 +18,8 @@ import pytest
 
 from operonx.core import END, PARENT, START, GraphOp, Interrupt, Operon, op
 from operonx.core.ops._events import SELF_CTX
+from operonx.core.ops.flow.branch_op import if_
+from operonx.core.ops.graph.graph_op import graph
 
 pytestmark = pytest.mark.unit
 
@@ -136,6 +138,61 @@ class TestGeneratorEmitter:
         assert len(event.ctx_to_cancel) > len(event.ctx)
 
 
+@op
+async def slow(i: int):
+    await asyncio.sleep(0.02)
+    return {"j": i}
+
+
+#: The ``j`` values ``guard`` saw, and the counts ``count_step`` saw; cleared per test.
+GUARDED = []
+STEPS = []
+
+
+@pytest.fixture(autouse=True)
+def _fresh_records():
+    GUARDED.clear()
+    STEPS.clear()
+
+
+@op
+def src(n: int):
+    for i in range(6):
+        yield {"i": i}
+
+
+@op
+def guard(j: int):
+    GUARDED.append(j)
+    if j == 2:
+        return Interrupt(reason="nested")
+    return {"k": j}
+
+
+@graph
+def inner(i):
+    c = slow(i=i)
+    gd = guard(j=c["j"])
+    START >> c >> gd >> END
+
+
+@op
+def count_step(count: int) -> dict:
+    STEPS.append(count)
+    if count == 2:
+        return Interrupt(reason="stop at 2")
+    return {"count": count + 1, "done": count >= 5}
+
+
+@graph
+def stop_loop():
+    PARENT.declare(count=0, done=False)
+    s = count_step(count=PARENT["count"])
+    s["count"] >> PARENT["count"]
+    s["done"] >> PARENT["done"]
+    START >> s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
+
+
 class TestNestedGraph:
     """A subgraph runs its own scheduler, with `output_queue=None`.
 
@@ -148,32 +205,7 @@ class TestNestedGraph:
     """
 
     @staticmethod
-    def _graph(recorder):
-        from operonx.core.ops.graph.graph_op import graph
-
-        @op
-        def src(n: int):
-            for i in range(6):
-                yield {"i": i}
-
-        @op
-        async def slow(i: int):
-            await asyncio.sleep(0.02)
-            return {"j": i}
-
-        @op
-        def guard(j: int):
-            recorder.append(j)
-            if j == 2:
-                return Interrupt(reason="nested")
-            return {"k": j}
-
-        @graph
-        def inner(i):
-            c = slow(i=i)
-            gd = guard(j=c["j"])
-            START >> c >> gd >> END
-
+    def _graph():
         with GraphOp(name="nested_outer") as g:
             s = src(n=PARENT["n"])
             blk = inner(i=s["i"].parallel())
@@ -182,8 +214,8 @@ class TestNestedGraph:
 
     @pytest.mark.asyncio
     async def test_no_phantom_none_result_for_the_cancelled_branch(self):
-        seen: list = []
-        handle = Operon(self._graph(seen)).start(inputs={"n": 1})
+        seen = GUARDED
+        handle = Operon(self._graph()).start(inputs={"n": 1})
         out = await asyncio.wait_for(handle.collect(), timeout=30)
         assert sorted(seen) == [0, 1, 2, 3, 4, 5], "every branch should reach the guard"
         # Sorted, because the claim is about *membership* — branch 2 cancelled
@@ -197,14 +229,14 @@ class TestNestedGraph:
 
     @pytest.mark.asyncio
     async def test_the_interrupt_reaches_the_handle(self):
-        handle = Operon(self._graph([])).start(inputs={"n": 1})
+        handle = Operon(self._graph()).start(inputs={"n": 1})
         await asyncio.wait_for(handle.collect(), timeout=30)
         assert len(handle.interrupts) == 1
         assert handle.interrupts[0].reason == "nested"
 
     @pytest.mark.asyncio
     async def test_siblings_of_the_cancelled_branch_survive(self):
-        handle = Operon(self._graph([])).start(inputs={"n": 1})
+        handle = Operon(self._graph()).start(inputs={"n": 1})
         out = await asyncio.wait_for(handle.collect(), timeout=30)
         assert len(out["k"]) == 5
 
@@ -216,31 +248,11 @@ class TestInsideALoop:
 
     @pytest.mark.asyncio
     async def test_an_iteration_can_stop_itself(self):
-        from operonx.core.ops.flow.branch_op import if_
-        from operonx.core.ops.graph.graph_op import graph
-
-        trace: list = []
-
-        @op
-        def step(count: int) -> dict:
-            trace.append(count)
-            if count == 2:
-                return Interrupt(reason="stop at 2")
-            return {"count": count + 1, "done": count >= 5}
-
-        @graph
-        def g():
-            PARENT.declare(count=0, done=False)
-            s = step(count=PARENT["count"])
-            s["count"] >> PARENT["count"]
-            s["done"] >> PARENT["done"]
-            START >> s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
-
-        built = g()
+        built = stop_loop()
         handle = Operon(built).start(inputs={})
         await asyncio.wait_for(handle.collect(), timeout=30)
 
-        assert trace == [0, 1, 2], "the loop must run up to the interrupt, then stop"
+        assert STEPS == [0, 1, 2], "the loop must run up to the interrupt, then stop"
         assert len(handle.interrupts) == 1
         event = handle.interrupts[0]
         assert "__loop_0__" in event.ctx_to_cancel[-1], (

@@ -60,15 +60,15 @@ def test_a_run_without_the_resource_fails_naming_it(hub):
     assert "$errors" in out
 
 
+@graph
+def batch_on_a_runtime_resource(model):
+    a = LLMOp.of(resource=model, batch_mode=True, prompt="x")
+    START >> a >> END
+
+
 def test_ratios_or_batch_need_a_fixed_resource():
     with pytest.raises(ValueError, match="one key per call"):
-
-        @graph
-        def bad(model):
-            a = LLMOp.of(resource=model, batch_mode=True, prompt="x")
-            START >> a >> END
-
-        Operon(bad, params={"model": None})
+        Operon(batch_on_a_runtime_resource, params={"model": None})
 
 
 @graph

@@ -98,16 +98,18 @@ def test_the_same_code_gives_the_same_fingerprint_in_two_processes(tmp_path):
     assert _fp_in_a_process(tmp_path)["graph_hash"] not in (one["graph_hash"], body["graph_hash"])
 
 
+@op(bound="sync")
+def step(x: int = 0) -> dict:
+    return {"y": x}
+
+
+@graph
+def g(x: int = 0):
+    s = step(x=x)
+    START >> s >> END
+
+
 def test_the_engines_variable_name_is_not_identity():
-    @op(bound="sync")
-    def step(x: int = 0) -> dict:
-        return {"y": x}
-
-    @graph
-    def g(x: int = 0):
-        s = step(x=x)
-        START >> s >> END
-
     first = Operon(g, params={"x": None})
     another_name = Operon(g, params={"x": None})
     assert first.graph.name != another_name.graph.name  # precondition

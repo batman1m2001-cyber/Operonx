@@ -51,20 +51,22 @@ async def test_transient_run_is_flat_in_items():
     )
 
 
+@op
+async def retaining(n: int = 0):
+    for i in range(n):
+        yield {"blob": bytes(4096), "i": i}
+
+
+@graph
+def _grows(n=0):
+    s = retaining(n=n)
+    c = consume(blob=s["blob"], i=s["i"])
+    START >> s >> c >> END
+
+
 @pytest.mark.asyncio
 async def test_without_transient_it_grows():
     """The guard on the test above: prove the measurement can detect a leak."""
-
-    @op
-    async def retaining(n: int = 0):
-        for i in range(n):
-            yield {"blob": bytes(4096), "i": i}
-
-    @graph
-    def _grows(n=0):
-        s = retaining(n=n)
-        c = consume(blob=s["blob"], i=s["i"])
-        START >> s >> c >> END
 
     engine = Operon(_grows, params={"n": None})
     small = engine.start(inputs={"n": 50})
@@ -75,36 +77,53 @@ async def test_without_transient_it_grows():
     assert _cell_entries(large.state) > _cell_entries(small.state)
 
 
+@graph
+def _bad(n=0):
+    s = stream(n=n)
+    c = consume(blob=s["blob"].collect(), i=s["i"])
+    START >> s >> c >> END
+
+
 def test_collect_on_a_transient_source_is_a_compile_error():
     """`.collect()` buffers until EOF — exactly what transient releases."""
-
-    @graph
-    def _bad(n=0):
-        s = stream(n=n)
-        c = consume(blob=s["blob"].collect(), i=s["i"])
-        START >> s >> c >> END
 
     with pytest.raises(ValueError, match="collect"):
         Operon(_bad, params={"n": None})
 
 
+@op(bound="sync")
+def other(blob: bytes = b"") -> dict:
+    return {"n": len(blob)}
+
+
+@graph
+def _fanout(n=0):
+    s = stream(n=n)
+    a = consume(blob=s["blob"], i=s["i"])
+    b = other(blob=s["blob"])
+    START >> s >> [a, b]
+    [a, b] >> END
+
+
 def test_two_consumers_of_a_transient_port_is_a_compile_error():
     """Eviction fires on context completion; that is only safe for 1-1."""
 
-    @op(bound="sync")
-    def other(blob: bytes = b"") -> dict:
-        return {"n": len(blob)}
-
-    @graph
-    def _fanout(n=0):
-        s = stream(n=n)
-        a = consume(blob=s["blob"], i=s["i"])
-        b = other(blob=s["blob"])
-        START >> s >> [a, b]
-        [a, b] >> END
-
     with pytest.raises(ValueError, match="consumer"):
         Operon(_fanout, params={"n": None})
+
+
+@op(transient=True)
+async def emits(n: int = 0):
+    for i in range(n):
+        yield {"total": i}
+
+
+@graph
+def _shared(n=0):
+    PARENT.declare(total=0)
+    e = emits(n=n)
+    e["total"] >> PARENT["total"]
+    START >> e >> END
 
 
 @pytest.mark.asyncio
@@ -118,18 +137,6 @@ async def test_transient_may_push_into_a_declared_cell():
     state. Asserted here so the two cases do not get conflated later.
     """
 
-    @op(transient=True)
-    async def emits(n: int = 0):
-        for i in range(n):
-            yield {"total": i}
-
-    @graph
-    def _shared(n=0):
-        PARENT.declare(total=0)
-        e = emits(n=n)
-        e["total"] >> PARENT["total"]
-        START >> e >> END
-
     engine = Operon(_shared, params={"n": None})
     handle = engine.start(inputs={"n": 20})
     result = await handle.collect()
@@ -139,6 +146,63 @@ async def test_transient_may_push_into_a_declared_cell():
 
 
 # -- regression: the chain length that the original tests never reached --
+
+
+@op(bound="io", transient=True)
+async def produce(n: int = 0):
+    for i in range(n):
+        yield {"item": f"i{i}"}
+
+
+@op(bound="sync")
+def relay(item: str = "") -> dict:
+    return {"reply": f"{item}!"}
+
+
+#: What the last op of a chain received; cleared per run.
+COLLECTED = []
+
+
+@op(bound="io")
+async def collect_reply(reply=None) -> dict:
+    COLLECTED.append(reply)
+    return {}
+
+
+@graph
+def three_op_chain(n=0):
+    a = produce(n=n)
+    b = relay(item=a["item"])
+    c = collect_reply(reply=b["reply"])
+    START >> a >> b >> c >> END
+
+
+@op(bound="sync")
+def pass_sync(item=None) -> dict:
+    return {"out": item}
+
+
+@op(bound="io")
+async def pass_io(item=None) -> dict:
+    await asyncio.sleep(0)
+    return {"out": item}
+
+
+MIDDLES = {"sync": pass_sync, "io": pass_io}
+
+
+@op(bound="io")
+async def collect_out(out=None) -> dict:
+    COLLECTED.append(out)
+    return {}
+
+
+@graph
+def bound_chain(n=0, middle=None):
+    a = produce(n=n)
+    b = middle(item=a["item"])
+    c = collect_out(out=b["out"])
+    START >> a >> b >> c >> END
 
 
 @pytest.mark.asyncio
@@ -152,30 +216,8 @@ async def test_transient_survives_a_three_op_chain():
     invisible to the release guard. The context was freed underneath them
     and every item after the first arrived as None.
     """
-    seen = []
-
-    @op(bound="io", transient=True)
-    async def produce(n: int = 0):
-        for i in range(n):
-            yield {"item": f"i{i}"}
-
-    @op(bound="sync")
-    def relay(item: str = "") -> dict:
-        return {"reply": f"{item}!"}
-
-    @op(bound="io")
-    async def collect(reply=None) -> dict:
-        seen.append(reply)
-        return {}
-
-    @graph
-    def chain(n=0):
-        a = produce(n=n)
-        b = relay(item=a["item"])
-        c = collect(reply=b["reply"])
-        START >> a >> b >> c >> END
-
-    engine = Operon(chain, params={"n": None})
+    seen = COLLECTED
+    engine = Operon(three_op_chain, params={"n": None})
     for count in (3, 50):
         seen.clear()
         handle = engine.start(inputs={"n": count})
@@ -199,38 +241,8 @@ async def test_transient_survives_whatever_the_consumer_is_bound_to(mid_bound):
     Parametrised because a suite that only ever wrote `sync` middles is
     exactly how this survived being found twice.
     """
-    seen = []
-
-    @op(bound="io", transient=True)
-    async def produce(n: int = 0):
-        for i in range(n):
-            yield {"item": f"i{i}"}
-
-    if mid_bound == "sync":
-
-        @op(bound="sync")
-        def relay(item=None) -> dict:
-            return {"out": item}
-    else:
-
-        @op(bound="io")
-        async def relay(item=None) -> dict:
-            await asyncio.sleep(0)
-            return {"out": item}
-
-    @op(bound="io")
-    async def collect(out=None) -> dict:
-        seen.append(out)
-        return {}
-
-    @graph
-    def chain(n=0):
-        a = produce(n=n)
-        b = relay(item=a["item"])
-        c = collect(out=b["out"])
-        START >> a >> b >> c >> END
-
-    engine = Operon(chain, params={"n": None})
+    seen = COLLECTED
+    engine = Operon(bound_chain(n=None, middle=MIDDLES[mid_bound]))
     for count in (1, 3, 40):
         seen.clear()
         handle = engine.start(inputs={"n": count})
@@ -239,6 +251,30 @@ async def test_transient_survives_whatever_the_consumer_is_bound_to(mid_bound):
         assert seen == [f"i{i}" for i in range(count)], (
             f"{mid_bound} chain of {count} lost items: {seen[:5]}"
         )
+
+
+@op(bound="io", transient=True)
+async def produce_blobs(n: int = 0):
+    for _ in range(n):
+        yield {"blob": bytes(4096)}
+
+
+@op(bound="io")
+async def relay_blob(blob=None) -> dict:
+    return {"out": blob}
+
+
+@op(bound="io")
+async def measure(out=None) -> dict:
+    return {"size": len(out or b"")}
+
+
+@graph
+def blob_chain(n=0):
+    a = produce_blobs(n=n)
+    b = relay_blob(blob=a["blob"])
+    c = measure(out=b["out"])
+    START >> a >> b >> c >> END
 
 
 @pytest.mark.asyncio
@@ -251,27 +287,7 @@ async def test_the_release_guard_did_not_become_a_no_op():
     count grows by two orders of magnitude.
     """
 
-    @op(bound="io", transient=True)
-    async def produce(n: int = 0):
-        for _ in range(n):
-            yield {"blob": bytes(4096)}
-
-    @op(bound="io")
-    async def relay(blob=None) -> dict:
-        return {"out": blob}
-
-    @op(bound="io")
-    async def collect(out=None) -> dict:
-        return {"size": len(out or b"")}
-
-    @graph
-    def chain(n=0):
-        a = produce(n=n)
-        b = relay(blob=a["blob"])
-        c = collect(out=b["out"])
-        START >> a >> b >> c >> END
-
-    engine = Operon(chain, params={"n": None})
+    engine = Operon(blob_chain, params={"n": None})
 
     def entries(state):
         total = 0

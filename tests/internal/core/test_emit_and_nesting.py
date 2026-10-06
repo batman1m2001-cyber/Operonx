@@ -32,6 +32,15 @@ def finish(step: int) -> dict:
     return {"done": step}
 
 
+@graph
+def inner(n):
+    w = steps(n=n)
+    e = EmitOp(name="deep", channel="progress", inputs={"payload": w["step"]})
+    f = finish(step=w["step"])
+    START >> w >> e
+    w >> f >> END
+
+
 class TestEmitOp:
     @pytest.mark.asyncio
     async def test_events_reach_a_custom_stream_consumer(self):
@@ -69,14 +78,6 @@ class TestEmitOp:
         progress event from deep in a sub-agent is exactly the case the
         feature exists for."""
 
-        @graph
-        def inner(n):
-            w = steps(n=n)
-            e = EmitOp(name="deep", channel="progress", inputs={"payload": w["step"]})
-            f = finish(step=w["step"])
-            START >> w >> e
-            w >> f >> END
-
         with GraphOp(name="emit3") as g:
             sub = inner(n=PARENT["n"])
             START >> sub >> END
@@ -85,18 +86,31 @@ class TestEmitOp:
         assert len(got) == 3
 
 
+@op
+def child_op(x: int) -> dict:
+    return {"y": x * 2}
+
+
+@graph
+def child(x):
+    c = child_op(x=x)
+    START >> c >> END
+
+
+@op
+def stopper(x: int) -> dict:
+    return Interrupt(reason="child stops itself")
+
+
+@graph
+def interrupting_child(x):
+    s = stopper(x=x)
+    START >> s >> END
+
+
 class TestNestedGraphIsolation:
     @staticmethod
     def _built():
-        @op
-        def child_op(x: int) -> dict:
-            return {"y": x * 2}
-
-        @graph
-        def child(x):
-            c = child_op(x=x)
-            START >> c >> END
-
         @op
         def parent_op(n: int) -> dict:
             return {"x": n + 1}
@@ -161,22 +175,13 @@ class TestNestedGraphIsolation:
             return {"x": n}
 
         @op
-        def stopper(x: int) -> dict:
-            return Interrupt(reason="child stops itself")
-
-        @op
         async def slow_sibling(n: int) -> dict:
             await asyncio.sleep(0.15)
             return {"slow": n}
 
-        @graph
-        def child(x):
-            s = stopper(x=x)
-            START >> s >> END
-
         with GraphOp(name="nest_int") as g:
             sd = seed(n=PARENT["n"])
-            sub = child(x=sd["x"])
+            sub = interrupting_child(x=sd["x"])
             slow = slow_sibling(n=sd["x"])
             START >> sd
             sd >> sub

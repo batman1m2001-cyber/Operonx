@@ -19,20 +19,22 @@ from operonx.core.states import StateSchema
 # ============================================================
 
 
+@op
+def increment(counter: int):
+    return {"counter": counter + 1}
+
+
+@graph
+def counter():
+    PARENT.declare(count=0)
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
+
+
 class TestSimpleCounterLoop:
     @pytest.mark.asyncio
     async def test_count_to_five(self):
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
-        @graph
-        def counter():
-            PARENT.declare(count=0)
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
-
         g = counter()
         g.build()
         state = StateSchema(g).create_state()
@@ -48,6 +50,14 @@ class TestSimpleCounterLoop:
 # ============================================================
 
 
+@graph
+def bounded():
+    PARENT.declare(count=0)
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> if_(PARENT["count"] >= 3, END).else_(inc)
+
+
 class TestLoopMaxIterations:
     @pytest.mark.asyncio
     async def test_max_iterations_reached(self):
@@ -58,19 +68,9 @@ class TestLoopMaxIterations:
         higher than we ever reach in this test (proves the cap works with
         a modest run)."""
 
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
         # Use a branch that never triggers within the first N iters to
         # exercise the cap-driven exit path. We keep the run short (~3)
         # by wiring a branch that ends on 3.
-        @graph
-        def bounded():
-            PARENT.declare(count=0)
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> if_(PARENT["count"] >= 3, END).else_(inc)
 
         g = bounded()
         g.build()
@@ -86,20 +86,17 @@ class TestLoopMaxIterations:
 # ============================================================
 
 
+@graph
+def loop_():
+    PARENT.declare(count=0)
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> if_(PARENT["count"] > 3, END).else_(inc)
+
+
 class TestLoopBranchCondition:
     @pytest.mark.asyncio
     async def test_branch_condition(self):
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
-        @graph
-        def loop_():
-            PARENT.declare(count=0)
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> if_(PARENT["count"] > 3, END).else_(inc)
-
         g = loop_()
         g.build()
         state = StateSchema(g).create_state()
@@ -114,21 +111,23 @@ class TestLoopBranchCondition:
 # ============================================================
 
 
+@op
+def fib_step(a: int, b: int):
+    return {"a": b, "b": a + b}
+
+
+@graph
+def fib():
+    PARENT.declare(a=0, b=1)
+    step = fib_step(a=PARENT["a"], b=PARENT["b"])
+    step["a"] >> PARENT["a"]
+    step["b"] >> PARENT["b"]
+    START >> step >> if_(PARENT["b"] >= 21, END).else_(step)
+
+
 class TestFibonacciLoop:
     @pytest.mark.asyncio
     async def test_fibonacci(self):
-        @op
-        def fib_step(a: int, b: int):
-            return {"a": b, "b": a + b}
-
-        @graph
-        def fib():
-            PARENT.declare(a=0, b=1)
-            step = fib_step(a=PARENT["a"], b=PARENT["b"])
-            step["a"] >> PARENT["a"]
-            step["b"] >> PARENT["b"]
-            START >> step >> if_(PARENT["b"] >= 21, END).else_(step)
-
         g = fib()
         g.build()
         state = StateSchema(g).create_state()
@@ -145,20 +144,22 @@ class TestFibonacciLoop:
 # ============================================================
 
 
+@op
+def step(total: int):
+    return {"total": total + 15}
+
+
+@graph
+def sum_loop():
+    PARENT.declare(total=0)
+    s = step(total=PARENT["total"])
+    s["total"] >> PARENT["total"]
+    START >> s >> if_(PARENT["total"] >= 100, END).else_(s)
+
+
 class TestLoopAccumulator:
     @pytest.mark.asyncio
     async def test_accumulator_loop(self):
-        @op
-        def step(total: int):
-            return {"total": total + 15}
-
-        @graph
-        def sum_loop():
-            PARENT.declare(total=0)
-            s = step(total=PARENT["total"])
-            s["total"] >> PARENT["total"]
-            START >> s >> if_(PARENT["total"] >= 100, END).else_(s)
-
         g = sum_loop()
         g.build()
         state = StateSchema(g).create_state()
@@ -174,30 +175,29 @@ class TestLoopAccumulator:
 # ============================================================
 
 
+@op
+def prepare(start_val: int):
+    return {"initial": start_val}
+
+
+@graph
+def inner_loop(seed: int):
+    PARENT.declare(count=0)
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
+
+
+@graph
+def outer():
+    prep = prepare(start_val=PARENT["start_val"])
+    loop = inner_loop(seed=prep["initial"])
+    START >> prep >> loop >> END
+
+
 class TestLoopInsideGraph:
     @pytest.mark.asyncio
     async def test_nested_loop(self):
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
-        @op
-        def prepare(start_val: int):
-            return {"initial": start_val}
-
-        @graph
-        def inner_loop(seed: int):
-            PARENT.declare(count=0)
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
-
-        @graph
-        def outer():
-            prep = prepare(start_val=PARENT["start_val"])
-            loop = inner_loop(seed=prep["initial"])
-            START >> prep >> loop >> END
-
         g = outer()
         g.build()
         state = StateSchema(g).create_state(inputs={"start_val": 2})
@@ -215,23 +215,25 @@ class TestLoopInsideGraph:
 # ============================================================
 
 
+@op
+def branch_step(value: int):
+    if value % 2 == 0:
+        return {"value": value // 2}
+    else:
+        return {"value": value * 3 + 1}
+
+
+@graph
+def collatz():
+    PARENT.declare(value=6)
+    s = branch_step(value=PARENT["value"])
+    s["value"] >> PARENT["value"]
+    START >> s >> if_(PARENT["value"] == 1, END).else_(s)
+
+
 class TestLoopWithBranch:
     @pytest.mark.asyncio
     async def test_branch_inside_loop(self):
-        @op
-        def step(value: int):
-            if value % 2 == 0:
-                return {"value": value // 2}
-            else:
-                return {"value": value * 3 + 1}
-
-        @graph
-        def collatz():
-            PARENT.declare(value=6)
-            s = step(value=PARENT["value"])
-            s["value"] >> PARENT["value"]
-            START >> s >> if_(PARENT["value"] == 1, END).else_(s)
-
         g = collatz()
         g.build()
         state = StateSchema(g).create_state()
@@ -246,31 +248,35 @@ class TestLoopWithBranch:
 # ============================================================
 
 
+@op
+def get_start():
+    return {"start": 10}
+
+
+@op
+def halve(value: int):
+    return {"value": value // 2}
+
+
+@graph
+def halve_loop(seed: int):
+    PARENT.declare(value=0)
+    h = halve(value=PARENT["value"])
+    h["value"] >> PARENT["value"]
+    START >> h >> if_(PARENT["value"] <= 1, END).else_(h)
+
+
+@graph
+def upstream_initial():
+    starter = get_start()
+    loop = halve_loop(seed=starter["start"])
+    START >> starter >> loop >> END
+
+
 class TestLoopInitialFromUpstream:
     @pytest.mark.asyncio
     async def test_upstream_initial(self):
-        @op
-        def get_start():
-            return {"start": 10}
-
-        @op
-        def halve(value: int):
-            return {"value": value // 2}
-
-        @graph
-        def halve_loop(seed: int):
-            PARENT.declare(value=0)
-            h = halve(value=PARENT["value"])
-            h["value"] >> PARENT["value"]
-            START >> h >> if_(PARENT["value"] <= 1, END).else_(h)
-
-        @graph
-        def outer():
-            starter = get_start()
-            loop = halve_loop(seed=starter["start"])
-            START >> starter >> loop >> END
-
-        g = outer()
+        g = upstream_initial()
         g.build()
         state = StateSchema(g).create_state()
         async for _, _ in g.run(state):

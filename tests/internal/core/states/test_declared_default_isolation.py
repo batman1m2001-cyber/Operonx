@@ -33,19 +33,39 @@ def put_in(n: int = 0, bag=None) -> dict:
     return {"seen": sorted(bag)}
 
 
+@graph
+def bag_graph(n=0, initial=None, opfn=None):
+    PARENT.declare(bag=initial)  # bound when the graph is built
+    t = opfn(n=n, bag=PARENT["bag"])
+    START >> t >> END
+
+
+class Handle:  # stands in for a session that cannot be copied
+    pass
+
+
+HANDLE = Handle()
+
+
+@op
+def read(n: int = 0, h=None) -> dict:
+    return {"same": h is HANDLE}
+
+
+@graph
+def handle_graph(n=0):
+    PARENT.declare(h=HANDLE)
+    t = read(n=n, h=PARENT["h"])
+    START >> t >> END
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "kind, initial, opfn",
     [("set", set(), add_to), ("list", [], append_to), ("dict", {}, put_in)],
 )
 async def test_mutable_default_is_per_run(kind, initial, opfn):
-    @graph
-    def g(n=0):
-        PARENT.declare(bag=initial)
-        t = opfn(n=n, bag=PARENT["bag"])
-        START >> t >> END
-
-    ENGINE = Operon(g, params={"n": None})
+    ENGINE = Operon(bag_graph(n=None, initial=initial, opfn=opfn))
 
     first = ENGINE.start(inputs={"n": 1})
     await first.collect()
@@ -68,24 +88,8 @@ async def test_non_container_default_keeps_its_identity():
     in a default — ONNX sessions and Triton clients reject deepcopy — so
     anything that is not one of the three containers is left aliased.
     """
-
-    class Handle:  # stands in for a session that cannot be copied
-        pass
-
-    handle = Handle()
-
-    @op
-    def read(n: int = 0, h=None) -> dict:
-        return {"same": h is handle}
-
-    @graph
-    def g(n=0):
-        PARENT.declare(h=handle)
-        t = read(n=n, h=PARENT["h"])
-        START >> t >> END
-
-    ENGINE = Operon(g, params={"n": None})
+    ENGINE = Operon(handle_graph, params={"n": None})
     for _ in range(2):
         h = ENGINE.start(inputs={"n": 1})
         await h.collect()
-        assert h.state[ENGINE.name, "h"] is handle
+        assert h.state[ENGINE.name, "h"] is HANDLE

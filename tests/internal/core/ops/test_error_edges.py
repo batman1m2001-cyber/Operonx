@@ -91,15 +91,16 @@ def sync_bad(x: int) -> dict:
     raise KeyError(x)
 
 
-async def test_error_edge_from_an_inline_op():
-    @graph
-    def g(x):
-        b = sync_bad(x=x)
-        n = note()
-        START >> b >> END
-        b.on_error(n)
-        n >> END
+@graph
+def g(x):
+    b = sync_bad(x=x)
+    n = note()
+    START >> b >> END
+    b.on_error(n)
+    n >> END
 
+
+async def test_error_edge_from_an_inline_op():
     out = await Operon(g, params={"x": None}).run({"x": 4})
     assert out["noted"] == "KeyError: 4"
 
@@ -117,17 +118,18 @@ async def odd_fails(i: int) -> dict:
     return {"ok": i}
 
 
-async def test_error_edge_per_item():
-    @graph
-    def g(n):
-        it = items(n=n)
-        w = odd_fails(i=it["i"])
-        n_ = note()
-        START >> it >> w >> END
-        w.on_error(n_)
-        n_ >> END
+@graph
+def per_item_handler(n):
+    it = items(n=n)
+    w = odd_fails(i=it["i"])
+    n_ = note()
+    START >> it >> w >> END
+    w.on_error(n_)
+    n_ >> END
 
-    out = await Operon(g, params={"n": None}).run({"n": 4})
+
+async def test_error_edge_per_item():
+    out = await Operon(per_item_handler, params={"n": None}).run({"n": 4})
     assert out["ok"] == [0, 2]
     assert out["noted"] == ["ValueError: odd 1", "ValueError: odd 3"]
 
@@ -148,45 +150,47 @@ def failing_sub(x):
     START >> b >> END
 
 
-async def test_error_edge_on_a_subgraph():
-    @graph
-    def g(x):
-        sub = failing_sub(x=x)
-        n = note()
-        START >> sub >> END
-        sub.on_error(n)
-        n >> END
+@graph
+def subgraph_handler(x):
+    sub = failing_sub(x=x)
+    n = note()
+    START >> sub >> END
+    sub.on_error(n)
+    n >> END
 
-    out = await Operon(g, params={"x": None}).run({"x": 1})
+
+async def test_error_edge_on_a_subgraph():
+    out = await Operon(subgraph_handler, params={"x": None}).run({"x": 1})
     assert out["noted"].startswith("SubgraphError")
+
+
+@graph
+def other(x):
+    n = note()
+    START >> n >> END
+
+
+@graph
+def handler_on_start(x):
+    n = note()
+    START.on_error(n)
+
+
+@graph
+def handler_on_branch(x):
+    b_ = boom(x=x)
+    n = note()
+    route = if_(b_["y"] == 1, n).else_(n)
+    START >> b_ >> route
+    route.on_error(n)
 
 
 def test_on_error_wiring_is_checked():
     with pytest.raises(TypeError, match="sentinel"):
-
-        @graph
-        def a(x):
-            n = note()
-            START.on_error(n)
-
-        a(x=1)
+        handler_on_start(x=1)
 
     with pytest.raises(TypeError, match="branch"):
-
-        @graph
-        def b(x):
-            b_ = boom(x=x)
-            n = note()
-            route = if_(b_["y"] == 1, n).else_(n)
-            START >> b_ >> route
-            route.on_error(n)
-
-        b(x=1)
-
-    @graph
-    def other(x):
-        n = note()
-        START >> n >> END
+        handler_on_branch(x=1)
 
     with pytest.raises(ValueError, match="same graph"):
 

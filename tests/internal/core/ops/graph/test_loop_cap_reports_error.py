@@ -142,16 +142,16 @@ async def test_a_capped_loop_inside_a_subgraph_is_reported_under_its_path():
     assert errors[f"{engine.name}.s.__loop_0__"]["type"] == "LoopLimitExceeded"
 
 
+@graph
+def no_loop():
+    s = counted(n=0)
+    f = finish(n=s["n"])
+    START >> s >> if_(s["done"] == True, f, max_iterations=3).else_(END)  # noqa: E712
+    f >> END
+
+
 def test_max_iterations_on_a_branch_that_closes_no_loop_is_refused():
     with pytest.raises(ValueError, match="max_iterations.*closes no loop"):
-
-        @graph
-        def no_loop():
-            s = counted(n=0)
-            f = finish(n=s["n"])
-            START >> s >> if_(s["done"] == True, f, max_iterations=3).else_(END)  # noqa: E712
-            f >> END
-
         Operon(no_loop)
 
 

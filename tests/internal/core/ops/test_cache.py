@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from operonx import graph
 from operonx.core import END, PARENT, START, GraphOp, Operon
 from operonx.core.ops import op
 
@@ -334,6 +335,18 @@ def _b_impl(x: int) -> dict:
     return {"r": f"B{x}"}
 
 
+@graph
+def ga(x):
+    c = _a_impl(x=x)
+    START >> c >> END
+
+
+@graph
+def gb(x):
+    c = _b_impl(x=x)
+    START >> c >> END
+
+
 class TestCacheKey:
     """The key is the graph, the op's code and its inputs — not its name.
 
@@ -345,18 +358,6 @@ class TestCacheKey:
     """
 
     async def test_cache_isolated_across_graphs_with_same_names(self):
-        from operonx import graph
-
-        @graph
-        def ga(x):
-            c = _a_impl(x=x)
-            START >> c >> END
-
-        @graph
-        def gb(x):
-            c = _b_impl(x=x)
-            START >> c >> END
-
         engine = Operon(ga, params={"x": None})
         r1 = (await engine.run(inputs={"x": 7}))["r"]
         engine = Operon(gb, params={"x": None})  # a different graph, same names

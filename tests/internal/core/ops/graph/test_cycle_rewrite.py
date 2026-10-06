@@ -240,27 +240,71 @@ class TestRewriteMechanics:
 # =========================================================================
 
 
+@op
+def inc(counter: int):
+    return {"counter": counter + 1}
+
+
+@op
+def pass_through(counter: int):
+    return {"counter": counter}
+
+
+@graph
+def cycling():
+    PARENT.declare(count=0)
+    tick = inc(counter=PARENT["count"], name="tick")
+    check = pass_through(counter=tick["counter"], name="check")
+    tick["counter"] >> PARENT["count"]
+    START >> tick >> if_(PARENT["count"] >= 3, END).else_(check)
+    check >> tick
+
+
+@op
+def gate(go: bool):
+    return {"go": go}
+
+
+@op
+def step(n: int):
+    return {"n": n + 1, "done": n + 1 >= 3}
+
+
+@op
+def finish(n: int = -1):
+    return {"result": n}
+
+
+@graph
+def flow(go):
+    PARENT.declare(n=0)
+    g = gate(go=go)
+    s = step(n=PARENT["n"])
+    s["n"] >> PARENT["n"]
+    f = finish(n=PARENT["n"])
+    START >> g >> if_(g["go"] == True, s).else_(f)  # noqa: E712
+    s >> if_(s["done"] == True, f).else_(s)  # noqa: E712
+    f >> END
+
+
+@op
+def spin(counter: int):
+    return {"counter": counter + 1}
+
+
+@graph
+def infinite():
+    PARENT.declare(count=0)
+    tick = spin(counter=PARENT["count"], name="tick")
+    tick["counter"] >> PARENT["count"]
+    START >> tick >> END
+    tick >> tick  # self-loop
+
+
 class TestSyntheticLoopTermination:
     async def test_loop_terminates_when_branch_takes_end(self):
         """The core happy path: branch inside the loop routes to END → back-
         edge source doesn't fire → outer scheduler terminates the loop."""
-
-        @op
-        def inc(counter: int):
-            return {"counter": counter + 1}
-
-        @op
-        def pass_through(counter: int):
-            return {"counter": counter}
-
-        @graph
-        def cycling():
-            PARENT.declare(count=0)
-            tick = inc(counter=PARENT["count"], name="tick")
-            check = pass_through(counter=tick["counter"], name="check")
-            tick["counter"] >> PARENT["count"]
-            START >> tick >> if_(PARENT["count"] >= 3, END).else_(check)
-            check >> tick
 
         g = cycling()
         result = await Operon(g).run(inputs={"count": 0})
@@ -293,29 +337,6 @@ class TestSyntheticLoopTermination:
         loop. It used to keep the entry's old name as its target, so the loop
         never started, nothing after it ran, and the run reported no error."""
 
-        @op
-        def gate(go: bool):
-            return {"go": go}
-
-        @op
-        def step(n: int):
-            return {"n": n + 1, "done": n + 1 >= 3}
-
-        @op
-        def finish(n: int = -1):
-            return {"result": n}
-
-        @graph
-        def flow(go):
-            PARENT.declare(n=0)
-            g = gate(go=go)
-            s = step(n=PARENT["n"])
-            s["n"] >> PARENT["n"]
-            f = finish(n=PARENT["n"])
-            START >> g >> if_(g["go"] == True, s).else_(f)  # noqa: E712
-            s >> if_(s["done"] == True, f).else_(s)  # noqa: E712
-            f >> END
-
         engine = Operon(flow, params={"go": None})
         out = await engine.run(inputs={"go": True})
         assert "$errors" not in out
@@ -326,18 +347,6 @@ class TestSyntheticLoopTermination:
     async def test_loop_respects_max_iterations_cap(self):
         """No exit path → the synthetic loop's max_iterations cap eventually
         stops it (default 1000 in the cycle_rewrite synthesizer)."""
-
-        @op
-        def spin(counter: int):
-            return {"counter": counter + 1}
-
-        @graph
-        def infinite():
-            PARENT.declare(count=0)
-            tick = spin(counter=PARENT["count"], name="tick")
-            tick["counter"] >> PARENT["count"]
-            START >> tick >> END
-            tick >> tick  # self-loop
 
         g = infinite()
         # Would loop forever without the cap. Run should return; count should
@@ -354,59 +363,68 @@ class TestSyntheticLoopTermination:
 # =========================================================================
 
 
+@op
+def turn(messages: list):
+    return {"messages": [f"turn_{len(messages) + 1}"]}
+
+
+@op
+def peek(messages: list):
+    return {"len": len(messages)}
+
+
+@graph
+def convo():
+    PARENT.declare(messages=[], reducers={"messages": add_messages})
+    t = turn(messages=PARENT["messages"], name="t")
+    p = peek(messages=PARENT["messages"], name="p")
+    t["messages"] >> PARENT["messages"]
+    START >> t >> if_(PARENT["messages"].len() >= 3, END).else_(p)
+    p >> t
+
+
+@graph
+def convo_simple():
+    PARENT.declare(messages=[], reducers={"messages": operator.add})
+    t = turn(messages=PARENT["messages"], name="t")
+    p = peek(messages=PARENT["messages"], name="p")
+    t["messages"] >> PARENT["messages"]
+    START >> t >> if_(PARENT["p_len"] >= 3, END).else_(p)  # placeholder cond
+    p >> t
+
+
+@op
+def add_one(counter: int, log: list):
+    return {"counter": counter + 1, "log": [f"iter_{counter + 1}"]}
+
+
+@op
+def noop(counter: int):
+    return {"counter": counter}
+
+
+@graph
+def accumulate():
+    PARENT.declare(count=0, log=[], reducers={"log": operator.add})
+    step = add_one(counter=PARENT["count"], log=PARENT["log"], name="step")
+    side = noop(counter=step["counter"], name="side")
+    step["counter"] >> PARENT["count"]
+    step["log"] >> PARENT["log"]
+    START >> step >> if_(PARENT["count"] >= 3, END).else_(side)
+    side >> step
+
+
 class TestReducerAcrossIterations:
     async def test_add_messages_accumulates_across_iters(self):
         """React-agent shape: `messages` reducer merges each iter's output
         into a shared list at DEFAULT_CONTEXT."""
 
-        @op
-        def turn(messages: list):
-            return {"messages": [f"turn_{len(messages) + 1}"]}
-
-        @op
-        def peek(messages: list):
-            return {"len": len(messages)}
-
-        @graph
-        def convo():
-            PARENT.declare(messages=[], reducers={"messages": add_messages})
-            t = turn(messages=PARENT["messages"], name="t")
-            p = peek(messages=PARENT["messages"], name="p")
-            t["messages"] >> PARENT["messages"]
-            START >> t >> if_(PARENT["messages"].len() >= 3, END).else_(p)
-            p >> t
-
         # add_messages needs id keys — turn simple strings won't work with
         # id-upsert semantics, but a plain list-append reducer via operator.add
         # matches the shape without complicating the test.
-        @graph
-        def convo_simple():
-            PARENT.declare(messages=[], reducers={"messages": operator.add})
-            t = turn(messages=PARENT["messages"], name="t")
-            p = peek(messages=PARENT["messages"], name="p")
-            t["messages"] >> PARENT["messages"]
-            START >> t >> if_(PARENT["p_len"] >= 3, END).else_(p)  # placeholder cond
-            p >> t
 
         # Simplified test — just ensure the reducer runs each iter without
         # clobbering. We hand-cap via a counter.
-        @op
-        def add_one(counter: int, log: list):
-            return {"counter": counter + 1, "log": [f"iter_{counter + 1}"]}
-
-        @op
-        def noop(counter: int):
-            return {"counter": counter}
-
-        @graph
-        def accumulate():
-            PARENT.declare(count=0, log=[], reducers={"log": operator.add})
-            step = add_one(counter=PARENT["count"], log=PARENT["log"], name="step")
-            side = noop(counter=step["counter"], name="side")
-            step["counter"] >> PARENT["count"]
-            step["log"] >> PARENT["log"]
-            START >> step >> if_(PARENT["count"] >= 3, END).else_(side)
-            side >> step
 
         g = accumulate()
         result = await Operon(g).run(inputs={"count": 0, "log": []})
@@ -486,48 +504,54 @@ class TestErrorCases:
 # =========================================================================
 
 
+@op
+def loop_gate():
+    return {"go": True}
+
+
+@op
+def a():
+    return {"x": 1}
+
+
+@op
+def b():
+    return {"x": 2}
+
+
+@op
+def merge(a_x: int = None, b_x: int = None):
+    return {"y": (a_x or 0) + (b_x or 0)}
+
+
+@op
+def tail(y: int):
+    return {"total": y}
+
+
+@graph
+def branchy():
+    PARENT.declare(count=0)
+    g = loop_gate(name="gate_branch_merge_inside_loop_body_gets_auto_softened")
+    a1 = a(name="a")
+    b1 = b(name="b")
+    m = merge(name="m", a_x=a1["x"], b_x=b1["x"])
+    t = tail(name="t", y=m["y"])
+    t["total"] >> PARENT["count"]
+    # Fan-out from gate_branch_merge_inside_loop_body_gets_auto_softened: a1 and b1 both fire; merge via m with auto-soft
+    # smoothing the double-pred wait. Branch decides continue vs END.
+    START >> g >> a1
+    g >> b1
+    a1 >> m
+    b1 >> m
+    m >> t
+    t >> if_(PARENT["count"] >= 2, END).else_(g)  # back-edge target = g
+
+
 class TestAutoSoftInteraction:
     async def test_branch_merge_inside_loop_body_gets_auto_softened(self):
         """A branch inside the SCC that fans back to a merge should still be
         handled by auto-soft after the SCC becomes a hidden loop body."""
-
-        @op
-        def gate():
-            return {"go": True}
-
-        @op
-        def a():
-            return {"x": 1}
-
-        @op
-        def b():
-            return {"x": 2}
-
-        @op
-        def merge(a_x: int = None, b_x: int = None):
-            return {"y": (a_x or 0) + (b_x or 0)}
-
-        @op
-        def tail(y: int):
-            return {"total": y}
-
-        @graph
-        def branchy():
-            PARENT.declare(count=0)
-            g = gate(name="gate")
-            a1 = a(name="a")
-            b1 = b(name="b")
-            m = merge(name="m", a_x=a1["x"], b_x=b1["x"])
-            t = tail(name="t", y=m["y"])
-            t["total"] >> PARENT["count"]
-            # Fan-out from gate: a1 and b1 both fire; merge via m with auto-soft
-            # smoothing the double-pred wait. Branch decides continue vs END.
-            START >> g >> a1
-            g >> b1
-            a1 >> m
-            b1 >> m
-            m >> t
-            t >> if_(PARENT["count"] >= 2, END).else_(g)  # back-edge target = g
 
         g = branchy()
         result = await Operon(g).run(inputs={"count": 0})

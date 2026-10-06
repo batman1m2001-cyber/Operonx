@@ -14,9 +14,21 @@ import asyncio
 import pytest
 
 from operonx.core import END, PARENT, START, GraphOp, Interrupt, Operon, op
+from operonx.core.ops.graph.graph_op import graph
 from operonx.core.ops.graph.task_scheduler import InterruptTargetError
 
 pytestmark = pytest.mark.unit
+
+
+@op
+def stopper(x: int):
+    return Interrupt(reason="child stops itself")
+
+
+@graph
+def child(x):
+    s = stopper(x=x)
+    START >> s >> END
 
 
 class TestSelfAtTheRootContext:
@@ -97,11 +109,6 @@ class TestSelfAtTheRootContext:
         """A subgraph's root ctx is also `("main",)`, but its sweep runs in
         its own scheduler and cannot reach the parent — bounded by
         construction rather than by the tuple, so SELF stays legal."""
-        from operonx.core.ops.graph.graph_op import graph
-
-        @op
-        def stopper(x: int):
-            return Interrupt(reason="child stops itself")
 
         @op
         async def slow_sibling(n: int) -> dict:
@@ -111,11 +118,6 @@ class TestSelfAtTheRootContext:
         @op
         def seed(n: int) -> dict:
             return {"x": n}
-
-        @graph
-        def child(x):
-            s = stopper(x=x)
-            START >> s >> END
 
         with GraphOp(name="nested_exempt") as g:
             sd = seed(n=PARENT["n"])
