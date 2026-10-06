@@ -24,7 +24,46 @@ def seed(n: int = 0) -> dict:
     return {"n": n}
 
 
-def _graph_with_child(ran: list):
+#: What ran, in order; cleared per test.
+RAN = []
+
+
+@pytest.fixture(autouse=True)
+def _fresh_ran():
+    RAN.clear()
+
+
+@op
+def inner(n: int = 0) -> dict:
+    RAN.append("inner")
+    return {"doubled": n * 2}
+
+
+@graph
+def child(n: int = 0):
+    i = inner(n=n)
+    START >> i >> END
+
+
+@op
+def inner_one() -> dict:
+    RAN.append("inner")
+    return {"a": 1}
+
+
+@graph
+def child_one():
+    i = inner_one()
+    START >> i >> END
+
+
+@op
+def after(a=None) -> dict:
+    RAN.append("after")
+    return {"out": a}
+
+
+def _graph_with_child():
     """A parent with one nested subgraph. Returns `(parent, child_node)`.
 
     The child is composed *inside* the parent's context, which is how a
@@ -32,16 +71,6 @@ def _graph_with_child(ran: list):
     `with` block leaves the parent with an edge to something it does not
     contain.
     """
-
-    @op
-    def inner(n: int = 0) -> dict:
-        ran.append("inner")
-        return {"doubled": n * 2}
-
-    @graph
-    def child(n: int = 0):
-        i = inner(n=n)
-        START >> i >> END
 
     with GraphOp(name="parent") as parent:
         s = seed(n=1)
@@ -54,8 +83,8 @@ def _graph_with_child(ran: list):
 class TestDisabledSubgraph:
     def test_its_ops_do_not_run(self):
         """The bug: the subgraph reported nothing and ran everything."""
-        ran = []
-        parent, child = _graph_with_child(ran)
+        ran = RAN
+        parent, child = _graph_with_child()
         child.enabled = False
         import asyncio
 
@@ -63,8 +92,8 @@ class TestDisabledSubgraph:
         assert ran == [], "a disabled subgraph must not execute its children"
 
     def test_enabled_by_default(self):
-        ran = []
-        parent, _child = _graph_with_child(ran)
+        ran = RAN
+        parent, _child = _graph_with_child()
         import asyncio
 
         asyncio.run(Operon(parent).run(inputs={"n": 1}))
@@ -72,8 +101,8 @@ class TestDisabledSubgraph:
 
     def test_re_enabling_works(self):
         """The flag is flipped per run by consumers; it must not latch."""
-        ran = []
-        parent, child = _graph_with_child(ran)
+        ran = RAN
+        parent, child = _graph_with_child()
         child.enabled = False
         import asyncio
 
@@ -84,8 +113,8 @@ class TestDisabledSubgraph:
 
     def test_the_rest_of_the_graph_still_runs(self):
         """Disabling one stage must not take the whole run down with it."""
-        ran = []
-        parent, child = _graph_with_child(ran)
+        ran = RAN
+        parent, child = _graph_with_child()
         child.enabled = False
         import asyncio
 
@@ -131,24 +160,9 @@ class TestDisabledDoesNotStallTheGraph:
     Two defects cancelling out.
     """
 
-    def _chain(self, ran: list):
-        @op
-        def inner() -> dict:
-            ran.append("inner")
-            return {"a": 1}
-
-        @graph
-        def child():
-            i = inner()
-            START >> i >> END
-
-        @op
-        def after(a=None) -> dict:
-            ran.append("after")
-            return {"out": a}
-
+    def _chain(self):
         with GraphOp(name="g") as g:
-            c = child(name="child")
+            c = child_one(name="child")
             s = after(a=c["a"])
             START >> c >> s >> END
         return g, g._ops["child"]
@@ -156,8 +170,8 @@ class TestDisabledDoesNotStallTheGraph:
     def test_the_successor_still_runs(self):
         import asyncio
 
-        ran = []
-        g, child = self._chain(ran)
+        ran = RAN
+        g, child = self._chain()
         child.enabled = False
         out = asyncio.run(Operon(g).run(inputs={}))
         assert "after" in ran, "a disabled op must not block what comes next"
@@ -168,8 +182,8 @@ class TestDisabledDoesNotStallTheGraph:
         """Absent, not stale: nothing was written, so nothing is read."""
         import asyncio
 
-        ran = []
-        g, child = self._chain(ran)
+        ran = RAN
+        g, child = self._chain()
         child.enabled = False
         out = asyncio.run(Operon(g).run(inputs={}))
         assert out.get("out") is None

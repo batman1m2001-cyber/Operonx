@@ -73,15 +73,12 @@ def two_collects_off_one_stream(n):
     [c, k] >> END
 
 
-def into_a_cell(sub):
-    @graph
-    def outer(n):
-        PARENT.declare(log=[], reducers={"log": append})
-        s = sub(n=n)
-        s["out"] >> PARENT["log"]
-        START >> s >> END
-
-    return outer
+@graph
+def into_a_cell(n, sub):
+    PARENT.declare(log=[], reducers={"log": append})
+    s = sub(n=n)
+    s["out"] >> PARENT["log"]
+    START >> s >> END
 
 
 @pytest.mark.parametrize(
@@ -94,7 +91,7 @@ def into_a_cell(sub):
     ids=["from_the_generator", "behind_a_parallel_op", "two_collects_off_one_stream"],
 )
 async def test_written_into_a_reducer_cell_once(sub, expected):
-    built = into_a_cell(sub)(n=None)
+    built = into_a_cell(n=None, sub=sub)
     out = await Operon(built).run(inputs={"n": 3})
     assert "$errors" not in out
     assert out["$state"][built.full_name, "log"] == expected

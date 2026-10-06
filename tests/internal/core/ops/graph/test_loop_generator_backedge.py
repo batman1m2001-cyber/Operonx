@@ -96,6 +96,29 @@ def g_generator_yielding_nothing_terminates():
     gen >> d >> s
 
 
+#: The lists ``gather`` received, cleared by its test.
+GATHERED = []
+
+
+@op
+def gather(values=None) -> dict:
+    GATHERED.append(values)
+    return {"n": len(values or [])}
+
+
+@graph
+def collect_loop():
+    PARENT.declare(count=0, done=False)
+    s = step(count=PARENT["count"])
+    s["count"] >> PARENT["count"]
+    s["done"] >> PARENT["done"]
+    gen = emit_items(n=s["width"])
+    d = double(item=gen["item"].parallel(max=4))
+    got = gather(values=d["doubled"].collect())
+    START >> s >> if_(s["done"] == True, END).else_(gen)  # noqa: E712
+    gen >> d >> got >> s
+
+
 class TestLoopWithGeneratorInside:
     async def _run(self, build):
         built = build()
@@ -105,33 +128,15 @@ class TestLoopWithGeneratorInside:
     @pytest.mark.asyncio
     async def test_collect_consumer_as_backedge_source_iterates(self):
         """The ReAct shape: fan out, collect, loop back."""
-        seen = []
-
-        @op
-        def gather(values=None) -> dict:
-            seen.append(values)
-            return {"n": len(values or [])}
-
-        @graph
-        def g():
-            PARENT.declare(count=0, done=False)
-            s = step(count=PARENT["count"])
-            s["count"] >> PARENT["count"]
-            s["done"] >> PARENT["done"]
-            gen = emit_items(n=s["width"])
-            d = double(item=gen["item"].parallel(max=4))
-            got = gather(values=d["doubled"].collect())
-            START >> s >> if_(s["done"] == True, END).else_(gen)  # noqa: E712
-            gen >> d >> got >> s
-
-        built, result = await self._run(g)
+        GATHERED.clear()
+        built, result = await self._run(collect_loop)
         assert result["$state"][built.full_name, "count"] == 3, (
             "loop must iterate to its exit condition, not stop after one pass"
         )
         # `collect()` behind a per-item op waits for the whole stream: the
         # consumer runs once per dispatching iteration with both items.
         # (It used to run once per item with a one-element list.)
-        assert seen == [[0, 2], [0, 2]]
+        assert GATHERED == [[0, 2], [0, 2]]
 
     @pytest.mark.asyncio
     async def test_parallel_consumer_as_backedge_source_iterates(self):

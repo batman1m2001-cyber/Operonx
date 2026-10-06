@@ -32,27 +32,24 @@ def read(v: str = None, acc: list = None) -> dict:
     return {"final_v": v, "final_acc": acc}
 
 
-def _p2(**declare):
-    @graph
-    def g_par(d1, d2):
-        PARENT.declare(v=None, acc=[], reducers={"acc": operator.add}, **declare)
-        a, b = w_fast(d=d1), w_slow(d=d2)
-        a["v"] >> PARENT["v"]
-        b["v"] >> PARENT["v"]
-        a["acc"] >> PARENT["acc"]
-        b["acc"] >> PARENT["acc"]
-        r = read(v=PARENT["v"], acc=PARENT["acc"])
-        START >> [a, b]
-        a >> r
-        b >> r
-        r >> END
-
-    return g_par
+@graph
+def g_par(d1, d2, allow_race=False):
+    PARENT.declare(v=None, acc=[], reducers={"acc": operator.add}, allow_race=allow_race)
+    a, b = w_fast(d=d1), w_slow(d=d2)
+    a["v"] >> PARENT["v"]
+    b["v"] >> PARENT["v"]
+    a["acc"] >> PARENT["acc"]
+    b["acc"] >> PARENT["acc"]
+    r = read(v=PARENT["v"], acc=PARENT["acc"])
+    START >> [a, b]
+    a >> r
+    b >> r
+    r >> END
 
 
 def test_build_rejects_concurrent_writers():
     with pytest.raises(GraphValidationError) as caught:
-        Operon(_p2(), params={"d1": None, "d2": None})
+        Operon(g_par, params={"d1": None, "d2": None})
     text = str(caught.value)
     assert "cell 'v'" in text and "'w_fast'" in text and "'w_slow'" in text
     assert "allow_race=True" in text and "reducers=" in text
@@ -60,15 +57,15 @@ def test_build_rejects_concurrent_writers():
 
 
 async def test_allow_race_opts_out():
-    engine = Operon(_p2(allow_race=True), params={"d1": None, "d2": None})
+    engine = Operon(g_par(d1=None, d2=None, allow_race=True))
     out = await engine.run({"d1": 0.0, "d2": 0.01})
     assert out["final_v"] == "slow"
-    Operon(_p2(allow_race=["v"]), params={"d1": None, "d2": None})
+    Operon(g_par(d1=None, d2=None, allow_race=["v"]))
 
 
 def test_allow_race_names_are_checked():
     with pytest.raises(ValueError, match="undeclared"):
-        Operon(_p2(allow_race=["nope"]), params={"d1": None, "d2": None})
+        Operon(g_par(d1=None, d2=None, allow_race=["nope"]))
 
 
 @graph
