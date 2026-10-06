@@ -159,6 +159,52 @@ def relay(item: str = "") -> dict:
     return {"reply": f"{item}!"}
 
 
+#: What the last op of a chain received; cleared per run.
+COLLECTED = []
+
+
+@op(bound="io")
+async def collect_reply(reply=None) -> dict:
+    COLLECTED.append(reply)
+    return {}
+
+
+@graph
+def three_op_chain(n=0):
+    a = produce(n=n)
+    b = relay(item=a["item"])
+    c = collect_reply(reply=b["reply"])
+    START >> a >> b >> c >> END
+
+
+@op(bound="sync")
+def pass_sync(item=None) -> dict:
+    return {"out": item}
+
+
+@op(bound="io")
+async def pass_io(item=None) -> dict:
+    await asyncio.sleep(0)
+    return {"out": item}
+
+
+MIDDLES = {"sync": pass_sync, "io": pass_io}
+
+
+@op(bound="io")
+async def collect_out(out=None) -> dict:
+    COLLECTED.append(out)
+    return {}
+
+
+@graph
+def bound_chain(n=0, middle=None):
+    a = produce(n=n)
+    b = middle(item=a["item"])
+    c = collect_out(out=b["out"])
+    START >> a >> b >> c >> END
+
+
 @pytest.mark.asyncio
 async def test_transient_survives_a_three_op_chain():
     """A parked sequential consumer must not have its context freed.
@@ -170,21 +216,8 @@ async def test_transient_survives_a_three_op_chain():
     invisible to the release guard. The context was freed underneath them
     and every item after the first arrived as None.
     """
-    seen = []
-
-    @op(bound="io")
-    async def collect(reply=None) -> dict:
-        seen.append(reply)
-        return {}
-
-    @graph
-    def chain(n=0):
-        a = produce(n=n)
-        b = relay(item=a["item"])
-        c = collect(reply=b["reply"])
-        START >> a >> b >> c >> END
-
-    engine = Operon(chain, params={"n": None})
+    seen = COLLECTED
+    engine = Operon(three_op_chain, params={"n": None})
     for count in (3, 50):
         seen.clear()
         handle = engine.start(inputs={"n": count})
@@ -208,33 +241,8 @@ async def test_transient_survives_whatever_the_consumer_is_bound_to(mid_bound):
     Parametrised because a suite that only ever wrote `sync` middles is
     exactly how this survived being found twice.
     """
-    seen = []
-
-    if mid_bound == "sync":
-
-        @op(bound="sync")
-        def relay(item=None) -> dict:
-            return {"out": item}
-    else:
-
-        @op(bound="io")
-        async def relay(item=None) -> dict:
-            await asyncio.sleep(0)
-            return {"out": item}
-
-    @op(bound="io")
-    async def collect(out=None) -> dict:
-        seen.append(out)
-        return {}
-
-    @graph
-    def chain(n=0):
-        a = produce(n=n)
-        b = relay(item=a["item"])
-        c = collect(out=b["out"])
-        START >> a >> b >> c >> END
-
-    engine = Operon(chain, params={"n": None})
+    seen = COLLECTED
+    engine = Operon(bound_chain(n=None, middle=MIDDLES[mid_bound]))
     for count in (1, 3, 40):
         seen.clear()
         handle = engine.start(inputs={"n": count})
@@ -246,26 +254,26 @@ async def test_transient_survives_whatever_the_consumer_is_bound_to(mid_bound):
 
 
 @op(bound="io", transient=True)
-async def produce_the_release_guard_did_not_become_a_no_op(n: int = 0):
+async def produce_blobs(n: int = 0):
     for _ in range(n):
         yield {"blob": bytes(4096)}
 
 
 @op(bound="io")
-async def relay_the_release_guard_did_not_become_a_no_op(blob=None) -> dict:
+async def relay_blob(blob=None) -> dict:
     return {"out": blob}
 
 
 @op(bound="io")
-async def collect(out=None) -> dict:
+async def measure(out=None) -> dict:
     return {"size": len(out or b"")}
 
 
 @graph
-def chain(n=0):
-    a = produce_the_release_guard_did_not_become_a_no_op(n=n)
-    b = relay_the_release_guard_did_not_become_a_no_op(blob=a["blob"])
-    c = collect(out=b["out"])
+def blob_chain(n=0):
+    a = produce_blobs(n=n)
+    b = relay_blob(blob=a["blob"])
+    c = measure(out=b["out"])
     START >> a >> b >> c >> END
 
 
@@ -279,7 +287,7 @@ async def test_the_release_guard_did_not_become_a_no_op():
     count grows by two orders of magnitude.
     """
 
-    engine = Operon(chain, params={"n": None})
+    engine = Operon(blob_chain, params={"n": None})
 
     def entries(state):
         total = 0
