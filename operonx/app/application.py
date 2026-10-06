@@ -31,7 +31,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from .declare import (
     describe_job,
-    describe_jobspec,
     describe_service,
     graph_refs,
     load_declared,
@@ -87,7 +86,7 @@ class Application:
     ):
         if isinstance(manifest, Manifest):
             self.manifest = manifest
-            self._jobs: Optional[Dict[str, Any]] = None
+            self._jobs: Dict[str, Any] = {}
         else:
             here = Path(inspect.stack()[1].filename).resolve().parent
             base = Path(root).resolve() if root else project_root(here)
@@ -169,7 +168,8 @@ class Application:
 
     @property
     def jobs(self) -> List[Any]:
-        """The jobs — declared, or built once from ``[[job]]`` — tracing where the app says."""
+        """The declared jobs, tracing where the application says, each
+        recording under the project's jobs folder unless told otherwise."""
         self.bootstrap()
         self._jobs = settle_jobs(self._jobs, self.manifest, self.root)
         return list(self._jobs.values())
@@ -219,7 +219,7 @@ class Application:
         return build_app(tuple(specs), on_startup=self.manifest.on_startup, startup=startup)
 
     async def run(self, name: str, *, resume: bool = False) -> Any:
-        """Run a job or runbook once and return its record."""
+        """Run a job once and return its record."""
         check_sinks(self.name, jobs=[self.job(name)])  # before the first item, not in it
         return await self.job(name).run(resume=resume)
 
@@ -232,10 +232,7 @@ class Application:
         """The three lists as plain data: what ``--list`` and the studio read.
         Names of things only; a TOML application is described without
         importing the project."""
-        if self.manifest.jobs:
-            jobs = [describe_jobspec(j, self.manifest) for j in self.manifest.jobs]
-        else:
-            jobs = [describe_job(j, self.manifest) for j in (self._jobs or {}).values()]
+        jobs = [describe_job(j, self.manifest) for j in self._jobs.values()]
         return {
             "name": self.name,
             "root": str(self.root),
@@ -255,5 +252,5 @@ class Application:
     def __repr__(self) -> str:
         return (
             f"Application({self.name!r}, graphs={len(self.graphs)}, "
-            f"services={len(self.services)}, jobs={len(self.jobs) if self._jobs else len(self.manifest.jobs)})"
+            f"services={len(self.services)}, jobs={len(self._jobs)})"
         )

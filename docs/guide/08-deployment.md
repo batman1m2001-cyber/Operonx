@@ -77,18 +77,13 @@ kind  = "asgi"
 path  = "/"
 port  = 9923
 app   = "app.serve.admin:app"
-
-[[job]]
-name     = "nightly"
-runbook  = "app.jobs.nightly:nightly"
-schedule = "0 3 * * *"
 ```
 
 ```bash
 pip install "operonx[serve]"
 operonx serve --list          # what would run, and where
 operonx serve                 # every listener, each with its workers
-operonx run --list            # every job, with its schedule
+operonx run --list            # every job of the application (declared in Python)
 operonx run nightly           # what the deployment's cron calls
 ```
 

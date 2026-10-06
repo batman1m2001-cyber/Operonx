@@ -79,8 +79,6 @@ STREAM_KINDS = frozenset({"websocket", "file", "queue"})
 #: how failures map to a response, and when the run ends.
 SESSION_MODES = frozenset({"per_request", "per_connection", "per_message"})
 
-#: How many runs a job mints: one per item, or one fed every item.
-JOB_SESSION_MODES = frozenset({"per_item", "stream"})
 
 #: How a door reads what its caller sends (``codec =``): ``"json"`` decodes
 #: every body and text frame, ``"text"`` passes text through. Bytes frames
@@ -246,58 +244,6 @@ class ServeSpec:
 
 
 @dataclass(frozen=True)
-class JobSpec:
-    """A `[[job]]` block: work put into a graph from a source, not a listener.
-
-    The `[[serve]]` of batch work. Names the graph, where items come from
-    (a ``source:`` resource key or a path relative to the manifest), where
-    results go, which item field is its identity, and how the run behaves.
-    ``operonx run <name>`` runs it; ``schedule`` is cron text for whatever
-    calls that — recorded and listed, never executed here.
-
-    ::
-
-        [[job]]
-        name        = "score_calls"
-        graph       = "pipeline.score:score_call"
-        source      = "source:calls_today"
-        sink        = "sink:scores"
-        key         = "call_id"
-        concurrency = 8
-        on_error    = "skip"
-        schedule    = "0 2 * * *"
-
-    ``on_error`` takes what ``Job(on_error=...)`` takes, with the same
-    meaning: ``"skip"`` (the default), ``"stop"``, ``"retry:N"`` or
-    ``"record"``.
-
-    A block naming ``runbook = "module:attr"`` instead of ``graph`` runs
-    a `Runbook` — many jobs, one command — and takes only ``name``,
-    ``schedule``, ``record_dir`` and ``description`` beside it.
-    """
-
-    name: str
-    graph: str = ""
-    runbook: Optional[str] = None
-    source: Optional[str] = None
-    sink: Optional[str] = None
-    key: Optional[str] = None
-    session: str = "per_item"
-    concurrency: int = 4
-    on_error: str = "skip"
-    #: ``None`` when the block has no ``trace`` key; ``()`` is "trace nothing".
-    trace: Optional[Tuple[str, ...]] = None
-    inputs: Dict[str, Any] = field(default_factory=dict)
-    item_input: Optional[str] = None
-    item_timeout: Optional[float] = None
-    max_inflight: Optional[int] = None
-    schedule: Optional[str] = None
-    record_dir: Optional[str] = None
-    description: str = ""
-    options: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
 class Manifest:
     """A parsed, validated `operonx.toml`."""
 
@@ -308,7 +254,6 @@ class Manifest:
     resources_overlay: Optional[str]
     source: Optional[Path]
     on_startup: Tuple[Any, ...] = ()
-    jobs: Tuple[JobSpec, ...] = ()
     # `[project] src = ["src"]`: the import roots, relative to `root`.
     # A project that keeps its packages under `src/` says so once here
     # instead of in every entry point.
@@ -320,6 +265,9 @@ class Manifest:
     tracing: Any = None
     #: ``[[queue]]``: review queues (`operonx.app.evals.queues.QueueSpec`).
     queues: Tuple[Any, ...] = ()
+    #: ``[jobs] dir``: where the application's jobs record their runs,
+    #: relative to the root (default ``.operonx/jobs``).
+    jobs_dir: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -345,13 +293,6 @@ class Manifest:
                 return spec
         known = ", ".join(s.name for s in self.serves) or "none"
         raise ManifestError(f"no serve entry named {name!r} (have: {known})")
-
-    def job(self, name: str) -> JobSpec:
-        for spec in self.jobs:
-            if spec.name == name:
-                return spec
-        known = ", ".join(j.name for j in self.jobs) or "none"
-        raise ManifestError(f"no job named {name!r} (have: {known})")
 
     def listeners(self) -> Dict[Tuple[str, int], Tuple[ServeSpec, ...]]:
         """Endpoints grouped onto the servers that will carry them."""
@@ -453,21 +394,19 @@ class Manifest:
                 )
         serves = settle_serves(serves, project.get("trace"), tracing)
 
-        jobs = tuple(_job_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("job"))))
-        seen_jobs: Dict[str, int] = {}
-        for i, j in enumerate(jobs):
-            if j.name in seen_jobs:
-                raise ManifestError(
-                    f"{where}: [[job]] #{seen_jobs[j.name]} and #{i} are both named {j.name!r}"
-                )
-            seen_jobs[j.name] = i
+        if raw.get("job"):
+            raise ManifestError(
+                f"{where}: [[job]] blocks are gone (operonx 1.17): declare each Job or Eval "
+                "in Python, in app/main.py, and list it in Application(jobs=[...])"
+            )
         if app_entry is None:
-            # With `app =` the services and jobs are the object's, checked
-            # when it is loaded (`load_declared`). A runbook's members are
-            # known only once it is imported: checked when jobs are built.
-            complete = not any(j.runbook for j in jobs)
-            check_names(tracing, where, serves, [j.name for j in jobs] if complete else None)
+            # With `app =` the services are the object's, checked when it is
+            # loaded (`load_declared`).
+            check_names(tracing, where, serves, [])
         queues = _queue_specs(_as_list(raw.get("queue")), where)
+        jobs_table = raw.get("jobs") or {}
+        if not isinstance(jobs_table, dict) or set(jobs_table) - {"dir"}:
+            raise ManifestError(f'{where}: [jobs] takes one key, dir = "<folder>"')
 
         return cls(
             project=project,
@@ -477,10 +416,10 @@ class Manifest:
             resources_overlay=overlay,
             source=source,
             on_startup=on_startup,
-            jobs=jobs,
             src=src,
             tracing=tracing,
             queues=queues,
+            jobs_dir=str(jobs_table["dir"]) if jobs_table.get("dir") else None,
         )
 
 
@@ -714,211 +653,6 @@ def _serve_spec(block: Any, where: str, index: int) -> ServeSpec:
         trace_own=trace_own,
         trace_from="service" if trace_own is not None else "default",
     )
-
-
-def _job_spec(block: Any, where: str, index: int) -> JobSpec:
-    if not isinstance(block, dict):
-        raise ManifestError(f"{where}: [[job]] #{index} is not a table")
-    name = str(block.get("name") or "").strip()
-    if not name:
-        raise ManifestError(f"{where}: [[job]] #{index} has no `name`")
-    label = f"[[job]] {name!r}"
-
-    graph = str(block.get("graph") or "")
-    runbook = str(block.get("runbook") or "")
-    if runbook:
-        if graph:
-            raise ManifestError(f"{where}: {label} names both `graph` and `runbook`")
-        if not _ENTRY_RE.match(runbook):
-            raise ManifestError(
-                f"{where}: {label} runbook {runbook!r} is not a `module:attr` entry point"
-            )
-        stray = sorted(
-            k
-            for k in block
-            if k not in {"name", "runbook", "schedule", "record_dir", "description"}
-        )
-        if stray:
-            raise ManifestError(
-                f"{where}: {label} is a runbook and cannot set {', '.join(stray)} — "
-                "its jobs declare those"
-            )
-        return JobSpec(
-            name=name,
-            runbook=runbook,
-            schedule=(str(block["schedule"]) if block.get("schedule") else None),
-            record_dir=(str(block["record_dir"]) if block.get("record_dir") else None),
-            description=str(block.get("description") or ""),
-        )
-    online = "runs" in block
-    if online:
-        _check_online(block, where, label)
-    elif not graph:
-        raise ManifestError(f"{where}: {label} has no `graph` (or `runbook`, or `runs`)")
-    if graph and not _ENTRY_RE.match(graph):
-        raise ManifestError(
-            f"{where}: {label} graph {graph!r} is not a `module:function` entry point"
-        )
-
-    item_timeout = block.get("item_timeout")
-    if item_timeout is not None and (
-        isinstance(item_timeout, bool)
-        or not isinstance(item_timeout, (int, float))
-        or item_timeout <= 0
-    ):
-        raise ManifestError(
-            f"{where}: {label} has item_timeout={item_timeout!r}; expected seconds, > 0"
-        )
-
-    session = str(block.get("session") or "per_item")
-    if session not in JOB_SESSION_MODES:
-        raise ManifestError(
-            f"{where}: {label} has session {session!r}; expected one of "
-            f"{', '.join(sorted(JOB_SESSION_MODES))}"
-        )
-
-    concurrency = block.get("concurrency", 4)
-    if not isinstance(concurrency, int) or isinstance(concurrency, bool) or concurrency < 1:
-        raise ManifestError(
-            f"{where}: {label} has concurrency={concurrency!r}; expected a positive integer"
-        )
-
-    # The Job's own parser, not a second pattern here: this block becomes a
-    # `Job`, and the two vocabularies had drifted — `record` was refused
-    # here and accepted by `Job(...)`, while `retry:0` passed here and
-    # failed only when the job was built to run. Imported at call time:
-    # the jobs package imports the serve layer, which reads manifests.
-    from operonx.app.jobs.runner import parse_on_error
-
-    on_error = str(block.get("on_error") or "skip").strip().lower()
-    try:
-        parse_on_error(on_error)
-    except ValueError as e:
-        raise ManifestError(f"{where}: {label} has an invalid on_error: {e}") from None
-
-    max_inflight = block.get("max_inflight")
-    if max_inflight is not None and (not isinstance(max_inflight, int) or max_inflight < 1):
-        raise ManifestError(
-            f"{where}: {label} has max_inflight={max_inflight!r}; expected a positive integer"
-        )
-
-    inputs = block.get("inputs") or {}
-    if not isinstance(inputs, dict):
-        raise ManifestError(f"{where}: {label} `inputs` must be a table")
-
-    known_keys = {
-        "name",
-        "graph",
-        "runbook",
-        "source",
-        "sink",
-        "key",
-        "session",
-        "concurrency",
-        "on_error",
-        "trace",
-        "inputs",
-        "item_input",
-        "item_timeout",
-        "max_inflight",
-        "schedule",
-        "record_dir",
-        "description",
-    }
-    options = {k: v for k, v in block.items() if k not in known_keys}
-    eval_keys = ("dataset", "evaluators", "threshold", "repeats", "cluster", "gate", "scores")
-    if options.get("dataset") is not None:
-        # an eval: `operonx.app.evals.Eval.from_spec` reads these
-        if not isinstance(options.get("evaluators", []), list):
-            raise ManifestError(f"{where}: {label} `evaluators` must be a list of module:attr")
-        repeats = options.get("repeats", 1)
-        if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
-            raise ManifestError(
-                f"{where}: {label} has repeats={repeats!r}; expected a positive integer"
-            )
-        if not isinstance(options.get("gate", {}), dict):
-            raise ManifestError(f"{where}: {label} `gate` must be a table ([job.gate])")
-        scores = options.get("scores")
-        if scores is not None and not (
-            isinstance(scores, str) and scores.startswith("score_store:")
-        ):
-            raise ManifestError(
-                f"{where}: {label} has scores={scores!r}; expected a 'score_store:<name>' key"
-            )
-    unread = {
-        k: v
-        for k, v in options.items()
-        if not (options.get("dataset") is not None and k in eval_keys)
-        and not (online and k in ONLINE_KEYS)
-    }
-    if unread:
-        # Kept, for tools that read their own keys — but a Job ignores them,
-        # so a typo like `concurency = 8` would otherwise do nothing, quietly.
-        import warnings
-
-        warnings.warn(
-            f"{where}: {label} has keys a Job does not read: {sorted(unread)} "
-            f"(Job settings: {sorted(known_keys)})",
-            stacklevel=2,
-        )
-
-    def _opt(key: str) -> Optional[str]:
-        value = block.get(key)
-        return str(value) if value not in (None, "") else None
-
-    return JobSpec(
-        name=name,
-        graph=graph,
-        source=_opt("source"),
-        sink=_opt("sink"),
-        key=_opt("key"),
-        session=session,
-        concurrency=concurrency,
-        on_error=on_error,
-        trace=(tuple(str(t) for t in _as_list(block["trace"])) if "trace" in block else None),
-        inputs=dict(inputs),
-        item_input=_opt("item_input"),
-        item_timeout=(float(item_timeout) if item_timeout is not None else None),
-        max_inflight=max_inflight,
-        schedule=_opt("schedule"),
-        record_dir=_opt("record_dir"),
-        description=str(block.get("description") or ""),
-        options=options,
-    )
-
-
-#: The keys of an online eval's ``[[job]]`` block (``runs = {…}`` makes one).
-ONLINE_KEYS = (
-    "runs",
-    "store",
-    "evaluators",
-    "scores",
-    "sample",
-    "target",
-    "budget_usd_per_day",
-    "queue",
-)
-
-
-def _check_online(block: Dict[str, Any], where: str, label: str) -> None:
-    """An online eval's block (`operonx.app.evals.OnlineEval.from_spec` reads it)."""
-    if block.get("graph") or block.get("dataset"):
-        raise ManifestError(
-            f"{where}: {label} has `runs`, so it judges stored runs: it takes no "
-            "`graph` and no `dataset`"
-        )
-    if not isinstance(block["runs"], dict):
-        raise ManifestError(f"{where}: {label} `runs` is a table of run filters (origin, name…)")
-    for key, prefix in (("store", "run_store:"), ("scores", "score_store:")):
-        value = block.get(key)
-        if not (isinstance(value, str) and value.startswith(prefix)):
-            raise ManifestError(f"{where}: {label} needs {key} = '{prefix}<name>'; got {value!r}")
-    evaluators = block.get("evaluators")
-    if not isinstance(evaluators, list) or not evaluators:
-        raise ManifestError(f"{where}: {label} `evaluators` is a non-empty list of module:attr")
-    queue = block.get("queue")
-    if queue is not None and not isinstance(queue, dict):
-        raise ManifestError(f"{where}: {label} `queue` is a table: {{to = '<queue>', …}}")
 
 
 def _queue_specs(blocks: List[Any], where: str) -> Tuple[Any, ...]:

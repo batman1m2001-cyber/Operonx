@@ -244,15 +244,6 @@ class Gate:
             names |= set(self.metrics)
         return sorted(names)
 
-    @classmethod
-    def from_options(cls, options: Mapping[str, Any]) -> "Gate":
-        """A Gate from a manifest's ``[job.gate]`` table."""
-        known = {f for f in cls.__dataclass_fields__}
-        unknown = sorted(set(options) - known)
-        if unknown:
-            raise ValueError(f"[job.gate] has keys a Gate does not read: {unknown}")
-        return cls(**dict(options))
-
     def describe(self) -> Dict[str, Any]:
         out = {
             "threshold": self.threshold,

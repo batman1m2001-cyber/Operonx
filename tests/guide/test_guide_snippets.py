@@ -26,6 +26,9 @@ from pathlib import Path
 
 import pytest
 
+# One child interpreter per snippet: about a minute. Run with -m slow.
+pytestmark = pytest.mark.slow
+
 GUIDE = Path(__file__).resolve().parents[2] / "operonx" / "guide"
 FENCE = re.compile(r"^```(\w+)([^\n]*)\n(.*?)^```\s*$", re.S | re.M)
 PAGES = sorted(GUIDE.glob("*.md"))

@@ -20,7 +20,7 @@ index or a concept graph runs the same graph: those steps have nothing to do.
 
 :func:`ingest_document` is the per-document graph (``item``, ``collection``,
 ``catalog``, ``blobs`` → ``result``); :func:`ingest_flow` wraps it in doors, so
-the same pipeline runs as a ``Job`` over a ``DirSource`` or behind a
+the same pipeline runs as a ``Job`` over a folder's files or behind a
 ``webhook``/``http`` service.
 """
 

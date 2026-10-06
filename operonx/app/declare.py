@@ -383,7 +383,6 @@ def manifest_from(
         resources_overlay=overlay,
         source=None,
         on_startup=tuple(on_startup),
-        jobs=(),
         src=tuple(src),
         base=root,
     )
@@ -417,28 +416,15 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
 
 
 def describe_job(job: Any, manifest: Any = None) -> Dict[str, Any]:
-    """A `Job` or `Runbook` object as the same plain data a ``[[job]]``
-    block describes to; with the application's *manifest*, the sinks it
-    will use as ``[tracing]`` and the application's default decide."""
+    """A `Job` (or `Eval`) as plain data, for ``--list`` and the studio;
+    with the application's *manifest*, the sinks it will use as
+    ``[tracing]`` and the application's default decide."""
     trace, tracing = _app_tracing(manifest)
-    if _is_runbook(job):
-        sinks, source = _job_sinks(job.name, None, trace, tracing)
-        return {
-            "name": job.name,
-            "kind": "runbook",
-            "graph": None,
-            # its wiring, the way it was written: `a >> [b, c] ; c >> d`
-            "runbook": " ; ".join(job.tree().splitlines()),
-            "session": None,
-            "source": None,
-            "sink": None,
-            "schedule": getattr(job, "schedule", None),
-            "description": getattr(job, "description", "") or "",
-            "sinks": sinks,
-            "sinks_from": source,
-        }
-    sinks, source = _job_sinks(job.name, _declared_trace(job), trace, tracing)
     d = job.describe()
+    if job.steps is not None:
+        sinks, source = _job_sinks(job.name, None, trace, tracing)
+    else:
+        sinks, source = _job_sinks(job.name, _declared_trace(job), trace, tracing)
     return {
         **(
             {k: d.get(k) for k in ("dataset", "evaluators", "threshold")}
@@ -448,11 +434,10 @@ def describe_job(job: Any, manifest: Any = None) -> Dict[str, Any]:
         "name": job.name,
         "kind": d.get("kind") or "job",
         "graph": d.get("graph"),
-        "runbook": None,
-        "session": d.get("session"),
-        "source": d.get("source"),
-        "sink": d.get("sink"),
-        "schedule": d.get("schedule"),
+        "steps": d.get("steps"),
+        "items": d.get("items"),
+        "key": d.get("key"),
+        "reduce": d.get("reduce"),
         "description": d.get("description") or "",
         "sinks": sinks,
         "sinks_from": source,
@@ -464,10 +449,6 @@ def _app_tracing(manifest: Any) -> tuple:
     if manifest is None:
         return None, None
     return manifest.project.get("trace"), getattr(manifest, "tracing", None)
-
-
-def _is_runbook(job: Any) -> bool:
-    return hasattr(job, "jobs") and not hasattr(job, "source")
 
 
 def _declared_trace(job: Any) -> Optional[Sequence[Any]]:
@@ -520,7 +501,7 @@ def load_declared(manifest: Any) -> Any:
     from .tracing import check_names, settle_serves
 
     # `[tracing]` lives only in the file. Its names are checked against
-    # what the object declares; a runbook's members count as jobs.
+    # what the object declares; the steps of a job of steps count as jobs.
     where = str(manifest.source) if manifest.source else "<manifest>"
     tracing = manifest.tracing
     check_names(tracing, where, obj.manifest.serves, _job_names((obj._jobs or {}).values()))
@@ -538,69 +519,11 @@ def load_declared(manifest: Any) -> Any:
         graphs=obj.manifest.graphs or manifest.graphs,
         fixtures={**manifest.fixtures, **obj.manifest.fixtures},
         resources_overlay=obj.manifest.resources_overlay or manifest.resources_overlay,
+        jobs_dir=manifest.jobs_dir,
+        queues=manifest.queues,
     )
     obj._bootstrapped = False  # the file's roots may differ from the object's guess
     return obj
-
-
-def build_job(spec: Any, root: Path) -> Any:
-    """A ``[[job]]`` block as its `Job` or `Runbook` object."""
-    from .jobs import Job, Runbook
-    from .serve.registry import load_object
-
-    if spec.runbook:
-        runbook = load_object(spec.runbook, field=f"[[job]] {spec.name!r} runbook")
-        if not isinstance(runbook, Runbook):
-            raise ManifestError(
-                f"[[job]] {spec.name!r} runbook {spec.runbook!r} is a "
-                f"{type(runbook).__name__}, not a Runbook"
-            )
-        if spec.record_dir:
-            rd = Path(spec.record_dir)
-            runbook.record_dir = rd if rd.is_absolute() else root / rd
-        if spec.schedule:
-            runbook.schedule = spec.schedule
-        return runbook
-    if (spec.options or {}).get("dataset") is not None:
-        from .evals import Eval
-
-        return Eval.from_spec(spec, root)
-    if (spec.options or {}).get("runs") is not None:
-        from .evals.online import OnlineEval
-
-        return OnlineEval.from_spec(spec, root)
-    return Job.from_spec(spec, root)
-
-
-def describe_jobspec(j: Any, manifest: Any = None) -> Dict[str, Any]:
-    """A ``[[job]]`` block as plain data, without importing the project. A
-    runbook's sinks are what a member that names none of its own uses."""
-    trace, tracing = _app_tracing(manifest)
-    sinks, source = _job_sinks(j.name, None if j.runbook else j.trace, trace, tracing)
-    opts = j.options or {}
-    is_eval = opts.get("dataset") is not None
-    return {
-        **(
-            {
-                "dataset": opts.get("dataset"),
-                "evaluators": [str(e) for e in opts.get("evaluators") or []],
-                "threshold": opts.get("threshold"),
-            }
-            if is_eval
-            else {}
-        ),
-        "name": j.name,
-        "kind": "runbook" if j.runbook else "eval" if is_eval else "job",
-        "graph": j.graph or None,
-        "runbook": j.runbook,
-        "session": None if j.runbook else j.session,
-        "source": j.source,
-        "sink": j.sink,
-        "schedule": j.schedule,
-        "description": j.description,
-        "sinks": sinks,
-        "sinks_from": source,
-    }
 
 
 def graph_refs(manifest: Any) -> list:
@@ -628,23 +551,16 @@ def graph_refs(manifest: Any) -> list:
             by_entry.setdefault(entry, [entry.rpartition(":")[2], [], s.resume])[1].append(
                 f"serve:{s.name}.resume"
             )
-    for j in manifest.jobs:
-        if j.graph:
-            by_entry.setdefault(j.graph, [j.graph.rpartition(":")[2], [], None])[1].append(
-                f"job:{j.name}"
-            )
     plain = [(n, e, tuple(u), {}, obj) for e, (n, u, obj) in by_entry.items()]
     return plain + variants
 
 
-def settle_jobs(jobs: Optional[Dict[str, Any]], manifest: Any, root: Path) -> Dict[str, Any]:
-    """An application's jobs: the declared objects, or built from its
-    ``[[job]]`` blocks — each tracing where `operonx.app.tracing` says:
-    ``[tracing.jobs.<name>]``, its own consumers, ``[tracing] sinks``,
-    the application's (``trace=`` / ``[project] trace``), else locally.
+def settle_jobs(jobs: Dict[str, Any], manifest: Any, root: Path) -> Dict[str, Any]:
+    """An application's jobs, each tracing where `operonx.app.tracing`
+    says: ``[tracing.jobs.<name>]``, its own consumers, ``[tracing] sinks``,
+    the application's (``trace=`` / ``[project] trace``), else locally —
+    and recording under the project unless it names its own folder.
     Idempotent: each job's own choice is kept aside the first time."""
-    if jobs is None:
-        jobs = {spec.name: build_job(spec, root) for spec in manifest.jobs}
     tracing = getattr(manifest, "tracing", None)
     if tracing is not None:
         from .tracing import check_names
@@ -654,46 +570,65 @@ def settle_jobs(jobs: Optional[Dict[str, Any]], manifest: Any, root: Path) -> Di
     trace = manifest.project.get("trace")
     for job in jobs.values():
         inherit_trace(job, trace, tracing)
+        _place(job, root, getattr(manifest, "jobs_dir", None))
     return jobs
+
+
+def _place(job: Any, root: Path, jobs_dir: Optional[str]) -> None:
+    """A job (and each step) with no ``record_dir`` records under the
+    project: its kind's folder (``.operonx/jobs``, ``evals``, ``online``),
+    a plain job's being ``[jobs] dir`` when the file sets one."""
+    if job.record_dir is None:
+        plain = type(job).folder == ".operonx/jobs"
+        job.record_dir = root / (jobs_dir if plain and jobs_dir else job.folder)
+    for step in job.steps or ():
+        _place(step, root, jobs_dir)
 
 
 def _job_names(jobs: Any) -> list:
     """Every job a ``[tracing.jobs.<name>]`` may name: the application's,
-    and each runbook's members."""
+    and the steps of each job of steps."""
     out = []
     for job in jobs:
         out.append(job.name)
-        if _is_runbook(job):
-            out.extend(j.name for j in job.jobs)
+        if job.steps is not None:
+            out.extend(_job_names(job.steps))
     return out
 
 
-def inherit_trace(job: Any, trace: Optional[Sequence[Any]], tracing: Any = None) -> None:
+def inherit_trace(
+    job: Any,
+    trace: Optional[Sequence[Any]],
+    tracing: Any = None,
+    parent: Optional[str] = None,
+) -> None:
     """A job that names no consumers takes ``[tracing] sinks``, else the
     application's; with none there either, it records locally
     (``.operonx/runs``). A job's item records point at traces — a job
     that silently recorded none left every one of those links pointing
     nowhere — so a job is never untraced by omission. ``trace=[]`` on the
     job is the explicit way to trace nothing; ``[tracing.jobs.<name>]``
-    overrides it. A runbook passes all of this to each of its jobs, its
-    own ``[tracing.jobs.<runbook>]`` included."""
+    overrides it. A job of steps passes all of this to each step, its own
+    ``[tracing.jobs.<name>]`` included."""
     from .tracing import job_override, pick
 
-    runbook = job.name if _is_runbook(job) else None
-    for j in job.jobs if runbook is not None else [job]:
-        if not hasattr(j, "_trace_own"):
-            # what the job declared, kept before an inherited list
-            # replaces `trace` and could pass for its own next time
-            j._trace_own = getattr(j, "trace", None)
-        sinks, source = pick(
-            overrides=job_override(tracing, j.name, runbook),
-            own=j._trace_own,
-            own_label="job",
-            tracing=tracing,
-            app=trace,
-        )
-        j.trace = default_consumers() if sinks is None else sinks
-        j._trace_from = source
+    if job.steps is not None:
+        for step in job.steps:
+            inherit_trace(step, trace, tracing, parent=job.name)
+        return
+    if not hasattr(job, "_trace_own"):
+        # what the job declared, kept before an inherited list
+        # replaces `trace` and could pass for its own next time
+        job._trace_own = getattr(job, "trace", None)
+    sinks, source = pick(
+        overrides=job_override(tracing, job.name, parent),
+        own=job._trace_own,
+        own_label="job",
+        tracing=tracing,
+        app=trace,
+    )
+    job.trace = default_consumers() if sinks is None else sinks
+    job._trace_from = source
 
 
 def default_consumers() -> list:

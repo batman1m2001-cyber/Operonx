@@ -298,7 +298,7 @@ def _eval(tmp_path, gate, broken=False, **kw):
     return Eval(
         "labels",
         graph=flow,
-        item_input="text",
+        input="text",
         inputs={"broken": broken},
         dataset=kw.pop("dataset", None) or _dataset(tmp_path / "cases.jsonl"),
         evaluators=[exact("label")],
@@ -375,7 +375,7 @@ def test_infra_errors_exit_3_with_a_gate_and_1_without(tmp_path):
     legacy = Eval(
         "labels",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=data,
         evaluators=[exact("label")],
         record_dir=tmp_path / "evals",
@@ -388,7 +388,7 @@ def test_without_a_gate_the_1_9_verdict_is_reported_unchanged(tmp_path):
     ev = Eval(
         "labels",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=_dataset(tmp_path / "c.jsonl"),
         evaluators=[exact("label")],
         record_dir=tmp_path / "evals",
@@ -431,28 +431,17 @@ def test_a_declared_eval_reads_repeats_cluster_and_its_gate(tmp_path, monkeypatc
     import warnings
 
     name = f"ev_{uuid.uuid4().hex[:6]}"
-    (tmp_path / f"{name}.py").write_text(textwrap.dedent(MOD), encoding="utf-8")
+    app = (
+        "\nfrom operonx.app import Application, Eval\nfrom operonx.app.evals import Gate\n\n"
+        'APP = Application("evdemo", jobs=[Eval("labels", graph=flow, input="text", '
+        'dataset="dataset:labels", evaluators=[label_ok], repeats=2, cluster="scenario", '
+        'gate=Gate(threshold=0.5, must_pass_tag="smoke"))])\n'
+    )
+    (tmp_path / f"{name}.py").write_text(textwrap.dedent(MOD) + app, encoding="utf-8")
     (tmp_path / "datasets").mkdir()
     _dataset(tmp_path / "datasets" / "labels.jsonl", n=6)
     (tmp_path / "operonx.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "evdemo"
-
-        [[job]]
-        name       = "labels"
-        graph      = "{name}:flow"
-        item_input = "text"
-        dataset    = "dataset:labels"
-        evaluators = ["{name}:label_ok"]
-        repeats    = 2
-        cluster    = "scenario"
-
-        [job.gate]
-        threshold     = 0.5
-        must_pass_tag = "smoke"
-    """),
-        encoding="utf-8",
+        f'[project]\nname = "evdemo"\napp = "{name}:APP"\n', encoding="utf-8"
     )
     monkeypatch.chdir(tmp_path)
     try:

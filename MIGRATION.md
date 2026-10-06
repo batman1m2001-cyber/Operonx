@@ -1,5 +1,7 @@
 # Migrating operonx
 
+- [To 1.17.0](#migrating-to-operonx-1170) — one `Job`: `items=` replaces sources, results
+  are kept, `reduce=` and `steps=` replace sinks and `Runbook`; jobs are declared in Python only
 - [To 1.16.0](#migrating-to-operonx-1160) — the built-in `operonx.agents` is removed
   (`operonx.agents` now names the operonx-agents package); variants bind a
   `@graph`'s parameters, graph factories are refused
@@ -9,6 +11,54 @@
   `operonx.tools` → `operonx.cli`
 - [To 1.0.0](#migrating-to-operonx-100) — `PARENT.shared`, `GraphOp.loop`,
   `@graph(until=)`, `ParserOp`, `ask()` removed
+
+---
+
+# Migrating to operonx 1.17.0
+
+`Runbook`, every source and sink class, stream jobs and `[[job]]` blocks are gone. There is one
+`Job`; what the removed pieces did is now an argument of it.
+
+| Before | After |
+|---|---|
+| `Job(source="calls.jsonl")` | `Job(items="calls.jsonl")` |
+| `source=[...]`, `source=gen_fn`, `PythonSource(...)` | `items=[...]`, `items=gen_fn` (called on every run) |
+| `CsvSource`, `DirSource`, `"source:x"` resources | a generator function: `items=read_csv` |
+| `sink="out.jsonl"`, `PythonSink(fn)` | `output="out.jsonl"`, `output=fn(key, result)` — or just read `run.results` |
+| `ListSink(lst)` | `run.results` (`{key: result}`, kept in the record's `results.jsonl`) |
+| `DirSink`, `NullSink`, `"sink:x"` resources | `output=fn` writing where you want; nothing, for `NullSink` |
+| `item_input="val"` | `input="val"` |
+| `on_error="retry:3"` | `retry=Retry(max_attempts=4)` (`from operonx import Retry`) |
+| `on_error="record"` | `on_error="skip"` (an `Eval` never fails its run on an item) |
+| `item_timeout=30` | `timeout=30` |
+| `session="stream"` | a graph that takes the whole list: `Job(items=None, inputs={"rows": rows})`, or `reduce=` |
+| a second job reading the first one's sink to summarise | `reduce=summary_graph` on the first job (`run.reduced`) |
+| `Runbook("n", a >> b >> c)` / `Sequential(a, b, c)` | `Job("n", steps=[a, b, c])` |
+| `a >> [b, c]` (parallel) | `steps=[a, b, c]`, or two jobs run by the same cron line |
+| `schedule="0 3 * * *"` | cron calls `operonx run <name>`; the schedule is not declared |
+| `[[job]]` in `operonx.toml` (and TOML evals) | `Application(jobs=[Job(...), Eval(...)])` in `app/main.py` |
+| `Eval.from_spec`, `OnlineEval.from_spec`, `Gate.from_options` | construct `Eval(...)`, `Gate(...)` directly |
+| `operonx run x --source a.jsonl --sink b.jsonl` | `operonx run x --items a.jsonl` |
+| `from operonx.core.jobs import ...` | `from operonx.app.jobs import ...` |
+
+```python
+# Before
+nightly = Runbook("nightly", score >> summarise)
+score = Job("score", graph=score_call, source="calls.jsonl", sink="out/scores.jsonl",
+            key="call_id", on_error="retry:2", item_timeout=30)
+summarise = Job("summarise", graph=summary_flow, source="out/scores.jsonl", session="stream")
+
+# After
+score = Job("score", graph=score_call, items="calls.jsonl", key="call_id",
+            retry=Retry(max_attempts=3), timeout=30, reduce=summary)  # summary(results)
+run = score.run_sync()
+run.results, run.reduced
+```
+
+A graph without doors is now bound by name: a dict item fills the graph's parameters (an unknown
+field is an error), a non-dict item goes to the only free parameter. Records default to
+`.operonx/jobs/<job>/` at the project root (`[jobs] dir` in `operonx.toml` moves them); evals go
+to `.operonx/evals/`. `record_dir=` and `on_item=` are unchanged.
 
 ---
 

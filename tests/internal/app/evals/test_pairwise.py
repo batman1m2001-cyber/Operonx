@@ -98,7 +98,7 @@ async def _experiments(tmp_path, graph_a=bot_a, graph_b=bot_b, rows=CASES):
         run = await Eval(
             "pairs",
             graph=g,
-            item_input="text",
+            input="text",
             dataset=path,
             record_dir=tmp_path / "evals",
             trace=[],

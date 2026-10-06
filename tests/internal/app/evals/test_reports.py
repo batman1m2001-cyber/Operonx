@@ -67,7 +67,7 @@ def _run(tmp_path, gate=None, broken=False, evaluators=None, scores=None, **kw):
     return Eval(
         "labels",
         graph=flow,
-        item_input="text",
+        input="text",
         inputs={"broken": broken},
         dataset=kw.pop("dataset", None) or _data(tmp_path / "cases.jsonl"),
         evaluators=[exact("label")] if evaluators is None else evaluators,

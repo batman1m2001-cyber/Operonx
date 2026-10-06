@@ -263,7 +263,7 @@ async def test_an_eval_checks_the_trajectory_of_each_case(tmp_path, llm):
     ev = Eval(
         "trajectories",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=path,
         evaluators=[
             trajectory.ops(mode="strict"),

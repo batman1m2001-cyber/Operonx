@@ -45,7 +45,7 @@ def _eval(tmp_path: Path, scores=None, **kw) -> Eval:
     return Eval(
         "stored",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=path,
         evaluators=[
             exact(ANSWER),
@@ -241,12 +241,17 @@ def label_ok(output=None, expected=None):
 """
 
 
-def _project(tmp_path, scores_line):
+def _project(tmp_path, scores):
     import textwrap
     import uuid
 
     name = f"ev_{uuid.uuid4().hex[:6]}"
-    (tmp_path / f"{name}.py").write_text(textwrap.dedent(MOD), encoding="utf-8")
+    app = (
+        "\nfrom operonx.app import Application, Eval\n\n"
+        'APP = Application("evdemo", jobs=[Eval("labels", graph=flow, input="text", '
+        f'dataset="dataset:labels", evaluators=[label_ok], scores={scores!r})])\n'
+    )
+    (tmp_path / f"{name}.py").write_text(textwrap.dedent(MOD) + app, encoding="utf-8")
     (tmp_path / "datasets").mkdir()
     (tmp_path / "datasets" / "labels.jsonl").write_text(
         '{"id": "a", "input": "money back", "expected": {"label": "refund"}}\n', encoding="utf-8"
@@ -256,21 +261,8 @@ def _project(tmp_path, scores_line):
         encoding="utf-8",
     )
     (tmp_path / "operonx.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "evdemo"
-
-        [resources]
-        overlay = "resources.yaml"
-
-        [[job]]
-        name       = "labels"
-        graph      = "{name}:flow"
-        item_input = "text"
-        dataset    = "dataset:labels"
-        evaluators = ["{name}:label_ok"]
-        {scores_line}
-    """),
+        f'[project]\nname = "evdemo"\napp = "{name}:APP"\n\n[resources]\n'
+        'overlay = "resources.yaml"\n',
         encoding="utf-8",
     )
     return name
@@ -278,17 +270,14 @@ def _project(tmp_path, scores_line):
 
 def test_a_declared_eval_writes_to_its_score_store(tmp_path, monkeypatch):
     import sys
-    import warnings
 
     from operonx.app import Application
     from operonx.core.registry import ResourceHub
 
-    name = _project(tmp_path, 'scores     = "score_store:team"')
+    name = _project(tmp_path, "score_store:team")
     monkeypatch.chdir(tmp_path)
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")  # `scores` is read, not a typo
-            app = Application.find(tmp_path)
+        app = Application.find(tmp_path)
         run = app.run_sync("labels")
         team = SqliteScoreStore(path=tmp_path / "team.sqlite")
         assert team.get_experiment(run.run_id).experiment.status == "ok"
@@ -298,13 +287,12 @@ def test_a_declared_eval_writes_to_its_score_store(tmp_path, monkeypatch):
         ResourceHub.reset_instance()
 
 
-def test_a_declared_scores_must_be_a_score_store_key(tmp_path):
-    from operonx.app import Application
-    from operonx.app.manifest import ManifestError
+def test_scores_must_be_a_score_store_key(tmp_path):
+    from operonx.app import Eval
 
-    _project(tmp_path, 'scores     = "team.sqlite"')
-    with pytest.raises(ManifestError, match="score_store:<name>"):
-        Application.find(tmp_path)
+    (tmp_path / "d.jsonl").write_text('{"id": "a", "input": "x"}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match="score_store:<name>"):
+        Eval("labels", graph=flow, dataset=tmp_path / "d.jsonl", scores="team.sqlite")
 
 
 async def test_a_store_that_cannot_be_opened_fails_before_the_record(tmp_path, llm):

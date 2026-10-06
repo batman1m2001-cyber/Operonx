@@ -1,7 +1,10 @@
-"""`operonx run`: a Job by import path, an exit status a cron can read."""
+"""`operonx run`: a Job by import path or by its application's name, and an
+exit status cron or CI can read (0 ok, 1 an item or step failed, 2 could
+not start)."""
 
 from __future__ import annotations
 
+import json
 import sys
 import textwrap
 import uuid
@@ -11,9 +14,10 @@ import pytest
 from operonx.cli.run import main
 
 MODULE = """
-from operonx.core import END, START, graph, op
-from operonx.app.jobs import Job, Runbook
+from operonx.app import Application
+from operonx.app.jobs import Job
 from operonx.app.serve import egress, ingress
+from operonx.core import END, START, graph, op
 
 
 @op(bound="sync")
@@ -31,20 +35,42 @@ def flow():
     START >> src >> loud >> out >> END
 
 
+@op(bound="sync")
+def count(results: list) -> dict:
+    return {"n": len(results)}
+
+
+@graph
+def counted(results):
+    c = count(results=results)
+    START >> c >> END
+
+
 ITEMS = [{"id": "a", "text": "x"}, {"id": "b", "text": "y"}, {"id": "c", "text": "z"}]
 
-job = Job("shout", graph=flow, source=ITEMS, key="id", description="says it louder")
-failing = Job("shout_bad", graph=flow, source=ITEMS + [{"id": "z", "text": "", "bad": True}], key="id")
+job = Job("shout", graph=flow, items=ITEMS, key="id", reduce=counted,
+          description="says it louder")
+failing = Job("shout_bad", graph=flow, items=ITEMS + [{"id": "z", "text": "", "bad": True}],
+              key="id")
 not_a_job = 42
-nightly = Runbook("nightly", job >> failing, on_error="continue", description="both, in order")
+nightly = Job("nightly", steps=[job, failing], description="both, in order")
+from_file = Job("from_file", graph=flow, items="data.jsonl", key="id", output="out.jsonl")
+
+APP = Application("demo", jobs=[job, failing, nightly, from_file])
 """
 
 
 @pytest.fixture
 def project(tmp_path, monkeypatch):
-    """A project directory with a module declaring jobs, as the cwd."""
+    """A project whose module declares the jobs and the application, as the cwd."""
     name = f"demo_jobs_{uuid.uuid4().hex[:6]}"
     (tmp_path / f"{name}.py").write_text(textwrap.dedent(MODULE), encoding="utf-8")
+    (tmp_path / "data.jsonl").write_text(
+        "".join(json.dumps({"id": i, "text": i}) + "\n" for i in "abc"), encoding="utf-8"
+    )
+    (tmp_path / "operonx.toml").write_text(
+        f'[project]\nname = "demo"\nsrc = ["."]\napp = "{name}:APP"\n', encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
     yield name, tmp_path
     sys.modules.pop(name, None)
@@ -52,7 +78,7 @@ def project(tmp_path, monkeypatch):
         sys.path.remove(str(tmp_path))
 
 
-def test_runs_a_job_and_exits_zero_when_every_item_is_ok(project, capsys):
+def test_runs_a_job_by_path_and_exits_zero_when_every_item_is_ok(project, capsys):
     name, root = project
     code = main([f"{name}:job", "--record-dir", str(root / "jobs")])
     out = capsys.readouterr().out
@@ -74,8 +100,7 @@ def test_resume_reaches_the_runner(project, capsys):
     name, root = project
     main([f"{name}:failing", "--record-dir", str(root / "jobs")])
     main([f"{name}:failing", "--record-dir", str(root / "jobs"), "--resume"])
-    out = capsys.readouterr().out
-    assert "skipped=3" in out  # the three that were fine
+    assert "skipped=3" in capsys.readouterr().out  # the three that were fine
 
 
 def test_show_prints_what_would_run_and_runs_nothing(project, capsys):
@@ -84,7 +109,8 @@ def test_show_prints_what_would_run_and_runs_nothing(project, capsys):
     out = capsys.readouterr().out
     assert code == 0
     assert out.splitlines()[0] == "shout"
-    assert "graph        flow" in out and "says it louder" in out
+    assert "graph        flow" in out and "reduce       counted" in out
+    assert "says it louder" in out
     assert not (root / "jobs").exists()
 
 
@@ -99,71 +125,35 @@ def test_bad_targets_are_named_on_stderr(project, capsys):
     assert main(["not-a-ref"]) == 2
 
 
-# -- from the manifest ------------------------------------------------------------
-
-
-@pytest.fixture
-def manifest_project(project):
-    """The same module, declared as [[job]] blocks in operonx.toml."""
-    name, root = project
-    (root / "data.jsonl").write_text(
-        '{"id": "a", "text": "x"}\n{"id": "b", "text": "y"}\n{"id": "c", "text": "z"}\n',
-        encoding="utf-8",
-    )
-    (root / "operonx.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "demo"
-
-        [[job]]
-        name   = "shout"
-        graph  = "{name}:flow"
-        source = "data.jsonl"
-        sink   = "out.jsonl"
-        key    = "id"
-        schedule = "*/5 * * * *"
-        description = "louder, on a schedule"
-
-        [[job]]
-        name    = "shout_stream"
-        graph   = "{name}:flow"
-        source  = "data.jsonl"
-        session = "stream"
-    """),
-        encoding="utf-8",
-    )
-    return name, root
-
-
-def test_a_job_runs_by_its_manifest_name(manifest_project, capsys):
-    _, root = manifest_project
-    code = main(["shout"])  # manifest found from the cwd
+def test_a_job_runs_by_its_application_name_under_the_project(project, capsys):
+    _, root = project
+    code = main(["from_file"])  # the application found from the cwd
     out = capsys.readouterr().out
-    assert code == 0 and "shout " in out and "ok=3 failed=0" in out
-    assert (root / "jobs" / "shout").is_dir()  # record_dir defaults beside the manifest
+    assert code == 0 and "from_file " in out and "ok=3 failed=0" in out
+    assert (root / ".operonx" / "jobs" / "from_file").is_dir()
     assert len((root / "out.jsonl").read_text(encoding="utf-8").splitlines()) == 3
 
 
-def test_a_stream_job_runs_and_refuses_to_resume(manifest_project, capsys):
-    _, root = manifest_project
-    assert main(["shout_stream", "-f", str(root / "operonx.toml")]) == 0
-    assert "fed=3 sent=3" in capsys.readouterr().out  # one run: what went in, what came out
-    assert main(["shout_stream", "--resume"]) == 2
-    assert "cannot resume" in capsys.readouterr().err
+def test_items_and_set_override_a_run(project, capsys):
+    _, root = project
+    (root / "two.jsonl").write_text('{"id": "q", "text": "w"}\n', encoding="utf-8")
+    assert main(["from_file", "--items", "two.jsonl"]) == 0
+    assert "ok=1 failed=0" in capsys.readouterr().out
+    assert main(["from_file", "--items", "two.csv"]) == 2
+    assert ".jsonl" in capsys.readouterr().err
+    assert main(["from_file", "--set", "nokey"]) == 2
 
 
-def test_list_prints_every_job_with_its_schedule(manifest_project, capsys):
-    code = main(["--list"])
+def test_list_prints_every_job(project, capsys):
+    assert main(["--list"]) == 0
     out = capsys.readouterr().out
-    assert code == 0
     assert out.splitlines()[0] == "demo"
-    assert "shout " in out and "per_item" in out and "[*/5 * * * *]" in out
-    assert "shout_stream" in out and "stream" in out and "louder, on a schedule" in out
+    assert "shout " in out and "-> reduce counted" in out and "says it louder" in out
+    assert "nightly" in out and "steps" in out and "shout -> shout_bad" in out
+    assert "data.jsonl -> flow" in out
 
 
-def test_an_unknown_name_and_a_missing_manifest_are_named(
-    manifest_project, capsys, tmp_path_factory
-):
+def test_an_unknown_name_and_a_missing_manifest_are_named(project, capsys, tmp_path_factory):
     assert main(["nope"]) == 2
     assert "no job named 'nope'" in capsys.readouterr().err
     elsewhere = tmp_path_factory.mktemp("empty")
@@ -172,51 +162,25 @@ def test_an_unknown_name_and_a_missing_manifest_are_named(
         main([])
 
 
-# -- runbooks -----------------------------------------------------------------------
-
-
-def test_a_runbook_runs_by_path_and_reports_its_jobs(project, capsys):
-    name, root = project
-    code = main([f"{name}:nightly", "--record-dir", str(root / "jobs")])
+def test_a_job_of_steps_reports_each_step(project, capsys):
+    _, root = project
+    code = main(["nightly"])
     out = capsys.readouterr().out
     assert code == 1
-    assert "nightly " in out and "jobs ok=1 failed=1 skipped=0" in out
-    assert "failed shout_bad: failed: 1 failed" in out
-    assert (root / "jobs" / "nightly").is_dir() and (root / "jobs" / "shout").is_dir()
+    assert "nightly " in out and "ok=1 failed=1" in out
+    assert "failed shout_bad" in out
+    assert (root / ".operonx" / "jobs" / "nightly").is_dir()
+    assert (root / ".operonx" / "jobs" / "shout").is_dir()  # each step keeps its own record
 
 
-def test_show_prints_a_runbooks_tree(project, capsys):
-    name, root = project
-    assert main([f"{name}:nightly", "--show", "--record-dir", str(root / "jobs")]) == 0
-    out = capsys.readouterr().out
-    assert out.splitlines()[0] == "nightly"
-    # the runbook as its wires, never `|`; then its jobs
-    assert out.splitlines()[1] == "  shout >> shout_bad"
-    assert "shout (per_item), shout_bad (per_item)" in out and "|" not in out
-    assert "both, in order" in out
+def test_a_job_of_steps_refuses_one_jobs_settings(project, capsys):
+    assert main(["nightly", "--items", "data.jsonl"]) == 2
+    assert "run that step instead" in capsys.readouterr().err
 
 
-def test_a_runbook_runs_by_its_manifest_name(manifest_project, capsys):
-    name, root = manifest_project
-    (root / "operonx.toml").write_text(
-        textwrap.dedent(f"""
-        [project]
-        name = "demo"
-
-        [[job]]
-        name    = "nightly"
-        runbook = "{name}:nightly"
-        record_dir = "runs"
-        schedule = "0 3 * * *"
-    """),
-        encoding="utf-8",
+def test_a_toml_job_block_is_refused_with_where_to_go(tmp_path, capsys):
+    (tmp_path / "operonx.toml").write_text(
+        '[project]\nname = "old"\n\n[[job]]\nname = "x"\ngraph = "m:f"\n', encoding="utf-8"
     )
-    assert main(["--list"]) == 0
-    listed = capsys.readouterr().out
-    assert "nightly" in listed and "runbook" in listed and "[0 3 * * *]" in listed
-    assert main(["nightly"]) == 1
-    assert "jobs ok=1 failed=1" in capsys.readouterr().out
-    assert (root / "runs" / "nightly").is_dir()
-    # the block's schedule reaches the runbook object
-    assert main(["nightly", "--show"]) == 0
-    assert "schedule     0 3 * * *" in capsys.readouterr().out
+    assert main(["x", "-f", str(tmp_path / "operonx.toml")]) == 2
+    assert "app/main.py" in capsys.readouterr().err

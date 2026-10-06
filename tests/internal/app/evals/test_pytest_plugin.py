@@ -82,7 +82,7 @@ def test_it_is_never_auto_loaded(project):
         test_x=FLOW
         + """
 async def test_one(run_case):
-    await run_case(flow, {"input": "hi"}, item_input="text")
+    await run_case(flow, {"input": "hi"}, input="text")
 """
     )
     got = project.runpytest()
@@ -97,7 +97,7 @@ def test_a_session_is_one_experiment_and_verdicts_are_outcomes(project):
         + """
 @pytest.mark.parametrize("case", cases("dataset:labels"))
 async def test_label(case, run_case):
-    got = await run_case(flow, case, evaluators=[exact("label")], item_input="text")
+    got = await run_case(flow, case, evaluators=[exact("label")], input="text")
     assert got.trace.path() == ["classify"]
 
 
@@ -131,7 +131,7 @@ def test_a_failing_assert_is_recorded(project):
         test_a=FLOW
         + """
 async def test_path(run_case):
-    got = await run_case(flow, {"id": "x", "input": "hi"}, item_input="text")
+    got = await run_case(flow, {"id": "x", "input": "hi"}, input="text")
     assert got.trace.path() == ["classify", "answer"], "the answer step never ran"
 """
     )
@@ -149,7 +149,7 @@ def test_sync_tests_check_and_why(project):
         + """
 def test_sync(run_case):
     got = run_case.sync(flow, {"id": "s", "input": "hello", "expected": {"label": "other"}},
-                        item_input="text")
+                        input="text")
     assert got.output == {"label": "other"} and got.status == "ok"
     assert got.check(exact("label"))
     assert not got.check(lambda output=None: {"passed": False, "reason": "nope"})
@@ -158,8 +158,8 @@ def test_sync(run_case):
 
 
 def test_twice(run_case):
-    run_case.sync(flow, {"input": "a"}, item_input="text")
-    run_case.sync(flow, {"input": "b"}, item_input="text")
+    run_case.sync(flow, {"input": "a"}, input="text")
+    run_case.sync(flow, {"input": "b"}, input="text")
 """
     )
     got = project.runpytest("-p", PLUGIN)
@@ -173,7 +173,7 @@ def test_reports_and_the_store(project):
         + """
 @pytest.mark.parametrize("case", cases("dataset:labels", ids=["refund", "hello"]))
 async def test_label(case, run_case):
-    await run_case(flow, case, evaluators=[exact("label")], item_input="text")
+    await run_case(flow, case, evaluators=[exact("label")], input="text")
 """
     )
     got = project.runpytest(
@@ -203,7 +203,7 @@ def test_the_gate_can_fail_a_passing_session(project):
         + """
 @pytest.mark.parametrize("case", cases("dataset:labels", ids=["refund", "hello"]))
 async def test_label(case, run_case):
-    await run_case(flow, case, evaluators=[exact("label")], item_input="text")
+    await run_case(flow, case, evaluators=[exact("label")], input="text")
 """
     )
     project.runpytest("-p", PLUGIN).assert_outcomes(passed=2)

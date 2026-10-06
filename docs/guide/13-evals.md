@@ -319,39 +319,39 @@ Without a `gate`, nothing changes from 1.9.0: `threshold` (or "any case
 failed") decides, and the exit code is 0 or 1. Exit 3 exists so CI can
 tell "the endpoint was down" from "the prompt got worse".
 
-## In the manifest
+## In the application
 
-An eval is a `[[job]]` with a `dataset`:
+An eval is declared in Python, in `Application(jobs=[...])` beside the
+other jobs — `repeats`, `cluster` and the `gate` are its arguments:
 
-```toml
-[[job]]
-name        = "replies"
-graph       = "bot:reply_flow"
-dataset     = "dataset:replies"
-evaluators  = ["checks:polite", "checks:names_the_time"]
-threshold   = 0.9
-concurrency = 4
+```python
+# app/main.py
+from operonx.app import Application, Eval
+from operonx.app.evals import Gate
+
+from bot import reply_flow
+from checks import names_the_time, polite
+
+APP = Application(
+    "bot",
+    jobs=[
+        Eval(
+            "replies",
+            graph=reply_flow,
+            dataset="dataset:replies",
+            evaluators=[polite, names_the_time],
+            repeats=3,
+            gate=Gate(threshold=0.9, baseline="latest", tolerance=0.03),
+        )
+    ],
+)
 ```
 
-`repeats` and `cluster` are keys of the block too, and a gate is its own
-table (then `threshold` goes inside it):
+A `[[job]]` block in `operonx.toml` is refused with a pointer to
+`app/main.py`.
 
-```toml
-[[job]]
-name       = "replies"
-graph      = "bot:reply_flow"
-dataset    = "dataset:replies"
-evaluators = ["checks:polite"]
-repeats    = 3
-
-[job.gate]
-threshold = 0.9
-baseline  = "latest"
-tolerance = 0.03
-```
-
-`evaluators` names objects in your code, ready to call — for a helper,
-bind it there first:
+`evaluators` are objects in your code, ready to call — for a helper,
+bind it first:
 
 ```python
 # checks.py

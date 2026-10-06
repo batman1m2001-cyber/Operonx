@@ -1,15 +1,3 @@
-# Where this example reaches out to. A source and a sink are resources
-# the way an LLM gateway is: the job names them, the deployment fills
-# them in.
-source:calls:
-  kind: jsonl
-  path: data/calls.jsonl
-
-sink:scores:
-  kind: jsonl
-  path: /tmp/operonx_jobs/ex17/scores_from_resources.jsonl
-  mode: overwrite
-
 # The local trace consumer the application records every run with. An
 # unset root is <project>/.operonx/runs, filed by origin.
 trace_local:

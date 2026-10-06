@@ -1,38 +1,23 @@
 # operonx.app.jobs
 
-Jobs run an Operon over data that does not talk back — a file, a table,
-an iterable — one run per item, with a record per run. Runbooks order
-jobs. The guide: [Jobs and Runbooks](../guide/10-jobs.md).
+Jobs run a graph over data that does not talk back — a list, a `.jsonl`
+file, a function that yields items — one run per item, every result kept,
+with a record per run. `steps=[...]` runs jobs in order. The guide:
+[Jobs](../guide/10-jobs.md).
 
 ## Job
 
 ::: operonx.app.jobs.Job
 
-## Runbook
-
-::: operonx.app.jobs.Runbook
-::: operonx.app.jobs.Sequential
-::: operonx.app.jobs.Parallel
-
 ## The record
 
 ::: operonx.app.jobs.JobRun
 ::: operonx.app.jobs.ItemResult
-::: operonx.app.jobs.RunbookRun
-::: operonx.app.jobs.NodeReport
+::: operonx.app.jobs.RunRecord
 
-## Sources and sinks
+## Items
 
-::: operonx.app.jobs.Source
-::: operonx.app.jobs.JsonlSource
-::: operonx.app.jobs.CsvSource
-::: operonx.app.jobs.PythonSource
-::: operonx.app.jobs.Sink
-::: operonx.app.jobs.JsonlSink
-::: operonx.app.jobs.CsvSink
-::: operonx.app.jobs.ListSink
-::: operonx.app.jobs.PythonSink
-::: operonx.app.jobs.NullSink
+::: operonx.app.jobs.iter_items
 
 ## The session
 

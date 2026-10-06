@@ -14,9 +14,10 @@ as tags, a run store indexes it. Nothing here does I/O except
     # {"origin": "service", "service": "call", "transport": "websocket",
     #  "tags": ["origin:service", "service:call", "transport:websocket"]}
 
-A runbook runs its jobs inside :func:`in_runbook`; a job's runs then
-carry ``runbook`` and ``runbook_run`` beside their own ``job`` fields, so
-a runbook run → its job runs → their items → their traces is one path.
+A job of ``steps`` runs its steps inside :func:`in_runbook`; a step's runs
+then carry ``runbook`` and ``runbook_run`` (the names run stores keep,
+from when that job was a ``Runbook``) beside their own ``job`` fields, so
+its run → its steps' runs → their items → their traces is one path.
 """
 
 from __future__ import annotations
@@ -62,15 +63,15 @@ def origin_metadata(origin: str, **fields: Any) -> Dict[str, Any]:
     return out
 
 
-# ── runbooks: the group a job's runs belong to ──────────────────────────
+# ── the job of steps a job's runs belong to ────────────────────────────
 
 _RUNBOOK: ContextVar[Optional[Tuple[str, str]]] = ContextVar("operonx_runbook_run", default=None)
 
 
 @contextmanager
 def in_runbook(name: str, run_id: str) -> Iterator[None]:
-    """Everything a runbook starts inside this block — its jobs, their
-    runs — knows the runbook run it belongs to. Tasks created inside
+    """Everything a job of steps starts inside this block — its steps,
+    their runs — knows the run it belongs to. Tasks created inside
     inherit it (asyncio copies the context), so it reaches every item."""
     token = _RUNBOOK.set((name, run_id))
     try:
@@ -80,7 +81,7 @@ def in_runbook(name: str, run_id: str) -> Iterator[None]:
 
 
 def current_runbook() -> Optional[Tuple[str, str]]:
-    """``(runbook, runbook_run)`` when called under :func:`in_runbook`."""
+    """``(job, job_run)`` of the job of steps, under :func:`in_runbook`."""
     return _RUNBOOK.get()
 
 

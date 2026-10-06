@@ -17,11 +17,11 @@ from pathlib import Path
 import pytest
 
 from operonx.app import Application, GraphRef, ManifestError
-from operonx.app.jobs import RUN_OK, Job, Runbook
+from operonx.app.jobs import RUN_OK, Job
 
 PIPELINE = """
 from operonx.core import END, START, graph, op
-from operonx.app.jobs import Job, Runbook
+from operonx.app.jobs import Job
 from operonx.app.serve import egress, ingress
 
 
@@ -45,8 +45,7 @@ def other_flow():
     START >> src >> out >> END
 
 
-nightly = Runbook("nightly", Job("inner", graph=score_flow, source=[{"call_id": "z", "text": "a b"}], key="call_id"))
-not_a_runbook = 42
+inner = Job("inner", graph=score_flow, items=[{"call_id": "z", "text": "a b"}], key="call_id")
 """
 
 CALLS = [{"call_id": "c1", "text": "one two three"}, {"call_id": "c2", "text": "four"}]
@@ -62,9 +61,8 @@ def project(tmp_path, monkeypatch):
     )
     (tmp_path / "resources.yaml").write_text(
         textwrap.dedent(f"""
-        source:calls:
-          kind: jsonl
-          path: {tmp_path / "data" / "calls.jsonl"}
+        trace_local:dev:
+          root: {tmp_path / "traces"}
     """),
         encoding="utf-8",
     )
@@ -93,19 +91,6 @@ def project(tmp_path, monkeypatch):
         path  = "/echo"
         port  = 8123
         graph = "{name}:other_flow"
-
-        [[job]]
-        name   = "score_calls"
-        graph  = "{name}:score_flow"
-        source = "source:calls"
-        sink   = "out/scores.jsonl"
-        key    = "call_id"
-        schedule = "0 2 * * *"
-
-        [[job]]
-        name    = "nightly"
-        runbook = "{name}:nightly"
-        record_dir = "runs"
     """),
         encoding="utf-8",
     )
@@ -130,17 +115,14 @@ def test_load_find_and_the_three_lists(project):
     # entry's attribute; with who uses them.
     graphs = {g.name: g for g in app.graphs}
     assert set(graphs) == {"other", "score_flow"}
-    assert graphs["score_flow"].used_by == ("serve:score", "job:score_calls")
+    assert graphs["score_flow"].used_by == ("serve:score",)
     assert graphs["other"].used_by == ("serve:echo",)
     assert isinstance(graphs["other"], GraphRef)
 
-    jobs = {j.name: j for j in app.jobs}
-    assert isinstance(jobs["score_calls"], Job) and isinstance(jobs["nightly"], Runbook)
-    assert jobs["score_calls"].sink == root / "out" / "scores.jsonl"
-    assert jobs["nightly"].record_dir == root / "runs"
+    assert app.jobs == []  # jobs are declared in Python only
     with pytest.raises(ManifestError, match="no job named"):
         app.job("nope")
-    assert "Application('demo'" in repr(app) and "jobs=2" in repr(app)
+    assert "Application('demo'" in repr(app) and "jobs=0" in repr(app)
 
 
 def test_describe_is_plain_data_and_imports_nothing(project):
@@ -170,12 +152,7 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "sinks": [],  # nothing configured: a service is not traced
         "sinks_from": "default",
     }
-    assert [(j["name"], j["kind"]) for j in d["jobs"]] == [
-        ("score_calls", "job"),
-        ("nightly", "runbook"),
-    ]
-    assert d["jobs"][0]["schedule"] == "0 2 * * *" and d["jobs"][1]["runbook"] == f"{name}:nightly"
-    assert d["jobs"][0]["session"] == "per_item" and d["jobs"][1]["session"] is None
+    assert d["jobs"] == []
     assert name not in sys.modules  # describe() did not import the project
 
 
@@ -185,39 +162,51 @@ def test_bootstrap_installs_the_hub_and_the_project_once(project):
 
     app = Application.find(root)
     app.bootstrap()
-    assert ResourceHub.instance().has("source:calls")
+    assert ResourceHub.instance().has("trace_local:dev")
     assert str(root) in sys.path
     app.bootstrap()  # idempotent
 
 
-async def test_run_a_job_and_a_runbook(project):
+def _declared(name, root, monkeypatch):
+    """The same project's jobs, declared in Python: a job over a file with an
+    output, and a job of steps."""
+    import importlib
+
+    monkeypatch.syspath_prepend(str(root))
+    mod = importlib.import_module(name)
+    score_calls = Job(
+        "score_calls",
+        graph=mod.score_flow,
+        items=root / "data" / "calls.jsonl",
+        output=root / "out" / "scores.jsonl",
+        key="call_id",
+    )
+    nightly = Job("nightly", steps=[mod.inner], record_dir=root / "runs")
+    return Application("demo", jobs=[score_calls, nightly], root=root, resources=None)
+
+
+async def test_run_a_job_and_a_job_of_steps(project, monkeypatch):
     name, root = project
-    app = Application.find(root)
+    app = _declared(name, root, monkeypatch)
+    d = app.describe()
+    assert [(j["name"], j["kind"]) for j in d["jobs"]] == [
+        ("score_calls", "job"),
+        ("nightly", "steps"),
+    ]
+    assert d["jobs"][1]["steps"] == ["inner"]
     run = await app.run("score_calls")
     assert run.status == RUN_OK and run.counts["ok"] == 2
-    assert (root / "out" / "scores.jsonl").exists()
-    rb = app.run_sync if False else None  # run_sync needs its own loop; covered below
-    del rb
+    assert run.path.parent == root / ".operonx" / "jobs" / "score_calls"  # the project's folder
+    assert run.results == {"c1": {"call_id": "c1", "words": 3}, "c2": {"call_id": "c2", "words": 1}}
+    assert (root / "out" / "scores.jsonl").read_text().count("\n") == 2
     nightly = await app.run("nightly")
-    assert nightly.status == RUN_OK and [j.name for j in nightly.jobs] == ["inner"]
+    assert nightly.status == RUN_OK and [s["name"] for s in nightly.meta["steps"]] == ["inner"]
     assert (root / "runs" / "nightly").is_dir()
 
 
-def test_run_sync_from_a_script(project):
-    _, root = project
-    assert Application.find(root).run_sync("score_calls").status == RUN_OK
-
-
-def test_a_runbook_entry_that_is_not_a_runbook_is_a_manifest_error(project):
+def test_run_sync_from_a_script(project, monkeypatch):
     name, root = project
-    toml = (
-        (root / "operonx.toml")
-        .read_text(encoding="utf-8")
-        .replace(f"{name}:nightly", f"{name}:not_a_runbook")
-    )
-    (root / "operonx.toml").write_text(toml, encoding="utf-8")
-    with pytest.raises(ManifestError, match="not a Runbook"):
-        Application.find(root).jobs
+    assert _declared(name, root, monkeypatch).run_sync("score_calls").status == RUN_OK
 
 
 def test_asgi_gives_one_listeners_app(project):
@@ -251,27 +240,25 @@ def test_the_graph_ref_compiles_like_a_served_graph(project):
 
 
 def test_the_old_import_paths_still_work_and_warn():
-    for old in ("operonx.core.serve", "operonx.core.jobs", "operonx.core.manifest"):
+    for old in ("operonx.core.serve", "operonx.core.manifest"):
         sys.modules.pop(old, None)
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         import importlib
 
         core_serve = importlib.import_module("operonx.core.serve")
-        from operonx.core.jobs import Job as OldJob
         from operonx.core.manifest import Manifest as OldManifest
         from operonx.core.serve.protocol import RunRequest as OldRunRequest
-    from operonx.app.jobs import Job
     from operonx.app.manifest import Manifest
     from operonx.app.serve.protocol import RunRequest
 
-    assert OldJob is Job and OldManifest is Manifest and OldRunRequest is RunRequest
+    assert OldManifest is Manifest and OldRunRequest is RunRequest
     assert (
         core_serve.current_session is importlib.import_module("operonx.app.serve").current_session
     )
     assert {
         str(x.message).split("`")[1] for x in w if issubclass(x.category, DeprecationWarning)
-    } >= {"operonx.core.serve", "operonx.core.jobs", "operonx.core.manifest"}
+    } >= {"operonx.core.serve", "operonx.core.manifest"}
 
 
 def test_application_stays_small():

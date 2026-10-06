@@ -80,22 +80,6 @@ def _ask_git(root: Path) -> "Future[Dict[str, Any]]":
 # ── the eval ─────────────────────────────────────────────────────────────
 
 
-class _Capture:
-    """The eval's sink: what each case sent, kept for its evaluators."""
-
-    def __init__(self) -> None:
-        self.by_key: Dict[str, List[Any]] = {}
-
-    async def write(self, key: str, item: Any) -> None:
-        self.by_key.setdefault(key, []).append(item)
-
-    async def close(self) -> None:
-        pass
-
-    def __repr__(self) -> str:
-        return "<eval capture>"
-
-
 @dataclass(frozen=True)
 class _Trial:
     """One run of one case: the case's row, which repeat, the item key,
@@ -111,7 +95,7 @@ class Eval(Job):
     """A dataset, a graph, evaluators — run as a job with ``origin=eval``.
 
     Everything but the arguments below is a :class:`Job` argument
-    (``concurrency``, ``item_timeout``, ``inputs``, ``item_input``,
+    (``concurrency``, ``timeout``, ``inputs``, ``input``,
     ``trace``…).
 
     Args:
@@ -151,6 +135,8 @@ class Eval(Job):
     """
 
     origin = "eval"
+    items_fail_run = False  # a failed case is a failed verdict; the gate decides
+    folder = "evals"
 
     def __init__(
         self,
@@ -164,7 +150,7 @@ class Eval(Job):
         cluster: Optional[str] = None,
         gate: Optional[Gate] = None,
         root: Union[str, Path, None] = None,
-        record_dir: Union[str, Path] = "evals",
+        record_dir: Union[str, Path, None] = None,
         scores: Any = None,
         scores_timeout: float = 10.0,
         variant: Optional[str] = None,
@@ -223,7 +209,6 @@ class Eval(Job):
         self._store: Optional[ScoreStore] = None
         self._writer: Optional[ScoreWriter] = None
         self._experiment: Optional[Experiment] = None
-        self._capture = _Capture()
         self._rows: Dict[str, Dict[str, Any]] = {}
         self._verdicts: List[Dict[str, Any]] = []
         self._fingerprint: Optional[Dict[str, Any]] = None
@@ -232,16 +217,8 @@ class Eval(Job):
         # a "main" / "git:<ref>" baseline: found before the record opens
         self._from_git: Optional[Tuple[str, Dict[str, CaseOutcome], Dict, str]] = None
         self._complete = False
-        kwargs.setdefault("on_error", "record")
         super().__init__(
-            name,
-            graph=graph,
-            source=self._cases,
-            sink=self._capture,
-            key="id",
-            session="per_item",
-            record_dir=record_dir,
-            **kwargs,
+            name, graph=graph, items=self._cases, key="id", record_dir=record_dir, **kwargs
         )
 
     # -- the experiment in a score store ---------------------------------------
@@ -263,7 +240,7 @@ class Eval(Job):
         opened = JobRun(
             job=self.name,
             run_id=run_id,
-            path=Path(self.record_dir) / self.name / run_id,
+            path=self.records() / self.name / run_id,
             status=RUN_RUNNING,
             started=started,
             ended=None,
@@ -274,7 +251,7 @@ class Eval(Job):
         self._writer = ScoreWriter(self._store, self.name)
         self._writer.submit([self._experiment])
 
-    async def run(self, *, resume: bool = False) -> JobRun:
+    async def run(self, *, resume: bool = False, **kwargs: Any) -> JobRun:
         """Run the eval once; with ``scores=``, then wait (up to
         ``scores_timeout``) for the store to take the experiment."""
         # opened before the record: a store that cannot be named fails the
@@ -289,7 +266,7 @@ class Eval(Job):
         )
         run: Optional[JobRun] = None
         try:
-            run = await super().run(resume=resume)
+            run = await super().run(resume=resume, **kwargs)
             if self._writer is not None:
                 self._writer.submit([experiment_of(run)])
         finally:
@@ -352,7 +329,7 @@ class Eval(Job):
         return {name: alignments_of(self._store, name) for name in self._judges}
 
     def _load_baseline(self) -> Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]]:
-        return record_baseline(Path(self.record_dir), self.name, str(self.gate.baseline))  # type: ignore[union-attr]
+        return record_baseline(self.records(), self.name, str(self.gate.baseline))  # type: ignore[union-attr]
 
     def item_of(self, raw: Any) -> Any:
         row = raw.row if isinstance(raw, _Trial) else raw
@@ -371,14 +348,15 @@ class Eval(Job):
         """After a case's run: its evaluators, and the verdict on its record."""
         if isinstance(raw, _Trial):
             row, repeat, digest = raw.row, raw.repeat, raw.case_hash
-        else:  # a source given on the command line: its rows are the cases
+        else:  # items given on the command line: its rows are the cases
             row = self._rows.get(result.key) or (
                 raw if isinstance(raw, Mapping) else {"input": raw}
             )
             repeat, digest = 0, case_hash(row)
         case = str(row.get("id", result.key))
-        sent = self._capture.by_key.pop(result.key, [])
-        output = sent[0] if len(sent) == 1 else (sent or None)
+        output = result.result
+        # every frame the case sent: one result is one frame, several are a list
+        sent = output if result.sent > 1 else ([output] if output is not None else [])
         if result.status not in (ITEM_OK, ITEM_EMPTY):
             verdict = {"passed": False, "error": result.error or result.status, "checks": {}}
         else:
@@ -597,7 +575,7 @@ class Eval(Job):
         a score store the new scores go to."""
         from .rescoring import is_judge, rescore
 
-        path = Path(self.record_dir) / self.name / run_id
+        path = self.records() / self.name / run_id
         if not (path / "run.json").is_file():
             raise ValueError(f"eval {self.name!r}: no run {run_id!r} under {path.parent}")
         chosen = list(self.evaluators if evaluators is None else evaluators)
@@ -617,52 +595,14 @@ class Eval(Job):
 
     # -- declared, described -------------------------------------------------
 
-    @classmethod
-    def from_spec(cls, spec: Any, root: Union[str, Path, None] = None) -> "Eval":
-        """An Eval from a ``[[job]]`` block with ``dataset`` and ``evaluators``
-        (and optionally ``threshold``, ``repeats``, ``cluster``, ``[job.gate]``)."""
-        from ..serve.registry import load_object
-
-        root = Path(root) if root is not None else Path.cwd()
-        opts = dict(spec.options)
-        evaluators = [
-            load_object(e, field=f"[[job]] {spec.name!r} evaluators") if isinstance(e, str) else e
-            for e in opts.get("evaluators") or []
-        ]
-        gate = opts.get("gate")
-        if gate is not None and not isinstance(gate, Mapping):
-            raise ValueError(f"[[job]] {spec.name!r}: `gate` is a table of Gate settings")
-        record_dir = Path(spec.record_dir) if spec.record_dir else Path("evals")
-        return cls(
-            spec.name,
-            graph=spec.graph,
-            dataset=dataset_path(opts["dataset"], root),
-            evaluators=evaluators,
-            threshold=opts.get("threshold"),
-            repeats=opts.get("repeats", 1),
-            cluster=opts.get("cluster"),
-            gate=Gate.from_options(gate) if gate is not None else None,
-            scores=opts.get("scores"),
-            root=root,
-            record_dir=record_dir if record_dir.is_absolute() else root / record_dir,
-            concurrency=spec.concurrency,
-            item_timeout=spec.item_timeout,
-            trace=list(spec.trace) if spec.trace is not None else None,
-            inputs=dict(spec.inputs),
-            item_input=spec.item_input,
-            schedule=spec.schedule,
-            description=spec.description,
-        )
-
     def describe(self) -> Dict[str, Any]:
         out = super().describe()
         # the cases come from the dataset and the outputs go to the verdicts:
-        # the source and sink underneath are plumbing, not what the eval is
+        # the items underneath are plumbing, not what the eval is
         out.update(
             {
                 "kind": "eval",
-                "source": str(self.dataset.path),
-                "sink": None,
+                "items": str(self.dataset.path),
                 "dataset": str(self.dataset.path),
                 "evaluators": [_name(e) for e in self.evaluators],
                 "threshold": self.threshold,

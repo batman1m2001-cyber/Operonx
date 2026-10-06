@@ -247,8 +247,7 @@ def test_an_installed_distribution_is_discovered_in_a_fresh_process(tmp_path):
 
 
 def test_operonx_categories_outside_providers_resolve_in_a_bare_script(tmp_path):
-    """run_store:, source:, trace_*: and langfuse: register in operonx.telemetry
-    and operonx.app.jobs. A script that bootstraps and asks for one before
+    """run_store:, trace_*: and langfuse: register in operonx.telemetry. A script that bootstraps and asks for one before
     importing those got "no provider is registered", pointing at
     operonx.providers. Fresh interpreter: inside pytest they are imported."""
     (tmp_path / "resources.yaml").write_text(
@@ -256,22 +255,17 @@ def test_operonx_categories_outside_providers_resolve_in_a_bare_script(tmp_path)
             run_store:main:
               backend: sqlite
               path: runs.sqlite
-            source:calls:
-              kind: jsonl
-              path: calls.jsonl
             trace_local:dev:
               root: traces
         """),
         encoding="utf-8",
     )
-    (tmp_path / "calls.jsonl").write_text('{"id": 1}\n', encoding="utf-8")
     script = textwrap.dedent("""\
         import sys
         import operonx
         assert "operonx.telemetry.runs" not in sys.modules
-        assert "operonx.app.jobs" not in sys.modules
         hub = operonx.bootstrap(resources="resources.yaml", env=False)
-        for key in ("run_store:main", "source:calls", "trace_local:dev"):
+        for key in ("run_store:main", "trace_local:dev"):
             print(key, type(hub.get(key)).__name__)
     """)
     out = subprocess.run(
@@ -279,4 +273,4 @@ def test_operonx_categories_outside_providers_resolve_in_a_bare_script(tmp_path)
     )
     assert out.returncode == 0, out.stderr[-1500:]
     got = dict(line.split() for line in out.stdout.strip().splitlines())
-    assert set(got) == {"run_store:main", "source:calls", "trace_local:dev"}
+    assert set(got) == {"run_store:main", "trace_local:dev"}

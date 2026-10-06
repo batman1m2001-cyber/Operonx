@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-06
+
+### Changed
+
+- **One `Job`.** `Job(items=...)` loops over a list, an iterable or async iterable, a function that
+  yields items (called on every run: the custom loader), or a `.jsonl` path. Every result is kept
+  in the record's `results.jsonl` and read back as `run.results`; a resumed run carries the earlier
+  results for the keys it skipped. `output=` (a `.jsonl` path or `fn(key, result)`) exports each
+  result as it finishes. `reduce=graph` runs once over every result (`run.reduced`).
+  `steps=[...]` runs jobs in order as one command. `retry=Retry(...)` and `timeout=` per item.
+- A graph without doors is bound by name (dict items fill parameters; `input=` hands the whole item
+  to one parameter; a non-dict item goes to the only free parameter).
+- Runs are recorded under the project root by default: `.operonx/jobs` (`[jobs] dir` overrides),
+  `.operonx/evals` for evals.
+- `operonx run <job> --items file.jsonl` replaces `--source`/`--sink`.
+- `pytest` skips tests marked `slow` (real sleeps, subprocesses, the guide snippets) by default;
+  `-m slow` or `-m ""` runs them.
+
+### Removed
+
+- `Runbook`, `Sequential`, `Parallel`; every source and sink class and the `source:`/`sink:`
+  resource categories; `session="stream"` jobs; `schedule=`; `on_error="retry:N"`/`"record"`;
+  `item_input=`, `item_timeout=`.
+- `[[job]]` blocks in `operonx.toml`, TOML-declared evals, `Eval.from_spec`,
+  `OnlineEval.from_spec`, `Gate.from_options`: declare jobs and evals in `Application(jobs=[...])`.
+  A `[[job]]` block is refused with a pointer to `app/main.py`.
+- The `operonx.core.jobs` alias. See MIGRATION.md.
+
+### Fixed
+
+- A Python-declared `Application` kept the manifest's `[[queue]]` blocks.
+- `operonx eval run --strict` (and other flags) no longer changed the declared eval in-process.
+
 ## [1.16.0] - 2026-10-06
 
 ### Removed
@@ -3092,7 +3125,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.16.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.13.0...v1.14.0

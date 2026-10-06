@@ -73,8 +73,8 @@ async def test_a_retried_then_successful_op_leaves_an_ok_run(tmp_path):
     job = Job(
         "j",
         graph=once,
-        source=str(tmp_path / "src.jsonl"),
-        item_input="text",
+        items=str(tmp_path / "src.jsonl"),
+        input="text",
         record_dir=tmp_path / "rec",
         trace=[],
     )
@@ -97,8 +97,8 @@ async def test_an_op_that_never_succeeds_keeps_its_error(tmp_path):
     job = Job(
         "j",
         graph=never,
-        source=str(tmp_path / "src.jsonl"),
-        item_input="text",
+        items=str(tmp_path / "src.jsonl"),
+        input="text",
         record_dir=tmp_path / "rec",
         trace=[],
     )

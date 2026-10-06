@@ -13,8 +13,8 @@ websocket, and an **Application** bundles a product's jobs and services.
 
 1. [Op types](01-ops.md): `@op`, generators, `@graph`, `LLMOp`, flow and
    retrieval ops.
-2. [The composition ladder](02-composition.md): op → operon → Job /
-   Runbook / Service → Application → `operonx.toml` and the CLIs.
+2. [The composition ladder](02-composition.md): op → operon → Job (with
+   `reduce` and `steps`) / Service → Application → `operonx.toml` and the CLIs.
 3. [Control flow](03-control-flow.md): streaming, loops, if/else, `~`.
 4. [Gotchas](04-gotchas.md): the failures that raise nothing.
 5. [Project layout](05-project-layout.md): how to lay out a product.
@@ -55,7 +55,7 @@ from operonx import END, PARENT, SCRATCH, START, EmitOp, InterruptOp, Operon, bo
 from operonx import OpFailed, Retry, Timeout  # failure policies (page 6)
 from operonx import TaskFailed, TaskFinished, TaskStarted, child, run_context  # page 8
 from operonx.app import Application, Eval, Service, asgi, env, http, schedule, webhook, websocket
-from operonx.app.jobs import Job, Runbook
+from operonx.app.jobs import Job
 from operonx.app.serve import RunRequest, egress, ingress
 from operonx.core.ops import if_
 from operonx.providers.ops import (

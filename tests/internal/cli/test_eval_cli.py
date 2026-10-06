@@ -54,20 +54,28 @@ def strict_label(output=None, expected=None):
 """
 
 
-def _toml(gate: str = "threshold = 0.5") -> str:
-    return f"""[project]
-name = "demo"
+APP = """
+from operonx.app import Application, Eval
+from operonx.app.evals import Gate
+from operonx.app.serve.registry import load_object
 
-[[job]]
-name       = "labels"
-graph      = "labels:flow"
-item_input = "text"
-dataset    = "dataset:labels"
-evaluators = ["checks:label"]
-
-[job.gate]
-{gate}
+APP = Application("demo", jobs=[
+    Eval("labels", graph=load_object("labels:flow"), input="text", dataset="dataset:labels",
+         evaluators=[load_object(e) for e in {evaluators}], gate=Gate({gate})),
+])
 """
+
+
+def _declare(
+    root: Path, gate: str = "threshold=0.5", evaluators: str = '["checks:label"]', toml: str = ""
+) -> None:
+    """The eval, declared in Python (evalapp.py) and pointed at by operonx.toml."""
+    (root / "evalapp.py").write_text(APP.format(gate=gate, evaluators=evaluators))
+    (root / "operonx.toml").write_text(
+        f'[project]\nname = "demo"\napp = "evalapp:APP"\n\n[resources]\n'
+        f'overlay = "resources.yaml"\n{toml}'
+    )
+    sys.modules.pop("evalapp", None)
 
 
 def _cases(n: int = 40):
@@ -86,18 +94,18 @@ def project(tmp_path, monkeypatch):
     (root / "datasets").mkdir(parents=True)
     (root / "labels.py").write_text(LABELS)
     (root / "checks.py").write_text(CHECKS)
-    (root / "operonx.toml").write_text(_toml())
+    _declare(root)
     (root / "datasets" / "labels.jsonl").write_text("".join(json.dumps(r) + "\n" for r in _cases()))
     monkeypatch.chdir(root)
     monkeypatch.delenv("OPERONX_RUNS_DIR", raising=False)
     monkeypatch.delenv("BROKEN", raising=False)
     monkeypatch.delenv("BOOM", raising=False)
     monkeypatch.setattr(sys, "path", list(sys.path))
-    for name in ("labels", "checks"):
+    for name in ("labels", "checks", "evalapp"):
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setattr(job_module, "_versions", {})
     yield root
-    for name in ("labels", "checks", "judges"):
+    for name in ("labels", "checks", "judges", "evalapp"):
         sys.modules.pop(name, None)
     from operonx.core.registry import ResourceHub
 
@@ -134,7 +142,7 @@ def test_pass_exits_0_and_the_experiment_is_stored(project, capsys):
 
 
 def test_failed_exits_1(project, monkeypatch, capsys):
-    (project / "operonx.toml").write_text(_toml("threshold = 0.9"))
+    _declare(project, gate="threshold=0.9")
     monkeypatch.setenv("BROKEN", "1")
     assert _eval("run", "labels") == 1
     assert "gate: pass: 50.0% < threshold 90.0%" in capsys.readouterr().out
@@ -176,7 +184,7 @@ def test_what_cannot_run_exits_2(project, capsys):
 
 
 def test_an_unopenable_store_is_an_error_unless_no_store(project, capsys):
-    (project / "operonx.toml").write_text(_toml() + '\n[evals]\nscores = "score_store:team"\n')
+    _declare(project, toml='\n[evals]\nscores = "score_store:team"\n')
     (project / "resources.yaml").write_text(
         "score_store:\n  team:\n    backend: clickhouse\n    host: ${CH_HOST_UNSET}\n"
     )
@@ -409,11 +417,7 @@ def _judge_project(project, base_url, evaluators='["checks:label", "judges:on_to
         f"llm:judge:\n  api_type: openai\n  api_key: sk-local-test\n"
         f"  base_url: {base_url}\n  model: judge-model\n"
     )
-    toml = _toml().replace('evaluators = ["checks:label"]', f"evaluators = {evaluators}")
-    toml = toml.replace(
-        'name = "demo"\n', 'name = "demo"\n\n[resources]\noverlay = "resources.yaml"\n'
-    )
-    (project / "operonx.toml").write_text(toml)
+    _declare(project, evaluators=evaluators)
 
 
 def _says(body):
@@ -527,28 +531,29 @@ def _online_project(project):
         f"run_store:main:\n  backend: sqlite\n  path: {project / 'runs.sqlite'}\n"
         f"score_store:main:\n  backend: sqlite\n  path: {project / 'scores.sqlite'}\n"
     )
+    (project / "onlineapp.py").write_text(
+        """
+from operonx.app import Application, Job
+from operonx.app.evals.online import OnlineEval
+from operonx.app.serve.registry import load_object
+
+APP = Application("demo", jobs=[
+    Job("bot", graph=load_object("labels:flow"), items="traffic.jsonl", input="text",
+        trace=["run_store:main"]),
+    OnlineEval("quality", runs={"origin": "job", "name": "bot"}, store="run_store:main",
+               scores="score_store:main", evaluators=[load_object("online_checks:refund_said")],
+               queue={"to": "refunds", "when": "any_failed"}),
+])
+"""
+    )
+    sys.modules.pop("onlineapp", None)
     (project / "operonx.toml").write_text(
         """[project]
 name = "demo"
+app = "onlineapp:APP"
 
 [resources]
 overlay = "resources.yaml"
-
-[[job]]
-name       = "bot"
-graph      = "labels:flow"
-source     = "traffic.jsonl"
-item_input = "text"
-trace      = ["run_store:main"]
-
-[[job]]
-name       = "quality"
-runs       = { origin = "job", name = "bot" }
-store      = "run_store:main"
-scores     = "score_store:main"
-evaluators = ["online_checks:refund_said"]
-queue      = { to = "refunds", when = "any_failed" }
-schedule   = "*/10 * * * *"
 
 [[queue]]
 name      = "refunds"

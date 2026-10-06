@@ -58,7 +58,7 @@ from operonx.app.evals import Eval
 from operonx.app.evals.fingerprint import fingerprint
 import mod
 
-ev = Eval("e", graph=mod.flow, dataset="cases.jsonl", evaluators=[mod.label_ok], item_input="text")
+ev = Eval("e", graph=mod.flow, dataset="cases.jsonl", evaluators=[mod.label_ok], input="text")
 rows = ev.dataset.rows()
 fp = fingerprint(graph=ev.engine().graph, rows=rows, evaluators={"label_ok": mod.label_ok})
 print(json.dumps(fp))
@@ -212,7 +212,7 @@ def test_a_dirty_tree_is_flagged(tmp_path):
     run = Eval(
         "fp",
         graph=classify_flow,
-        item_input="text",
+        input="text",
         dataset=data,
         evaluators=[exact("label")],
         record_dir=tmp_path / "evals",
@@ -306,7 +306,7 @@ def test_the_fingerprint_is_on_the_run_record(tmp_path):
         return Eval(
             "fp",
             graph=classify_flow,
-            item_input="text",
+            input="text",
             dataset=data,
             evaluators=[exact("label")],
             record_dir=tmp_path / "evals",

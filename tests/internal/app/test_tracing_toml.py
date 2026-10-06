@@ -81,9 +81,6 @@ sinks = ["local", "trace_langfuse:edupia", "trace_clickhouse:default"]
 [tracing.services.call]
 sinks = ["local", "trace_langfuse:edupia"]
 
-[tracing.jobs.backfill_call_logs]
-sinks = []
-
 [[serve]]
 name  = "call"
 kind  = "http"
@@ -96,14 +93,6 @@ kind  = "http"
 path  = "/admin"
 graph = "pipeline:admin"
 trace = ["trace_local:default"]
-
-[[job]]
-name  = "backfill_call_logs"
-graph = "pipeline:backfill"
-
-[[job]]
-name  = "score_calls"
-graph = "pipeline:score"
 """
 
 
@@ -114,7 +103,7 @@ def test_tracing_is_parsed_and_settles_every_service_and_job():
     m = _manifest(TOML_APP)
     assert m.tracing.sinks == ("local", "trace_langfuse:edupia", "trace_clickhouse:default")
     assert m.tracing.services == {"call": ("local", "trace_langfuse:edupia")}
-    assert m.tracing.jobs == {"backfill_call_logs": ()}
+    assert m.tracing.jobs == {}
     # the override beats the project-wide list
     assert m.serve("call").options["trace"] == ["local", "trace_langfuse:edupia"]
     # the service's own `trace =` beats the project-wide list
@@ -126,46 +115,7 @@ def test_tracing_is_parsed_and_settles_every_service_and_job():
         "call": (["local", "trace_langfuse:edupia"], "[tracing.services.call]"),
         "admin": (["trace_local:default"], "service"),
     }
-    jobs = {j["name"]: (j["sinks"], j["sinks_from"]) for j in d["jobs"]}
-    assert jobs == {
-        "backfill_call_logs": ([], "[tracing.jobs.backfill_call_logs]"),
-        "score_calls": (
-            ["local", "trace_langfuse:edupia", "trace_clickhouse:default"],
-            "[tracing]",
-        ),
-    }
-
-
-def test_built_jobs_follow_the_same_precedence(tmp_path):
-    from operonx.app.declare import build_job, settle_jobs
-
-    m = _manifest(TOML_APP)
-    jobs = {s.name: build_job(s, tmp_path) for s in m.jobs}
-    settle_jobs(jobs, m, tmp_path)
-    assert jobs["backfill_call_logs"].trace == []
-    assert jobs["score_calls"].trace == [
-        "local",
-        "trace_langfuse:edupia",
-        "trace_clickhouse:default",
-    ]
-
-
-def test_an_explicit_empty_trace_on_a_job_block_is_kept():
-    """`[[job]] trace = []` is a decision, the way `Job(trace=[])` is. It
-    used to read as "nothing declared" and inherit."""
-    m = _manifest("""
-    [project]
-    name = "x"
-    [tracing]
-    sinks = ["local"]
-    [[job]]
-    name  = "quiet"
-    graph = "m:f"
-    trace = []
-    """)
-    assert m.job("quiet").trace == ()
-    (j,) = Application(m).describe()["jobs"]
-    assert (j["sinks"], j["sinks_from"]) == ([], "job")
+    assert d["jobs"] == []  # jobs are declared in Python only
 
 
 def test_with_no_tracing_anywhere_a_service_is_untraced_and_a_job_records_locally():
@@ -177,21 +127,17 @@ def test_with_no_tracing_anywhere_a_service_is_untraced_and_a_job_records_locall
     kind = "http"
     path = "/a"
     graph = "m:f"
-    [[job]]
-    name  = "j"
-    graph = "m:f"
     """)
     assert "trace" not in m.serve("a").options
     d = Application(m).describe()
     assert (d["services"][0]["sinks"], d["services"][0]["sinks_from"]) == ([], "default")
-    assert (d["jobs"][0]["sinks"], d["jobs"][0]["sinks_from"]) == (["local"], "default")
 
 
 # -- precedence with an application declared in Python ----------------------------
 
 MODULE = """
 from operonx.app import Application, Service, http
-from operonx.app.jobs import Job, ListSink, Runbook
+from operonx.app.jobs import Job
 from operonx.core import END, START, graph, op
 
 
@@ -206,7 +152,7 @@ def flow():
     START >> o >> END
 
 
-member = Job("member", graph=flow, source=[], sink=ListSink())
+member = Job("member", graph=flow)
 APP = Application(
     "demo",
     services=[
@@ -214,8 +160,8 @@ APP = Application(
         Service("plain", http("POST", "/plain", port=8471), graph=flow),
     ],
     jobs=[
-        Job("backfill", graph=flow, source=[], sink=ListSink(){job}),
-        Runbook("nightly", member),
+        Job("backfill", graph=flow{job}),
+        Job("nightly", steps=[member]),
     ],
     resources=None,
     src=["."]{app},
@@ -335,22 +281,22 @@ def test_tracing_reaches_the_services_and_jobs_that_declare_nothing(
     assert app.job("backfill").trace == ["local"]
 
 
-def test_a_runbook_override_reaches_its_member_jobs(tmp_path, monkeypatch, unimport):
+def test_a_steps_override_reaches_its_steps(tmp_path, monkeypatch, unimport):
     _project(
         tmp_path,
         monkeypatch,
         tracing='[tracing]\nsinks = ["local"]\n[tracing.jobs.nightly]\nsinks = []\n',
     )
     app = Application.find(tmp_path)
-    (member,) = app.job("nightly").jobs
+    (member,) = app.job("nightly").steps
     assert member.trace == []
     assert {j["name"]: j["sinks"] for j in app.describe()["jobs"]}["nightly"] == []
 
 
-def test_a_runbook_member_can_be_named_on_its_own(tmp_path, monkeypatch, unimport):
+def test_a_step_can_be_named_on_its_own(tmp_path, monkeypatch, unimport):
     _project(tmp_path, monkeypatch, tracing='[tracing.jobs.member]\nsinks = ["trace_t:m"]\n')
     app = Application.find(tmp_path)
-    (member,) = app.job("nightly").jobs
+    (member,) = app.job("nightly").steps
     assert member.trace == ["trace_t:m"]
 
 
@@ -416,9 +362,6 @@ name = "admin"
 kind = "asgi"
 path = "/admin"
 app  = "m:app"
-[[job]]
-name  = "backfill"
-graph = "m:f"
 """
 
 
@@ -458,7 +401,7 @@ graph = "m:f"
         ),
         pytest.param(
             "[tracing.jobs.nope]\nsinks = []\n",
-            r"\[tracing\.jobs\.nope\] names no job \(have: backfill\)",
+            r"\[tracing\.jobs\.nope\] names no job",
             id="unknown-job",
         ),
         pytest.param(
@@ -627,15 +570,18 @@ def test_serve_list_shows_each_services_sinks(tmp_path, capsys):
     assert "sinks: trace_local:default  (service)" in out
 
 
-def test_run_list_shows_each_jobs_sinks(tmp_path, capsys):
+def test_run_list_shows_each_jobs_sinks(tmp_path, monkeypatch, unimport, capsys):
     from operonx.cli.run import main
 
-    path = tmp_path / "operonx.toml"
-    path.write_text(TOML_APP, encoding="utf-8")
-    assert main(["-f", str(path), "--list"]) == 0
+    _project(
+        tmp_path,
+        monkeypatch,
+        tracing='[tracing]\nsinks = ["local"]\n[tracing.jobs.backfill]\nsinks = []\n',
+    )
+    assert main(["-f", str(tmp_path / "operonx.toml"), "--list"]) == 0
     out = capsys.readouterr().out
-    assert "sinks: none  ([tracing.jobs.backfill_call_logs])" in out
-    assert "sinks: local, trace_langfuse:edupia, trace_clickhouse:default  ([tracing])" in out
+    assert "sinks: none  ([tracing.jobs.backfill])" in out
+    assert "sinks: local  ([tracing])" in out
 
 
 def test_describe_names_a_consumer_object_by_its_type(tmp_path):

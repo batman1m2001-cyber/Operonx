@@ -1,10 +1,12 @@
 """What a job run leaves behind.
 
-One directory per run, two files::
+One directory per run, three files::
 
     <record_dir>/<job>/<run_id>/
-      run.json      job, status, started, ended, counts, source, sink, …
-      items.jsonl   one line per item: key, status, error, trace_id, ms, sent
+      run.json        job, status, started, ended, counts, the job's settings,
+                      and what ``reduce`` returned
+      items.jsonl     one line per item: key, status, error, trace_id, ms, sent
+      results.jsonl   one line per item that produced something: key, result
 
 This is the difference between a job and a for-loop. A runner that
 reports "OK" for ninety items that produced nothing has no record; with
@@ -12,7 +14,10 @@ one, each of those ninety is a line whose ``sent`` is 0 and whose status
 is ``empty``, and ``--resume`` knows which keys still need doing.
 
 Items are written as they finish and flushed one at a time, so a run
-that is killed still says what it got through.
+that is killed still says what it got through. ``results.jsonl`` is what
+makes ``--resume`` and ``reduce`` agree: a resumed run starts by copying the
+results its predecessor kept for the keys it will skip, so every run's file
+holds every result, wherever it was computed.
 """
 
 from __future__ import annotations
@@ -38,6 +43,7 @@ __all__ = [
     "RUN_STOPPED",
     "done_keys",
     "last_run",
+    "load_results",
     "runs_of",
 ]
 
@@ -48,7 +54,7 @@ ITEM_OK = "ok"
 ITEM_FAILED = "failed"
 ITEM_EMPTY = "empty"
 ITEM_SKIPPED = "skipped"  # already done in the run being resumed
-ITEM_TIMEOUT = "timeout"  # the run passed `item_timeout` and was cancelled
+ITEM_TIMEOUT = "timeout"  # the run passed the job's `timeout` and was cancelled
 
 #: Whole-run outcomes.
 RUN_RUNNING = "running"
@@ -72,6 +78,10 @@ def new_run_id() -> str:
     return now.strftime("%Y%m%dT%H%M%S") + f"-{now.microsecond:06d}"
 
 
+#: ItemResult fields that live in memory only.
+_TRANSIENT = ("trace", "result")
+
+
 @dataclass
 class ItemResult:
     key: str
@@ -86,19 +96,28 @@ class ItemResult:
     #: The item's live ``WorkflowTrace`` while its case is judged — for the
     #: evaluators that read it. Never written, and let go once judged.
     trace: Any = field(default=None, repr=False, compare=False)
+    #: What the item's run produced (see ``Job``). Written to
+    #: ``results.jsonl``, never to ``items.jsonl``, and let go once written.
+    result: Any = field(default=None, repr=False, compare=False)
 
     def as_dict(self) -> Dict[str, Any]:
         """The record line's fields. Shallow: the line is serialized at
         once, and a deep copy of an eval's verdict (``asdict``) was most of
         what writing an item cost (`scripts/bench_eval_overhead.py`)."""
-        out = {name: getattr(self, name) for name in self.__dataclass_fields__ if name != "trace"}
+        out = {
+            name: getattr(self, name)
+            for name in self.__dataclass_fields__
+            if name not in _TRANSIENT
+        }
         if out["verdict"] is None:
             del out["verdict"]
         return out
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ItemResult":
-        return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data and k != "trace"})
+        return cls(
+            **{k: data[k] for k in cls.__dataclass_fields__ if k in data and k not in _TRANSIENT}
+        )
 
 
 @dataclass
@@ -136,6 +155,28 @@ class JobRun:
     def timed_out(self) -> List[ItemResult]:
         return [i for i in self.items if i.status == ITEM_TIMEOUT]
 
+    @property
+    def results(self) -> Dict[str, Any]:
+        """``{key: result}`` for every item that produced something — this
+        run's and, after ``--resume``, the earlier runs' too. Read from
+        ``results.jsonl``; empty when the job kept no results."""
+        return load_results(self.path)
+
+    @property
+    def errors(self) -> Dict[str, str]:
+        """``{key: error}`` for every item that failed or timed out."""
+        return {
+            i.key: i.error or i.status
+            for i in self.items
+            if i.status in (ITEM_FAILED, ITEM_TIMEOUT)
+        }
+
+    @property
+    def reduced(self) -> Any:
+        """What the job's ``reduce`` graph returned (``None`` without one,
+        or when it did not run)."""
+        return self.meta.get("reduced")
+
     @classmethod
     def load(cls, path: str | Path, items: bool = True) -> "JobRun":
         """A run from its directory. ``items=False`` reads ``run.json``
@@ -150,9 +191,8 @@ class JobRun:
                     line = line.strip()
                     if line:
                         items.append(ItemResult.from_dict(json.loads(line)))
-        # The four item statuses are recounted from items.jsonl, which is
-        # the truth; anything else run.json counted (a stream run's `fed`
-        # and `sent`) is kept as written.
+        # The item statuses are recounted from items.jsonl, which is the
+        # truth; anything else run.json counted is kept as written.
         if read_items:
             counts = {s: 0 for s in _COUNTED}
             counts.update(
@@ -181,8 +221,6 @@ class JobRun:
 
     def summary(self) -> str:
         c = self.counts
-        if "fed" in c:  # a stream run: one run, no items
-            return f"{self.job} {self.run_id} {self.status}  fed={c['fed']} sent={c.get('sent', 0)}"
         text = (
             f"{self.job} {self.run_id} {self.status}  "
             f"ok={c.get(ITEM_OK, 0)} failed={c.get(ITEM_FAILED, 0)} "
@@ -218,6 +256,7 @@ class RunRecord:
         *,
         meta: Optional[Dict[str, Any]] = None,
         resume_from: Optional[str] = None,
+        keep_results: bool = True,
     ):
         self.job = job
         for _ in range(3):
@@ -237,6 +276,9 @@ class RunRecord:
         self.error: Optional[str] = None
         self._write_run(RUN_RUNNING, ended=None)
         self._items = (self.path / "items.jsonl").open("a", encoding="utf-8")
+        self._results = (
+            (self.path / "results.jsonl").open("a", encoding="utf-8") if keep_results else None
+        )
 
     def _write_run(self, status: str, ended: Optional[str]) -> None:
         payload = {
@@ -260,6 +302,17 @@ class RunRecord:
         self._items.flush()
         self.counts[result.status] = self.counts.get(result.status, 0) + 1
 
+    def result(self, key: str, value: Any) -> None:
+        """Keep one item's result in ``results.jsonl`` (when the job keeps
+        results). Flushed at once, like the item line."""
+        if self._results is None:
+            return
+        self._results.write(
+            json.dumps({"key": key, "result": value}, ensure_ascii=False, default=str)
+        )
+        self._results.write("\n")
+        self._results.flush()
+
     def finish(
         self,
         status: str,
@@ -268,9 +321,9 @@ class RunRecord:
         counts: Optional[Dict[str, int]] = None,
         extra: Optional[Dict[str, Any]] = None,
     ) -> JobRun:
-        """Close the record. ``counts`` adds to the four item counts (a
-        stream run reports ``fed`` and ``sent``); ``extra`` lands in
-        run.json beside the job's description (a stream run's trace id)."""
+        """Close the record. ``counts`` adds to the item counts; ``extra``
+        lands in run.json beside the job's description (what ``reduce``
+        returned, a ``steps`` job's steps, an eval's numbers)."""
         if error:
             self.error = error
         if counts:
@@ -278,6 +331,8 @@ class RunRecord:
         if extra:
             self.meta.update(extra)
         self._items.close()
+        if self._results is not None:
+            self._results.close()
         self._write_run(status, ended=_now())
         return JobRun.load(self.path)
 
@@ -296,6 +351,22 @@ def runs_of(root: str | Path, job: str) -> List[Path]:
 def last_run(root: str | Path, job: str) -> Optional[JobRun]:
     runs = runs_of(root, job)
     return JobRun.load(runs[-1]) if runs else None
+
+
+def load_results(path: str | Path) -> Dict[str, Any]:
+    """``{key: result}`` from a run directory's ``results.jsonl`` (empty
+    when there is none). A key written twice keeps its last result."""
+    out: Dict[str, Any] = {}
+    file = Path(path) / "results.jsonl"
+    if not file.exists():
+        return out
+    with file.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                row = json.loads(line)
+                out[row["key"]] = row["result"]
+    return out
 
 
 def done_keys(run: Optional[JobRun]) -> Set[str]:

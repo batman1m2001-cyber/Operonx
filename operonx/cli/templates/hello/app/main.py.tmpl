@@ -20,10 +20,9 @@ OUT = ROOT / "out"
 greet_people = Job(
     "greet_people",
     graph=greet_flow,
-    source=ROOT / "datasets" / "people.jsonl",
-    sink=OUT / "greetings.jsonl",
+    items=ROOT / "datasets" / "people.jsonl",
     key="id",  # resumable: `operonx run greet_people --resume` skips done ids
-    record_dir=OUT / "jobs",
+    output=OUT / "greetings.jsonl",
     description="A greeting for every person in datasets/people.jsonl.",
 )
 

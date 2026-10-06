@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-kb"
-version = "0.2.3"
+version = "0.2.4"
 description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
 readme = "README.md"
 license = "Apache-2.0"
@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 # Core: text, Markdown, HTML, DOCX/PPTX/XLSX (stdlib), SQLite catalog, local
 # blobs, in-memory index. Everything heavier is an extra (PLAN.md §1).
 dependencies = [
-    "operonx>=1.16",
+    "operonx>=1.17",
     "pydantic>=2.0",
     "defusedxml>=0.7.1",  # Office XML from untrusted files
     "httpx>=0.24",        # operonx.providers (EmbeddingOp) imports it eagerly
@@ -106,7 +106,11 @@ include = ["operonx_kb", "README.md", "LICENSE", "pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The scale gates and the slow ones run with `-m corpus`, `-m slow`, or
+# everything with `-m ""`; a plain `pytest` stays quick.
+addopts = "-m 'not corpus and not slow'"
 markers = [
+    "slow: correct but seconds-long (subprocesses, OCR, real sleeps)",
     "pdf: needs the 'pdf' extra (docling-parse)",
     "corpus: the 200-document and 100-page scale gates (about a minute)",
 ]

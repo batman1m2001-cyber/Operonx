@@ -200,7 +200,7 @@ def test_an_eval_does_not_run_an_archived_case(tmp_path):
     run = Eval(
         "echo",
         graph=flow,
-        item_input="text",
+        input="text",
         dataset=path,
         evaluators=[exact("label")],
         record_dir=tmp_path / "evals",

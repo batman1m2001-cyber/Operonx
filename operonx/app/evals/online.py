@@ -238,6 +238,8 @@ class OnlineEval(Job):
     """
 
     origin = "eval"
+    items_fail_run = False  # a failed pass is a failed verdict, not a broken job
+    folder = "online"
 
     def __init__(
         self,
@@ -254,7 +256,7 @@ class OnlineEval(Job):
         queues_dir: Union[str, Path] = ".operonx/queues",
         trace: Any = (),
         judge_concurrency: int = 4,
-        record_dir: Union[str, Path] = "online",
+        record_dir: Union[str, Path, None] = None,
         since: Optional[float] = None,
         until: Optional[float] = None,
         **kwargs: Any,
@@ -310,53 +312,22 @@ class OnlineEval(Job):
         self._queued = 0
         self._exhausted = 0
 
-        kwargs.setdefault("on_error", "record")
         super().__init__(
             name,
             # the item's run is judged in `judge`; the graph only hands it on, untraced
             graph=Operon(online_pass, params={"run": None}, trace=[]),
-            source=self._runs,
+            items=self._runs,
             key=lambda run: run.trace_id,
-            item_input="run",
+            input="run",
             record_dir=record_dir,
             **kwargs,
-        )
-
-    @classmethod
-    def from_spec(cls, spec: Any, root: Union[str, Path, None] = None) -> "OnlineEval":
-        """An OnlineEval from a ``[[job]]`` block with ``runs = {…}``."""
-        from ..serve.registry import load_object
-
-        root = Path(root) if root is not None else Path.cwd()
-        opts = dict(spec.options)
-        evaluators = [
-            load_object(e, field=f"[[job]] {spec.name!r} evaluators") if isinstance(e, str) else e
-            for e in opts.get("evaluators") or []
-        ]
-        record_dir = Path(spec.record_dir) if spec.record_dir else Path("online")
-        return cls(
-            spec.name,
-            runs=opts["runs"],
-            store=opts["store"],
-            evaluators=evaluators,
-            scores=opts["scores"],
-            sample=float(opts.get("sample", 1.0)),
-            target=str(opts.get("target") or "trace"),
-            budget_usd_per_day=opts.get("budget_usd_per_day"),
-            queue=opts.get("queue"),
-            queues_dir=root / ".operonx" / "queues",
-            trace=list(spec.trace) if spec.trace is not None else (),
-            record_dir=record_dir if record_dir.is_absolute() else root / record_dir,
-            concurrency=spec.concurrency,
-            schedule=spec.schedule,
-            description=spec.description,
         )
 
     # -- a pass ------------------------------------------------------------------
 
     @property
     def cursor_path(self) -> Path:
-        return Path(self.record_dir) / self.name / "cursor.json"
+        return self.records() / self.name / "cursor.json"
 
     @property
     def is_backfill(self) -> bool:
@@ -385,12 +356,12 @@ class OnlineEval(Job):
         )
         return twin
 
-    async def run(self, *, resume: bool = False):
+    async def run(self, *, resume: bool = False, **kwargs: Any):
         self._run_store = _open_runs(self.store)
         self._store = _open_scores(self.scores)
         run = None
         try:
-            run = await super().run(resume=resume)
+            run = await super().run(resume=resume, **kwargs)
         finally:
             writer, self._writer = self._writer, None
             if writer is not None:

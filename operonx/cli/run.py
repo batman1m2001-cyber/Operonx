@@ -2,20 +2,20 @@
 
     operonx run score_calls                   # a job the application declares, by name
     operonx run score_calls --resume          # only what the last run did not finish
-    operonx run --list                        # every job, with its schedule
+    operonx run --list                        # every job
     operonx run jobs:score_calls              # a Job object, as module:attr
     operonx run score_calls --show            # what would run, and exit
-    operonx run score_calls --set day=2026-09-25 --sink out/today.jsonl
+    operonx run score_calls --set day=2026-09-25 --items data/today.jsonl
 
-A Job or Runbook is also its own command line — ``job.main()`` takes the
-same flags, minus the name, so ``python -m jobs.score_calls --resume``
-works from a package whose ``__main__.py`` calls it.
+A Job is also its own command line — ``job.main()`` takes the same
+flags, minus the name, so ``python -m jobs.score_calls --resume`` works
+from a package whose ``__main__.py`` calls it.
 
-The command is what a cron entry calls; a job's ``schedule`` declares
-when, it does not run anything. Exit status is 0 only when every item
-finished cleanly, so a cron mail or a CI step sees a failed batch. An
-eval exits with its gate's code: 0 pass, 1 failed or regressed, 2
-inconclusive under ``Gate(strict=True)``, 3 an infrastructure error.
+This is what cron, a systemd timer or a CI schedule calls. Exit status:
+0 when the run is ``ok``, 1 when an item (or a step) failed, 2 when the
+job could not start (a bad flag, a name it does not know). An eval exits
+with its gate's code: 0 pass, 1 failed or regressed, 2 inconclusive
+under ``Gate(strict=True)``, 3 an infrastructure error.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, List, Optional, Sequence
 
 from operonx.app import Application, ManifestError
 from operonx.app.serve.registry import load_object
@@ -43,12 +43,11 @@ def _list(app: Application) -> int:
         print("  no jobs")
         return 0
     for j in jobs:
-        when = f"  [{j['schedule']}]" if j["schedule"] else ""
-        if j["kind"] == "runbook":
-            print(f"  {j['name']:18s} {'runbook':9s} {j['runbook']:30s}{when}")
+        if j["kind"] == "steps":
+            print(f"  {j['name']:18s} {'steps':6s} {' -> '.join(j['steps'])}")
         else:
-            io = f"{j['source'] or '-'} -> {j['sink'] or '-'}"
-            print(f"  {j['name']:18s} {j['session']:9s} {j['graph']:30s} {io}{when}")
+            reduce = f" -> reduce {j['reduce']}" if j.get("reduce") else ""
+            print(f"  {j['name']:18s} {j['kind']:6s} {j['items'] or '-'} -> {j['graph']}{reduce}")
         if j["description"]:
             print(f"  {'':18s} {j['description']}")
         print(f"  {'':18s} {_sinks(j)}")
@@ -79,12 +78,11 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
         metavar="KEY=VALUE",
         help="an input for the graph (repeatable); VALUE is JSON when it parses",
     )
-    parser.add_argument("--source", default=None, help="read items from here instead")
-    parser.add_argument("--sink", default=None, help="write results here instead")
+    parser.add_argument("--items", default=None, help="read items from this .jsonl file instead")
     parser.add_argument(
         "--record-dir",
         default=None,
-        help="where to write the run record (default: the job's record_dir)",
+        help="where to write the run record (default: the project's .operonx/jobs)",
     )
     parser.add_argument(
         "--concurrency", type=int, default=None, help="items in flight at once (default: the job's)"
@@ -95,8 +93,8 @@ def _add_run_flags(parser: argparse.ArgumentParser) -> None:
 
 
 def _apply(job: Any, args: argparse.Namespace) -> None:
-    """Command-line overrides onto a Job, or onto every job of a Runbook."""
-    from operonx.app.jobs import Runbook
+    """Command-line overrides onto a Job, or onto every step of a job of steps."""
+    from operonx.app.jobs.items import check_items
 
     sets = {}
     for pair in args.sets:
@@ -105,71 +103,51 @@ def _apply(job: Any, args: argparse.Namespace) -> None:
             raise ValueError(f"--set wants KEY=VALUE, not {pair!r}")
         sets[key.strip()] = _value(value)
 
-    jobs = job.jobs if isinstance(job, Runbook) else [job]
-    if isinstance(job, Runbook) and (args.source or args.sink):
-        raise ValueError("--source / --sink name one job's data; run that job instead")
-    for j in jobs:
+    def each(j: Any) -> List[Any]:
+        return [j] if j.steps is None else [m for s in j.steps for m in each(s)]
+
+    if job.steps is not None and (args.items or args.concurrency):
+        raise ValueError("--items / --concurrency name one job's settings; run that step instead")
+    for j in each(job):
         j.inputs.update(sets)
-        if args.record_dir:
-            j.record_dir = Path(args.record_dir)
-    if args.record_dir:
-        job.record_dir = Path(args.record_dir)
-    if not isinstance(job, Runbook):
-        if args.source:
-            job.source = args.source
-        if args.sink:
-            job.sink = args.sink
-        if args.concurrency:
-            job.concurrency = args.concurrency
+    if args.items:
+        check_items(args.items, job.name)
+        job.items = args.items
+    if args.concurrency:
+        job.concurrency = args.concurrency
 
 
 def _show(job: Any) -> int:
-    from operonx.app.jobs import Runbook
-
     print(job.name)
-    if isinstance(job, Runbook):
-        for line in job.tree().splitlines():
-            print(f"  {line}")
-        print(f"  {'jobs':12s} " + ", ".join(f"{j.name} ({j.session})" for j in job.jobs))
-        if job.schedule:
-            print(f"  {'schedule':12s} {job.schedule}")
-        if job.description:
-            print(f"  {'description':12s} {job.description}")
-    else:
-        for k, v in job.describe().items():
-            if v not in (None, "", {}, []):
-                print(f"  {k:12s} {v}")
-        if job.inputs:
-            print(f"  {'inputs':12s} {job.inputs}")
-    print(f"  {'record_dir':12s} {job.record_dir}")
+    for k, v in job.describe().items():
+        if v not in (None, "", {}, []):
+            print(f"  {k:12s} {v}")
+    if job.steps is None and job.inputs:
+        print(f"  {'inputs':12s} {job.inputs}")
+    print(f"  {'records':12s} {job.records()}")
     return 0
 
 
 def _run(job: Any, args: argparse.Namespace) -> int:
-    """Run *job* (a Job or Runbook), print its outcome, return the exit status."""
-    from operonx.app.jobs import Runbook
-
+    """Run *job*, print its outcome, return the exit status."""
     try:
         _apply(job, args)
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    if args.record_dir:
+        job.record_dir = Path(args.record_dir)
     if args.show:
         return _show(job)
 
-    try:
-        run = job.run_sync(resume=args.resume)
-    except ValueError as exc:  # a stream job asked to resume
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+    run = job.run_sync(resume=args.resume, record_dir=args.record_dir)
     print(run.summary())
     print(f"  {run.path}")
-    if isinstance(job, Runbook):
-        for node in run.jobs:
-            if node.status != "ok":
-                print(f"  {node.status} {node.name}: {node.error or ''}".rstrip())
+    if job.steps is not None:
+        for step in run.meta.get("steps") or []:
+            if step["status"] != "ok":
+                print(f"  {step['status']} {step['name']}  {step.get('path', '')}".rstrip())
         return 0 if run.status == "ok" else 1
-
     return outcome(run, args.failures)
 
 
@@ -196,7 +174,7 @@ def outcome(run: Any, failures: int = 10) -> int:
 
 
 def main_for(job: Any, argv: Optional[Sequence[str]] = None, *, doc: Optional[str] = None) -> int:
-    """*job* (a Job or Runbook) as a command line. What ``job.main()`` calls."""
+    """*job* as a command line. What ``job.main()`` calls."""
     parser = argparse.ArgumentParser(
         prog=f"{job.name}",
         description=doc or getattr(job, "description", "") or None,
@@ -239,7 +217,7 @@ def main(argv=None) -> int:
     _add_run_flags(parser)
     args = parser.parse_args(argv)
 
-    from operonx.app.jobs import Job, Runbook
+    from operonx.app.jobs import Job
 
     _load_dotenv()
     try:
@@ -254,11 +232,8 @@ def main(argv=None) -> int:
             if cwd not in sys.path:
                 sys.path.insert(0, cwd)
             job = load_object(args.job, field="job")
-            if not isinstance(job, (Job, Runbook)):
-                print(
-                    f"error: {args.job!r} is a {type(job).__name__}, not a Job or a Runbook",
-                    file=sys.stderr,
-                )
+            if not isinstance(job, Job):
+                print(f"error: {args.job!r} is a {type(job).__name__}, not a Job", file=sys.stderr)
                 return 2
         else:
             job = _application(args.manifest).job(args.job)

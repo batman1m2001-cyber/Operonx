@@ -3,7 +3,7 @@
 The gates:
 
 * a service's runs carry ``origin=service`` and the service's name, a
-  job's carry ``origin=job``, a runbook's jobs carry the runbook run;
+  job's carry ``origin=job``, a job of steps' steps carry its run;
 * services and jobs inherit the application's consumers, and a job with
   none anywhere still records (its item links must point somewhere);
 * every run carries the code's version, read once per process;
@@ -21,7 +21,7 @@ import pytest
 
 from operonx.app import Application, Service, websocket
 from operonx.app.declare import inherit_trace
-from operonx.app.jobs import Job, ListSink, Runbook
+from operonx.app.jobs import Job
 from operonx.app.manifest import Manifest, ServeSpec, _toml
 from operonx.app.origin import (
     code_version,
@@ -117,13 +117,12 @@ async def test_a_service_run_carries_its_service():
     assert "origin:service" in md["tags"] and "service:shouter" in md["tags"]
 
 
-async def test_a_runbooks_jobs_carry_the_runbook_run(tmp_path):
+async def test_the_steps_of_a_job_carry_its_run(tmp_path):
     cap = Capture()
     a = Job(
         "a",
         graph=shout_flow,
-        source=[{"id": 1}],
-        sink=ListSink(),
+        items=[{"id": 1}],
         key="id",
         trace=[cap],
         record_dir=tmp_path,
@@ -131,19 +130,18 @@ async def test_a_runbooks_jobs_carry_the_runbook_run(tmp_path):
     b = Job(
         "b",
         graph=shout_flow,
-        source=[{"id": 2}],
-        sink=ListSink(),
+        items=[{"id": 2}],
         key="id",
         trace=[cap],
         record_dir=tmp_path,
     )
-    run = await Runbook("nightly", a >> b, record_dir=tmp_path).run()
+    run = await Job("nightly", steps=[a, b], record_dir=tmp_path).run()
     assert run.status == "ok" and len(cap.traces) == 2
     for t in cap.traces:
         assert t.metadata["origin"] == "job"
         assert t.metadata["runbook"] == "nightly" and t.metadata["runbook_run"] == run.run_id
         assert f"runbook_run:{run.run_id}" in t.metadata["tags"]
-    # outside the runbook, the same job's runs carry no runbook
+    # run on its own, the same job's runs carry no parent
     cap.traces.clear()
     await a.run()
     assert "runbook" not in cap.traces[0].metadata
@@ -199,33 +197,30 @@ trace = ["trace_langfuse:x"]
 
 
 def test_a_job_inherits_the_app_default_or_records_locally_but_keeps_an_explicit_choice(tmp_path):
-    none = Job("none", graph=shout_flow, source=[], sink=ListSink(), record_dir=tmp_path)
+    none = Job("none", graph=shout_flow, items=[], record_dir=tmp_path)
     own = Job(
         "own",
         graph=shout_flow,
-        source=[],
-        sink=ListSink(),
+        items=[],
         record_dir=tmp_path,
         trace=["trace_langfuse:x"],
     )
-    silent = Job(
-        "silent", graph=shout_flow, source=[], sink=ListSink(), record_dir=tmp_path, trace=[]
-    )
+    silent = Job("silent", graph=shout_flow, items=[], record_dir=tmp_path, trace=[])
     inherit_trace(none, None)
     inherit_trace(own, None)
     inherit_trace(silent, None)
     assert len(none.trace) == 1 and isinstance(none.trace[0], LocalConsumer)
     assert own.trace == ["trace_langfuse:x"] and silent.trace == []
 
-    fresh = Job("fresh", graph=shout_flow, source=[], sink=ListSink(), record_dir=tmp_path)
+    fresh = Job("fresh", graph=shout_flow, items=[], record_dir=tmp_path)
     app = Application("demo", root=tmp_path, trace=["trace_local:default"], jobs=[fresh])
     assert app.job("fresh").trace == ["trace_local:default"]
 
 
-def test_a_runbook_passes_the_default_to_each_of_its_jobs(tmp_path):
-    a = Job("a", graph=shout_flow, source=[], sink=ListSink(), record_dir=tmp_path)
-    b = Job("b", graph=shout_flow, source=[], sink=ListSink(), record_dir=tmp_path, trace=[])
-    rb = Runbook("rb", a >> b, record_dir=tmp_path)
+def test_a_job_of_steps_passes_the_default_to_each_step(tmp_path):
+    a = Job("a", graph=shout_flow, items=[], record_dir=tmp_path)
+    b = Job("b", graph=shout_flow, items=[], record_dir=tmp_path, trace=[])
+    rb = Job("rb", steps=[a, b], record_dir=tmp_path)
     Application("demo", root=tmp_path, trace=["trace_local:default"], jobs=[rb]).jobs
     assert a.trace == ["trace_local:default"] and b.trace == []
 
@@ -336,8 +331,7 @@ def test_an_applications_job_records_its_items_under_the_project(tmp_path, monke
     job = Job(
         "score",
         graph=shout_flow,
-        source=[{"id": 1}, {"id": 2}],
-        sink=ListSink(),
+        items=[{"id": 1}, {"id": 2}],
         key="id",
         record_dir=tmp_path / "records",
     )

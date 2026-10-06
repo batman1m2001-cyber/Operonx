@@ -6,8 +6,7 @@ One example climbs every rung:
 |---|---|---|
 | **op** | one step of logic | always: it is where the code lives |
 | **operon** — a `@graph` run by `Operon` | ops wired in order, run as one unit | a script, a test, or the thing the rungs above run |
-| **Job** | runs the graph once per item of a source, writes a sink, keeps a record | batches, backfills, nightly work |
-| **Runbook** | orders several jobs | "do A, then B and C" |
+| **Job** | runs the graph once per item, keeps every result in a record; `reduce` and `steps` | batches, backfills, nightly work |
 | **Service** | puts the graph behind HTTP or a websocket | a client calls it |
 | **Application** | all services and jobs of a product, their resources and tracing | the product itself |
 | **`operonx.toml`** | tells the CLIs where the application is | serving and running it |
@@ -54,8 +53,6 @@ incoming item, `egress(item=...)` sends a result out. Write the graph once;
 every rung above runs it unchanged.
 
 ```python file=scorer.py
-import json
-
 from operonx import END, START, graph, op
 from operonx.app.serve import egress, ingress
 
@@ -73,9 +70,9 @@ def score(call: dict) -> dict:
 
 
 @op
-def summarize(path: str) -> dict:
-    rows = [json.loads(line) for line in open(path)]
-    return {"report": {"calls": len(rows), "engaged": sum(r["verdict"] == "engaged" for r in rows)}}
+def tally(results: list) -> dict:
+    engaged = sum(r["verdict"] == "engaged" for r in results)
+    return {"report": {"calls": len(results), "engaged": engaged}}
 
 
 @graph
@@ -87,14 +84,14 @@ def score_flow():
 
 
 @graph
-def report_flow(path):  # no doors: a job runs it once, and its outputs go to the sink
-    s = summarize(path=path)
-    START >> s >> END
+def report_flow(results):  # no doors: a job's `reduce`, run once over every result
+    t = tally(results=results)
+    START >> t >> END
 ```
 
 `ingress()` is transient (each item is freed once used), so never
-`.collect()` it; a job that needs every item at once reads the file the
-previous job wrote.
+`.collect()` it; a job that needs every result at once gives them to a
+`reduce` graph.
 
 ## Job — one run per item
 
@@ -103,58 +100,71 @@ import asyncio
 
 from operonx.app.jobs import Job
 
-from scorer import score_flow
-
-CALLS = [{"id": "c1", "text": "yes I can talk now"}, {"id": "c2", "text": "busy"}]
-
-
-async def main():
-    got = []
-    job = Job("score_calls", graph=score_flow, source=CALLS, sink=got, key="id")
-    run = await job.run()  # run.status, run.counts, run.items — and a record on disk
-    assert run.status == "ok" and run.counts["ok"] == 2
-    assert [r["verdict"] for r in got] == ["engaged", "brief"]
-
-
-asyncio.run(main())
-```
-
-- `source`: a list, a `.jsonl`/`.csv` path, a directory, a generator, or a
-  `"source:name"` resource. `sink`: a list, a path, a function
-  `fn(key, item)`, or `"sink:name"`.
-- `key` makes items resumable: `job.run(resume=True)` skips done keys.
-- `on_error`: `"skip"` (default), `"stop"`, `"retry:N"` (with a 0.5 s, 1 s,
-  2 s … pause between attempts), or `"record"`. A timed-out item keeps its
-  `trace_id`.
-- `session="stream"` feeds every item through one run instead of one run each.
-- `job.run_sync()` from plain code; `job.main()` turns it into a CLI.
-
-## Runbook — jobs in order
-
-One job's sink is the next one's source.
-
-```python
-import asyncio
-
-from operonx.app.jobs import Job, Runbook
-
 from scorer import report_flow, score_flow
 
 CALLS = [{"id": "c1", "text": "yes I can talk now"}, {"id": "c2", "text": "busy"}]
 
 
 async def main():
-    reports = []
-    scores = Job("scores", graph=score_flow, source=CALLS, sink="out/scores.jsonl", key="id")
-    report = Job("report", graph=report_flow, inputs={"path": "out/scores.jsonl"}, sink=reports)
-    with Runbook("nightly") as nightly:
-        scores >> report  # one wire per line; `a >> [b, c]` fans out
-    run = await nightly.run()
-    assert run.status == "ok" and reports[0]["report"] == {"calls": 2, "engaged": 1}
+    job = Job("score_calls", graph=score_flow, items=CALLS, key="id", reduce=report_flow)
+    run = await job.run()  # run.status, run.counts, run.items — and a record on disk
+    assert run.status == "ok" and run.counts["ok"] == 2
+    assert [run.results[k]["verdict"] for k in ("c1", "c2")] == ["engaged", "brief"]
+    assert run.reduced == {"report": {"calls": 2, "engaged": 1}}
 
 
 asyncio.run(main())
 ```
+
+- `items`: a list, a function that yields them (called on every run: your
+  own loader, a database query), or a `.jsonl` path. Nothing else: a CSV or
+  a folder is a two-line generator.
+- Binding: a graph with doors takes the item through `ingress`. Otherwise a
+  dict item fills the graph's parameters by name (a field the graph does
+  not take is an error), `input="case"` hands the whole item to one
+  parameter, and anything else goes to the graph's only free parameter.
+  `inputs={...}` are fixed inputs for every item.
+- Every result is kept in the record (`run.results`, `results.jsonl`).
+  `output="out/x.jsonl"` or `output=fn(key, result)` also exports each
+  success as it finishes.
+- `reduce=graph` runs once after the last item with `results`: every
+  successful result, in key order, including the ones an earlier run kept.
+- `key` makes items resumable: `job.run(resume=True)` runs only the keys
+  that did not finish.
+- `on_error="skip"` (default) or `"stop"`; `retry=Retry(max_attempts=3)` and
+  `timeout=30` per item. A timed-out item keeps its `trace_id`.
+- Runs are recorded under `.operonx/jobs/<job>/<run>/` in the project
+  (`[jobs] dir` in `operonx.toml`, or `record_dir=`, to move them).
+- `job.run_sync()` from plain code; `job.main()` turns it into a CLI.
+
+## Steps — jobs in order, as one command
+
+```python
+import asyncio
+
+from operonx.app.jobs import Job
+
+from scorer import score_flow
+
+CALLS = [{"id": "c1", "text": "yes I can talk now"}]
+LATER = [{"id": "c2", "text": "busy"}]
+
+
+async def main():
+    today = Job("today", graph=score_flow, items=CALLS, key="id")
+    backlog = Job("backlog", graph=score_flow, items=LATER, key="id")
+    nightly = Job("nightly", steps=[today, backlog])
+    run = await nightly.run()  # the first step that is not ok stops the rest
+    assert run.status == "ok" and [s["name"] for s in run.meta["steps"]] == ["today", "backlog"]
+
+
+asyncio.run(main())
+```
+
+Each step keeps its own record; `--resume` reaches every step. Anything
+more (a condition, a loop over days) is a Python function calling
+`job.run()`. On a clock, cron or CI runs `operonx run nightly`; it exits
+non-zero when a step failed.
 
 ## Service — behind HTTP or a websocket
 
@@ -230,9 +240,7 @@ APP = Application(
     "scorer",
     services=[Service("score", http("POST", "/score", port=env("PORT", 8017)), graph=score_flow)],
     jobs=[
-        Job(
-            "score_calls", graph=score_flow, source="calls.jsonl", sink="out/scored.jsonl", key="id"
-        )
+        Job("score_calls", graph=score_flow, items="calls.jsonl", output="out/scored.jsonl", key="id")
     ],
     trace=["trace_local:default"],  # every run recorded under .operonx/runs
 )

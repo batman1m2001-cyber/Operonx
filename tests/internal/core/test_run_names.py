@@ -63,8 +63,8 @@ async def test_a_job_trace_is_named_after_its_graph(tmp_path):
     job = Job(
         "enrich",
         graph=enrich_one,
-        source=[1, 2],
-        item_input="val",
+        items=[1, 2],
+        input="val",
         record_dir=tmp_path / "jobs",
         trace=[cap],
     )

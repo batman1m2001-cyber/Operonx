@@ -1,23 +1,21 @@
-"""`Job` — work to do with an Operon over data that does not talk back.
+"""`Job` — an Operon run over data that does not talk back.
 
-A job is not an op and not a graph. It is the declaration that a
-`[[serve]]` block is for a listener: which graph, where the items come
-from, where results go, what identifies an item, how many run at once,
-what a failure means, where the record is written. The graph stays what
-it was; the job is everything the graph should not know.
+A job is not an op and not a graph. It says which graph runs, over which
+items, what identifies an item, what to do with all the results, and what
+a failure means. The graph stays what it was; the job is everything the
+graph should not know::
 
-::
+    qc = Job("qc", graph=check_case, items="cases.jsonl", input="case", key="id",
+             reduce=score_cases, concurrency=4)
+    run = qc.run_sync()        # or: operonx run qc  /  operonx run qc --resume
+    run.results                # {key: result}
+    run.reduced                # what score_cases returned
 
-    score = Job("score_calls", graph=score_call,
-                source="source:calls_today", sink="sink:scores",
-                key="call_id", concurrency=8, on_error="skip")
-    run = await score.run()             # JobRun: counts, per-item status, path
-    run = await score.run(resume=True)  # only what the last run did not finish
+Jobs that must run in order, as one command, are a job of ``steps``::
 
-Every job is also its own command line — in a package's ``__main__.py``::
+    nightly = Job("nightly", steps=[fetch, qc, publish])
 
-    from .job import job
-    raise SystemExit(job.main())        # python -m jobs.score_calls --resume
+Design and the reasons for each choice: ``docs/JOBS_AND_GUIDES_PLAN.md``.
 """
 
 from __future__ import annotations
@@ -29,173 +27,232 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
-from ._keys import is_resource_key
+from operonx.core.policy import Retry
+
+from .items import check_items
 from .record import JobRun
-from .runner import parse_on_error
 
-__all__ = ["Job", "SESSION_MODES"]
+__all__ = ["Job", "ON_ERROR", "default_record_dir"]
 
-#: How many runs a job mints. ``per_item`` is one run per item, which is
-#: what makes failure, retry and resume honest. ``stream`` is one run fed
-#: every item through `ingress` — the callbot shape: shared state, one
-#: trace, and no per-item accounting.
-SESSION_MODES = ("per_item", "stream")
-
-#: How far a stream job's source may run ahead of its graph. A file is
-#: pulled, not pushed, so this only caps what sits buffered; it is a
-#: default rather than a required choice because nothing here is a
-#: socket nobody can slow down.
-DEFAULT_MAX_INFLIGHT = 1024
+#: What a failed item does to the rest of the run.
+ON_ERROR = ("skip", "stop")
 
 KeyFn = Callable[[Any], Any]
+
+
+def default_record_dir(folder: str = ".operonx/jobs") -> Path:
+    """Where runs are recorded when nothing says otherwise: *folder* under
+    the project — the nearest folder with an ``operonx.toml``, else the
+    working directory."""
+    from operonx.app.declare import project_root
+
+    return project_root(Path.cwd()) / folder
+
+
+def _compile(job: str, what: str, g: Any, trace: Any) -> Any:
+    """A graph as a compiled Operon: an ``Operon`` as is, a ``GraphOp``
+    wrapped, a module-level ``@graph`` with every parameter a run input."""
+    from operonx.core.engine import Operon
+    from operonx.core.ops.graph import GraphOp
+
+    if isinstance(g, str):
+        from operonx.app.serve.registry import load_object
+
+        g = load_object(g, field=f"job {job!r} {what}")
+    if isinstance(g, Operon):
+        return g
+    if isinstance(g, GraphOp):
+        return Operon(g, trace=trace)
+    if callable(g) and getattr(g, "_operonx_graph", False):
+        try:
+            params = {p: None for p in inspect.signature(g).parameters}
+        except (TypeError, ValueError):
+            params = {}
+        # Named after the graph explicitly: built inside `Operon(...)` it
+        # would take its name from the code around this call.
+        return Operon(g(name=g.__name__, **params), params=params or None, trace=trace)
+    raise TypeError(
+        f"job {job!r}: {what} is a {type(g).__name__}, not an Operon, a GraphOp "
+        "or a module-level @graph"
+    )
 
 
 class Job:
     """See the module docstring.
 
     Args:
-        name: The job's name; the record directory is named after it.
-        graph: The Operon to run — a compiled ``Operon``, a ``GraphOp``, a
-            ``@graph`` factory, or ``"module:attr"`` naming one. A factory
-            is compiled the way ``[[serve]]`` compiles it: every parameter
-            becomes a runtime input, fillable from ``inputs``.
-        source: A ``"source:name"`` resource key, a ``.jsonl``/``.csv``
-            path, an iterable, a generator function, or a ``Source``.
-        sink: A ``"sink:name"`` key, a path, a list, a callable, a
-            ``Sink``, or ``None`` for no sink (the record still counts).
-        key: The item field that identifies it, or a function of the
-            item. Without one every item gets a random id and the job
-            cannot resume.
-        session: ``"per_item"`` or ``"stream"`` (see :data:`SESSION_MODES`).
-        concurrency: Items in flight at once (per_item).
-        max_inflight: Items buffered ahead of the graph (stream).
-        on_error: ``"skip"``, ``"stop"``, ``"retry:N"`` or ``"record"`` (a
-            failed item is recorded and sunk but does not fail the run). A
-            timed-out item counts as failed for the policy. ``retry:N``
-            waits between attempts: 0.5 s, 1 s, 2 s … (jittered, at most
-            30 s), the default ``Retry`` backoff.
-        item_timeout: Seconds one item's run may take. Past it the run is
-            cancelled and the item recorded ``timeout``. A batch with no
-            deadline is the post-mortem everyone has read.
-        preflight: Resource keys (``"llm:x"``, ``"vector_store:y"``) that
-            must answer before any item runs. One unreachable key fails
-            the run in seconds instead of every item in turn.
+        name: The job's name: the CLI argument and the record's folder.
+        graph: A module-level ``@graph``, a ``GraphOp``, an ``Operon``, or
+            ``"module:attr"`` naming one. Runs once per item.
+        items: What to loop over: a function returning an iterable (called
+            on every run), an iterable or async iterable, or a ``.jsonl``
+            path. ``None`` runs the graph once.
+        input: The graph parameter that receives the whole item. Without
+            it, a dict item fills parameters by name and anything else goes
+            to the graph's only free parameter. A graph with ``ingress``
+            takes the item through its door instead.
+        inputs: Fixed graph inputs for every item (``--set`` adds to them).
+        key: The item field that identifies it, or a function of the item.
+            Without one each item gets a random id and the job cannot resume.
+        output: Also export each successful result as it finishes: a
+            ``.jsonl`` path (``{"key", "result"}`` lines), or a function
+            ``(key, result)``, sync or async.
+        reduce: A module-level ``@graph`` taking ``results`` (the list of
+            every successful result, in key order) plus ``inputs``. Runs once,
+            after the last item; its outputs are ``run.reduced``.
+        concurrency: Items in flight at once.
+        on_error: ``"skip"`` (carry on) or ``"stop"`` (start nothing new,
+            and do not reduce). Either way the run is ``failed`` when an
+            item failed.
+        retry: ``Retry(max_attempts=N)``: a failed or timed-out item runs
+            again, with the policy's backoff between attempts.
+        timeout: Seconds one item's run may take; past it, the run is
+            cancelled and the item recorded ``timeout``.
+        preflight: Resource keys (``"llm:x"``) that must answer before any
+            item runs, so a dead endpoint fails the job once, in seconds.
+        steps: Instead of ``graph``: jobs to run in order, as one command.
+            The first step whose run is not ``ok`` stops the rest.
+        trace: Trace consumers for the runs (``[tracing]`` in operonx.toml
+            overrides it). Ignored when ``graph`` is already an ``Operon``.
+        keep_results: Keep each result in the record's ``results.jsonl``.
+            ``False`` for results too big to keep; ``reduce`` then has
+            nothing to read and is refused.
         on_item: Called with each item's ``ItemResult`` as it is recorded
-            (sync or async; per_item) — progress lines, events for a host.
-            An exception in it is logged, never fails the run.
-        trace: Trace consumers for the runs, as ``Operon(trace=...)``
-            takes them. Ignored when ``graph`` is already an ``Operon``.
-        inputs: Static inputs every run receives.
-        item_input: The graph input the item is bound to, for a graph
-            with no doors. A graph with no ``ingress`` is doorless whether
-            or not this is set: the run's result is the item's result and
-            goes to the sink. Leave it unset when the graph needs no item —
-            a job with no source runs such a graph once.
-        schedule: Cron text. Declarative — recorded and listed, run by
-            whatever calls ``operonx run``.
-        record_dir: Where runs are recorded; ``<record_dir>/<name>/<run>``.
+            (sync or async): progress lines, events for a host. It never
+            breaks the run. ``run(on_item=...)`` replaces it for that run.
+        record_dir: Where runs are recorded (``<record_dir>/<name>/<run>``).
+            Default: the project's — ``[jobs] dir`` in operonx.toml, else
+            ``.operonx/jobs`` under the project root.
         description: One line, for ``--list`` and the studio.
     """
+
+    #: What a run of this job carries as its origin (an `Eval` says "eval").
+    origin = "job"
+    #: Whether a failed item fails the run. An `Eval` says no: a failed case
+    #: is a failed verdict, and its gate (or threshold) decides the run.
+    items_fail_run = True
+    #: The project folder its runs go to when no ``record_dir`` is given
+    #: (``[jobs] dir`` in operonx.toml overrides it for plain jobs).
+    folder = ".operonx/jobs"
 
     def __init__(
         self,
         name: str,
         *,
-        graph: Any,
-        source: Any = None,
-        sink: Any = None,
-        key: Union[str, KeyFn, None] = None,
-        session: str = "per_item",
-        concurrency: int = 4,
-        max_inflight: int = DEFAULT_MAX_INFLIGHT,
-        on_error: str = "skip",
-        item_timeout: Optional[float] = None,
-        preflight: Optional[Sequence[str]] = None,
-        on_item: Optional[Callable[[Any], Any]] = None,
-        trace: Any = None,
+        graph: Any = None,
+        items: Any = None,
+        input: Optional[str] = None,  # noqa: A002 — the graph parameter's name
         inputs: Optional[Dict[str, Any]] = None,
-        item_input: Optional[str] = None,
-        schedule: Optional[str] = None,
-        record_dir: Union[str, Path] = "jobs",
+        key: Union[str, KeyFn, None] = None,
+        output: Union[str, Path, Callable[..., Any], None] = None,
+        reduce: Any = None,
+        concurrency: int = 4,
+        on_error: str = "skip",
+        retry: Optional[Retry] = None,
+        timeout: Optional[float] = None,
+        preflight: Optional[Sequence[str]] = None,
+        steps: Optional[Sequence["Job"]] = None,
+        trace: Any = None,
+        keep_results: bool = True,
+        record_dir: Union[str, Path, None] = None,
+        on_item: Optional[Callable[[Any], Any]] = None,
         description: str = "",
     ):
         if not name or not isinstance(name, str):
             raise ValueError("a job needs a name")
-        if session not in SESSION_MODES:
-            raise ValueError(
-                f"job {name!r}: session must be one of {SESSION_MODES}, not {session!r}"
-            )
-        if int(concurrency) < 1:
-            raise ValueError(f"job {name!r}: concurrency must be at least 1")
-        if int(max_inflight) < 1:
-            raise ValueError(f"job {name!r}: max_inflight must be at least 1")
-        parse_on_error(on_error)  # fail at declaration, not at 2 a.m.
-        if item_timeout is not None and not float(item_timeout) > 0:
-            raise ValueError(f"job {name!r}: item_timeout must be a positive number of seconds")
+        self.name = name
+        self.description = description
+        self.steps: Optional[List[Job]] = None
+        if steps is not None:
+            self._check_steps(steps, graph=graph, items=items, reduce=reduce, output=output)
+            self.steps = list(steps)
+        elif graph is None:
+            raise ValueError(f"job {name!r} needs a graph (or steps=[...])")
+        check_items(items, name)
+        if input is not None and not (isinstance(input, str) and input):
+            raise TypeError(f"job {name!r}: input is the name of a graph parameter")
         if key is not None and not (isinstance(key, str) or callable(key)):
             raise TypeError(f"job {name!r}: key must be a field name or a function of the item")
+        if output is not None and not callable(output):
+            if Path(output).suffix.lower() != ".jsonl":
+                raise ValueError(
+                    f"job {name!r}: output={str(output)!r} — a path must be a .jsonl file; "
+                    "for anything else pass a function (key, result)"
+                )
+        if int(concurrency) < 1:
+            raise ValueError(f"job {name!r}: concurrency must be at least 1")
+        if on_error not in ON_ERROR:
+            raise ValueError(f"job {name!r}: on_error must be 'skip' or 'stop', not {on_error!r}")
+        if retry is not None and not isinstance(retry, Retry):
+            raise TypeError(f"job {name!r}: retry is a Retry(max_attempts=N), not {retry!r}")
+        if timeout is not None and not float(timeout) > 0:
+            raise ValueError(f"job {name!r}: timeout must be a positive number of seconds")
+        if reduce is not None and not keep_results:
+            raise ValueError(
+                f"job {name!r}: reduce reads the results the record keeps; "
+                "it cannot run with keep_results=False"
+            )
 
-        self.name = name
         self.graph = graph
-        self.source = source
-        self.sink = sink
-        self.key = key
-        self.session = session
-        self.concurrency = int(concurrency)
-        self.max_inflight = int(max_inflight)
-        self.on_error = on_error
-        self.item_timeout = float(item_timeout) if item_timeout is not None else None
-        self.preflight: List[str] = list(preflight or [])
-        self.on_item = on_item
-        self.trace = trace
+        self.items = items
+        self.input = input
         self.inputs: Dict[str, Any] = dict(inputs or {})
-        self.item_input = item_input
-        self.schedule = schedule
-        self.record_dir = Path(record_dir)
-        self.description = description
+        self.key = key
+        self.output = output
+        self.reduce = reduce
+        self.concurrency = int(concurrency)
+        self.on_error = on_error
+        self.retry = retry
+        self.timeout = float(timeout) if timeout is not None else None
+        self.preflight: List[str] = list(preflight or [])
+        self.trace = trace
+        self.keep_results = bool(keep_results)
+        #: Where runs are recorded (``<record_dir>/<name>/<run>``). ``None``
+        #: is the project's: see :func:`default_record_dir`.
+        self.record_dir: Optional[Path] = Path(record_dir) if record_dir is not None else None
+        self.on_item = on_item
         self._engine: Any = None
+        self._reducer: Any = None
         self._doors: Optional[bool] = None
+
+    @staticmethod
+    def _check_steps(steps: Any, **given: Any) -> None:
+        extra = [k for k, v in given.items() if v is not None]
+        if extra:
+            raise ValueError(
+                f"a job of steps runs other jobs; it takes no {', '.join(extra)} of its own"
+            )
+        steps = list(steps)
+        if not steps:
+            raise ValueError("steps=[...] needs at least one job")
+        bad = [s for s in steps if not isinstance(s, Job)]
+        if bad:
+            raise TypeError(f"a step is a Job, not a {type(bad[0]).__name__}")
 
     # -- the graph ---------------------------------------------------------
 
     def engine(self) -> Any:
         """The compiled Operon, built once."""
-        if self._engine is not None:
-            return self._engine
-        from operonx.core.engine import Operon
-        from operonx.core.ops.graph import GraphOp
-
-        g = self.graph
-        if isinstance(g, str):
-            from operonx.app.serve.registry import load_object
-
-            g = load_object(g, field=f"job {self.name!r} graph")
-        if isinstance(g, Operon):
-            self._engine = g
-        elif isinstance(g, GraphOp):
-            self._engine = Operon(g, trace=self.trace)
-        elif callable(g):
-            try:
-                params = {p: None for p in inspect.signature(g).parameters}
-            except (TypeError, ValueError):
-                params = {}
-            if getattr(g, "_operonx_graph", False):
-                # The run is named after the graph, explicitly: built inside
-                # `Operon(...)` it took a name from the code around this
-                # call, and every job run was called `params`.
-                g = g(name=g.__name__, **params)
-            self._engine = Operon(g, params=params or None, trace=self.trace)
-        else:
-            raise TypeError(
-                f"job {self.name!r}: graph is a {type(g).__name__}, "
-                "not an Operon, a GraphOp or a @graph factory"
-            )
+        if self._engine is None:
+            if self.steps is not None:
+                raise TypeError(f"job {self.name!r} runs steps; it has no graph")
+            self._engine = _compile(self.name, "graph", self.graph, self.trace)
         return self._engine
+
+    def reducer(self) -> Any:
+        """The compiled ``reduce`` graph, built once (``None`` without one)."""
+        if self.reduce is not None and self._reducer is None:
+            self._reducer = _compile(self.name, "reduce", self.reduce, self.trace)
+            if "results" not in self._reducer.graph.inputs:
+                raise TypeError(
+                    f"job {self.name!r}: the reduce graph needs a `results` parameter "
+                    "(the list of every result)"
+                )
+        return self._reducer
 
     def has_doors(self) -> bool:
         """True when the graph reads items through ``ingress`` — the serving
-        shape. Without one the job runs it as a function: inputs in, the
-        run's result out. Checked once, anywhere in the graph."""
+        shape. Checked once, anywhere in the graph."""
         if self._doors is None:
             from operonx.app.serve.ops import ingress
 
@@ -210,14 +267,41 @@ class Job:
             self._doors = walk(self.engine().graph)
         return self._doors
 
+    def bind(self, item: Any) -> Dict[str, Any]:
+        """The run inputs for one item of a graph without doors."""
+        inputs = dict(self.inputs)
+        params = list(self.engine().graph.inputs)
+        if self.input is not None:
+            if self.input not in params:
+                raise ValueError(
+                    f"input={self.input!r}, but the graph takes {params or 'no parameters'}"
+                )
+            inputs[self.input] = item
+            return inputs
+        if isinstance(item, Mapping):
+            unknown = [k for k in item if k not in params]
+            if unknown:
+                raise ValueError(
+                    f"the item has {unknown}, which the graph does not take "
+                    f'(it takes {params or "nothing"}); pass input="<param>" to hand it '
+                    "the whole item"
+                )
+            inputs.update(item)
+            return inputs
+        free = [p for p in params if p not in self.inputs]
+        if len(free) != 1:
+            raise ValueError(
+                f"a {type(item).__name__} item needs one graph parameter to go to; "
+                f'the graph has {free or "none"} free — pass input="<param>"'
+            )
+        inputs[free[0]] = item
+        return inputs
+
     # -- identity ----------------------------------------------------------
 
-    #: What a run of this job carries as its origin (an `Eval` says "eval").
-    origin = "job"
-
     def item_of(self, raw: Any) -> Any:
-        """What the graph receives for one source item — the item itself;
-        an `Eval` hands over a case's ``input``."""
+        """What the graph receives for one raw item — the item itself; an
+        `Eval` hands over a case's ``input``."""
         return raw
 
     def key_of(self, item: Any) -> str:
@@ -241,68 +325,47 @@ class Job:
 
     # -- running -----------------------------------------------------------
 
-    async def run(self, *, resume: bool = False) -> JobRun:
-        """Run the job once and return its record."""
-        from .runner import run_job
+    async def run(
+        self,
+        *,
+        resume: bool = False,
+        record_dir: Union[str, Path, None] = None,
+        on_item: Optional[Callable[[Any], Any]] = None,
+    ) -> JobRun:
+        """Run the job once and return its record. *record_dir* overrides
+        where it is written (for this run, and every step's); *on_item* is
+        called with each item's ``ItemResult`` as it is recorded."""
+        from .runner import run_job, run_steps
 
-        return await run_job(self, resume=resume)
+        kept = (self.record_dir, self.on_item)
+        if record_dir is not None:
+            self.record_dir = Path(record_dir)
+        if on_item is not None:
+            self.on_item = on_item
+        try:
+            if self.steps is not None:
+                return await run_steps(self, resume=resume, record_dir=record_dir)
+            return await run_job(self, resume=resume)
+        finally:
+            self.record_dir, self.on_item = kept
 
-    def run_sync(self, *, resume: bool = False) -> JobRun:
+    def run_sync(self, **kwargs: Any) -> JobRun:
         """`run()` from synchronous code — a script, a cron entry."""
-        return asyncio.run(self.run(resume=resume))
+        return asyncio.run(self.run(**kwargs))
 
     def main(self, argv: Optional[Sequence[str]] = None, *, doc: Optional[str] = None) -> int:
-        """This job as a command line; returns the exit status.
-
-        The flags ``operonx run`` has, minus the job name — ``--resume``,
-        ``--show``, ``--source``, ``--sink``, ``--set key=value``,
-        ``--concurrency``, ``--record-dir``. *doc* (a module's
-        ``__doc__``) is what ``--help`` prints.
-        """
+        """This job as a command line; returns the exit status. Takes the
+        flags ``operonx run`` has, minus the job name."""
         from operonx.cli.run import main_for
 
         return main_for(self, argv, doc=doc)
 
-    # -- from the manifest ---------------------------------------------------
-
-    @classmethod
-    def from_spec(cls, spec: Any, root: Union[str, Path, None] = None) -> "Job":
-        """A Job from a ``[[job]]`` block (``operonx.app.manifest.JobSpec``).
-
-        Paths in the block are relative to *root*, the manifest's
-        directory; ``source:`` / ``sink:`` keys and ``module:attr`` graph
-        entries are left for the hub and the importer to resolve.
-        """
-        root = Path(root) if root is not None else Path.cwd()
-
-        def located(value: Optional[str]) -> Any:
-            if value is None:
-                return None
-            if is_resource_key(value):
-                return value  # a resource key, left for the hub
-            path = Path(value)
-            return path if path.is_absolute() else root / path
-
-        record_dir = Path(spec.record_dir) if spec.record_dir else Path("jobs")
-        if not record_dir.is_absolute():
-            record_dir = root / record_dir
-        return cls(
-            spec.name,
-            graph=spec.graph,
-            source=located(spec.source),
-            sink=located(spec.sink),
-            key=spec.key,
-            session=spec.session,
-            concurrency=spec.concurrency,
-            max_inflight=spec.max_inflight or DEFAULT_MAX_INFLIGHT,
-            on_error=spec.on_error,
-            item_timeout=spec.item_timeout,
-            trace=list(spec.trace) if spec.trace is not None else None,
-            inputs=dict(spec.inputs),
-            item_input=spec.item_input,
-            schedule=spec.schedule,
-            record_dir=record_dir,
-            description=spec.description,
+    def records(self) -> Path:
+        """Where this job's runs are recorded."""
+        return (
+            Path(self.record_dir)
+            if self.record_dir is not None
+            else default_record_dir(self.folder)
         )
 
     # -- describing --------------------------------------------------------
@@ -310,61 +373,61 @@ class Job:
     def describe(self) -> Dict[str, Any]:
         """What the job is, for run.json and ``--list``. No secrets: only
         the names of things."""
-        g = self.graph
-        graph_name = (
-            g
-            if isinstance(g, str)
-            else getattr(g, "name", None) or getattr(g, "__name__", type(g).__name__)
-        )
 
         def shown(value: Any) -> Any:
             if value is None or isinstance(value, str):
                 return value
             if isinstance(value, Path):
                 return str(value)
+            if isinstance(value, (list, tuple)):
+                return f"{len(value)} items"
             if callable(value) and hasattr(value, "__qualname__"):
-                # a generator function or a class, named where it is defined
-                # (`qc.cases:agent_cases`), not `<function … at 0x…>`
                 from operonx.app.declare import ref_name
 
                 return ref_name(value)
-            return repr(value)
+            return type(value).__name__
 
+        if self.steps is not None:
+            return {
+                "kind": "steps",
+                "steps": [s.name for s in self.steps],
+                "description": self.description,
+            }
         return {
-            "graph": graph_name,
-            "source": shown(self.source),
-            "sink": shown(self.sink),
+            "kind": "job",
+            "graph": self.graph
+            if isinstance(self.graph, str)
+            else getattr(self.graph, "name", None)
+            or getattr(self.graph, "__name__", type(self.graph).__name__),
+            "items": shown(self.items),
+            "input": self.input,
             "key": self.key
             if isinstance(self.key, str)
             else (getattr(self.key, "__name__", "fn") if self.key else None),
-            "session": self.session,
-            "concurrency": self.concurrency if self.session == "per_item" else None,
-            "max_inflight": self.max_inflight if self.session == "stream" else None,
-            "on_error": self.on_error if self.session == "per_item" else None,
-            "item_timeout": self.item_timeout,
+            "output": shown(self.output),
+            "reduce": None
+            if self.reduce is None
+            else getattr(self.reduce, "name", None) or getattr(self.reduce, "__name__", "reduce"),
+            "concurrency": self.concurrency,
+            "on_error": self.on_error,
+            "retry": self.retry.max_attempts if self.retry is not None else None,
+            "timeout": self.timeout,
             "preflight": list(self.preflight) or None,
-            "item_input": self.item_input,
-            "schedule": self.schedule,
             "description": self.description,
         }
 
-    # -- composition: `a >> b`, `a >> [b, c]`, `[a, b] >> c` wire a Runbook ------
-
-    def __rshift__(self, other: Any) -> Any:
-        from .runbook import Sequential
-
-        return Sequential(self, other)
-
-    def __rrshift__(self, other: Any) -> Any:
-        # `[a, b] >> job`: a list has no `>>`, so Python asks the job.
-        from .runbook import Sequential
-
-        return Sequential(other, self)
+    def __copy__(self) -> "Job":
+        """A shallow copy whose own bound methods (an `Eval`'s ``items``)
+        point at the copy, not at the job it was copied from."""
+        new = object.__new__(type(self))
+        new.__dict__.update(self.__dict__)
+        for name, value in self.__dict__.items():
+            if inspect.ismethod(value) and value.__self__ is self:
+                setattr(new, name, getattr(new, value.__func__.__name__))
+        return new
 
     def __repr__(self) -> str:
+        if self.steps is not None:
+            return f"Job({self.name!r}, steps={[s.name for s in self.steps]})"
         d = self.describe()
-        return (
-            f"Job({self.name!r}, graph={d['graph']!r}, source={d['source']!r}, "
-            f"sink={d['sink']!r}, key={d['key']!r}, {self.session}, "
-            f"concurrency={self.concurrency}, on_error={self.on_error!r})"
-        )
+        return f"Job({self.name!r}, graph={d['graph']!r}, items={d['items']!r}, key={d['key']!r})"

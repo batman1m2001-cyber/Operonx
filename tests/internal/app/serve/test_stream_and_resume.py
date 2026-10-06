@@ -257,4 +257,4 @@ def test_a_session_says_whether_its_peer_reads_a_stream():
     assert HttpSession("x", stream=True).stream is True
     assert WebSocketSession(websocket=None).stream is True
     assert MemorySession().stream is True
-    assert JobSession(sink=None, key="k").stream is False
+    assert JobSession("k").stream is False

@@ -2024,7 +2024,7 @@ wheels = [
 
 [[package]]
 name = "operonx"
-version = "1.16.0"
+version = "1.17.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "orjson" },
@@ -2215,7 +2215,7 @@ dev = [
 
 [[package]]
 name = "operonx-kb"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },

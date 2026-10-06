@@ -113,7 +113,6 @@ def test_the_answer_flow_runs_behind_doors(loaded, llm, tmp_path):
     from operonx_kb.graphs.answer import answer_flow
 
     llm.script = quoting()
-    got = []
     inputs = {
         "mode": "dense",
         "llm": "answerer",
@@ -125,11 +124,12 @@ def test_the_answer_flow_runs_behind_doors(loaded, llm, tmp_path):
         "blobs": "kb_blob:main",
     }
     job = Job("ask_docs", graph=answer_flow, inputs=inputs,
-              source=[{"id": "a", "query": "meeting", "collection": "docs"}],
-              sink=got, key="id", record_dir=str(tmp_path / "jobs"))  # fmt: skip
+              items=[{"id": "a", "query": "meeting", "collection": "docs"}],
+              key="id", record_dir=str(tmp_path / "jobs"))  # fmt: skip
     record = run(job.run())
     assert record.status == "ok", record
-    assert got[0]["citations"] and got[0]["citations"][0]["support"] == "verified"
+    got = record.results["a"]
+    assert got["citations"] and got["citations"][0]["support"] == "verified"
 
 
 def test_an_answer_without_citations_is_shown_as_unsupported(loaded, llm):

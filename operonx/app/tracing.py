@@ -137,7 +137,7 @@ def check_names(
     jobs: Optional[Iterable[str]],
 ) -> None:
     """Every ``[tracing.services.<n>]`` names a service with runs, every
-    ``[tracing.jobs.<n>]`` a job. ``None`` skips that check — a runbook's
+    ``[tracing.jobs.<n>]`` a job. ``None`` skips that check — a job of steps'
     members, say, are not known until it is imported."""
     if tracing is None:
         return
@@ -175,7 +175,7 @@ def pick(
     """The sinks one service or job uses, and the level they came from.
 
     ``overrides`` are the ``[tracing.*.<name>]`` lists that name it, most
-    specific first (a runbook member's own entry, then its runbook's).
+    specific first (a step's own entry, then its job of steps').
     ``None`` at a level means "not set there"; ``[]`` is a choice. Returns
     ``(None, "default")`` when no level says anything."""
     for sinks, label in overrides:
@@ -223,13 +223,14 @@ def settle_serves(
     return tuple(out)
 
 
-def job_override(tracing: Optional[Tracing], name: str, runbook: Optional[str]) -> list:
-    """The ``[tracing.jobs.*]`` levels that name a job, most specific first."""
+def job_override(tracing: Optional[Tracing], name: str, parent: Optional[str]) -> list:
+    """The ``[tracing.jobs.*]`` levels that name a job, most specific first:
+    its own, then the job of steps that runs it."""
     if tracing is None:
         return []
     out = [(tracing.jobs.get(name), f"[tracing.jobs.{name}]")]
-    if runbook is not None:
-        out.append((tracing.jobs.get(runbook), f"[tracing.jobs.{runbook}]"))
+    if parent is not None:
+        out.append((tracing.jobs.get(parent), f"[tracing.jobs.{parent}]"))
     return out
 
 
@@ -245,9 +246,14 @@ def check_sinks(app: str, services: Sequence[ServeSpec] = (), jobs: Sequence[Any
         for sink in s.options.get("trace") or []:
             if isinstance(sink, str) and sink != LOCAL:
                 wanted.setdefault((sink, s.trace_from), []).append(f"service {s.name!r}")
+
+    def members(job: Any) -> List[Any]:
+        if getattr(job, "steps", None) is None:
+            return [job]
+        return [m for step in job.steps for m in members(step)]
+
     for job in jobs:
-        members = job.jobs if hasattr(job, "jobs") and not hasattr(job, "source") else [job]
-        for j in members:
+        for j in members(job):
             for sink in getattr(j, "trace", None) or []:
                 if isinstance(sink, str) and sink != LOCAL:
                     source = getattr(j, "_trace_from", "job")
