@@ -56,40 +56,40 @@ def wf(text):
     router >> s >> ~m
 
 
+@op
+def detect_need(text: str, needs_llm: bool = False) -> dict:
+    return {
+        "needs_llm": needs_llm,
+        "quick_result": "skipped" if not needs_llm else None,
+    }
+
+
+@graph
+def branch_flow(text, needs_llm):
+    d = detect_need(text=text, needs_llm=needs_llm)
+    e = LLMOp.of(
+        resource="mock",
+        prompt={"user": "{text}"},
+        fields=["result: str"],
+        parser="xml",
+        text=text,
+    )
+    s = skip(quick_result=d["quick_result"])
+    router = if_(d["needs_llm"] == True, e).else_(s)  # noqa: E712
+    m = merge(result=s["result"], llm_result=e["result"])
+
+    START >> d >> router
+    router >> e >> ~m >> END
+    router >> s >> ~m
+
+
 class TestExtractAfterBranch:
     def _run_branch_test(self, needs_llm, responses, expected_final):
         """Helper: build graph with if_() + LLMOp(fields=...), run with mock LLM."""
-
-        @op
-        def detect(text: str) -> dict:
-            return {
-                "needs_llm": needs_llm,
-                "quick_result": "skipped" if not needs_llm else None,
-            }
-
         mock_hub, _ = make_mock_hub(responses)
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_cls:
             mock_cls.instance.return_value = mock_hub
-
-            @graph
-            def wf(text):
-                d = detect(text=text)
-                e = LLMOp.of(
-                    resource="mock",
-                    prompt={"user": "{text}"},
-                    fields=["result: str"],
-                    parser="xml",
-                    text=text,
-                )
-                s = skip(quick_result=d["quick_result"])
-                router = if_(d["needs_llm"] == True, e).else_(s)  # noqa: E712
-                m = merge(result=s["result"], llm_result=e["result"])
-
-                START >> d >> router
-                router >> e >> ~m >> END
-                router >> s >> ~m
-
-            g = wf(text="test")
+            g = branch_flow(text="test", needs_llm=needs_llm)
             engine = Operon(g)
             result = asyncio.run(engine.run(inputs={}))
 

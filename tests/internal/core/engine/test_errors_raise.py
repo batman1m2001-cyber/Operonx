@@ -112,22 +112,27 @@ async def test_errors_raise_inside_subgraph():
     assert SEEN["slow_done"] == 0
 
 
+#: The arguments ``down`` was called with.
+DOWN_CALLS = []
+
+
+@op(retry=Retry(max_attempts=3, initial=0.01, jitter=False))
+async def down(x: int) -> dict:
+    DOWN_CALLS.append(x)
+    raise ConnectionError("refused")
+
+
+@graph
+def down_graph(x):
+    d = down(x=x)
+    START >> d >> END
+
+
 async def test_errors_raise_after_the_last_retry():
-    calls = []
-
-    @op(retry=Retry(max_attempts=3, initial=0.01, jitter=False))
-    async def down(x: int) -> dict:
-        calls.append(x)
-        raise ConnectionError("refused")
-
-    @graph
-    def g(x):
-        d = down(x=x)
-        START >> d >> END
-
+    DOWN_CALLS.clear()
     with pytest.raises(OpFailed, match="refused"):
-        await Operon(g, params={"x": None}, errors="raise").run({"x": 1})
-    assert len(calls) == 3
+        await Operon(down_graph, params={"x": None}, errors="raise").run({"x": 1})
+    assert len(DOWN_CALLS) == 3
 
 
 async def test_errors_raise_through_stream_and_handle():
