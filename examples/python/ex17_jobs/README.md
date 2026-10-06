@@ -17,10 +17,10 @@ in a batch.
 score_calls = Job(
     "score_calls",
     graph=score_call,
-    items=HERE / "data" / "calls.jsonl",   # or a list, or a function that yields
-    key="call_id",                         # makes it resumable
-    output=OUT / "scores.jsonl",           # optional export, as each finishes
-    reduce=report,                         # one graph over every result
+    items=HERE / "data" / "calls.jsonl",  # or a list, or a function that yields
+    key="call_id",  # makes it resumable
+    output=OUT / "scores.jsonl",  # optional export, as each finishes
+    reduce=report,  # one graph over every result
 )
 ```
 
@@ -68,6 +68,7 @@ database query, a folder walk, a CSV reader:
 ```python
 def recent_calls():
     yield {"call_id": "r1", "transcript": "..."}
+
 
 score_recent = Job("score_recent", graph=score_call, items=recent_calls, key="call_id")
 ```

@@ -119,8 +119,8 @@ replaces by id. `delete(ids=None, filter=None, collection=None)` removes
 by id **or** by filter — the same native dialect `search` takes:
 
 ```python
-await store.delete(ids=[3, 7])                                   # any backend
-await store.delete(filter={"tenant": "acme"})                    # pgvector
+await store.delete(ids=[3, 7])  # any backend
+await store.delete(filter={"tenant": "acme"})  # pgvector
 await store.delete(filter={"must": [{"key": "tenant", "match": {"value": "acme"}}]})  # Qdrant
 ```
 

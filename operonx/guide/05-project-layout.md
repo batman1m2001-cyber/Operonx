@@ -49,7 +49,9 @@ scorer/
   def build_search(k=8):
       @graph
       def search(query): ...
+
       return search
+
 
   # yes: one graph, the setting is an input
   @graph
@@ -157,7 +159,13 @@ APP = Application(
     "scorer",
     services=[Service("score", http("POST", "/score", port=env("PORT", 8017)), graph=score_flow)],
     jobs=[
-        Job("score_calls", graph=score_flow, items="calls.jsonl", output="out/scored.jsonl", key="id")
+        Job(
+            "score_calls",
+            graph=score_flow,
+            items="calls.jsonl",
+            output="out/scored.jsonl",
+            key="id",
+        )
     ],
 )
 ```

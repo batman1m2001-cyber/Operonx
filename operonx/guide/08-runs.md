@@ -415,7 +415,9 @@ def chat(text):
 
 
 async def main():
-    engine = Operon(chat, params={"text": None}, journal=SqliteJournal("chat.db"), carry=["history"])
+    engine = Operon(
+        chat, params={"text": None}, journal=SqliteJournal("chat.db"), carry=["history"]
+    )
     await engine.run({"text": "hello"}, thread_id="cust-7")
     out = await engine.run({"text": "and again"}, thread_id="cust-7")
     state = out["$state"]

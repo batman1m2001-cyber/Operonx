@@ -240,7 +240,13 @@ APP = Application(
     "scorer",
     services=[Service("score", http("POST", "/score", port=env("PORT", 8017)), graph=score_flow)],
     jobs=[
-        Job("score_calls", graph=score_flow, items="calls.jsonl", output="out/scored.jsonl", key="id")
+        Job(
+            "score_calls",
+            graph=score_flow,
+            items="calls.jsonl",
+            output="out/scored.jsonl",
+            key="id",
+        )
     ],
     trace=["trace_local:default"],  # every run recorded under .operonx/runs
 )

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.2] - 2026-10-06
+
+### Fixed
+
+- Projects made by `operonx init` pass `ruff format --check` under ruff 0.16, which also formats
+  Python inside Markdown: the template excludes the generated `.operonx/` guide copy, and the
+  `AGENTS.md` example is formatted. The repository is formatted with ruff 0.16 (dev pin
+  `ruff>=0.16`), so CI's format check passes again.
+
 ## [1.17.1] - 2026-10-06
 
 ### Changed
@@ -3142,7 +3151,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.2...HEAD
+[1.17.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.15.0...v1.16.0

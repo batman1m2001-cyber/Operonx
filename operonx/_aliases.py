@@ -41,8 +41,7 @@ class _AliasFinder(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         except ModuleNotFoundError as exc:
             if exc.name == real.split(".")[0]:  # the package itself, not something it imports
                 raise ImportError(
-                    f"{spec.name} is the {dist} package, which is not installed: "
-                    f"pip install {dist}"
+                    f"{spec.name} is the {dist} package, which is not installed: pip install {dist}"
                 ) from exc
             raise
 

@@ -33,8 +33,13 @@ def _agent_conversation() -> list:
         {"id": "sys", "role": "system", "content": "Be brief.", "cache_control": {"type": "x"}},
         {"id": "u1", "role": "user", "content": "Weather in Hanoi?"},
         {"id": "a1", "role": "assistant", "content": "", "tool_calls": [CALL]},
-        {"role": "tool", "tool_call_id": "call_1", "name": "get_weather", "content": "31C",
-         "status": "success"},
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "get_weather",
+            "content": "31C",
+            "status": "success",
+        },
     ]
 
 

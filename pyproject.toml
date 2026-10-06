@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx"
-version = "1.17.1"
+version = "1.17.2"
 description = "High-performance workflow engine for AI applications"
 readme = "README.md"
 license = "Apache-2.0"
@@ -189,7 +189,7 @@ dev = [
     "pytest-timeout>=2.4.0",
     "python-dotenv>=1.2.2",
     "httpx>=0.24",
-    "ruff>=0.1",
+    "ruff>=0.16",  # CI runs the latest; 0.16 also formats Python inside Markdown
     "pre-commit",
     # the Mongo run store's tests run against an in-memory Mongo
     "mongomock>=4.1",
