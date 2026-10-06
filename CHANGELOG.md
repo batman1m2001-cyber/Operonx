@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.4] - 2026-10-06
+
+### Changed
+
+- The guide, the init AGENTS.md and the auto-synced `<!-- operonx:guide -->` block say how to
+  upgrade a project: `uv lock --upgrade-package operonx && uv sync`, then `uv run operonx guide`.
+  The block also carries the naming and `if_` rules, so existing projects get them at their next
+  sync.
+
 ## [1.17.3] - 2026-10-06
 
 ### Fixed
@@ -3168,7 +3177,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.3...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...HEAD
+[1.17.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.3...v1.17.4
 [1.17.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.2...v1.17.3
 [1.17.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.0...v1.17.1

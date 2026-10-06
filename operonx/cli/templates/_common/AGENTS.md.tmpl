@@ -91,8 +91,9 @@ uv run operonx run NAME       # run one job
   `BranchOp` or `Branch` yourself.
 - An op that raises does not raise: the run's result has `"$errors"`.
   Check for it.
-- After adding or upgrading an operonx package, run `operonx guide` and
-  re-read `.operonx/guide/README.md`.
+- To upgrade operonx: `uv lock --upgrade-package operonx && uv sync`, then
+  `uv run operonx guide`, then re-read `.operonx/guide/README.md`. After
+  adding an operonx package (`uv add operonx-agents`), run `operonx guide`.
 
 ## operonx guides
 

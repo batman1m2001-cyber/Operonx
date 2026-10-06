@@ -199,7 +199,11 @@ def agents_block(guides: Optional[List[Guide]] = None) -> str:
         f"{AGENTS_BEGIN}\n"
         f"Installed: {names}. Read `.operonx/guide/README.md` first: it lists every\n"
         "page of every installed operonx package, each tested against that version.\n"
-        "After `uv add` / `uv sync` of an operonx package, run `operonx guide`.\n"
+        "Upgrade: `uv lock --upgrade-package operonx && uv sync`, then `uv run operonx guide`\n"
+        "(after `uv add operonx-agents` or `operonx-kb`, just `uv run operonx guide`).\n"
+        "Names come from variables: write `name=` only when other code reads the name,\n"
+        "one op per line. Branch with `if_(cond, a).else_(b)` in the `>>` chain, never a\n"
+        "hand-built `BranchOp`.\n"
         f"{AGENTS_END}"
     )
 
