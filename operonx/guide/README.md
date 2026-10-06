@@ -93,7 +93,12 @@ from operonx.providers.ops import (
 8. **Combine conditions with `&`, `|`, `~`**, never `and`, `or`, `not`.
 9. **`~` is only for races:** fire on whichever of two unrelated ops lands
    first.
-10. **Models and stores are `resources.yaml` keys**; call
+10. **Let names come from variables.** `score = score_call(...)` is named
+    `score`; never pass `name=` unless something reads that name, or the op
+    is not assigned to a variable (page 4).
+11. **Branch with `if_(...).else_(...)` inline**, inside the `>>` chain.
+    Never build a `BranchOp` or `Branch` by hand (page 3).
+12. **Models and stores are `resources.yaml` keys**; call
     `operonx.bootstrap()` (or `Application.bootstrap()`) before building an
     engine that uses them.
 

@@ -239,7 +239,8 @@ def no() -> dict:
 @graph
 def with_amp():
     p = pair(a=PARENT["a"], b=PARENT["b"])
-    y, n = yes(), no()
+    y = yes()
+    n = no()
     START >> p >> if_((p["a"] == 1) & (p["b"] == 2), y).else_(n)
     y >> END
     n >> END
@@ -410,6 +411,19 @@ Operon(greet).run()`), a `@graph` is named after its function. Jobs and
 services name their runs after the graph's function. State keys and trace
 names follow, so renaming a variable renames them. Pin names that other
 code reads.
+
+**Do not write `name=` by habit.** `reply = chat(text=text)` is already
+`reply`. Write `name=` only when:
+
+- other code reads the name — a trace filter, a state key, an eval that
+  checks an op's output by name (`trajectory.op_output("classify", ...)`);
+- the op is not assigned to a plain variable — built in a list, a dict
+  or a loop, it is named after the container or not at all;
+- two ops in one graph would otherwise get the same name.
+
+**One op per line.** `a, b = f(), g()` names neither `a` nor `b` (they fall
+back to their function names), on every Python version. Write
+`a = f()` and `b = g()`.
 
 ```python
 import asyncio

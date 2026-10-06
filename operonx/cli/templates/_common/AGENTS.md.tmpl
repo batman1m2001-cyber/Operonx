@@ -83,6 +83,12 @@ uv run operonx run NAME       # run one job
 ## Rules
 
 - Never `print()`. Log with `from operonx.core.loggings import LOGGER`.
+- Let names come from variables: `reply = chat(text=text)` is named `reply`.
+  Write `name=` only when other code reads that name (a trace filter, a
+  state key, an eval), and build one op per line (`a, b = f(), g()` names
+  neither).
+- Branch with `if_(cond, a).else_(b)` inside the `>>` chain. Never build a
+  `BranchOp` or `Branch` yourself.
 - An op that raises does not raise: the run's result has `"$errors"`.
   Check for it.
 - After adding or upgrading an operonx package, run `operonx guide` and

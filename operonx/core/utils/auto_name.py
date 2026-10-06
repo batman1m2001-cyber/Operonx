@@ -141,11 +141,21 @@ def _name_at(code: CodeType, offset: int) -> Optional[str]:
         i += 1
 
     # Look at the next few instructions (small window)
+    copied = False
     for j in range(i, min(i + 4, len(instructions))):
         opname = instructions[j].opname
         if opname in _STORE_OPS:
+            # Two stores in a row with no copy before them is a tuple unpack
+            # (`a, b = f(), g()`): on 3.11+ the last call is followed by the
+            # last target's store, so only it would be named — on 3.10 a
+            # ROT_TWO comes first and neither is. Name neither, everywhere.
+            # `x = y = f()` copies first, and keeps its name.
+            after = instructions[j + 1].opname if j + 1 < len(instructions) else ""
+            if after in _STORE_OPS and not copied:
+                return None
             return instructions[j].argval
         if opname in _BENIGN_OPS:
+            copied = copied or opname in ("COPY", "DUP_TOP")
             continue
         break  # non-trivial instruction → not a simple assignment
 

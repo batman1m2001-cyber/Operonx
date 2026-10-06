@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.3] - 2026-10-06
+
+### Fixed
+
+- **Tuple unpacking named one op on Python 3.11+.** In `a, b = f(), g()` the second op was named
+  `b` and the first kept its function name; on 3.10 neither was named. Neither is now, on every
+  version, so names (and state keys, trace names) no longer depend on the Python version. Chained
+  `x = y = f()` keeps its name. This was the Python Compatibility CI failure.
+- The docs build: `docs/api/app.md` no longer references the removed `JobSpec`, and the agents
+  guide is linked by URL.
+
+### Changed
+
+- The guide and the `operonx init` AGENTS.md say: let names come from variables (`name=` only when
+  other code reads the name, one op per line), and branch with `if_(...).else_(...)` inline, never
+  a hand-built `BranchOp`.
+
 ## [1.17.2] - 2026-10-06
 
 ### Fixed
@@ -3151,7 +3168,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.2...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.3...HEAD
+[1.17.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.2...v1.17.3
 [1.17.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.1...v1.17.2
 [1.17.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.16.0...v1.17.0

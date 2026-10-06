@@ -83,6 +83,17 @@ class TestAutoName:
         node = BaseOp(name="explicit")
         assert node.name == "explicit"
 
+    def test_a_tuple_unpack_names_neither_op_on_any_python(self):
+        """`a, b = f(), g()`: on 3.11+ the second call is followed by `b`'s
+        store, so only it was named — on 3.10 neither was."""
+        first, second = BaseOp(), BaseOp()
+        assert first.name != "first" and second.name != "second"
+        assert first.name != "second" and second.name != "first"
+
+    def test_a_chained_assignment_keeps_its_name(self):
+        kept = also = BaseOp()
+        assert kept.name == "kept" and also is kept
+
     def test_no_assignment_falls_back(self):
         """When created inside a data structure, bytecode sees the container's STORE.
 
