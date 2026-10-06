@@ -21,7 +21,7 @@ trajectory evaluators, `dataset_from_runs` and `operonx_agents.testing`.
 The guide page with tested snippets is operonx's `operonx/guide/09-agents.md`.
 
 ```python
-from operonx_agents import Choice, Model, ModelSettings, llm_step
+from operonx.agents import Choice, Model, ModelSettings, llm_step
 
 classify = llm_step(
     model=Model("inhouse", deadline=0.9, settings=ModelSettings(logprobs=True)),
@@ -36,7 +36,7 @@ classify = llm_step(
 ```
 
 ```python
-from operonx_agents import Agent, Model, RedisSession, RedisStateStore, Runner, UsageLimits, tool
+from operonx.agents import Agent, Model, RedisSession, RedisStateStore, Runner, UsageLimits, tool
 
 
 @tool(readonly=True)
@@ -66,7 +66,7 @@ async for event in Runner.stream(support, "And when?", session=session):
 ```
 
 ```python
-from operonx_agents import (
+from operonx.agents import (
     Agent,
     Approve,
     MCPServer,
@@ -108,7 +108,7 @@ res = await Runner.resume(
 
 ```python
 from operonx.app import Application, http, websocket
-from operonx_agents import agent_service
+from operonx.agents import agent_service
 
 APP = Application(
     "shop",

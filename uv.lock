@@ -788,7 +788,7 @@ wheels = [
 
 [[package]]
 name = "operonx"
-version = "1.14.0"
+version = "1.16.0"
 source = { editable = "../Operon" }
 dependencies = [
     { name = "orjson" },
@@ -809,6 +809,7 @@ openai = [
 ]
 serve = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "websockets", version = "16.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "websockets", version = "17.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -844,8 +845,10 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'postgres'", specifier = ">=0.24" },
     { name = "httpx", marker = "extra == 'providers'", specifier = ">=0.24" },
     { name = "httpx", marker = "extra == 'qdrant'", specifier = ">=0.24" },
+    { name = "httpx", marker = "extra == 'serve'", specifier = ">=0.24" },
     { name = "httpx", marker = "extra == 'standard'", specifier = ">=0.24" },
     { name = "httpx", marker = "extra == 'triton'", specifier = ">=0.24" },
+    { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=2.6.0,<3.0.0" },
     { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=2.6.0,<3.0.0" },
     { name = "langfuse", marker = "extra == 'standard'", specifier = ">=2.6.0,<3.0.0" },
@@ -915,7 +918,7 @@ provides-extras = ["openai", "anthropic", "gemini", "bedrock", "onnx", "triton",
 
 [[package]]
 name = "operonx-agents"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
