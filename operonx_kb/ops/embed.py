@@ -1,4 +1,4 @@
-"""EmbedChunksOp — embeddings for chunks, through an operonx ``embedding:`` resource.
+"""``embed_chunks`` — embeddings for chunks, through an operonx ``embedding:`` resource.
 
 The embedder is any operonx ``BaseEmbedder`` resource, unchanged. What this op
 adds over ``EmbeddingOp`` is the durable, content-addressed embedding cache in
@@ -12,17 +12,14 @@ a model fingerprint nor a durable store.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
-from operonx.core.configs import OpType
-from operonx.core.ops import BaseOp
-from operonx.core.ops.base import shorthand, split_shorthand_kwargs
-from operonx.core.utils.common import Param
+from operonx import op
 
 from operonx_kb.model.ids import fingerprint
 from operonx_kb.ops._resources import backend_settings, catalog_of, resolve
 
-__all__ = ["EmbedChunksOp", "embedder_fingerprint"]
+__all__ = ["embed_chunks", "embedder_fingerprint"]
 
 
 def embedder_fingerprint(resource_key: str, backend: Any, template: str = "{text}") -> str:
@@ -35,125 +32,51 @@ def embedder_fingerprint(resource_key: str, backend: Any, template: str = "{text
     return fingerprint(f"{type(backend).__module__}.{type(backend).__qualname__}", "1", data)
 
 
-class EmbedChunksOp(BaseOp):
+@op(exclude={"trace": ["chunks", "vectors"]}, show_keys="stats")
+async def embed_chunks(
+    chunks: list, embedder: str, catalog: str, batch_size: int = 64, template: str = "{text}"
+) -> dict:
     """Embed chunks, cache first.
 
-    Inputs:
-        chunks (list[dict]): Chunk dumps (``Chunk.model_dump()``) to embed.
+    Args:
+        chunks: Chunk dumps (``Chunk.model_dump()``) to embed.
+        embedder: The embedder key; a bare name is ``embedding:<name>``.
+        catalog: The catalog key holding the embedding cache.
+        batch_size: Texts per embedder call.
+        template: How a chunk's embed text is presented to the model
+            (``"passage: {text}"`` for E5). Part of the cache key: the same text
+            under another template is another vector.
 
-    Outputs:
-        vectors (dict): ``chunk_id -> vector``.
-        stats (dict): ``embedded`` (sent to the model), ``cached`` (cache hits), ``calls``.
-
-    Example::
-
-        emb = EmbedChunksOp.of(resource="bge-m3", catalog="kb_catalog:main", chunks=ch["todo"])
+    Returns:
+        ``vectors`` (``chunk_id -> vector``) and ``stats`` (``embedded`` sent to the
+        model, ``cached`` cache hits, ``calls``).
     """
-
-    show_keys_default = ("stats",)
-
-    __slots__ = ["resource", "catalog", "batch_size", "template", "backend", "_initialized"]
-
-    type: OpType = "embedding"
-
-    def __init__(
-        self,
-        resource: Optional[str] = None,
-        catalog: Optional[str] = None,
-        batch_size: int = 64,
-        template: str = "{text}",
-        inputs: Dict[str, Any] = None,
-        outputs: Dict[str, Any] = None,
-        **kwargs: Any,
-    ):
-        """Initialize EmbedChunksOp.
-
-        Args:
-            resource: The embedder. A bare name is ``embedding:<name>``; a key with
-                ``:`` is used verbatim.
-            catalog: The catalog key holding the embedding cache.
-            batch_size: Texts per embedder call.
-            template: How a chunk's embed text is presented to the model
-                (``"passage: {text}"`` for E5). Part of the cache key: the
-                same text under another template is another vector.
-        """
-        kwargs.setdefault("bound", "io")
-        kwargs.setdefault("exclude", {"trace": ["chunks", "vectors"]})
-        super().__init__(**kwargs)
-        if not resource or not catalog:
+    if "{text}" not in template:
+        raise ValueError(f"embed_chunks template {template!r} must contain {{text}}")
+    backend = resolve(embedder, "embedding")  # the hub caches the instance
+    cat = catalog_of(catalog)
+    fp = embedder_fingerprint(embedder, backend, template)
+    by_sha: Dict[str, str] = {}
+    for c in chunks:
+        by_sha.setdefault(c["embed_text_sha"], c["embed_text"])
+    cached = await asyncio.to_thread(cat.get_embeddings, fp, list(by_sha))
+    missing = [sha for sha in by_sha if sha not in cached]
+    fresh: Dict[str, List[float]] = {}
+    calls = 0
+    for start in range(0, len(missing), batch_size):
+        batch = missing[start : start + batch_size]
+        result = await backend.run([template.replace("{text}", by_sha[sha]) for sha in batch])
+        calls += 1
+        vectors = result["embeddings"]
+        if len(vectors) != len(batch):
             raise ValueError(
-                "EmbedChunksOp needs resource= (an embedder key) and catalog= (a kb_catalog key)"
+                f"embedder {embedder!r} returned {len(vectors)} vectors for {len(batch)} texts"
             )
-        self.resource = resource
-        self.catalog = catalog
-        self.batch_size = batch_size
-        if "{text}" not in template:
-            raise ValueError(f"EmbedChunksOp template {template!r} must contain {{text}}")
-        self.template = template
-        self.inputs = self._merge_params({"chunks": Param(type=list, required=True)}, inputs)
-        self.outputs = self._merge_params(
-            {"vectors": Param(type=dict, required=True), "stats": Param(type=dict, required=True)},
-            outputs,
-        )
-        self.backend = None
-        self._initialized = False
-        self._set_core(self._process)
-
-    def warmup(self) -> None:
-        self._ensure_initialized()
-
-    def _ensure_initialized(self) -> None:
-        if self._initialized:
-            return
-        self.backend = resolve(self.resource, "embedding")
-        self._initialized = True
-
-    async def _process(self, chunks: list) -> Dict[str, Any]:
-        self._ensure_initialized()
-        catalog = catalog_of(self.catalog)
-        fp = embedder_fingerprint(self.resource, self.backend, self.template)
-        by_sha: Dict[str, str] = {}
-        for c in chunks:
-            by_sha.setdefault(c["embed_text_sha"], c["embed_text"])
-        cached = await asyncio.to_thread(catalog.get_embeddings, fp, list(by_sha))
-        missing = [sha for sha in by_sha if sha not in cached]
-        fresh: Dict[str, List[float]] = {}
-        calls = 0
-        for start in range(0, len(missing), self.batch_size):
-            batch = missing[start : start + self.batch_size]
-            result = await self.backend.run(
-                [self.template.replace("{text}", by_sha[sha]) for sha in batch]
-            )
-            calls += 1
-            vectors = result["embeddings"]
-            if len(vectors) != len(batch):
-                raise ValueError(
-                    f"embedder {self.resource!r} returned {len(vectors)} vectors for {len(batch)} texts"
-                )
-            fresh.update({sha: [float(x) for x in v] for sha, v in zip(batch, vectors)})
-        if fresh:
-            await asyncio.to_thread(catalog.put_embeddings, fp, fresh)
-        table = {**cached, **fresh}
-        return {
-            "vectors": {c["id"]: table[c["embed_text_sha"]] for c in chunks},
-            "stats": {"embedded": len(fresh), "cached": len(cached), "calls": calls},
-        }
-
-    @shorthand
-    def of(
-        cls, resource=None, catalog=None, batch_size=64, template="{text}", **kwargs
-    ) -> "EmbedChunksOp":
-        """Create an EmbedChunksOp with flat kwargs."""
-        input_mappings, init_kwargs = split_shorthand_kwargs(kwargs)
-        return cls(
-            resource=resource,
-            catalog=catalog,
-            batch_size=batch_size,
-            template=template,
-            inputs=input_mappings or None,
-            **init_kwargs,
-        )
-
-    @property
-    def specific_metadata(self) -> Dict[str, Any]:
-        return {"model": self.resource}
+        fresh.update({sha: [float(x) for x in v] for sha, v in zip(batch, vectors)})
+    if fresh:
+        await asyncio.to_thread(cat.put_embeddings, fp, fresh)
+    table = {**cached, **fresh}
+    return {
+        "vectors": {c["id"]: table[c["embed_text_sha"]] for c in chunks},
+        "stats": {"embedded": len(fresh), "cached": len(cached), "calls": calls},
+    }

@@ -43,15 +43,17 @@ A search is an operonx graph, so it is one step of your own flow — traced with
 between (`tests/graphs/test_in_a_flow.py`):
 
 ```python
-search = kb.search_graph("handbook", mode="hybrid")
+from operonx.kb.graphs import search   # module level: the collection's settings are read per run
 
 @graph
-def answer_flow(question):
-    found = search(query=question, collection="handbook", filter=None, k=5)
+def answer_flow(question, catalog):
+    found = search(query=question, collection="handbook", filter=None, k=5, mode="hybrid",
+                   catalog=catalog)
     reply = cite(hits=found["hits"])          # your own op
     START >> found >> reply >> END
 
-out = await Operon(answer_flow, params={"question": None}).run(inputs={"question": "..."})
+engine = Operon(answer_flow, params={"question": None, "catalog": None})
+out = await engine.run(inputs={"question": "...", "catalog": "kb_catalog:main"})
 ```
 
 For an agent (operonx-agents installed beside it), `kb_tools` gives a read-only `kb_search` /
@@ -59,7 +61,7 @@ For an agent (operonx-agents installed beside it), `kb_tools` gives a read-only 
 query — and `kb_read` checks it again (`tests/graphs/test_agent_tools.py`):
 
 ```python
-from operonx_kb.tools import kb_tools
+from operonx.kb.tools import kb_tools
 
 tools = kb_tools(kb, "handbook", scope=lambda ctx: {"acl_any": ctx.deps.principals})
 agent = Agent(name="hr", model=Model("assistant"), tools=[tools])

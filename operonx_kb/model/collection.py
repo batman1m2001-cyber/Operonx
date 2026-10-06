@@ -172,7 +172,8 @@ class ContextualSpec(_Spec):
             into windows of whole chunks up to this many tokens, and a chunk sees
             the window that holds it.
         max_tokens: The model's answer limit.
-        parallel: Model calls in flight at once.
+        parallel: No effect since 0.2.1 (stages run 8 calls at once; limit a model with
+            its resource's ``rate_limit:``). Kept so stored specs load.
     """
 
     llm: str
@@ -199,7 +200,8 @@ class TreeSpec(_Spec):
             contents from this length on.
         toc_window_tokens: The most text one table-of-contents call reads.
         max_tokens: The answer limit of a summary.
-        parallel: Model calls in flight at once while ingesting.
+        parallel: No effect since 0.2.1 (stages run 8 calls at once; limit a model with
+            its resource's ``rate_limit:``). Kept so stored specs load.
         docs: Documents tree search walks: the first ``docs`` distinct documents
             among the seed retriever's hits.
         seed_depth: Hits the seed retriever returns.

@@ -2,11 +2,10 @@
 
 ::
 
-    search ─► build_context ─► LLMOp (cite-by-span JSON) ─► check_answer
+    ranked_search ─► build_context ─► LLMOp (cite-by-span JSON) ─► check_answer
 
-``search`` is any search graph (:mod:`operonx_kb.graphs.retrieve`): the answer
-graph adds the context, the model and citation verification, and nothing about
-how hits are found.
+Defined once, at module level (operonx guide 05): the search mode, the reranker
+and the answer model (``llm``, an ``llm:`` resource's name) are inputs.
 """
 
 from __future__ import annotations
@@ -15,73 +14,49 @@ from operonx import END, START, graph
 from operonx.app.serve import egress, ingress
 from operonx.providers.ops import LLMOp
 
+from operonx_kb.graphs.retrieve import ranked_search
 from operonx_kb.ops.answer import ANSWER_PROMPT, build_context, check_answer
 from operonx_kb.ops.serve import answer_result, search_request
 
-__all__ = ["answer_graph", "build_answer_flow"]
+__all__ = ["answer", "answer_flow"]
 
 
-def answer_graph(
-    search,
-    llm: str,
-    *,
-    budget_tokens: int = 1500,
-    neighbours: int = 1,
-    catalog: str = "kb_catalog:main",
-    blobs: str = "kb_blob:main",
-):
-    """Answer ``(query, collection, filter, k)`` from a search's hits with verified citations.
+@graph
+def answer(query, collection, filter, k, mode, reranker, rerank_depth, llm, budget_tokens,
+           neighbours, catalog, blobs):  # fmt: skip
+    """Answer ``query`` from a search's hits with verified citations.
 
-    Args:
-        search: A search graph (``search_graph(...)`` or ``reranked(...)``).
-        llm: The ``llm:`` resource name of the answer model.
-        budget_tokens: Tokens the sources may take in the prompt.
-        neighbours: Chunks added on each side of a hit, within its section.
+    ``budget_tokens``: tokens the sources may take in the prompt; ``neighbours``:
+    chunks added on each side of a hit, within its section.
     """
-
-    @graph
-    def answer(query, collection, filter, k):
-        found = search(query=query, collection=collection, filter=filter, k=k)
-        context = build_context(
-            hits=found["hits"],
-            catalog=catalog,
-            blobs=blobs,
-            budget_tokens=budget_tokens,
-            neighbours=neighbours,
-        )
-        model = LLMOp.of(
-            resource=llm,
-            prompt=ANSWER_PROMPT,
-            fields=["answer: str", "citations?: list"],
-            parser="json",
-            passages=context["prompt"],
-            question=query,
-        )
-        checked = check_answer(
-            passages=context["sources"],
-            catalog=catalog,
-            blobs=blobs,
-            answer=model["answer"],
-            citations=model["citations"],
-            usage=model["usage"],
-        )
-        START >> found >> context >> model >> checked >> END
-
-    return answer
+    found = ranked_search(query=query, collection=collection, filter=filter, k=k, mode=mode,
+                          reranker=reranker, rerank_depth=rerank_depth, catalog=catalog)  # fmt: skip
+    context = build_context(hits=found["hits"], catalog=catalog, blobs=blobs,
+                            budget_tokens=budget_tokens, neighbours=neighbours)  # fmt: skip
+    model = LLMOp.of(
+        resource=llm,
+        prompt=ANSWER_PROMPT,
+        fields=["answer: str", "citations?: list"],
+        parser="json",
+        passages=context["prompt"],
+        question=query,
+    )
+    checked = check_answer(passages=context["sources"], catalog=catalog, blobs=blobs,
+                           answer=model["answer"], citations=model["citations"],
+                           usage=model["usage"])  # fmt: skip
+    START >> found >> context >> model >> checked >> END
 
 
-def build_answer_flow(answer, *, k: int = 8):
-    """An answer graph behind doors: each item ``{"query", "collection", "filter"?, "k"?}``
-    gets one answer back."""
-
-    @graph
-    def answer_flow():
-        src = ingress()
-        req = search_request(item=src["item"], k=k)
-        answered = answer(query=req["query"], collection=req["collection"], filter=req["filter"],
-                          k=req["k"])  # fmt: skip
-        res = answer_result(answer=answered["answer"])
-        out = egress(item=res["result"])
-        START >> src >> req >> answered >> res >> out >> END
-
-    return answer_flow
+@graph
+def answer_flow(mode, reranker, rerank_depth, k, llm, budget_tokens, neighbours, catalog, blobs):
+    """Answers behind doors: each item ``{"query", "collection", "filter"?, "k"?}`` gets
+    one answer back; the run's inputs are the same for every item."""
+    src = ingress()
+    req = search_request(item=src["item"], k=k)
+    answered = answer(query=req["query"], collection=req["collection"], filter=req["filter"],
+                      k=req["k"], mode=mode, reranker=reranker, rerank_depth=rerank_depth,
+                      llm=llm, budget_tokens=budget_tokens, neighbours=neighbours,
+                      catalog=catalog, blobs=blobs)  # fmt: skip
+    res = answer_result(answer=answered["answer"])
+    out = egress(item=res["result"])
+    START >> src >> req >> answered >> res >> out >> END

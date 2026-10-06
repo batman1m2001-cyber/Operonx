@@ -110,12 +110,22 @@ def test_a_citation_into_a_pdf_resolves_to_page_and_box(kbx, llm):
 def test_the_answer_flow_runs_behind_doors(loaded, llm, tmp_path):
     from operonx.app.jobs import Job
 
-    from operonx_kb.graphs.answer import build_answer_flow
+    from operonx_kb.graphs.answer import answer_flow
 
     llm.script = quoting()
-    flow = build_answer_flow(loaded.answer_graph("docs", "answerer", mode="dense"))
     got = []
-    job = Job("ask_docs", graph=flow, source=[{"id": "a", "query": "meeting", "collection": "docs"}],
+    inputs = {
+        "mode": "dense",
+        "llm": "answerer",
+        "k": 8,
+        "budget_tokens": 1500,
+        "neighbours": 1,
+        "rerank_depth": 30,
+        "catalog": "kb_catalog:main",
+        "blobs": "kb_blob:main",
+    }
+    job = Job("ask_docs", graph=answer_flow, inputs=inputs,
+              source=[{"id": "a", "query": "meeting", "collection": "docs"}],
               sink=got, key="id", record_dir=str(tmp_path / "jobs"))  # fmt: skip
     record = run(job.run())
     assert record.status == "ok", record

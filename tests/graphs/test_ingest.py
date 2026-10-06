@@ -194,15 +194,16 @@ def test_ingest_flow_runs_as_a_job_over_a_directory(kb, tmp_path):
     from operonx.app.jobs import Job
     from operonx.app.jobs.sources import DirSource
 
-    from operonx_kb.graphs import build_ingest_flow
+    from operonx_kb.graphs import ingest_flow
 
     (tmp_path / "in").mkdir()
     for name in ("meeting_notes.txt", "quy_trinh_vi.html"):
         (tmp_path / "in" / name).write_bytes((DOCS / name).read_bytes())
-    flow = build_ingest_flow(kb.collection("docs").spec.dense)
     got = []
-    job = Job("ingest_docs", graph=flow, source=DirSource(tmp_path / "in"), sink=got, key="name",
-              inputs={"collection": "docs"}, record_dir=str(tmp_path / "jobs"))  # fmt: skip
+    job = Job("ingest_docs", graph=ingest_flow, source=DirSource(tmp_path / "in"), sink=got,
+              key="name", record_dir=str(tmp_path / "jobs"),
+              inputs={"collection": "docs", "catalog": "kb_catalog:main",
+                      "blobs": "kb_blob:main"})  # fmt: skip
     record = run(job.run())
     assert record.status == "ok", record
     assert sorted(r["action"] for r in got) == ["new", "new"]

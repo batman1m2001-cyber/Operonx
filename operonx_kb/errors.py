@@ -20,6 +20,8 @@ __all__ = [
     "EnrichmentError",
     "FilterError",
     "MissingExtraError",
+    "IngestError",
+    "QueryError",
 ]
 
 
@@ -94,3 +96,11 @@ class MissingExtraError(KBError, ImportError):
             f"  Install with: pip install 'operonx-kb[{extra}]'",
             {"original error": str(original)} if original else None,
         )
+
+
+class IngestError(KBError):
+    """A KB graph run failed; the message holds the failing op and its error."""
+
+
+class QueryError(KBError):
+    """A search or an answer run failed; the message holds the failing op and its error."""

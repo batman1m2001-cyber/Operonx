@@ -41,6 +41,9 @@ __all__ = [
     "hydrate",
     "rerank_depth",
     "apply_rerank",
+    "pick_hits",
+    "pick_search",
+    "wants_rerank",
 ]
 
 
@@ -246,3 +249,31 @@ def apply_rerank(hits: list, reranks: list, k: int) -> dict:
     documents = [{"content": h["text"], "chunk_id": h["chunk_id"]} for h in out]
     stats = {"in": len(hits), "out": len(out)}
     return {"hits": out, "documents": documents, "stats": stats}
+
+
+@op(show_keys="hits")
+def pick_hits(first: Optional[list] = None, second: Optional[list] = None,
+              third: Optional[list] = None) -> dict:  # fmt: skip
+    """Where the arms of a mode branch merge: the hits of the arm that ran."""
+    return {"hits": next((h for h in (first, second, third) if h is not None), [])}
+
+
+@op(show_keys="yes")
+def wants_rerank(reranker: Optional[str] = None) -> dict:
+    """Whether a search is reranked: ``reranker`` names a ``reranking:`` resource."""
+    return {"yes": bool(reranker)}
+
+
+@op(show_keys="stats")
+def pick_search(
+    hits: Optional[list] = None,
+    documents: Optional[list] = None,
+    stats: Optional[dict] = None,
+    rr_hits: Optional[list] = None,
+    rr_documents: Optional[list] = None,
+    rr_stats: Optional[dict] = None,
+) -> dict:
+    """Where a search and a reranked search merge: the outputs of the one that ran."""
+    if rr_hits is not None:
+        return {"hits": rr_hits, "documents": rr_documents or [], "stats": rr_stats or {}}
+    return {"hits": hits or [], "documents": documents or [], "stats": stats or {}}

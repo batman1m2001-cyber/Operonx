@@ -1,4 +1,4 @@
-"""Concept graph ops: what :func:`operonx_kb.graphs.retrieve.graph_retriever` and the
+"""Concept graph ops: what :func:`operonx_kb.graphs.retrieve.graph_retrieve` and the
 ingest graph run (PLAN G1-G5).
 
 - :func:`graph_concepts` (ingest): each chunk's concepts, committed with the version.
