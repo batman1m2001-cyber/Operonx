@@ -18,6 +18,12 @@ upstream gaps) and each phase's gate.
 
 ## Rules
 
+- **Every `@graph` at module level, never inside a function** (operonx guide 05). Settings
+  (`k`, depths) are graph inputs; another shape is another module-level graph or an `if_`.
+  Keep the edges written out. The graph factories in `operonx_kb/graphs/*` (`build_*`,
+  `*_retriever`, `llm_stage`, …) are **known debt**, not a pattern to copy: they exist because
+  operonx's provider ops take `resource=` only at build time. Do not add new ones.
+
 - The span invariant (`canonical[e.span] == e.text`) is checked when a version is built and again
   before commit. A violation is a bug: fix the producer, never relax the check.
 - Never `print()`; log with `from operonx.core.loggings import LOGGER`.
