@@ -97,6 +97,13 @@ def ask(q):
     START >> lk >> r >> END
 
 
+# A timeout is TRANSIENT: with a retry it is tried again.
+@graph
+def ask_twice(q):
+    lk = lookup(q=q, retry=Retry(max_attempts=2, initial=0.01))
+    START >> lk >> END
+
+
 async def main():
     engine = Operon(ask, params={"q": None})
     t0 = time.perf_counter()
@@ -104,12 +111,6 @@ async def main():
     assert time.perf_counter() - t0 < 1
     assert "text" not in out  # the op failed, so reply did not run
     assert "TimeoutError" in str(out["$errors"][f"{engine.name}.lk"])
-
-    # A timeout is TRANSIENT: with a retry it is tried again.
-    @graph
-    def ask_twice(q):
-        lk = lookup(q=q, retry=Retry(max_attempts=2, initial=0.01))
-        START >> lk >> END
 
     handle = Operon(ask_twice, params={"q": None}).start({"q": "hi"})
     await handle.result()
@@ -320,28 +321,36 @@ async def slow(x: int) -> dict:
     return {"v": "slow"}
 
 
-def build(**declare):
-    @graph
-    def race(x):
-        PARENT.declare(v=None, **declare)
-        a = fast(x=x)
-        b = slow(x=x)
-        a["v"] >> PARENT["v"]
-        b["v"] >> PARENT["v"]
-        START >> [a, b]
-        [a, b] >> END
+@graph
+def race(x):
+    PARENT.declare(v=None)
+    a = fast(x=x)
+    b = slow(x=x)
+    a["v"] >> PARENT["v"]
+    b["v"] >> PARENT["v"]
+    START >> [a, b]
+    [a, b] >> END
 
-    return race
+
+@graph
+def race_on_purpose(x):
+    PARENT.declare(v=None, allow_race=True)  # last write wins, on purpose
+    a = fast(x=x)
+    b = slow(x=x)
+    a["v"] >> PARENT["v"]
+    b["v"] >> PARENT["v"]
+    START >> [a, b]
+    [a, b] >> END
 
 
 try:
-    Operon(build(), params={"x": None})
+    Operon(race, params={"x": None})
 except GraphValidationError as e:
     assert "concurrent writers" in str(e)
 else:
     raise AssertionError("expected the build to fail")
 
-Operon(build(allow_race=True), params={"x": None})  # last write wins, on purpose
+Operon(race_on_purpose, params={"x": None})
 ```
 
 The fixes, in order of preference: order the writers (`a >> b`), give the
