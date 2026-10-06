@@ -1,0 +1,118 @@
+name: Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even when the version is unchanged from HEAD~1 (use to recover when a version bump and a follow-up commit were pushed together)."
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Detect a version bump on push to main ───────────────────────────────
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.detect.outputs.version }}
+      changed: ${{ steps.detect.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: detect
+        env:
+          FORCE: ${{ inputs.force }}
+        run: |
+          # Compare against the previous commit on main (before this merge).
+          # Merge commit: HEAD^1 = previous main tip. Regular commit: HEAD~1.
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then
+            BASE="HEAD^1"
+          else
+            BASE="HEAD~1"
+          fi
+          echo "Comparing against $BASE ($(git rev-parse --short $BASE))"
+          if [ "$FORCE" = "true" ]; then
+            echo "force=true — bypassing version diff and publishing current version."
+          fi
+
+          OLD=$(git show $BASE:pyproject.toml 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
+          NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' pyproject.toml)
+          if { [ "$OLD" != "$NEW" ] || [ "$FORCE" = "true" ]; } && [ -n "$NEW" ]; then
+            if [ "$FORCE" = "true" ] && [ "$OLD" = "$NEW" ]; then
+              echo "python: $NEW (forced)"
+            else
+              echo "python: $OLD -> $NEW (CHANGED)"
+            fi
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          else
+            echo "python: $NEW (unchanged)"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Publish to PyPI ─────────────────────────────────────────────────────
+  publish-pypi:
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.10
+
+      - name: Build wheel + sdist
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+  # ── Tag the release ─────────────────────────────────────────────────────
+  tag-release:
+    needs: [check-version, publish-pypi]
+    if: needs.publish-pypi.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create git tag
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$VERSION" ]; then
+            echo "No version detected; skipping tag."
+            exit 0
+          fi
+          TAG="v$VERSION"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; skipping."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
