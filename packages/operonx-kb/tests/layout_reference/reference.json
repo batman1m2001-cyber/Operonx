@@ -1,0 +1,1271 @@
+{
+ "description": "Hand-checked layout reference for real PDF pages (K1d). Every block was decided by looking at the rendered page; block texts come from the PDF text layer. Pages whose file starts with 'docling:' are docling's test PDFs (pass a docling checkout); the others are committed next to this file.",
+ "conventions": [
+  "A block is what a reader sees as one unit: a paragraph, a heading, one list item, a caption, a footnote, a running header or footer line, a code listing, a table, a figure.",
+  "Reading order is the order a reader follows: columns top to bottom, left to right; a figure's caption with the figure.",
+  "A paragraph broken by a column or page end is one block, kept with the page where it starts; its text includes the continuation. A fragment that continues a paragraph from an earlier page is not listed on this page.",
+  "List items: one block per item, text without the marker; 'depth' is the nesting level (0 = outermost). Paragraphs indented under an item are paragraphs.",
+  "Headings: 'title' is the document title on its first page; other headings carry 'level' (numbering decides it when present, else visual rank on the page).",
+  "Running headers and footers, page numbers and the arXiv side stamp are page_header / page_footer. A note referenced from the text (a mark, an asterisk on the author) is a footnote wherever it sits.",
+  "Tables: one row per visual row; a cell spanning several rows or columns repeats its text in every grid position it covers (docling's grid convention). Header rows included.",
+  "Figures: every picture a reader sees as an image (photo, chart, diagram, logo) is a figure with its bbox; background tints and boxes behind text are not. Text drawn inside a figure (axis labels, callouts) is part of the figure and is not listed.",
+  "Text is the PDF text layer's (word runs joined with docling's sanitize rules), so the reference measures grouping and labelling, not text extraction. Stray glyphs that are not content (a lone '.', form-box dashes) are not listed.",
+  "'scope' (when present) limits a page to a region: only blocks whose centre lies inside it are scored."
+ ],
+ "pages": [
+  {
+   "id": "paper-titlepage",
+   "file": "docling:tests/data/pdf/sources/2206.01062.pdf",
+   "sha256": "5dfbd8c115a15fd3396b68409124cfee29fc8efac7b5c846634ff924e635e0dc",
+   "page": 1,
+   "genre": "paper (ACM two-column, title page)",
+   "origin": "arXiv:2206.01062 (DocLayNet), from docling's test set @ 51fe9ff",
+   "license": "arXiv paper; used from docling's MIT-licensed test data, not copied here",
+   "notes": [
+    "Five author blocks (name, affiliation, e-mail) laid out as a 3+2 grid: one paragraph per author.",
+    "The ACM permission block, conference line, copyright, ISBN and DOI under the rule at the bottom of the left column are one footnote block.",
+    "Figure 1 is a collage of four page images; it is one figure. Its internal text (rotated and small) is not listed."
+   ],
+   "blocks": [
+    {
+     "kind": "page_header",
+     "text": "arXiv:2206.01062v1 [cs.CV] 2 Jun 2022",
+     "why": "rotated arXiv stamp in the left margin"
+    },
+    {
+     "kind": "title",
+     "text": "DocLayNet: A Large Human-Annotated Dataset for Document-Layout Analysis"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Birgit Pfitzmann IBM Research Rueschlikon, Switzerland bpf@zurich.ibm.com",
+     "why": "author block"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Christoph Auer IBM Research Rueschlikon, Switzerland cau@zurich.ibm.com",
+     "why": "author block"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Michele Dolfi IBM Research Rueschlikon, Switzerland dol@zurich.ibm.com",
+     "why": "author block"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Ahmed S. Nassar IBM Research Rueschlikon, Switzerland ahn@zurich.ibm.com",
+     "why": "author block"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Peter Staar IBM Research Rueschlikon, Switzerland taa@zurich.ibm.com",
+     "why": "author block"
+    },
+    {
+     "kind": "heading",
+     "text": "ABSTRACT",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Accurate document layout analysis is a key requirement for highquality PDF document conversion. With the recent availability of public, large ground-truth datasets such as PubLayNet and DocBank, deep-learning models have proven to be very effective at layout detection and segmentation. While these datasets are of adequate size to train such models, they severely lack in layout variability since they are sourced from scientific article repositories such as PubMed and arXiv only. Consequently, the accuracy of the layout segmentation drops significantly when these models are applied on more challenging and diverse layouts. In this paper, we present DocLayNet, a new, publicly available, document-layout annotation dataset in COCO format. It contains 80863 manually annotated pages from diverse data sources to represent a wide variability in layouts. For each PDF page, the layout annotations provide labelled bounding-boxes with a choice of 11 distinct classes. DocLayNet also provides a subset of double- and triple-annotated pages to determine the inter-annotator agreement. In multiple experiments, we provide baseline accuracy scores (in mAP) for a set of popular object detection models. We also demonstrate that these models fall approximately 10% behind the inter-annotator agreement. Furthermore, we provide evidence that DocLayNet is of sufficient size. Lastly, we compare models trained on PubLayNet, DocBank and DocLayNet, showing that layout predictions of the DocLayNettrained models are more robust and thus the preferred choice for general-purpose document-layout analysis."
+    },
+    {
+     "kind": "heading",
+     "text": "CCS CONCEPTS",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "• Information systems →Document structure; • Applied computing → Document analysis; • Computing methodologies →Machine learning; Computer vision; Object detection;",
+     "why": "CCS concept list printed as one run-in paragraph with inline bullets"
+    },
+    {
+     "kind": "footnote",
+     "text": "Permission to make digital or hard copies of part or all of this work for personal or classroom use is granted without fee provided that copies are not made or distributed for profit or commercial advantage and that copies bear this notice and the full citation on the first page. Copyrights for third-party components of this work must be honored. For all other uses, contact the owner/author(s). KDD '22, August 14-18, 2022, Washington, DC, USA © 2022 Copyright held by the owner/author(s). ACM ISBN 978-1-4503-9385-0/22/08. https://doi.org/10.1145/3534678.3539043",
+     "why": "ACM permission/copyright block under the footnote rule"
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.5163,
+      0.303,
+      0.915,
+      0.6717
+     ]
+    },
+    {
+     "kind": "caption",
+     "text": "Figure 1: Four examples of complex page layouts across different document categories"
+    },
+    {
+     "kind": "heading",
+     "text": "KEYWORDS",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "PDF document conversion, layout segmentation, object-detection, data set, Machine Learning"
+    },
+    {
+     "kind": "paragraph",
+     "text": "ACM Reference Format: Birgit Pfitzmann, Christoph Auer, Michele Dolfi, Ahmed S. Nassar, and Peter Staar. 2022. DocLayNet: A Large Human-Annotated Dataset for DocumentLayout Analysis. In Proceedings of the 28th ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD '22), August 14-18, 2022, Washington, DC, USA. ACM, New York, NY, USA, 9 pages. https://doi.org/10.1145/ 3534678.3539043",
+     "why": "'ACM Reference Format:' is a run-in label of the citation paragraph"
+    }
+   ]
+  },
+  {
+   "id": "paper-table",
+   "file": "docling:tests/data/pdf/sources/2305.03393v1-pg9.pdf",
+   "sha256": "a07f5c34601ba2c234d898cbfaa9e29a7045996ccd82ccab3012516220a1f3a4",
+   "page": 1,
+   "genre": "paper (LNCS single column, ruled table)",
+   "origin": "arXiv:2305.03393 page 9 (OTSL), from docling's test set @ 51fe9ff",
+   "license": "arXiv paper; used from docling's MIT-licensed test data, not copied here",
+   "notes": [
+    "The file is this single page, so the first paragraph has no visible start and is listed as a paragraph.",
+    "Table 1 has two header rows; '# enc-layers', '# dec-layers', 'Language', 'mAP (0.75)' and 'Inference time (secs)' span both, 'TEDs' spans three columns. OTSL and HTML are separate rows (docling's model reference merges each pair into one row)."
+   ],
+   "blocks": [
+    {
+     "kind": "page_header",
+     "text": "Optimized Table Tokenization for Table Structure Recognition 9",
+     "why": "running title with the page number"
+    },
+    {
+     "kind": "paragraph",
+     "text": "order to compute the TED score. Inference timing results for all experiments were obtained from the same machine on a single core with AMD EPYC 7763 CPU @2.45 GHz."
+    },
+    {
+     "kind": "heading",
+     "text": "5.1 Hyper Parameter Optimization",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "We have chosen the PubTabNet data set to perform HPO, since it includes a highly diverse set of tables. Also we report TED scores separately for simple and complex tables (tables with cell spans). Results are presented in Table. 1. It is evident that with OTSL, our model achieves the same TED score and slightly better mAP scores in comparison to HTML. However OTSL yields a 2x speed up in the inference runtime over HTML."
+    },
+    {
+     "kind": "caption",
+     "text": "Table 1. HPO performed in OTSL and HTML representation on the same transformer-based TableFormer [9] architecture, trained only on PubTabNet [22]. Effects of reducing the # of layers in encoder and decoder stages of the model show that smaller models trained on OTSL perform better, especially in recognizing complex table structures, and maintain a much higher mAP score than the HTML counterpart."
+    },
+    {
+     "kind": "table",
+     "rows": [
+      [
+       "# enc-layers",
+       "# dec-layers",
+       "Language",
+       "TEDs",
+       "TEDs",
+       "TEDs",
+       "mAP (0.75)",
+       "Inference time (secs)"
+      ],
+      [
+       "# enc-layers",
+       "# dec-layers",
+       "Language",
+       "simple",
+       "complex",
+       "all",
+       "mAP (0.75)",
+       "Inference time (secs)"
+      ],
+      [
+       "6",
+       "6",
+       "OTSL",
+       "0.965",
+       "0.934",
+       "0.955",
+       "0.88",
+       "2.73"
+      ],
+      [
+       "6",
+       "6",
+       "HTML",
+       "0.969",
+       "0.927",
+       "0.955",
+       "0.857",
+       "5.39"
+      ],
+      [
+       "4",
+       "4",
+       "OTSL",
+       "0.938",
+       "0.904",
+       "0.927",
+       "0.853",
+       "1.97"
+      ],
+      [
+       "4",
+       "4",
+       "HTML",
+       "0.952",
+       "0.909",
+       "0.938",
+       "0.843",
+       "3.77"
+      ],
+      [
+       "2",
+       "4",
+       "OTSL",
+       "0.923",
+       "0.897",
+       "0.915",
+       "0.859",
+       "1.91"
+      ],
+      [
+       "2",
+       "4",
+       "HTML",
+       "0.945",
+       "0.901",
+       "0.931",
+       "0.834",
+       "3.81"
+      ],
+      [
+       "4",
+       "2",
+       "OTSL",
+       "0.952",
+       "0.92",
+       "0.942",
+       "0.857",
+       "1.22"
+      ],
+      [
+       "4",
+       "2",
+       "HTML",
+       "0.944",
+       "0.903",
+       "0.931",
+       "0.824",
+       "2"
+      ]
+     ]
+    },
+    {
+     "kind": "heading",
+     "text": "5.2 Quantitative Results",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "We picked the model parameter configuration that produced the best prediction quality (enc=6, dec=6, heads=8) with PubTabNet alone, then independently trained and evaluated it on three publicly available data sets: PubTabNet (395k samples), FinTabNet (113k samples) and PubTables-1M (about 1M samples). Performance results are presented in Table. 2. It is clearly evident that the model trained on OTSL outperforms HTML across the board, keeping high TEDs and mAP scores even on difficult financial tables (FinTabNet) that contain sparse and large tables."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Additionally, the results show that OTSL has an advantage over HTML when applied on a bigger data set like PubTables-1M and achieves significantly improved scores. Finally, OTSL achieves faster inference due to fewer decoding steps which is a result of the reduced sequence representation."
+    }
+   ]
+  },
+  {
+   "id": "paper-twocolumn",
+   "file": "docling:tests/data/pdf/sources/2203.01017v2.pdf",
+   "sha256": "4fa8dff93d74a84069210c84a38d14d62a39ec8f4e4c90bf955fdebdebcf6636",
+   "page": 4,
+   "genre": "paper (CVPR two-column body, borderless table)",
+   "origin": "arXiv:2203.01017 page 4 (TableFormer), from docling's test set @ 51fe9ff",
+   "license": "arXiv paper; used from docling's MIT-licensed test data, not copied here",
+   "notes": [
+    "The first two lines of the left column finish a paragraph from page 3: not listed.",
+    "The left column's last paragraph ('In this regard ...') continues in the right column below the table caption ('one adopts a colorful appearance ...'): one block.",
+    "The right column's last paragraph continues on page 5; its text includes the continuation.",
+    "Table 1 is borderless except for horizontal rules; the check marks are a dingbat font whose text layer says '3' (and '7' for a cross)."
+   ],
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "text": "The availability of the bounding boxes for all table cells is essential to train our models. In order to distinguish between empty and non-empty bounding boxes, we have introduced a binary class in the annotation. Unfortunately, the original datasets either omit the bounding boxes for whole tables (e.g. TableBank) or they narrow their scope only to non-empty cells. Therefore, it was imperative to introduce a data pre-processing procedure that generates the missing bounding boxes out of the annotation information. This procedure first parses the provided table structure and calculates the dimensions of the most fine-grained grid that covers the table structure. Notice that each table cell may occupy multiple grid squares due to row or column spans. In case of PubTabNet we had to compute missing bounding boxes for 48% of the simple and 69% of the complex tables. Regarding FinTabNet, 68% of the simple and 98% of the complex tables require the generation of bounding boxes."
+    },
+    {
+     "kind": "paragraph",
+     "text": "As it is illustrated in Fig. 2, the table distributions from all datasets are skewed towards simpler structures with fewer number of rows/columns. Additionally, there is very limited variance in the table styles, which in case of PubTabNet and FinTabNet means one styling format for the majority of the tables. Similar limitations appear also in the type of table content, which in some cases (e.g. FinTabNet) is restricted to a certain domain. Ultimately, the lack of diversity in the training dataset damages the ability of the models to generalize well on unseen data."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Motivated by those observations we aimed at generating a synthetic table dataset named SynthTabNet. This approach offers control over: 1) the size of the dataset, 2) the table structure, 3) the table style and 4) the type of content. The complexity of the table structure is described by the size of the table header and the table body, as well as the percentage of the table cells covered by row spans and column spans. A set of carefully designed styling templates provides the basis to build a wide range of table appearances. Lastly, the table content is generated out of a curated collection of text corpora. By controlling the size and scope of the synthetic datasets we are able to train and evaluate our models in a variety of different conditions. For example, we can first generate a highly diverse dataset to train our models and then evaluate their performance on other synthetic datasets which are focused on a specific domain."
+    },
+    {
+     "kind": "paragraph",
+     "text": "In this regard, we have prepared four synthetic datasets, each one containing 150k examples. The corpora to generate the table text consists of the most frequent terms appearing in PubTabNet and FinTabNet together with randomly generated text. The first two synthetic datasets have been fine-tuned to mimic the appearance of the original datasets but encompass more complicated table structures. The third one adopts a colorful appearance with high contrast and the last one contains tables with sparse content. Lastly, we have combined all synthetic datasets into one big unified synthetic dataset of 600k examples."
+    },
+    {
+     "kind": "table",
+     "rows": [
+      [
+       "",
+       "Tags",
+       "Bbox",
+       "Size",
+       "Format"
+      ],
+      [
+       "PubTabNet",
+       "3",
+       "3",
+       "509k",
+       "PNG"
+      ],
+      [
+       "FinTabNet",
+       "3",
+       "3",
+       "112k",
+       "PDF"
+      ],
+      [
+       "TableBank",
+       "3",
+       "7",
+       "145k",
+       "JPEG"
+      ],
+      [
+       "Combined-Tabnet(*)",
+       "3",
+       "3",
+       "400k",
+       "PNG"
+      ],
+      [
+       "Combined(**)",
+       "3",
+       "3",
+       "500k",
+       "PNG"
+      ],
+      [
+       "SynthTabNet",
+       "3",
+       "3",
+       "600k",
+       "PNG"
+      ]
+     ]
+    },
+    {
+     "kind": "caption",
+     "text": "Table 1: Both \"Combined-Tabnet\" and \"CombinedTabnet\" are variations of the following: (*) The CombinedTabnet dataset is the processed combination of PubTabNet and Fintabnet. (**) The combined dataset is the processed combination of PubTabNet, Fintabnet and TableBank."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Tab. 1 summarizes the various attributes of the datasets."
+    },
+    {
+     "kind": "heading",
+     "text": "4. The TableFormer model",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Given the image of a table, TableFormer is able to predict: 1) a sequence of tokens that represent the structure of a table, and 2) a bounding box coupled to a subset of those tokens. The conversion of an image into a sequence of tokens is a well-known task [35, 16]. While attention is often used as an implicit method to associate each token of the sequence with a position in the original image, an explicit association between the individual table-cells and the image bounding boxes is also required."
+    },
+    {
+     "kind": "heading",
+     "text": "4.1. Model architecture.",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "We now describe in detail the proposed method, which is composed of three main components, see Fig. 4. Our CNN Backbone Network encodes the input as a feature vector of predefined length. The input feature vector of the encoded image is passed to the Structure Decoder to produce a sequence of HTML tags that represent the structure of the table. With each prediction of an HTML standard data cell ('<td>') the hidden state of that cell is passed to the Cell BBox Decoder. As for spanning cells, such as row or column span, the tag is broken down to '<', 'rowspan=' or 'colspan=', with the number of spanning cells (attribute), and '>'. The hidden state attached to '<' is passed to the Cell BBox Decoder. A shared feed forward network (FFN) receives the hidden states from the Structure Decoder, to provide the final detection predictions of the bounding box coordinates and their classification."
+    },
+    {
+     "kind": "paragraph",
+     "text": "CNN Backbone Network. A ResNet-18 CNN is the backbone that receives the table image and encodes it as a vector of predefined length. The network has been modified by removing the linear and pooling layer, as we are not performing classification, and adding an adaptive pooling layer of size 28*28. ResNet by default downsamples the image resolution by 32 and then the encoded image is provided to both the Structure Decoder, and Cell BBox Decoder.",
+     "why": "continues on page 5 (left column under Figure 4 there; text from the page-5 text layer)"
+    },
+    {
+     "kind": "page_footer",
+     "text": "4"
+    }
+   ]
+  },
+  {
+   "id": "report-redbook",
+   "file": "docling:tests/data/pdf/sources/redp5110_sampled.pdf",
+   "sha256": "2f6bc92861997d1434c069040dc63447c3e415e8e9eadbd1a8129ba2327ddba5",
+   "page": 6,
+   "genre": "technical report (IBM Redpaper)",
+   "origin": "IBM Redpaper REDP-5110 page 2 of chapter 1, from docling's test set @ 51fe9ff",
+   "license": "IBM Redbooks publication; used from docling's MIT-licensed test data, not copied here",
+   "notes": [
+    "Bullets are drawn in a symbol font whose text layer says 'SM590000'; the list item text leaves it out.",
+    "The two paragraphs indented under the first bullet are paragraphs, not list items."
+   ],
+   "blocks": [
+    {
+     "kind": "heading",
+     "text": "1.1 Security fundamentals",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "Before reviewing database security techniques, there are two fundamental steps in securing information assets that must be described:"
+    },
+    {
+     "kind": "list_item",
+     "text": "First, and most important, is the definition of a company's security policy. Without a security policy, there is no definition of what are acceptable practices for using, accessing, and storing information by who, what, when, where, and how. A security policy should minimally address three things: confidentiality, integrity, and availability."
+    },
+    {
+     "kind": "paragraph",
+     "text": "The monitoring and assessment of adherence to the security policy determines whether your security strategy is working. Often, IBM security consultants are asked to perform security assessments for companies without regard to the security policy. Although these assessments can be useful for observing how the system is defined and how data is being accessed, they cannot determine the level of security without a security policy. Without a security policy, it really is not an assessment as much as it is a baseline for monitoring the changes in the security settings that are captured."
+    },
+    {
+     "kind": "paragraph",
+     "text": "A security policy is what defines whether the system and its settings are secure (or not)."
+    },
+    {
+     "kind": "list_item",
+     "text": "The second fundamental in securing data assets is the use of resource security. If implemented properly, resource security prevents data breaches from both internal and external intrusions. Resource security controls are closely tied to the part of the security policy that defines who should have access to what information resources. A hacker might be good enough to get through your company firewalls and sift his way through to your system, but if they do not have explicit access to your database, the hacker cannot compromise your information assets."
+    },
+    {
+     "kind": "paragraph",
+     "text": "With your eyes now open to the importance of securing information assets, the rest of this chapter reviews the methods that are available for securing database resources on IBM i."
+    },
+    {
+     "kind": "heading",
+     "text": "1.2 Current state of IBM i security",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "Because of the inherently secure nature of IBM i, many clients rely on the default system settings to protect their business data that is stored in DB2 for i. In most cases, this means no data protection because the default setting for the Create default public authority (QCRTAUT) system value is *CHANGE."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Even more disturbing is that many IBM i clients remain in this state, despite the news headlines and the significant costs that are involved with databases being compromised. This default security configuration makes it quite challenging to implement basic security policies. A tighter implementation is required if you really want to protect one of your company's most valuable assets, which is the data."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Traditionally, IBM i applications have employed menu-based security to counteract this default configuration that gives all users access to the data. The theory is that data is protected by the menu options controlling what database operations that the user can perform. This approach is ineffective, even if the user profile is restricted from running interactive commands. The reason is that in today's connected world there are a multitude of interfaces into the system, from web browsers to PC clients, that bypass application menus. If there are no object-level controls, users of these newer interfaces have an open door to your data."
+    },
+    {
+     "kind": "page_footer",
+     "text": "2 Row and Column Access Control Support in IBM DB2 for i"
+    }
+   ]
+  },
+  {
+   "id": "manual-twocolumn",
+   "file": "docling:tests/data/pdf/sources/amt_handbook_sample.pdf",
+   "sha256": "7099fe05ade36067cf66e72b23277972a1a2b7d2da1cb82c8d690efd70143fe0",
+   "page": 1,
+   "genre": "manual (FAA handbook, two columns, figures)",
+   "origin": "FAA Aviation Maintenance Technician Handbook page 7-45, from docling's test set @ 51fe9ff",
+   "license": "US government work (public domain); not copied here",
+   "notes": [
+    "The page is the whole file: the first paragraph has no visible start and the last ends mid-sentence ('This').",
+    "The left column's last paragraph ('Boots self-locking nuts ... The wing type that is') continues at the top of the right column ('the most common ranges ...'): one block.",
+    "A lone '.' on its own line under that paragraph is a stray glyph and is not listed.",
+    "Italic run-in headings are headings of the same rank."
+   ],
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "text": "pulleys, provided the inner race of the bearing is clamped to the supporting structure by the nut and bolt. Plates must be attached to the structure in a positive manner to eliminate rotation or misalignment when tightening the bolts or screws."
+    },
+    {
+     "kind": "paragraph",
+     "text": "The two general types of self-locking nuts currently in use are the all-metal type and the fiber lock type. For the sake of simplicity, only three typical kinds of self-locking nuts are considered in this handbook: the Boots self-locking and the stainless steel self-locking nuts, representing the all-metal types; and the elastic stop nut, representing the fiber insert type."
+    },
+    {
+     "kind": "heading",
+     "text": "Boots Self-Locking Nut",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "The Boots self-locking nut is of one piece, all-metal construction designed to hold tight despite severe vibration. Note in Figure 7-26 that it has two sections and is essentially two nuts in one: a locking nut and a load-carrying nut. The two sections are connected with a spring, which is an integral part of the nut."
+    },
+    {
+     "kind": "paragraph",
+     "text": "The spring keeps the locking and load-carrying sections such a distance apart that the two sets of threads are out of phase or spaced so that a bolt, which has been screwed through the load-carrying section, must push the locking section outward against the force of the spring to engage the threads of the locking section properly."
+    },
+    {
+     "kind": "paragraph",
+     "text": "The spring, through the medium of the locking section, exerts a constant locking force on the bolt in the same direction as a force that would tighten the nut. In this nut, the load-carrying section has the thread strength of a standard nut of comparable size, while the locking section presses against the threads of the bolt and locks the nut firmly in position. Only a wrench applied to the nut loosens it. The nut can be removed and reused without impairing its efficiency."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Boots self-locking nuts are made with three different spring styles and in various shapes and sizes. The wing type that is the most common ranges in size for No. 6 up to 1 ⁄4 inch, the Rol-top ranges from 1 ⁄4 inch to 1 ⁄6 inch, and the bellows type ranges in size from No. 8 up to 3 ⁄8 inch. Wing-type nuts are made of anodized aluminum alloy, cadmium-plated carbon steel, or stainless steel. The Rol-top nut is cadmium-plated steel, and the bellows type is made of aluminum alloy only."
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.1212,
+      0.686,
+      0.5202,
+      0.8966
+     ]
+    },
+    {
+     "kind": "caption",
+     "text": "Figure 7-26. Self-locking nuts."
+    },
+    {
+     "kind": "heading",
+     "text": "Stainless Steel Self-Locking Nut",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "The stainless steel self-locking nut may be spun on and off by hand as its locking action takes places only when the nut is seated against a solid surface and tightened. The nut consists of two parts: a case with a beveled locking shoulder and key and a thread insert with a locking shoulder and slotted keyway. Until the nut is tightened, it spins on the bolt easily, because the threaded insert is the proper size for the bolt. However, when the nut is seated against a solid surface and tightened, the locking shoulder of the insert is pulled downward and wedged against the locking shoulder of the case. This action compresses the threaded insert and causes it to clench the bolt tightly. The cross-sectional view in Figure 7-27 shows how the key of the case fits into the slotted keyway of the insert so that when the case is turned, the threaded insert is turned with it. Note that the slot is wider than the key. This permits the slot to be narrowed and the insert to be compressed when the nut is tightened."
+    },
+    {
+     "kind": "heading",
+     "text": "Elastic Stop Nut",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "The elastic stop nut is a standard nut with the height increased to accommodate a fiber locking collar. This"
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.5404,
+      0.5452,
+      0.9394,
+      0.8941
+     ]
+    },
+    {
+     "kind": "caption",
+     "text": "Figure 7-27. Stainless steel self-locking nut."
+    },
+    {
+     "kind": "page_footer",
+     "text": "7-45"
+    }
+   ]
+  },
+  {
+   "id": "newspaper-editorial",
+   "file": "docling:tests/data/pdf/sources/newspaper-00.pdf",
+   "sha256": "ba5f7a78792369ea36dbf2a554aa1635fa9f25983664ff17b406dca326279019",
+   "page": 1,
+   "genre": "newspaper (narrow multi-column, scoped to one article)",
+   "origin": "20 Minuten, 23 Dec 2025, pages 2-3 spread, from docling's test set @ 51fe9ff",
+   "license": "newspaper page; used from docling's MIT-licensed test data, not copied here",
+   "notes": [
+    "Scoped to the editorial 'Liebe Leserinnen und Leser' (two 100 pt columns); the rest of the spread is an interview whose question/answer runs are not annotated.",
+    "The second paragraph runs from the bottom of the left column to the top of the right one: one block.",
+    "The en dashes are drawn as tiny glyphs whose text layer says '-'; they are kept in place."
+   ],
+   "scope": [
+    0.0199,
+    0.0917,
+    0.1841,
+    0.5186
+   ],
+   "blocks": [
+    {
+     "kind": "heading",
+     "text": "Liebe Leserinnen und Leser",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Heute lest ihr die letzte Ausgabe der Pendlerzeitung 20 Minuten. Damit geht ein Stück Mediengeschichte zu Ende. 26 Jahre lang hat euch diese Zeitung Gesprächsstoff geliefert. Auch wenn viele 20-MinutenFans uns schon lange ausschliesslich digital nutzen: Noch heute greifen mehr als 1,3 Millionen Leserinnen und Leser täglich in die blaue Box. Unser Blatt tritt als klare Nummer 1 der Schweizer Tageszeitungen ab. Danke für eure Treue!"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Der Dank gilt ebenso unserenWerbekunden, die 20 Minuten erst möglich gemacht haben. Mittlerweile hat sich der Werbemarkt radikal verändert - insbesondere seit der Pandemie. Aufgrund des Medienwandels fliessen Werbegelder vom Print hin zu vielfältigen Werbemöglichkeiten im digitalen Raum. Heute ist es nicht mehr möglich, die hohen Kosten für Druck und Verteilung unserer Gratiszeitung zu tragen. Darum konzentrieren wir uns jetzt auf unser digitales Angebot, das schweizweit täglich mehr als 4 Millionen Mal besucht wird - am häufigsten über die App. Damit ist 20 Minuten die mit Abstand reichweitenstärkste digitale Medienmarke in allen Landesteilen."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Am Anfang dieser Erfolgsgeschichte stand unsere einzigartige Zeitung. In dieser Ausgabe würdigen wir die Medienrevolution 20 Minuten nochmals. Viel Vergnügen mit dem Blick in die Vergangenheit. Und so weh der Abschied von der Zeitung tut: Wir freuen uns auf unsere gemeinsame Zukunft auf den digitalen Kanälen. In diesem Sinne: Jetzt App downloaden!"
+    },
+    {
+     "kind": "paragraph",
+     "text": "HERZLICH, DÉSIRÉE POMPER, CHEFREDAKTORIN BERNHARD BRECHBÜHL, CEO 20-MINUTEN-GRUPPE",
+     "why": "sign-off and signatures"
+    }
+   ]
+  },
+  {
+   "id": "report-korean",
+   "file": "docling:tests/data/pdf/sources/normal_4pages.pdf",
+   "sha256": "ca9c83b1653221a66b30cdb543c1ef7b116827762ae65fca36b87b332532b51e",
+   "page": 1,
+   "genre": "policy brief (Korean, masthead, two columns, footnotes)",
+   "origin": "National Assembly Research Service 'Issues and Points' no. 1695, from docling's test set @ 51fe9ff",
+   "license": "Korean public-agency publication; used from docling's MIT-licensed test data, not copied here",
+   "notes": [
+    "The publication line block is three lines; the text layer interleaves two of them ('발행처 발행인 ...'), so its text is given in reading order.",
+    "'이슈와 논점' is the series name on the masthead banner, not a heading of this document.",
+    "The left column's third paragraph ends '... 로 보아야 할지' and continues at the top of the right column ('이슈가 될 것으로 판단된다.'): one block.",
+    "Footnote 2 has two numbered sub-items and continues into the right column's footnote area ('질병은 보장대상이 ...'): one footnote.",
+    "The asterisk note at the bottom is the author's affiliation (marked on the author name): a footnote.",
+    "The two bitmaps on the page are the tinted backgrounds of the summary box and the section band, not figures. The logos (top left, bottom right) are drawn figures."
+   ],
+   "blocks": [
+    {
+     "kind": "figure",
+     "bbox": [
+      0.0686,
+      0.0,
+      0.2222,
+      0.1071
+     ]
+    },
+    {
+     "kind": "paragraph",
+     "text": "제1695호",
+     "why": "issue number on the masthead"
+    },
+    {
+     "kind": "paragraph",
+     "text": "발행일 2020년 4월 2일 발행처 국회입법조사처 발행인 김하중 국회입법조사처장 www.nars.go.kr"
+    },
+    {
+     "kind": "paragraph",
+     "text": "이슈와 논점",
+     "why": "series name banner"
+    },
+    {
+     "kind": "title",
+     "text": "코로나-19 관련 보험약관상 재해보험금 지급문제 및 개선과제"
+    },
+    {
+     "kind": "paragraph",
+     "text": "김 창 호*",
+     "why": "author"
+    },
+    {
+     "kind": "paragraph",
+     "text": "2020.1.1. 「감염병예방법」 관련 규정이 변경되어 적용됨에 따라, 세계적 유행(Pandemic) 단계에 돌 입하였다고 세계보건기구(WHO)가 인정한 코로나-19와 관련하여, 보험회사에서 그동안 판매했거나 향후 판매하게 될 보험상품의 입원 및 사망의 재해 인정 여부에 대하여 보험실무상 혼선이 초래되어 이 에 대하여 보험약관의 현황 및 문제점을 살펴보고 그에 따른 개선방안을 제시하고자 하였다.",
+     "why": "summary box"
+    },
+    {
+     "kind": "heading",
+     "text": "1 들어가며",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "2020.3.30. 0시 기준 현재 \"코로나바이러스감염 증-19(COVID-19, 이하 \"코로나-19\")\"의 국내 확 진자는 9,661명, 사망자는 158명으로 나타났다."
+    },
+    {
+     "kind": "paragraph",
+     "text": "이와 관련하여 세계보건기구(WHO)는 지난 2020. 3.11. 코로나-19가 세계적 유행(Pandemic) 단계 에 돌입하였음을 선언하였다."
+    },
+    {
+     "kind": "paragraph",
+     "text": "한편 코로나-19가 전 세계적 유행단계에 돌입한 와중에 국내 보험업계에서는 코로나-19를 과연 질 병으로 보아야 할지, 상해 1) 나 재해 2) 로 보아야 할지 이슈가 될 것으로 판단된다."
+    },
+    {
+     "kind": "footnote",
+     "text": "1) 손해보험의 표준약관 규정에 따르면, 보험기간 중에 발생한 급격하고도 우연한 외래의 사고로 신체에 입은 상해라고 규정하고 있는데, 즉, \"급 격성, 우연성, 외래성\"을 충족하는 사고를 상해로 정의함"
+    },
+    {
+     "kind": "footnote",
+     "text": "2) 생명보험은 표준약관 \"재해분류표\"에서 \"우발적인 외래의 사고\"를 재 해라고 정의하며 보장대상이 되는 재해는 다음 중 어느 하나에 해당하 는 것을 말함 1) 한국표준질병·사인분류상의 'S80~Y84'에 해당하는 우발적인 외래의 사고 2) 감염병의 예방 및 관리에 관한 법률 제2조 제2호에서 규정한 감염병 그러나, 약관상 한국표준질병·사인분류상의 U00~U99에 해당하는 질병은 보장대상이 되지 않는 것으로 정의"
+    },
+    {
+     "kind": "paragraph",
+     "text": "통상 질병보험금에 비해 상해나 재해로 인한 보 험금의 경우 보장금액 등이 높게 책정되어 있다 보 니 코로나-19를 상해나 재해로 인정할 지 여부에 대하여 약관 상 명백한 규정이 없는 한 관련 분쟁이 지속적으로 발생할 가능성이 있다."
+    },
+    {
+     "kind": "paragraph",
+     "text": "보험실무상 어떤 보험사는 코로나-19를 재해로 인정하여 재해보험금을 지급하고, 다른 보험사는 불인정하여 재해보험금을 지급하지 않는 등 혼선이 야기되고 있어, 코로나-19의 재해 인정 여부가 향 후 유사 바이러스 감염증 발생 시 보험금 지급 기준 을 정립함에 있어서 중요한 잣대가 될 것이다."
+    },
+    {
+     "kind": "paragraph",
+     "text": "따라서 코로나-19와 관련하여 보험회사에서 이 미 판매했거나 향후 판매하게 될 보험상품의 약관 상 재해보험금의 입원 및 사망담보 적용여부에 대 하여 살펴보고 그에 따른 재해보험금 지급문제의 개선과제에 대하여 정리하고자 한다."
+    },
+    {
+     "kind": "footnote",
+     "text": "* 경제산업조사실 금융공정거래팀 입법조사관, 02-788-4582, ja0512@assembly.go.kr"
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.7092,
+      0.9406,
+      0.8987,
+      0.9756
+     ]
+    }
+   ]
+  },
+  {
+   "id": "code-listing",
+   "file": "docling:tests/data/pdf/sources/code_and_formula.pdf",
+   "sha256": "6cb63fba2ad42dd0e0afe6a26dcf3b3bff5a86919c4c06157c71c65ebc0fc9e6",
+   "page": 1,
+   "genre": "article with a code listing",
+   "origin": "docling's code_and_formula test PDF @ 51fe9ff",
+   "license": "docling test data (MIT); not copied here",
+   "notes": [
+    "The listing's lines are one code block; its caption sits above it."
+   ],
+   "blocks": [
+    {
+     "kind": "heading",
+     "text": "JavaScript Code Example",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Duis autem vel eum iriure dolor in hendrerit in vulputate velit esse molestie consequat, vel illum dolore eu feugiat nulla facilisis at vero eros et accumsan et iusto odio dignissim qui blandit praesent luptatum zzril delenit augue duis dolore te feugait nulla facilisi. Lorem ipsum dolor sit amet,"
+    },
+    {
+     "kind": "caption",
+     "text": "Listing 1: Simple JavaScript Program"
+    },
+    {
+     "kind": "code",
+     "text": "function add(a, b) {\n    return a + b;\n}\nconsole.log(add(3, 5));"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet. Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam nonumy eirmod tempor invidunt ut labore et dolore magna aliquyam erat, sed diam voluptua. At vero eos et accusam et justo duo dolores et ea rebum. Stet clita kasd gubergren, no sea takimata sanctus est Lorem ipsum dolor sit amet."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Duis autem vel eum iriure dolor in hendrerit in vulputate velit esse molestie consequat, vel illum dolore eu feugiat nulla facilisis at vero eros et accumsan et iusto odio dignissim qui blandit praesent luptatum zzril delenit augue duis dolore te feugait nulla facilisi. Lorem ipsum dolor sit amet,"
+    },
+    {
+     "kind": "page_footer",
+     "text": "1"
+    }
+   ]
+  },
+  {
+   "id": "form-irs-w9",
+   "file": "pdfs/irs_fw9_p1.pdf",
+   "sha256": "1c4d61d323afb0fd40263da2fb110aed009c9e1b5f6b1c283ed7c3915208482e",
+   "page": 1,
+   "genre": "form (IRS W-9, fields, checkboxes, then two-column instructions)",
+   "origin": "https://www.irs.gov/pub/irs-pdf/fw9.pdf (Rev. March 2024, sha256 2d420cbb...3f53), page 1 extracted with pypdfium2",
+   "license": "US federal government work, public domain (17 U.S.C. 105)",
+   "notes": [
+    "Every field label and checkbox option is its own block (a paragraph); empty fields and checkbox squares are not content.",
+    "The rotated side label 'Print or type. See Specific Instructions on page 3.' is one paragraph, read bottom to top.",
+    "Line 3a's label and the '4 Exemptions ...' label share a text line; they are separate blocks.",
+    "The dashes inside the SSN/EIN boxes are not listed.",
+    "Footer: the catalogue number and the form id are page footers."
+   ],
+   "blocks": [
+    {
+     "kind": "paragraph",
+     "text": "Form W-9 (Rev. March 2024) Department of the Treasury Internal Revenue Service",
+     "why": "form id box"
+    },
+    {
+     "kind": "title",
+     "text": "Request for Taxpayer Identification Number and Certification"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Go to www.irs.gov/FormW9 for instructions and the latest information."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Give form to the requester. Do not send to the IRS."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Before you begin. For guidance related to the purpose of Form W-9, see Purpose of Form, below."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Print or type. See Specific Instructions on page 3.",
+     "why": "rotated side label"
+    },
+    {
+     "kind": "paragraph",
+     "text": "1 Name of entity/individual. An entry is required. (For a sole proprietor or disregarded entity, enter the owner's name on line 1, and enter the business/disregarded entity's name on line 2.)"
+    },
+    {
+     "kind": "paragraph",
+     "text": "2 Business name/disregarded entity name, if different from above."
+    },
+    {
+     "kind": "paragraph",
+     "text": "3a Check the appropriate box for federal tax classification of the entity/individual whose name is entered on line 1. Check only one of the following seven boxes."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Individual/sole proprietor"
+    },
+    {
+     "kind": "paragraph",
+     "text": "C corporation"
+    },
+    {
+     "kind": "paragraph",
+     "text": "S corporation"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Partnership"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Trust/estate"
+    },
+    {
+     "kind": "paragraph",
+     "text": "LLC. Enter the tax classification (C = C corporation, S = S corporation, P = Partnership) . . . ."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Note: Check the \"LLC\" box above and, in the entry space, enter the appropriate code (C, S, or P) for the tax classification of the LLC, unless it is a disregarded entity. A disregarded entity should instead check the appropriate box for the tax classification of its owner."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Other (see instructions)"
+    },
+    {
+     "kind": "paragraph",
+     "text": "4 Exemptions (codes apply only to certain entities, not individuals; see instructions on page 3):"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Exempt payee code (if any)"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Exemption from Foreign Account Tax Compliance Act (FATCA) reporting code (if any)"
+    },
+    {
+     "kind": "paragraph",
+     "text": "3b If on line 3a you checked \"Partnership\" or \"Trust/estate,\" or checked \"LLC\" and entered \"P\" as its tax classification, and you are providing this form to a partnership, trust, or estate in which you have an ownership interest, check this box if you have any foreign partners, owners, or beneficiaries. See instructions . . . . . . . . ."
+    },
+    {
+     "kind": "paragraph",
+     "text": "(Applies to accounts maintained outside the United States.)"
+    },
+    {
+     "kind": "paragraph",
+     "text": "5 Address (number, street, and apt. or suite no.). See instructions."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Requester's name and address (optional)"
+    },
+    {
+     "kind": "paragraph",
+     "text": "6 City, state, and ZIP code"
+    },
+    {
+     "kind": "paragraph",
+     "text": "7 List account number(s) here (optional)"
+    },
+    {
+     "kind": "heading",
+     "text": "Part I Taxpayer Identification Number (TIN)",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Enter your TIN in the appropriate box. The TIN provided must match the name given on line 1 to avoid backup withholding. For individuals, this is generally your social security number (SSN). However, for a resident alien, sole proprietor, or disregarded entity, see the instructions for Part I, later. For other entities, it is your employer identification number (EIN). If you do not have a number, see How to get a TIN, later."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Note: If the account is in more than one name, see the instructions for line 1. See also What Name and Number To Give the Requester for guidelines on whose number to enter."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Social security number"
+    },
+    {
+     "kind": "paragraph",
+     "text": "or"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Employer identification number"
+    },
+    {
+     "kind": "heading",
+     "text": "Part II Certification",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Under penalties of perjury, I certify that:"
+    },
+    {
+     "kind": "list_item",
+     "text": "The number shown on this form is my correct taxpayer identification number (or I am waiting for a number to be issued to me); and"
+    },
+    {
+     "kind": "list_item",
+     "text": "I am not subject to backup withholding because (a) I am exempt from backup withholding, or (b) I have not been notified by the Internal Revenue Service (IRS) that I am subject to backup withholding as a result of a failure to report all interest or dividends, or (c) the IRS has notified me that I am no longer subject to backup withholding; and"
+    },
+    {
+     "kind": "list_item",
+     "text": "I am a U.S. citizen or other U.S. person (defined below); and"
+    },
+    {
+     "kind": "list_item",
+     "text": "The FATCA code(s) entered on this form (if any) indicating that I am exempt from FATCA reporting is correct."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Certification instructions. You must cross out item 2 above if you have been notified by the IRS that you are currently subject to backup withholding because you have failed to report all interest and dividends on your tax return. For real estate transactions, item 2 does not apply. For mortgage interest paid, acquisition or abandonment of secured property, cancellation of debt, contributions to an individual retirement arrangement (IRA), and, generally, payments other than interest and dividends, you are not required to sign the certification, but you must provide your correct TIN. See the instructions for Part II, later."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Sign Here"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Signature of U.S. person"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Date"
+    },
+    {
+     "kind": "heading",
+     "text": "General Instructions",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Section references are to the Internal Revenue Code unless otherwise noted."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Future developments. For the latest information about developments related to Form W-9 and its instructions, such as legislation enacted after they were published, go to www.irs.gov/FormW9."
+    },
+    {
+     "kind": "heading",
+     "text": "What's New",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "Line 3a has been modified to clarify how a disregarded entity completes this line. An LLC that is a disregarded entity should check the appropriate box for the tax classification of its owner. Otherwise, it should check the \"LLC\" box and enter its appropriate tax classification."
+    },
+    {
+     "kind": "paragraph",
+     "text": "New line 3b has been added to this form. A flow-through entity is required to complete this line to indicate that it has direct or indirect foreign partners, owners, or beneficiaries when it provides the Form W-9 to another flow-through entity in which it has an ownership interest. This change is intended to provide a flow-through entity with information regarding the status of its indirect foreign partners, owners, or beneficiaries, so that it can satisfy any applicable reporting requirements. For example, a partnership that has any indirect foreign partners may be required to complete Schedules K-2 and K-3. See the Partnership Instructions for Schedules K-2 and K-3 (Form 1065)."
+    },
+    {
+     "kind": "heading",
+     "text": "Purpose of Form",
+     "level": 2
+    },
+    {
+     "kind": "paragraph",
+     "text": "An individual or entity (Form W-9 requester) who is required to file an information return with the IRS is giving you this form because they"
+    },
+    {
+     "kind": "page_footer",
+     "text": "Cat. No. 10231X"
+    },
+    {
+     "kind": "page_footer",
+     "text": "Form W-9 (Rev. 3-2024)"
+    }
+   ]
+  },
+  {
+   "id": "slide-bullets",
+   "file": "pdfs/nasa_20110014565_p11.pdf",
+   "sha256": "1d1f36f16301b5bb4a3eacfe09083f7c4968f3bafc9a36a7b45fa3dc53427fe2",
+   "page": 1,
+   "genre": "slides (subheadings, bullets with run-in labels, a chart)",
+   "origin": "NASA NTRS 20110014565 'Exit Presentation' slide 11, https://ntrs.nasa.gov/api/citations/20110014565/downloads/20110014565.pdf, extracted with pypdfium2",
+   "license": "NASA work, public domain in the US",
+   "notes": [
+    "The slide title is a level-1 heading (the deck's title is on its first slide).",
+    "Each bullet is one list item: its bold label and its dash-led explanation are one text.",
+    "Both logos and the signal plot are figures."
+   ],
+   "blocks": [
+    {
+     "kind": "figure",
+     "bbox": [
+      0.0194,
+      0.0167,
+      0.1972,
+      0.1259
+     ]
+    },
+    {
+     "kind": "heading",
+     "text": "Conclusions",
+     "level": 1
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.8444,
+      0.0074,
+      0.9792,
+      0.1352
+     ]
+    },
+    {
+     "kind": "heading",
+     "text": "No Oscillation vs. Oscillation",
+     "level": 2
+    },
+    {
+     "kind": "list_item",
+     "text": "Pro No Oscillation: -provides larger window of frames to chose RF from in case of blink, obstruction, etc."
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.6944,
+      0.1648,
+      1.0,
+      0.463
+     ]
+    },
+    {
+     "kind": "heading",
+     "text": "Multiple RFs vs. 1 RF",
+     "level": 2
+    },
+    {
+     "kind": "list_item",
+     "text": "Pro 1RF: -Saves time, ≈ 10x faster"
+    },
+    {
+     "kind": "list_item",
+     "text": "Cons 1RF: -With larger N, may see more inaccuracy at start and end of run"
+    },
+    {
+     "kind": "list_item",
+     "text": "Pro MRF: -Enables us to choose best segment for each trial"
+    },
+    {
+     "kind": "list_item",
+     "text": "Important for this relatively long run",
+     "depth": 1
+    },
+    {
+     "kind": "page_footer",
+     "text": "11"
+    }
+   ]
+  },
+  {
+   "id": "slide-nested-list",
+   "file": "pdfs/nasa_20170004414_p5.pdf",
+   "sha256": "51a60ba7d601cf667872ed788d179d43e20c1f7240726b2ca413981b62d8a5b1",
+   "page": 1,
+   "genre": "slides (nested bullet list, logos)",
+   "origin": "NASA NTRS 20170004414 'Presentation to New Albany High School' slide 5, https://ntrs.nasa.gov/api/citations/20170004414/downloads/20170004414.pdf, extracted with pypdfium2",
+   "license": "NASA work, public domain in the US",
+   "notes": [
+    "Two overlapping bitmaps make each top logo; each logo is one figure."
+   ],
+   "blocks": [
+    {
+     "kind": "figure",
+     "bbox": [
+      0.0417,
+      0.0,
+      0.1569,
+      0.1481
+     ]
+    },
+    {
+     "kind": "heading",
+     "text": "Operations Support Officer",
+     "level": 1
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.8389,
+      0.0,
+      0.9986,
+      0.1463
+     ]
+    },
+    {
+     "kind": "list_item",
+     "text": "Leads core systems US maintenance inside the ISS"
+    },
+    {
+     "kind": "list_item",
+     "text": "Supports non-core system maintenance"
+    },
+    {
+     "kind": "list_item",
+     "text": "Manages motorized mechanisms"
+    },
+    {
+     "kind": "list_item",
+     "text": "CBM (modules, HTV, Dragon, COTS)",
+     "depth": 1
+    },
+    {
+     "kind": "list_item",
+     "text": "CAS (AMS, US external payloads and cargo)",
+     "depth": 1
+    },
+    {
+     "kind": "list_item",
+     "text": "Manages structural sensors"
+    },
+    {
+     "kind": "list_item",
+     "text": "Structural Dynamic Measurement System (SDMS)",
+     "depth": 1
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.7417,
+      0.6556,
+      0.9917,
+      0.8907
+     ]
+    },
+    {
+     "kind": "page_footer",
+     "text": "5"
+    }
+   ]
+  },
+  {
+   "id": "encyclopedia-vietnamese",
+   "file": "pdfs/viwiki_ho_hoan_kiem_p1.pdf",
+   "sha256": "af5355a1bf646f8207089dded9dfcd0f5284780ef19f6e77bd4b5b9b48fc02ee",
+   "page": 1,
+   "genre": "encyclopedia article (Vietnamese, body column beside an infobox)",
+   "origin": "Vietnamese Wikipedia 'Hồ Hoàn Kiếm', PDF render https://vi.wikipedia.org/api/rest_v1/page/pdf/H%E1%BB%93_G%C6%B0%C6%A1m (fetched 2026-10-04, sha256 edacf321...6dbe), page 1 extracted with pypdfium2",
+   "license": "CC BY-SA 4.0, Wikipedia contributors",
+   "notes": [
+    "The infobox is a table of label/value rows; its title bar names it (a caption); its photo and map are figures, the photo has a caption.",
+    "A label that wraps ('Dòng thoát / nước') is one cell.",
+    "The page is the whole file: the last paragraph ends mid-sentence ('trên đảo Ngọc').",
+    "The Wikipedia logo (globe bitmap and the drawn word mark) is one figure."
+   ],
+   "blocks": [
+    {
+     "kind": "figure",
+     "bbox": [
+      0.0722,
+      0.0511,
+      0.3021,
+      0.0962
+     ]
+    },
+    {
+     "kind": "title",
+     "text": "Hồ Hoàn Kiếm"
+    },
+    {
+     "kind": "paragraph",
+     "text": "Hồ Hoàn Kiếm (Hán-Nôm: 湖還劍) còn được gọi là Hồ Gươm là một hồ nước ngọt tự nhiên nằm ở phường Hoàn Kiếm, trung tâm thành phố Hà Nội. Hồ có diện tích khoảng 12 ha. [2] Trước kia, hồ còn có các tên gọi là hồ Lục Thủy (vì nước có màu xanh quanh năm), hồ Thủy Quân (dùng để duyệt thủy binh), hồ Tả Vọng và Hữu Vọng (trong thời Lê mạt). Tên gọi Hoàn Kiếm xuất hiện vào đầu thế kỷ 15 gắn với truyền thuyết vua Lê Lợi trả lại gươm thần cho Rùa vàng. Theo truyền thuyết, trong một lần vua Lê Thái Tổ dạo chơi trên thuyền, bỗng một con rùa vàng nổi lên mặt nước đòi nhà vua trả thanh gươm mà Long Vương cho mượn để đánh đuổi quân Minh xâm lược. Nhà vua liền trả gươm cho rùa thần và rùa lặn xuống nước biến mất. Từ đó hồ được lấy tên là hồ Hoàn Kiếm."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Hồ Hoàn Kiếm có vị trí kết nối giữa khu phố cổ gồm các phố Hàng Ngang, Hàng Đào, Cầu Gỗ, Lương Văn Can, Lò Sũ... với khu phố Tây do người Pháp quy hoạch cách đây hơn một thế kỷ là Bảo Khánh, Nhà thờ, Tràng Thi, Hàng Bài, Đinh Tiên Hoàng, Tràng Tiền, Hàng Khay, Bà Triệu."
+    },
+    {
+     "kind": "heading",
+     "text": "Lịch sử",
+     "level": 1
+    },
+    {
+     "kind": "paragraph",
+     "text": "Cách đây khoảng 6 thế kỷ, dựa theo bản đồ thời Hồng Đức thì phần lớn xung quanh kinh thành khi ấy là nước. Hồ Hoàn Kiếm là một phần lưu sông Hồng chảy qua vị trí của các phố ngày nay như Hàng Đào, Hai Bà Trưng, Lý Thường Kiệt, Hàng Chuối. Tiếp đó đổ ra nhánh chính của sông Hồng. [3] Nơi rộng nhất phân lưu này hình thành nên hồ Hoàn Kiếm hiện nay."
+    },
+    {
+     "kind": "paragraph",
+     "text": "Thời Lê Trung Hưng (thế kỷ 16), khi chúa Trịnh cho chỉnh trang Hoàng thành Thăng Long để vua Lê ở đã đồng thời xây dựng phủ chúa riêng nằm ngay bên ngoài Hoàng thành. Phủ Chúa trở thành một cơ quan trung ương thời bấy giờ với những công trình kiến trúc xa hoa như lầu Ngũ Long (dùng để duyệt quân) nằm ở bờ Đông hồ Hoàn Kiếm, đình Tả Vọng trên đảo Ngọc"
+    },
+    {
+     "kind": "caption",
+     "text": "Hồ Hoàn Kiếm",
+     "why": "infobox title bar"
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.5554,
+      0.1758,
+      0.9078,
+      0.3433
+     ]
+    },
+    {
+     "kind": "caption",
+     "text": "Hồ Hoàn Kiếm"
+    },
+    {
+     "kind": "figure",
+     "bbox": [
+      0.5622,
+      0.367,
+      0.9028,
+      0.5452
+     ]
+    },
+    {
+     "kind": "table",
+     "rows": [
+      [
+       "Vị trí",
+       "phường Hoàn Kiếm, thành phố Hà Nội"
+      ],
+      [
+       "Loại",
+       "Hồ nước ngọt"
+      ],
+      [
+       "Dòng chảy vào",
+       "mưa"
+      ],
+      [
+       "Dòng thoát nước",
+       "Sông Hồng"
+      ],
+      [
+       "Diện tích mặt nước",
+       "Sông Hồng"
+      ],
+      [
+       "Lưu vực quốc gia",
+       "Việt Nam"
+      ],
+      [
+       "Chiều dài tối đa",
+       "700 m"
+      ],
+      [
+       "Chiều rộng tối đa",
+       "250 m"
+      ],
+      [
+       "Diện tích bề mặt",
+       "12 ha"
+      ],
+      [
+       "Độ sâu trung bình",
+       "1-1,4 m [1]"
+      ]
+     ]
+    }
+   ]
+  }
+ ]
+}

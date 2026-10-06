@@ -1,0 +1,10 @@
+Weekly sync, 2 October 2026
+
+Attendees: Lan, Minh, Thang.
+The ingest pipeline now keeps every character addressable.
+
+Decisions:
+Chunk ids are content derived, so unchanged paragraphs are never re-embedded.
+Deletes are tombstones first and purges second.
+
+Next week: measure PDF throughput on the golden corpus.

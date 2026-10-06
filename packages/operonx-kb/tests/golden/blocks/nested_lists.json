@@ -1,0 +1,11 @@
+{"blocks": [
+ {"kind": "heading", "level": 1, "text": "Setup"},
+ {"kind": "list_item", "text": "Install uv", "attrs": {"ordered": true, "marker": "1."}},
+ {"kind": "list_item", "text": "macOS: brew install uv", "depth": 1},
+ {"kind": "list_item", "text": "Linux: curl the installer", "depth": 1},
+ {"kind": "list_item", "text": "verify the checksum", "depth": 2, "attrs": {"ordered": true, "marker": "a."}},
+ {"kind": "list_item", "text": "Create the project", "attrs": {"ordered": true, "marker": "2."}},
+ {"kind": "paragraph", "text": "That is all."},
+ {"kind": "list_item", "text": "a separate bullet list"},
+ {"kind": "code", "text": "uv init demo\ncd demo\n    uv add operonx", "attrs": {"lang": "bash"}}
+]}

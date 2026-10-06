@@ -1,0 +1,22 @@
+{
+ "title": "Setup",
+ "pages": [],
+ "canonical": "## Setup\n\n1. Install uv\n  - macOS: brew install uv\n  - Linux: curl the installer\n    a. verify the checksum\n2. Create the project\n\nThat is all.\n\n- a separate bullet list\n\n```bash\nuv init demo\ncd demo\n    uv add operonx\n```",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [3, 218]},
+  {"path": "0.0", "kind": "section", "level": 1, "span": [3, 218]},
+  {"path": "0.0.0", "kind": "heading", "level": 1, "span": [3, 8], "text": "Setup"},
+  {"path": "0.0.1", "kind": "list", "span": [13, 129], "ordered": true},
+  {"path": "0.0.1.0", "kind": "list_item", "span": [13, 23], "text": "Install uv", "ordered": true, "marker": "1."},
+  {"path": "0.0.1.1", "kind": "list", "span": [28, 107], "ordered": false},
+  {"path": "0.0.1.1.0", "kind": "list_item", "span": [28, 50], "text": "macOS: brew install uv"},
+  {"path": "0.0.1.1.1", "kind": "list_item", "span": [55, 80], "text": "Linux: curl the installer"},
+  {"path": "0.0.1.1.2", "kind": "list", "span": [88, 107], "ordered": true},
+  {"path": "0.0.1.1.2.0", "kind": "list_item", "span": [88, 107], "text": "verify the checksum", "ordered": true, "marker": "a."},
+  {"path": "0.0.1.2", "kind": "list_item", "span": [111, 129], "text": "Create the project", "ordered": true, "marker": "2."},
+  {"path": "0.0.2", "kind": "paragraph", "span": [131, 143], "text": "That is all."},
+  {"path": "0.0.3", "kind": "list", "span": [147, 169], "ordered": false},
+  {"path": "0.0.3.0", "kind": "list_item", "span": [147, 169], "text": "a separate bullet list"},
+  {"path": "0.0.4", "kind": "code", "span": [179, 218], "text": "uv init demo\ncd demo\n    uv add operonx", "lang": "bash"}
+ ]
+}

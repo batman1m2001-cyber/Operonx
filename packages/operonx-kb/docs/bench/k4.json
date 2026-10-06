@@ -1,0 +1,861 @@
+{
+ "embedder": "intfloat/multilingual-e5-small",
+ "llm": "gpt-4o-mini",
+ "prices": {
+  "input": 1.5e-07,
+  "cached_input": 7.5e-08,
+  "output": 6e-07
+ },
+ "types": {
+  "short heading-less articles": [
+   "xquad_vi",
+   "xquad_en"
+  ],
+  "templated business documents": [
+   "corpus_vi"
+  ],
+  "mixed real corpus (Wikipedia paragraphs, legal PDFs)": [
+   "vi_public"
+  ]
+ },
+ "sets": {
+  "xquad_en": {
+   "ingest": {
+    "documents": 48,
+    "chunks": 159,
+    "usage": {
+     "toc": {
+      "other": {
+       "calls": 46,
+       "cached": 0,
+       "prompt_tokens": 21983,
+       "completion_tokens": 3346,
+       "cached_tokens": 0
+      }
+     },
+     "summary": {
+      "other": {
+       "calls": 220,
+       "cached": 0,
+       "prompt_tokens": 110534,
+       "completion_tokens": 20460,
+       "cached_tokens": 0
+      }
+     }
+    },
+    "seconds": 64.1,
+    "size": {
+     "pdf": {
+      "documents": 0,
+      "pages": 0,
+      "tokens": 0
+     },
+     "other": {
+      "documents": 48,
+      "pages": 0,
+      "tokens": 44519
+     }
+    }
+   },
+   "ingest_ctx": {
+    "documents": 48,
+    "chunks": 159,
+    "usage": {
+     "contextual": {
+      "other": {
+       "calls": 159,
+       "cached": 0,
+       "prompt_tokens": 196103,
+       "completion_tokens": 10902,
+       "cached_tokens": 36352
+      }
+     }
+    },
+    "seconds": 35.1,
+    "size": {
+     "pdf": {
+      "documents": 0,
+      "pages": 0,
+      "tokens": 0
+     },
+     "other": {
+      "documents": 48,
+      "pages": 0,
+      "tokens": 44519
+     }
+    }
+   },
+   "modes": {
+    "xquad_en|dense": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9824,
+      "recall@10": 0.995,
+      "recall@20": 1.0,
+      "mrr": 0.9384,
+      "ndcg@10": 0.9521
+     },
+     "ci": {
+      "recall@5": {
+       "n": 397,
+       "mean": 0.9824,
+       "se": 0.0066,
+       "ci_lo": 0.9641,
+       "ci_hi": 0.9914,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 397,
+       "mean": 0.995,
+       "se": 0.0036,
+       "ci_lo": 0.9818,
+       "ci_hi": 0.9986,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 397,
+       "mean": 1.0,
+       "se": 0.0,
+       "ci_lo": 0.9904,
+       "ci_hi": 1.0,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 397,
+       "mean": 0.9384,
+       "se": 0.0096,
+       "ci_lo": 0.9195,
+       "ci_hi": 0.9573,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 397,
+       "mean": 0.9521,
+       "se": 0.0077,
+       "ci_lo": 0.937,
+       "ci_hi": 0.9672,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 79.06200084835291,
+     "p95_ms": 88.16579123958945,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "4d5836581cd3",
+      "version_dirty": true,
+      "graph_hash": "cdfa419af701",
+      "config_hash": "c0a59f84facd",
+      "models": [
+       "intfloat/multilingual-e5-small"
+      ],
+      "dataset_version": "9bd0a92c221c",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "xquad_en|lexical": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9899,
+      "recall@10": 0.9899,
+      "recall@20": 0.9924,
+      "mrr": 0.9551,
+      "ndcg@10": 0.9639
+     },
+     "ci": {
+      "recall@5": {
+       "n": 397,
+       "mean": 0.9899,
+       "se": 0.005,
+       "ci_lo": 0.9744,
+       "ci_hi": 0.9961,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 397,
+       "mean": 0.9899,
+       "se": 0.005,
+       "ci_lo": 0.9744,
+       "ci_hi": 0.9961,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 397,
+       "mean": 0.9924,
+       "se": 0.0044,
+       "ci_lo": 0.978,
+       "ci_hi": 0.9974,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 397,
+       "mean": 0.9551,
+       "se": 0.0084,
+       "ci_lo": 0.9387,
+       "ci_hi": 0.9715,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 397,
+       "mean": 0.9639,
+       "se": 0.0071,
+       "ci_lo": 0.95,
+       "ci_hi": 0.9778,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 24.540172424167395,
+     "p95_ms": 29.1320588439703,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "4d5836581cd3",
+      "version_dirty": true,
+      "graph_hash": "0787ff236c1c",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "9bd0a92c221c",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "xquad_en|hybrid": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9924,
+      "recall@10": 0.9975,
+      "recall@20": 1.0,
+      "mrr": 0.9674,
+      "ndcg@10": 0.9748
+     },
+     "ci": {
+      "recall@5": {
+       "n": 397,
+       "mean": 0.9924,
+       "se": 0.0044,
+       "ci_lo": 0.978,
+       "ci_hi": 0.9974,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 397,
+       "mean": 0.9975,
+       "se": 0.0025,
+       "ci_lo": 0.9859,
+       "ci_hi": 0.9996,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 397,
+       "mean": 1.0,
+       "se": 0.0,
+       "ci_lo": 0.9904,
+       "ci_hi": 1.0,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 397,
+       "mean": 0.9674,
+       "se": 0.007,
+       "ci_lo": 0.9538,
+       "ci_hi": 0.9811,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 397,
+       "mean": 0.9748,
+       "se": 0.0055,
+       "ci_lo": 0.9639,
+       "ci_hi": 0.9857,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 86.58452378585935,
+     "p95_ms": 95.646598841995,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "4d5836581cd3",
+      "version_dirty": true,
+      "graph_hash": "0cbcb71f3410",
+      "config_hash": "2ea793bff384",
+      "models": [
+       "intfloat/multilingual-e5-small"
+      ],
+      "dataset_version": "9bd0a92c221c",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "xquad_en_ctx|dense": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9874,
+      "recall@10": 0.995,
+      "recall@20": 1.0,
+      "mrr": 0.9502,
+      "ndcg@10": 0.961
+     },
+     "ci": {
+      "recall@5": {
+       "n": 397,
+       "mean": 0.9874,
+       "se": 0.0056,
+       "ci_lo": 0.9709,
+       "ci_hi": 0.9946,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 397,
+       "mean": 0.995,
+       "se": 0.0036,
+       "ci_lo": 0.9818,
+       "ci_hi": 0.9986,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 397,
+       "mean": 1.0,
+       "se": 0.0,
+       "ci_lo": 0.9904,
+       "ci_hi": 1.0,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 397,
+       "mean": 0.9502,
+       "se": 0.0089,
+       "ci_lo": 0.9328,
+       "ci_hi": 0.9676,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 397,
+       "mean": 0.961,
+       "se": 0.0072,
+       "ci_lo": 0.947,
+       "ci_hi": 0.9751,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 79.54134093597531,
+     "p95_ms": 87.84288074821234,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "4d5836581cd3",
+      "version_dirty": true,
+      "graph_hash": "0007b463370a",
+      "config_hash": "c0a59f84facd",
+      "models": [
+       "intfloat/multilingual-e5-small"
+      ],
+      "dataset_version": "6762e849d6ba",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "xquad_en_ctx|lexical": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9899,
+      "recall@10": 0.9899,
+      "recall@20": 0.9924,
+      "mrr": 0.9579,
+      "ndcg@10": 0.966
+     },
+     "ci": {
+      "recall@5": {
+       "n": 397,
+       "mean": 0.9899,
+       "se": 0.005,
+       "ci_lo": 0.9744,
+       "ci_hi": 0.9961,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 397,
+       "mean": 0.9899,
+       "se": 0.005,
+       "ci_lo": 0.9744,
+       "ci_hi": 0.9961,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 397,
+       "mean": 0.9924,
+       "se": 0.0044,
+       "ci_lo": 0.978,
+       "ci_hi": 0.9974,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 397,
+       "mean": 0.9579,
+       "se": 0.0082,
+       "ci_lo": 0.942,
+       "ci_hi": 0.9739,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 397,
+       "mean": 0.966,
+       "se": 0.0069,
+       "ci_lo": 0.9524,
+       "ci_hi": 0.9796,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 24.377699941396713,
+     "p95_ms": 27.476331684738398,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "4d5836581cd3",
+      "version_dirty": true,
+      "graph_hash": "1beede1223f4",
+      "config_hash": "4f53cda18c2b",
+      "models": [],
+      "dataset_version": "6762e849d6ba",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    },
+    "xquad_en_ctx|hybrid": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9924,
+      "recall@10": 0.9975,
+      "recall@20": 1.0,
+      "mrr": 0.9679,
+      "ndcg@10": 0.9751
+     },
+     "ci": {
+      "recall@5": {
+       "n": 397,
+       "mean": 0.9924,
+       "se": 0.0044,
+       "ci_lo": 0.978,
+       "ci_hi": 0.9974,
+       "method": "wilson"
+      },
+      "recall@10": {
+       "n": 397,
+       "mean": 0.9975,
+       "se": 0.0025,
+       "ci_lo": 0.9859,
+       "ci_hi": 0.9996,
+       "method": "wilson"
+      },
+      "recall@20": {
+       "n": 397,
+       "mean": 1.0,
+       "se": 0.0,
+       "ci_lo": 0.9904,
+       "ci_hi": 1.0,
+       "method": "wilson"
+      },
+      "mrr": {
+       "n": 397,
+       "mean": 0.9679,
+       "se": 0.007,
+       "ci_lo": 0.9541,
+       "ci_hi": 0.9817,
+       "method": "clt"
+      },
+      "ndcg@10": {
+       "n": 397,
+       "mean": 0.9751,
+       "se": 0.0056,
+       "ci_lo": 0.9641,
+       "ci_hi": 0.9861,
+       "method": "clt"
+      }
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 87.0566931553185,
+     "p95_ms": 97.46150998398662,
+     "errors": 0,
+     "error_samples": [],
+     "gate": "failed",
+     "fingerprint": {
+      "code_version": "4d5836581cd3",
+      "version_dirty": true,
+      "graph_hash": "422ce1f474d8",
+      "config_hash": "2ea793bff384",
+      "models": [
+       "intfloat/multilingual-e5-small"
+      ],
+      "dataset_version": "6762e849d6ba",
+      "evaluators": {
+       "recall@5": "28308e6201ef",
+       "recall@10": "d5950c925afe",
+       "recall@20": "0e60f4c389ef",
+       "mrr": "4c7db592fb9c",
+       "ndcg@10": "7eccc075e83c"
+      },
+      "evaluators_hash": "e236ee892374",
+      "operonx_version": "1.14.0"
+     }
+    }
+   },
+   "contextual_minus_baseline": {
+    "dense": {
+     "recall@10": {
+      "n": 397,
+      "a": 0.995,
+      "b": 0.995,
+      "diff": 0.0,
+      "ci_lo": -0.0127,
+      "ci_hi": 0.0127,
+      "p": 1.0,
+      "method": "mcnemar",
+      "corr": 0.4975,
+      "regressed": 1,
+      "fixed": 1
+     },
+     "mrr": {
+      "n": 397,
+      "a": 0.9384,
+      "b": 0.9502,
+      "diff": 0.0118,
+      "ci_lo": -0.0016,
+      "ci_hi": 0.0262,
+      "p": 0.086,
+      "method": "bootstrap",
+      "corr": 0.7211,
+      "units": 397
+     },
+     "ndcg@10": {
+      "n": 397,
+      "a": 0.9521,
+      "b": 0.961,
+      "diff": 0.0089,
+      "ci_lo": -0.001,
+      "ci_hi": 0.0194,
+      "p": 0.094,
+      "method": "bootstrap",
+      "corr": 0.7438,
+      "units": 397
+     }
+    },
+    "lexical": {
+     "recall@10": {
+      "n": 397,
+      "a": 0.9899,
+      "b": 0.9899,
+      "diff": 0.0,
+      "ci_lo": -0.0106,
+      "ci_hi": 0.0106,
+      "p": 1.0,
+      "method": "mcnemar",
+      "corr": 1.0,
+      "regressed": 0,
+      "fixed": 0
+     },
+     "mrr": {
+      "n": 397,
+      "a": 0.9551,
+      "b": 0.9579,
+      "diff": 0.0029,
+      "ci_lo": -0.0035,
+      "ci_hi": 0.0095,
+      "p": 0.4248,
+      "method": "bootstrap",
+      "corr": 0.9248,
+      "units": 397
+     },
+     "ndcg@10": {
+      "n": 397,
+      "a": 0.9639,
+      "b": 0.966,
+      "diff": 0.0021,
+      "ci_lo": -0.0026,
+      "ci_hi": 0.0071,
+      "p": 0.4178,
+      "method": "bootstrap",
+      "corr": 0.9424,
+      "units": 397
+     }
+    },
+    "hybrid": {
+     "recall@10": {
+      "n": 397,
+      "a": 0.9975,
+      "b": 0.9975,
+      "diff": 0.0,
+      "ci_lo": -0.0118,
+      "ci_hi": 0.0118,
+      "p": 1.0,
+      "method": "mcnemar",
+      "corr": -0.0025,
+      "regressed": 1,
+      "fixed": 1
+     },
+     "mrr": {
+      "n": 397,
+      "a": 0.9674,
+      "b": 0.9679,
+      "diff": 0.0005,
+      "ci_lo": -0.0084,
+      "ci_hi": 0.0097,
+      "p": 0.9255,
+      "method": "bootstrap",
+      "corr": 0.772,
+      "units": 397
+     },
+     "ndcg@10": {
+      "n": 397,
+      "a": 0.9748,
+      "b": 0.9751,
+      "diff": 0.0003,
+      "ci_lo": -0.0068,
+      "ci_hi": 0.0076,
+      "p": 0.9375,
+      "method": "bootstrap",
+      "corr": 0.7861,
+      "units": 397
+     }
+    }
+   },
+   "tree": {
+    "cases": 10,
+    "metrics": {
+     "recall@5": 1.0,
+     "recall@10": 1.0,
+     "recall@20": 1.0,
+     "mrr": 0.95,
+     "ndcg@10": 0.9631
+    },
+    "ci": {
+     "recall@5": {
+      "n": 10,
+      "mean": 1.0,
+      "se": 0.0,
+      "ci_lo": 0.7225,
+      "ci_hi": 1.0,
+      "method": "wilson"
+     },
+     "recall@10": {
+      "n": 10,
+      "mean": 1.0,
+      "se": 0.0,
+      "ci_lo": 0.7225,
+      "ci_hi": 1.0,
+      "method": "wilson"
+     },
+     "recall@20": {
+      "n": 10,
+      "mean": 1.0,
+      "se": 0.0,
+      "ci_lo": 0.7225,
+      "ci_hi": 1.0,
+      "method": "wilson"
+     },
+     "mrr": {
+      "n": 10,
+      "mean": 0.95,
+      "se": 0.05,
+      "ci_lo": 0.852,
+      "ci_hi": 1.0,
+      "method": "clt"
+     },
+     "ndcg@10": {
+      "n": 10,
+      "mean": 0.9631,
+      "se": 0.0369,
+      "ci_lo": 0.8908,
+      "ci_hi": 1.0,
+      "method": "clt"
+     }
+    },
+    "scored": {
+     "recall@5": 10,
+     "recall@10": 10,
+     "recall@20": 10,
+     "mrr": 10,
+     "ndcg@10": 10
+    },
+    "p50_ms": 1164.003926794976,
+    "p95_ms": 4526.3098501600325,
+    "errors": 0,
+    "error_samples": [],
+    "gate": "pass",
+    "fingerprint": {
+     "code_version": "4d5836581cd3",
+     "version_dirty": true,
+     "graph_hash": null,
+     "config_hash": null,
+     "models": null,
+     "graph_hash_error": "GraphOp 'search_flow' contains a synthetic hidden loop (Phase 3 cycle-rewrite output). Serialize the pre-rewrite graph or use @graph(strict_dag=True) on the affected subgraph.",
+     "dataset_version": "469d7a654b1d",
+     "evaluators": {
+      "recall@5": "28308e6201ef",
+      "recall@10": "d5950c925afe",
+      "recall@20": "0e60f4c389ef",
+      "mrr": "4c7db592fb9c",
+      "ndcg@10": "7eccc075e83c"
+     },
+     "evaluators_hash": "e236ee892374",
+     "operonx_version": "1.14.0"
+    }
+   },
+   "tree_query": {
+    "queries": 10,
+    "calls_per_query": 1.1,
+    "prompt_tokens_per_query": 1238.2,
+    "completion_tokens_per_query": 13.5,
+    "cached_tokens_per_query": 844.8,
+    "usd_per_query": 0.00013,
+    "usd": 0.0013
+   },
+   "tree_minus_hybrid": {
+    "recall@10": {
+     "n": 10,
+     "a": 1.0,
+     "b": 1.0,
+     "diff": 0.0,
+     "ci_lo": -0.2775,
+     "ci_hi": 0.2775,
+     "p": 1.0,
+     "method": "mcnemar",
+     "regressed": 0,
+     "fixed": 0
+    },
+    "mrr": {
+     "n": 10,
+     "a": 0.95,
+     "b": 0.95,
+     "diff": 0.0,
+     "ci_lo": 0.0,
+     "ci_hi": 0.0,
+     "p": 1.0,
+     "method": "bootstrap",
+     "corr": 1.0,
+     "units": 10
+    },
+    "ndcg@10": {
+     "n": 10,
+     "a": 0.9631,
+     "b": 0.9631,
+     "diff": 0.0,
+     "ci_lo": 0.0,
+     "ci_hi": 0.0,
+     "p": 1.0,
+     "method": "bootstrap",
+     "corr": 1.0,
+     "units": 10
+    },
+    "recall@5": {
+     "n": 10,
+     "a": 1.0,
+     "b": 1.0,
+     "diff": 0.0,
+     "ci_lo": -0.2775,
+     "ci_hi": 0.2775,
+     "p": 1.0,
+     "method": "mcnemar",
+     "regressed": 0,
+     "fixed": 0
+    }
+   },
+   "hybrid_on_tree_cases": {
+    "recall@5": 1.0,
+    "recall@10": 1.0,
+    "mrr": 0.95,
+    "ndcg@10": 0.9631
+   }
+  }
+ },
+ "decisions": {
+  "contextual": {
+   "short heading-less articles": "opt-in"
+  },
+  "tree": {
+   "short heading-less articles": "opt-in"
+  }
+ },
+ "spent_usd": 0.0687
+}

@@ -1,0 +1,33 @@
+{"source": "irs_fw9_p1.pdf page 1", "page_no": 1, "width": 611.97601, "height": 791.96802, "region": [80.0, 176.0, 445.0, 194.0], "word_fields": ["text", "x0", "y0", "x1", "y1", "font", "size", "bold", "italic", "mono", "angle"],
+ "words": [
+  ["Individual/sole", 86.6, 182.0, 131.58, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["proprietor", 133.53, 182.0, 164.38, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["C", 193.6, 182.0, 198.65, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["corporation", 200.6, 182.0, 236.64, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["S", 265.6, 182.0, 270.14, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["corporation", 272.08, 182.0, 308.12, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["Partnership", 337.6, 182.0, 373.51, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0],
+  ["Trust/estate", 402.4, 182.0, 439.87, 188.12, "/OKAJSW+HelveticaNeueLTStd-Roman", 6.12, false, false, false, 0.0]
+ ],
+ "rules": [
+  [81.0, 180.25, 81.0, 188.25],
+  [180.0, 188.25, 188.0, 188.25],
+  [188.0, 180.25, 188.0, 188.25],
+  [180.0, 180.25, 188.0, 180.25],
+  [180.0, 180.25, 180.0, 188.25],
+  [252.0, 188.25, 260.0, 188.25],
+  [260.0, 180.25, 260.0, 188.25],
+  [252.0, 180.25, 260.0, 180.25],
+  [252.0, 180.25, 252.0, 188.25],
+  [324.0, 188.25, 332.0, 188.25],
+  [332.0, 180.25, 332.0, 188.25],
+  [324.0, 180.25, 332.0, 180.25],
+  [324.0, 180.25, 324.0, 188.25],
+  [388.8, 188.25, 396.8, 188.25],
+  [396.8, 180.25, 396.8, 188.25],
+  [388.8, 180.25, 396.8, 180.25],
+  [388.8, 180.25, 388.8, 188.25]
+ ],
+ "images": [
+ ]
+}

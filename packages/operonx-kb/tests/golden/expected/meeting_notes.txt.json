@@ -1,0 +1,12 @@
+{
+ "title": null,
+ "pages": [],
+ "canonical": "Weekly sync, 2 October 2026\n\nAttendees: Lan, Minh, Thang. The ingest pipeline now keeps every character addressable.\n\nDecisions: Chunk ids are content derived, so unchanged paragraphs are never re-embedded. Deletes are tombstones first and purges second.\n\nNext week: measure PDF throughput on the golden corpus.",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [0, 311]},
+  {"path": "0.0", "kind": "paragraph", "span": [0, 27], "text": "Weekly sync, 2 October 2026"},
+  {"path": "0.1", "kind": "paragraph", "span": [29, 116], "text": "Attendees: Lan, Minh, Thang. The ingest pipeline now keeps every character addressable."},
+  {"path": "0.2", "kind": "paragraph", "span": [118, 254], "text": "Decisions: Chunk ids are content derived, so unchanged paragraphs are never re-embedded. Deletes are tombstones first and purges second."},
+  {"path": "0.3", "kind": "paragraph", "span": [256, 311], "text": "Next week: measure PDF throughput on the golden corpus."}
+ ]
+}

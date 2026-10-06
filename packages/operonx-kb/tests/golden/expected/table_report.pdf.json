@@ -1,0 +1,16 @@
+{
+ "title": "Leave Policy Summary",
+ "pages": [[1, 595.0, 842.0]],
+ "canonical": "# Leave Policy Summary\n\nTable 1 lists the leave entitlements by contract type. Part-time staff receive leave pro rata to their hours.\n\nTable 1: Leave entitlements by contract\n\n| Contract | Annual leave | Sick leave | Notes |\n| --- | --- | --- | --- |\n| Full-time | 12 days | 30 days | Carry over until March |\n| Part-time | Pro rata | 30 days | Based on hours |\n| Intern | 6 days | 10 days |  |\n\n## Allowances\n\nMonthly allowances are paid with the salary and adjusted every year accordingly to the consumer price index.\n\n| Item | Amount | Frequency |\n| --- | --- | --- |\n| Lunch | 730,000 | monthly |\n| Parking | 150,000 | monthly |\n| Phone | 200,000 | monthly |",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [2, 662]},
+  {"path": "0.0", "kind": "title", "span": [2, 22], "text": "Leave Policy Summary", "pages": [1], "bbox": [0.09, 0.06, 0.48, 0.08]},
+  {"path": "0.1", "kind": "paragraph", "span": [24, 133], "text": "Table 1 lists the leave entitlements by contract type. Part-time staff receive leave pro rata to their hours.", "pages": [1], "bbox": [0.09, 0.1, 0.88, 0.12]},
+  {"path": "0.2", "kind": "caption", "span": [135, 174], "text": "Table 1: Leave entitlements by contract", "pages": [1], "bbox": [0.09, 0.14, 0.4, 0.15], "caption_of": "0.3"},
+  {"path": "0.3", "kind": "table", "span": [176, 394], "text": "| Contract | Annual leave | Sick leave | Notes |\n| --- | --- | --- | --- |\n| Full-time | 12 days | 30 days | Carry over until March |\n| Part-time | Pro rata | 30 days | Based on hours |\n| Intern | 6 days | 10 days |  |", "pages": [1], "bbox": [0.09, 0.16, 0.85, 0.24], "header_rows": 1},
+  {"path": "0.4", "kind": "section", "level": 1, "span": [399, 662]},
+  {"path": "0.4.0", "kind": "heading", "level": 1, "span": [399, 409], "text": "Allowances", "pages": [1], "bbox": [0.09, 0.26, 0.22, 0.27]},
+  {"path": "0.4.1", "kind": "paragraph", "span": [411, 519], "text": "Monthly allowances are paid with the salary and adjusted every year accordingly to the consumer price index.", "pages": [1], "bbox": [0.09, 0.28, 0.74, 0.31]},
+  {"path": "0.4.2", "kind": "table", "span": [521, 662], "text": "| Item | Amount | Frequency |\n| --- | --- | --- |\n| Lunch | 730,000 | monthly |\n| Parking | 150,000 | monthly |\n| Phone | 200,000 | monthly |", "pages": [1], "bbox": [0.09, 0.32, 0.64, 0.38], "header_rows": 1}
+ ]
+}

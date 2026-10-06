@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.operonx/
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+dist/
+*.egg-info/
+.env
