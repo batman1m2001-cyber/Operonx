@@ -21,18 +21,20 @@ id), and it is saved in the parent's store. So:
   (the child's own journal decides what re-runs), which is why the tool is
   ``idempotent``.
 
-**Agent as an op** (``support.as_op()``). An op factory for a graph:
+**Agent as an op** (``AgentOp.of(agent=support, input=...)``, or
+``support.as_op()`` for a factory with the options bound). A step of a graph:
 
-- ``as_op()``: one frame; outputs ``output``, ``status``, ``usage``,
-  ``interruptions``, ``state_id``, ``error`` that bind downstream like any
-  op's. An interrupted run is answered outside the graph with
+- ``AgentOp.of(agent=support, input=...)``: one frame; outputs
+  ``output``, ``status``, ``usage``, ``interruptions``, ``state_id``,
+  ``error`` that bind downstream like any op's. An interrupted run is
+  answered outside the graph with
   ``Runner.resume(agent, state_id, store=..., approvals=...)``.
-- ``as_op(stream=True)``: a transient generator whose one output,
-  ``event``, yields every :mod:`~operonx_agents.run.events` event, the
+- ``AgentOp.of(agent=support, stream=True, input=...)``: a transient
+  generator whose one output, ``event``, yields every :mod:`~operonx_agents.run.events` event, the
   last a ``RunFinished`` holding the result. Wire it to an ``EmitOp`` to
   reach ``engine.stream(mode="custom")``::
 
-      run = support.as_op(stream=True)(input=question)
+      run = AgentOp.of(agent=support, stream=True, input=question)
       EmitOp(payload=run["event"], channel="agent", transient=True)
 
   The two are separate ops because operonx runs a consumer once per frame
@@ -46,7 +48,7 @@ import dataclasses
 from typing import TYPE_CHECKING, Any, AsyncIterator, Callable, Dict, Optional
 
 from operonx.core.ops import BaseOp
-from operonx.core.ops.base import split_shorthand_kwargs
+from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.auto_name import register_skip
 from operonx.core.utils.common import Param
 from pydantic import BaseModel
@@ -178,7 +180,8 @@ def agent_op(
 
 
 class AgentOp(BaseOp):
-    """The op :func:`agent_op` builds. Use the factory; see the module docs."""
+    """An agent as one step of a graph: ``AgentOp.of(agent=..., input=...)``,
+    like any op's ``.of``. See the module docs for the outputs."""
 
     show_keys_default = ("status", "output")
 
@@ -190,10 +193,10 @@ class AgentOp(BaseOp):
         self,
         *,
         agent: "Agent",
-        stream: bool,
-        store: Optional["StateStore"],
-        sessions: Optional[Callable[[str], "Session"]],
-        durability: str,
+        stream: bool = False,
+        store: Optional["StateStore"] = None,
+        sessions: Optional[Callable[[str], "Session"]] = None,
+        durability: str = "turn",
         inputs: Optional[Dict[str, Any]] = None,
         outputs: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
@@ -219,6 +222,35 @@ class AgentOp(BaseOp):
         self.inputs = self._merge_params(input_schema, self._normalize_params(inputs))
         self.outputs = self._merge_params(output_schema, self._normalize_params(outputs))
         self._set_core(self._events if stream else self._run)
+
+    @shorthand
+    def of(
+        cls,
+        agent: "Agent",
+        stream: bool = False,
+        store: Optional["StateStore"] = None,
+        sessions: Optional[Callable[[str], "Session"]] = None,
+        durability: str = "turn",
+        **kwargs: Any,
+    ) -> "AgentOp":
+        """Run ``agent`` as a step: ``input`` (and ``session_id``, ``deps``) bind
+        like any op's inputs.
+
+        Example::
+
+            website = AgentOp.of(agent=researcher, input=tasks["website"])
+            website["output"] >> PARENT["website"]
+
+        Args:
+            agent: The :class:`~operonx_agents.Agent` it runs.
+            stream: ``True``: every event on a transient ``event`` output.
+            store: Where runs are saved: an interrupted run waits there.
+            sessions: ``session_id -> Session``, for a step given a ``session_id``.
+            durability: The runs' ``durability``.
+        """
+        inputs, init_kwargs = split_shorthand_kwargs(kwargs)
+        return cls(agent=agent, stream=stream, store=store, sessions=sessions,
+                   durability=durability, inputs=inputs or None, **init_kwargs)  # fmt: skip
 
     def warmup(self) -> None:
         """Resolve the model's resources at engine start, so a missing one

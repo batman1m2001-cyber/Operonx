@@ -201,17 +201,16 @@ with TestClient(build_app(APP.services)) as client:
 - `store=` is required: an interrupted run waits there, so use
   `SQLiteStateStore` or `RedisStateStore` when the process can restart.
 
-## In a graph: `as_op()`
+## In a graph: `AgentOp`
 
 ```python
 import asyncio
 
 import operonx
 from operonx import END, START, Operon, graph, op
+from operonx.agents import AgentOp
 
 from orders import support
-
-ask_support = support.as_op()
 
 
 @op
@@ -221,7 +220,7 @@ def shout(answer: str) -> dict:
 
 @graph
 def flow(question):
-    answered = ask_support(input=question)
+    answered = AgentOp.of(agent=support, input=question)
     s = shout(answer=answered["output"])
     START >> answered >> s >> END
 
@@ -237,9 +236,11 @@ async def main():
 asyncio.run(main())
 ```
 
-`as_op()`'s outputs are `output`, `status`, `usage`, `interruptions`,
-`state_id`, `error`. `as_op(stream=True)` is a transient `event` stream for
-an `EmitOp` instead.
+An agent is a spec, not an op: `AgentOp.of(agent=..., input=...)` runs it as
+one step, like `LLMOp.of(...)`, with `session_id` and `deps` as optional
+inputs. Its outputs are `output`, `status`, `usage`, `interruptions`,
+`state_id`, `error`. `AgentOp.of(agent=..., stream=True, input=...)` is a
+transient `event` stream for an `EmitOp` instead.
 
 ## Check the path: trajectory evals
 

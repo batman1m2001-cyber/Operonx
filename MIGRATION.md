@@ -89,7 +89,7 @@ answer = res.output                 # res.status: completed | limit | interrupte
 | `operonx.agents` | `operonx_agents` |
 |---|---|
 | `@tool(name=, description=, schema=)`, `TOOL_REGISTRY`, `get_tool_definitions` | `@tool` (schema and validation from the signature and docstring); each `Agent` owns its tools — there is no registry |
-| `build_react_agent(call_model=...)`, `agent_result` | `Agent(...)` + `Runner.run` / `Runner.stream`; in a graph, `agent.as_op()` |
+| `build_react_agent(call_model=...)`, `agent_result` | `Agent(...)` + `Runner.run` / `Runner.stream`; in a graph, `AgentOp.of(agent=..., input=...)` |
 | `make_llm_caller("x", tools=...)` | `Model("x")` (fallback, a deadline over the chain, normalised `Usage`) |
 | `build_dispatch` | `operonx_agents.dispatch` (one tool message per call) |
 | `ToolPolicy` | `ToolPolicy` (same rules) |
