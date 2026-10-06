@@ -2,7 +2,7 @@
 
 Typed LLM steps and agents on **operonx** (editable from this repo, `../..`). Users import it as
 `operonx.agents` (operonx >= 1.16 aliases this package); inside the package, `operonx_agents`. Read the operonx guide
-(`../../operonx/guide/`, then `09-agents.md`) before using an operonx API; do not write one
+(`../../operonx/guide/`, then this package's `operonx_agents/guide/`) before using an operonx API; do not write one
 from memory.
 
 ## Rules

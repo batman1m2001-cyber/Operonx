@@ -1,16 +1,8 @@
-"""``python -m operonx.guide``: where the guide is, and what it holds."""
+"""``python -m operonx.guide``: every installed operonx guide, and its pages."""
 
-from operonx import __version__
-from operonx.guide import pages, path
+from operonx.guide import _title, installed
 
-print(f"operonx {__version__} guide for coding assistants: {path()}")
-for page in pages():
-    title = next(
-        (
-            line.lstrip("# ").strip()
-            for line in page.read_text(encoding="utf-8").splitlines()
-            if line.startswith("# ")
-        ),
-        page.stem,
-    )
-    print(f"  {page}  —  {title}")
+for g in installed():
+    print(f"{g.name} — {g.dist} {g.version}: {g.dir}")
+    for page in g.pages():
+        print(f"  {page.name}  —  {_title(page)}")

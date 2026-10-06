@@ -1,9 +1,9 @@
 """`operonx` — the command line: one command, a subcommand each.
 
     operonx init [DIR] [--template NAME] [--name NAME] [--force]
-    operonx guide                   # the guide's index (README.md)
-    operonx guide --path            # where the installed guide is
-    operonx guide --sync [DIR]      # copy it into DIR/.operonx/guide/
+    operonx guide [DIR]             # sync the installed guides into DIR/.operonx/guide/
+    operonx guide --check [DIR]     # exit 1 when that copy is stale (CI)
+    operonx guide --path            # where the installed core guide is
     operonx run ...                 # run a job              (operonx.cli.run)
     operonx serve ...               # serve the services     (operonx.cli.serve)
     operonx play ...                # drive a served door    (operonx.app.play)
@@ -13,6 +13,10 @@
 command line untouched: each is its module's own ``main(argv)`` (for the
 first three, the one the deprecated ``operonx-<name>`` alias calls too),
 so there is one parser per command and two spellings cannot differ.
+
+Inside a project whose ``.operonx/guide/`` is stale — an operonx package
+was added, removed or upgraded — any command first syncs it and says so
+in one line on stderr.
 """
 
 from __future__ import annotations
@@ -71,20 +75,21 @@ def _parser() -> argparse.ArgumentParser:
 
     guide = sub.add_parser(
         "guide",
-        help="the operonx guide for coding assistants",
-        description="Print the guide's index, its installed path, or copy it into a project.",
+        help="sync the guides of the installed operonx packages into the project",
+        description="Copy every installed operonx package's guide into DIR/.operonx/guide/ "
+        "(one folder per package, plus an index) and update AGENTS.md's operonx block.",
+    )
+    guide.add_argument(
+        "dir", nargs="?", default=None, help="the project (default: the one at or above here)"
     )
     what = guide.add_mutually_exclusive_group()
-    what.add_argument("--path", action="store_true", help="print the installed guide's directory")
     what.add_argument(
-        "--sync",
-        nargs="?",
-        const="",
-        default=None,
-        metavar="DIR",
-        help="copy the installed guide into DIR/.operonx/guide/ "
-        "(default: the project at or above here)",
+        "--check", action="store_true", help="change nothing; exit 1 when the copy is stale"
     )
+    what.add_argument(
+        "--path", action="store_true", help="print the installed core guide's directory"
+    )
+    what.add_argument("--sync", action="store_true", help=argparse.SUPPRESS)  # the old spelling
     for name, (_, summary) in DELEGATED.items():
         # listed for --help only: main() hands these their argv before parsing
         sub.add_parser(name, help=f"{summary} (`operonx {name} --help`)", add_help=False)
@@ -131,31 +136,50 @@ def _init(args: argparse.Namespace) -> int:
     return 0
 
 
-def _project_root(start: Path) -> Path:
-    for candidate in (start, *start.parents):
-        if (candidate / "operonx.toml").is_file():
-            return candidate
-    return start
-
-
 def _guide(args: argparse.Namespace) -> int:
-    from operonx import __version__, guide
+    from operonx import guide
 
     if args.path:
         print(guide.path())
         return 0
-    if args.sync is not None:
-        root = Path(args.sync) if args.sync else _project_root(Path.cwd().resolve())
-        dest = guide.sync(root)
-        print(f"operonx {__version__} guide copied to {dest}")
+    root = Path(args.dir) if args.dir else guide.find_project()
+    if root is None:
+        print(
+            "error: no operonx.toml here or above; name the project: operonx guide DIR",
+            file=sys.stderr,
+        )
+        return 2
+    if args.check:
+        stale = guide.changes(root)
+        if stale:
+            print(f"guide is stale: {', '.join(stale)} (run `operonx guide`)", file=sys.stderr)
+            return 1
         return 0
-    sys.stdout.write((guide.path() / "README.md").read_text(encoding="utf-8"))
+    done = guide.sync(root)
+    print(f"guide: {', '.join(done)}" if done else "guide: up to date")
+    print(root / guide.COPY_DIR / "README.md")
     return 0
+
+
+def _autosync() -> None:
+    """Sync a project's stale guide copy before a command; never fail it."""
+    try:
+        from operonx import guide
+
+        root = guide.find_project()
+        if root is None or not (root / guide.COPY_DIR).is_dir():
+            return
+        done = guide.sync(root) if guide.changes(root) else []
+        if done:
+            print(f"guide: {', '.join(done)}", file=sys.stderr)
+    except Exception:  # a read-only checkout, a broken install: the command still runs
+        pass
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in DELEGATED:
+        _autosync()
         return importlib.import_module(DELEGATED[argv[0]][0]).main(argv[1:])
     parser = _parser()
     args = parser.parse_args(argv)

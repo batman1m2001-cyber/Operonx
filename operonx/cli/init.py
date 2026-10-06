@@ -9,8 +9,9 @@ template adds or replaces. A file there is ``<path>.tmpl``; a leading
 ``{{summary}}`` are filled in; nothing else is, so Python braces need
 no escaping.
 
-The project also gets ``.operonx/guide/``, the installed guide, so an
-assistant reads it beside the code (what ``operonx guide --sync`` writes).
+The project also gets ``.operonx/guide/``, the guides of every installed
+operonx package, so an assistant reads them beside the code (what
+``operonx guide`` writes).
 """
 
 from __future__ import annotations
@@ -153,7 +154,7 @@ def plan(
 ) -> Dict[str, bytes]:
     """Every file *template* writes for a project called *name*, by path.
     With *editable*, the project's operonx is that checkout."""
-    from operonx import __version__, guide
+    from operonx import __version__
 
     if template not in TEMPLATES:
         raise InitError(f"no template {template!r} (have: {', '.join(TEMPLATES)})")
@@ -178,10 +179,6 @@ def plan(
         for src in sorted(base.rglob("*.tmpl")):
             text = src.read_text(encoding="utf-8")
             files[_target(src.relative_to(base))] = _render(text, values).encode("utf-8")
-    copy = guide.COPY_DIR.as_posix()
-    for page in guide.pages():
-        files[f"{copy}/{page.name}"] = page.read_bytes()
-    files[f"{copy}/VERSION"] = f"{__version__}\n".encode()
     return files
 
 
@@ -217,4 +214,7 @@ def init_project(
             result.created.append(rel)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
+    from operonx import guide
+
+    guide.sync(root)  # generated, so always current — never "kept"
     return result

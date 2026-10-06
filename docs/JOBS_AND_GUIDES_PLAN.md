@@ -395,6 +395,8 @@ uv add operonx-agents operonx-kb               # then any operonx command, or:
 uv run operonx guide                           # → core + agents + kb, one index
 ```
 
+**Status: built in operonx 1.17.1 (agents 0.1.4, kb 0.2.5); the gate below passed.** Auto-sync runs only where the project already has a `.operonx/guide/` copy, so a project that never ran `init` or `operonx guide` is never written to.
+
 Phase **B1**: entry points and sync in core, the AGENTS.md block, init
 template. Phase **B2**: move page 09 to agents, write the KB page, add each
 package's snippet tests. Gate: in a fresh folder, `init` → `uv add

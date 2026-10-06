@@ -204,28 +204,28 @@ class TestForCodingAssistants:
             ".env",
             "print()",
             "LOGGER",
-            "operonx guide --sync",
+            "operonx guide",
+            guide.AGENTS_BEGIN,
             "pytest",
             "operonx serve",
         ):
             assert must in agents, must
         assert (root / "CLAUDE.md").read_text().strip() == "@AGENTS.md"
 
-    def test_agents_md_names_every_guide_page(self, project):
-        """It listed pages 01-05 and left out 06, failures, when it shipped."""
-        from operonx.guide import pages
-
+    def test_agents_md_block_names_the_installed_packages(self, project):
         _, root = project
         agents = (root / "AGENTS.md").read_text()
-        missing = [p.name for p in pages() if p.name != "README.md" and p.name not in agents]
-        assert missing == []
+        assert guide.agents_block() in agents
+        assert f"operonx {operonx.__version__}" in agents
 
-    def test_the_guide_copy_is_the_installed_guide(self, project):
+    def test_the_guide_copy_is_the_installed_guides(self, project):
         _, root = project
         copy = root / ".operonx" / "guide"
         for page in guide.pages():
-            assert (copy / page.name).read_bytes() == page.read_bytes(), page.name
-        assert (copy / "VERSION").read_text().strip() == operonx.__version__
+            assert (copy / "core" / page.name).read_bytes() == page.read_bytes(), page.name
+        index = (copy / "README.md").read_text()
+        assert f"core={operonx.__version__}" in index and "core/01-ops.md" in index
+        assert guide.changes(root) == []
 
 
 class TestInit:
@@ -298,39 +298,76 @@ class TestInit:
 
 
 class TestGuide:
-    def test_prints_the_index(self, capsys):
-        assert main(["guide"]) == 0
-        assert capsys.readouterr().out == (guide.path() / "README.md").read_text(encoding="utf-8")
-
     def test_path(self, capsys):
         assert main(["guide", "--path"]) == 0
         assert capsys.readouterr().out.strip() == str(guide.path())
 
-    def test_sync_copies_the_guide_and_writes_the_version(self, tmp_path, capsys):
+    def test_sync_rewrites_a_stale_copy_and_says_what_changed(self, tmp_path, capsys):
         root = tmp_path / "p"
         _init(capsys, root)
         copy = root / ".operonx" / "guide"
-        (copy / "VERSION").write_text("0.0.1\n")
-        (copy / "README.md").write_text("stale")
-        (copy / "99-gone.md").write_text("a page the new version dropped")
-        assert main(["guide", "--sync", str(root)]) == 0
-        assert (copy / "VERSION").read_text().strip() == operonx.__version__
-        assert (copy / "README.md").read_bytes() == (guide.path() / "README.md").read_bytes()
-        assert not (copy / "99-gone.md").exists()
-        assert sorted(p.name for p in copy.iterdir()) == sorted(
-            [p.name for p in guide.pages()] + ["VERSION"]
+        index = (copy / "README.md").read_text()
+        (copy / "README.md").write_text(
+            index.replace(f"core={operonx.__version__}", "core=0.0.1 gone=1.0")
         )
-        assert str(copy) in capsys.readouterr().out
+        (copy / "gone").mkdir()
+        (copy / "gone" / "01-x.md").write_text("a package no longer installed")
+        (copy / "core" / "99-gone.md").write_text("a page the new version dropped")
+        assert main(["guide", "--check", str(root)]) == 1
+        assert "core 0.0.1 → " in capsys.readouterr().err
+        assert main(["guide", str(root)]) == 0
+        out = capsys.readouterr().out
+        assert f"core 0.0.1 → {operonx.__version__}" in out and "-gone" in out
+        assert not (copy / "gone").exists() and not (copy / "core" / "99-gone.md").exists()
+        assert guide.changes(root) == []
+        assert main(["guide", "--check", str(root)]) == 0
+        assert main(["guide", str(root)]) == 0
+        assert "up to date" in capsys.readouterr().out  # twice changes nothing
+
+    def test_the_old_flat_copy_is_replaced(self, tmp_path, capsys):
+        root = tmp_path / "p"
+        _init(capsys, root)
+        copy = root / ".operonx" / "guide"
+        for p in list(copy.rglob("*"))[::-1]:
+            p.rmdir() if p.is_dir() else p.unlink()
+        (copy / "01-ops.md").write_text("old layout")
+        (copy / "VERSION").write_text("1.16.0\n")
+        assert main(["guide", str(root)]) == 0
+        assert sorted(p.name for p in copy.iterdir()) == ["README.md", "core"]
 
     def test_sync_defaults_to_the_project_above_here(self, tmp_path, capsys, monkeypatch):
         root = tmp_path / "p"
         _init(capsys, root)
-        (root / ".operonx" / "guide" / "VERSION").write_text("0.0.1\n")
+        (root / ".operonx" / "guide" / "core" / "01-ops.md").write_text("edited")
         monkeypatch.chdir(root / "src")
-        assert main(["guide", "--sync"]) == 0
-        assert (root / ".operonx" / "guide" / "VERSION").read_text().strip() == (
-            operonx.__version__
-        )
+        assert main(["guide"]) == 0
+        assert (root / ".operonx" / "guide" / "core" / "01-ops.md").read_bytes() == (
+            guide.path() / "01-ops.md"
+        ).read_bytes()
+
+    def test_outside_a_project_it_says_so(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert main(["guide"]) == 2
+        assert "operonx.toml" in capsys.readouterr().err
+
+    def test_agents_md_gets_the_block_once_and_keeps_the_rest(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("# mine\n\nmy rules\n")
+        guide.sync(tmp_path)
+        text = (tmp_path / "AGENTS.md").read_text()
+        assert text.startswith("# mine\n\nmy rules\n") and guide.agents_block() in text
+        guide.sync(tmp_path)
+        assert (tmp_path / "AGENTS.md").read_text() == text
+
+    def test_another_command_syncs_a_stale_copy(self, tmp_path, capsys, monkeypatch):
+        from operonx.cli import main as cli
+
+        root = tmp_path / "p"
+        _init(capsys, root)
+        (root / ".operonx" / "guide" / "core" / "01-ops.md").write_text("stale")
+        monkeypatch.chdir(root)
+        cli._autosync()
+        assert "guide: pages changed" in capsys.readouterr().err
+        assert guide.changes(root) == []
 
     def test_path_and_sync_together_are_refused(self, capsys):
         with pytest.raises(SystemExit) as exc:

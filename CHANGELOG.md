@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-10-06
+
+### Changed
+
+- **The guide follows the installed packages.** Each operonx package ships its own guide and
+  registers it under the `operonx.guides` entry point (operonx-agents 0.1.4: `agents`; operonx-kb
+  0.2.5: `kb`, a new page). A project's `.operonx/guide/` holds one folder per installed package
+  plus a generated `README.md` index; a sync adds, updates and removes folders to match.
+- `operonx guide [DIR]` syncs (it printed the index before); `--check` exits 1 when the copy is
+  stale, for CI; `--sync` is still accepted. Any `operonx run|serve|play|eval` inside a project
+  with a guide copy syncs a stale one first and says so in one line on stderr.
+- `AGENTS.md` keeps a marked `<!-- operonx:guide -->` block naming the installed packages; it is
+  appended once to an existing `AGENTS.md`, and the rest of the file is never touched.
+- Guide page 09 (agents) moved to operonx-agents (`agents/01-agents.md`).
+- `operonx.guide.testing`: the snippet runner and stand-in model, for a package to test its own
+  guide.
+
 ## [1.17.0] - 2026-10-06
 
 ### Changed
@@ -3125,7 +3142,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.1...HEAD
+[1.17.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.0...v1.17.1
 [1.17.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.16.0...v1.17.0
 [1.16.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.14.0...v1.15.0

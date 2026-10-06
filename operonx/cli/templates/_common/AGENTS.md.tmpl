@@ -6,12 +6,10 @@ services and jobs.
 
 ## Before you write code
 
-1. Read `.operonx/guide/README.md`. It is the guide for the installed
-   operonx, and every example in it is tested against that version.
-2. Before you use an operonx API, re-read the guide page that covers it:
-   `01-ops.md`, `02-composition.md`, `03-control-flow.md`, `04-gotchas.md`,
-   `05-project-layout.md`, `06-failures.md`, `07-evals.md`, `08-runs.md`,
-   `09-agents.md`.
+1. Read `.operonx/guide/README.md`. It indexes the guide of every installed
+   operonx package (core, and operonx-agents or operonx-kb when added), and
+   every example in them is tested against the installed version.
+2. Before you use an operonx API, re-read the guide page that covers it.
    Do not write an operonx API from memory.
 3. Read `app/main.py`. It is the map of the product.
 
@@ -85,5 +83,10 @@ uv run operonx run NAME       # run one job
 - Never `print()`. Log with `from operonx.core.loggings import LOGGER`.
 - An op that raises does not raise: the run's result has `"$errors"`.
   Check for it.
-- After upgrading operonx, run `operonx guide --sync` and re-read
-  `.operonx/guide/README.md`.
+- After adding or upgrading an operonx package, run `operonx guide` and
+  re-read `.operonx/guide/README.md`.
+
+## operonx guides
+
+<!-- operonx:guide -->
+<!-- /operonx:guide -->
