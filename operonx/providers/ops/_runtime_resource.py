@@ -22,7 +22,9 @@ __all__ = ["take_resource", "per_call", "RESOURCE_PARAM"]
 RESOURCE_PARAM = Param(type=str, required=True)
 
 
-def take_resource(resource: Any, inputs: Optional[Dict[str, Any]]) -> Tuple[Any, Optional[dict], bool]:
+def take_resource(
+    resource: Any, inputs: Optional[Dict[str, Any]]
+) -> Tuple[Any, Optional[dict], bool]:
     """``(static resource, inputs, dynamic)``: a ``Ref`` resource becomes the ``resource`` input."""
     if isinstance(resource, Ref):
         merged = dict(inputs or {})

@@ -21,6 +21,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 src = ["src", "."]  # the features and `app` are first-party
+extend-exclude = [".operonx"]  # generated: the guides `operonx guide` copies in
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]

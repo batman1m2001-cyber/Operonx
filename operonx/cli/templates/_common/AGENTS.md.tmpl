@@ -39,11 +39,13 @@ builds a graph in a nested `def` and returns it:
 def build_answer_flow(answer, k=8):
     @graph
     def answer_flow(): ...
+
     return answer_flow
+
 
 # yes
 @graph
-def answer_flow(question, k):          # a setting is a graph input
+def answer_flow(question, k):  # a setting is a graph input
     ...
 ```
 
