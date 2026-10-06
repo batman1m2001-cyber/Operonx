@@ -337,6 +337,10 @@ class Model:
                                 emitted = True
                                 yield delta
                         reply = acc.response(resource, llm)
+                        if acc.empty:
+                            # No text, no tool call, no stop reason: the gateway did not
+                            # answer (one that ignores `stream: true`, say), never ""
+                            raise RuntimeError("the stream ended with no reply")
                         _record(rec, llm, resource, reply, reply.usage)
                 except Exception as exc:  # noqa: BLE001
                     if emitted:
@@ -542,6 +546,11 @@ class _StreamAcc:
         # without it costs no AttributeError.
         extra = getattr(delta, "model_extra", None)
         return text, (extra.get("reasoning_content") if extra else None) or ""
+
+    @property
+    def empty(self) -> bool:
+        """Nothing that makes a reply arrived."""
+        return not (self.text or self.calls or self.finish_reason)
 
     def response(self, resource: str, llm: Any) -> ModelResponse:
         return ModelResponse(

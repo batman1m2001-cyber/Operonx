@@ -92,6 +92,22 @@ class TestStreaming:
         assert got[:2] == ["Mon", "day."]
         assert got[-1].content == "Monday." and got[-1].model_used == "b"
 
+    async def test_a_stream_with_no_reply_is_a_failed_attempt(self, hub):
+        """A gateway that answers a streamed request with nothing (no text, no
+        tool call, no stop reason) failed: the next resource answers."""
+        hub(
+            a=ScriptedLLM(stream_script=[chunk()]),
+            b=ScriptedLLM(stream_script=[chunk("Monday."), chunk(finish_reason="stop")]),
+        )
+        got = [p async for p in Model("a", fallback=["b"]).stream(MSGS)]
+        assert got[-1].content == "Monday." and got[-1].model_used == "b"
+
+    async def test_a_stream_with_no_reply_is_never_an_empty_answer(self, hub):
+        hub(a=ScriptedLLM(stream_script=[chunk()]))
+        with pytest.raises(ModelError, match="the stream ended with no reply"):
+            async for _ in Model("a").stream(MSGS):
+                pass
+
 
 class TestDeadline:
     async def test_covers_the_whole_chain(self, hub):
