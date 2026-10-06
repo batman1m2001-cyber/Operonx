@@ -3,6 +3,7 @@
     uv run python scripts/bench_k4.py WORK [--sets vi_public,xquad_vi,xquad_en,corpus_vi]
         [--llm gpt-4o-mini --llm-resources ../../resources.yaml --env ../../.env]
         [--tree-cases 100] [--embeddings OLD_CATALOG.db ...] [--budget 8]
+        [--cases 100 --docs 150]
 
 For each set (built by ``scripts/prepare_eval.py`` / ``prepare_vi_public.py`` under
 ``WORK/sets`` when missing), two collections over the same files, chunker,
@@ -23,6 +24,13 @@ Then, with operonx ``Eval`` and the KB's evaluators:
 3. the model's tokens and USD for every ingest stage (from the ingest reports)
    and per tree query (from the ``LLMOp`` spans of the eval's traces), priced at
    gpt-4o-mini's list prices unless the resource carries its own.
+
+``--cases N`` makes it a sample: N cases per set (a fixed seed) over a corpus of the
+documents their labels cite, every document an earlier run already ingested (its
+model calls are cached, so it is free), then random distractors up to ``--docs``.
+Both collections of a set get the same sample, so every comparison stays paired; the
+model calls of ingest (a tree per document, a context per chunk) follow the corpus,
+which is where nearly all of them are. The sample is recorded in ``k4.json``.
 
 ``--embeddings`` copies the embedding cache of earlier runs' catalogs (the K2 and
 D5 work folders) into this one, so the baseline's chunks are not embedded again.
@@ -225,6 +233,36 @@ def retarget(cases: Path, collection: str, out: Path) -> Path:
     return out
 
 
+def sample_set(kb, name: str, sets_dir: Path, work: Path, n_cases: int, n_docs: int):
+    """A sample of a set (see ``--cases``): ``(cases, corpus, summary)``, linked under
+    ``WORK/sample/<name>``."""
+    rows = [json.loads(line) for line in (sets_dir / name / "cases.jsonl").read_text("utf-8").splitlines()
+            if line.strip()]  # fmt: skip
+    picked = random.Random(4).sample(rows, min(n_cases, len(rows)))
+    files = {p.name: p for p in (sets_dir / name / "corpus").iterdir() if p.is_file()}
+    cited = {r["doc_key"] for row in picked for r in row["expected"].get("relevant", [])}
+    try:
+        done = {d.key for d in kb.documents(name)}  # ingested by an earlier run: cached
+    except Exception:  # noqa: BLE001 — no such collection yet
+        done = set()
+    keep = sorted((cited | done) & set(files))
+    rest = sorted(set(files) - set(keep))
+    extra = random.Random(4).sample(rest, max(0, min(len(rest), n_docs - len(keep))))
+    root = work / "sample" / name
+    corpus = root / "corpus"
+    corpus.mkdir(parents=True, exist_ok=True)
+    for old in corpus.iterdir():
+        old.unlink()
+    for key in keep + extra:
+        (corpus / key).symlink_to(files[key].resolve())
+    cases = root / "cases.jsonl"
+    cases.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in picked), "utf-8")
+    summary = {"cases": len(picked), "of_cases": len(rows), "documents": len(keep) + len(extra),
+               "of_documents": len(files), "cited": len(cited & set(files)),
+               "already_ingested": len(done & set(files))}  # fmt: skip
+    return cases, corpus, summary
+
+
 def lift(cmp: Dict[str, Any]) -> str:
     """``lift`` / ``loss`` when significant at 0.05, else ``noise``."""
     if cmp["p"] < 0.05:
@@ -294,6 +332,13 @@ async def main(args) -> None:
         row = results["sets"].setdefault(name, {})
         cases = sets_dir / name / "cases.jsonl"
         corpus = sets_dir / name / "corpus"
+        if args.cases:
+            cases, corpus, row["sample"] = sample_set(
+                kb, name, sets_dir, work, args.cases, args.docs
+            )
+            log(f"sample {name}: {row['sample']}")
+        else:
+            row.pop("sample", None)
         for coll, contextual, key in ((name, False, "ingest"), (f"{name}_ctx", True, "ingest_ctx")):
             kb.create_collection(coll, spec(name, args.llm, contextual))
             log(f"ingest {coll}")
@@ -388,6 +433,13 @@ if __name__ == "__main__":
         nargs="*",
         default=[],
         help="catalogs to copy the embedding cache from",
+    )
+    ap.add_argument("--cases", type=int, default=0, help="sample this many cases per set (0: all)")
+    ap.add_argument(
+        "--docs",
+        type=int,
+        default=150,
+        help="with --cases: documents per set, distractors included",
     )
     ap.add_argument("--concurrency", type=int, default=4, help="documents ingested at once")
     ap.add_argument(
