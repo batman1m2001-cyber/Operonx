@@ -106,40 +106,48 @@ def engine_floor(question=None):
     START >> n >> END
 
 
+#: The agent the run being measured talks to: module-level graphs read it here, so
+#: no graph is built inside a function (operonx guide 05).
+CURRENT: Dict[str, Agent] = {}
+
+
+@op
+async def support(question: str) -> dict:
+    res = await Runner.run(CURRENT["agent"], question)
+    return {"turns": res.turns, "messages": res.messages}
+
+
+@graph
+def chat(question=None):
+    s = support(question=question)
+    START >> s >> END
+
+
+@op
+async def support_streamed(question: str) -> dict:
+    async for event in Runner.stream(CURRENT["agent"], question):
+        pass
+    res = event.result
+    return {"turns": res.turns, "messages": res.messages}
+
+
+@graph
+def chat_streamed(question=None):
+    s = support_streamed(question=question)
+    START >> s >> END
+
+
 def runner(variant: str, agent: Agent) -> Callable[[], Any]:
+    CURRENT["agent"] = agent
     if variant == "engine":
         engine = Operon(engine_floor, params={"question": None})
         return lambda: engine.run({"question": USER})
     if variant == "direct":
         return lambda: Runner.run(agent, USER)
     if variant == "runner":
-
-        @op
-        async def support(question: str) -> dict:
-            res = await Runner.run(agent, question)
-            return {"turns": res.turns, "messages": res.messages}
-
-        @graph
-        def chat(question=None):
-            s = support(question=question)
-            START >> s >> END
-
         engine = Operon(chat, params={"question": None})
         return lambda: engine.run({"question": USER})
     if variant == "stream":
-
-        @op
-        async def support_streamed(question: str) -> dict:
-            async for event in Runner.stream(agent, question):
-                pass
-            res = event.result
-            return {"turns": res.turns, "messages": res.messages}
-
-        @graph
-        def chat_streamed(question=None):
-            s = support_streamed(question=question)
-            START >> s >> END
-
         engine = Operon(chat_streamed, params={"question": None})
         return lambda: engine.run({"question": USER})
     raise ValueError(f"unknown variant {variant!r}; one of engine, direct, runner, stream")
@@ -161,16 +169,7 @@ def checker(variant: str, turns: int, calls: int) -> Callable[[Any], None]:
 
 
 async def trace_check(agent: Agent, turns: int, calls: int) -> int:
-    @op
-    async def support(question: str) -> dict:
-        res = await Runner.run(agent, question)
-        return {"turns": res.turns}
-
-    @graph
-    def chat(question=None):
-        s = support(question=question)
-        START >> s >> END
-
+    CURRENT["agent"] = agent
     handle = Operon(chat, params={"question": None}).start({"question": USER})
     await handle.result()
     names = [n.op_name for n in handle.trace.nodes]

@@ -1,6 +1,7 @@
 # AGENTS.md — operonx-agents
 
-Typed LLM steps and agents on **operonx** (editable from `../Operon`). Read the operonx guide
+Typed LLM steps and agents on **operonx** (editable from `../Operon`). Users import it as
+`operonx.agents` (operonx >= 1.16 aliases this package); inside the package, `operonx_agents`. Read the operonx guide
 (`../Operon/operonx/guide/`, then `09-agents.md`) before using an operonx API; do not write one
 from memory.
 

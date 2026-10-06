@@ -18,8 +18,8 @@ from operonx_agents import Choice, Model, ModelSettings, llm_step
 from scripts.shadow_replay import CALLBOT_ENV, RESOURCES, control, pct, recorded_turns
 
 
-def mk(logprobs):
-    s = llm_step(
+def _step(logprobs):
+    return llm_step(
         model=Model("inhouse", deadline=0.9, settings=ModelSettings(logprobs=logprobs)),
         system="{analyzer_system_prompt}",
         user="{intent_prompt}",
@@ -28,11 +28,27 @@ def mk(logprobs):
         on_invalid="fallback",
     )
 
-    @graph
-    def g(system=None, user=None, allowed=None):
-        llm_classify = s(analyzer_system_prompt=system, intent_prompt=user, allowed_intents=allowed)
-        START >> llm_classify >> END
 
+STEP_LP, STEP_NOLP = _step(True), _step(False)
+
+
+@graph
+def step_lp(system=None, user=None, allowed=None):
+    llm_classify = STEP_LP(
+        analyzer_system_prompt=system, intent_prompt=user, allowed_intents=allowed
+    )
+    START >> llm_classify >> END
+
+
+@graph
+def step_nolp(system=None, user=None, allowed=None):
+    llm_classify = STEP_NOLP(
+        analyzer_system_prompt=system, intent_prompt=user, allowed_intents=allowed
+    )
+    START >> llm_classify >> END
+
+
+def mk(g):
     return Operon(g, params={"system": None, "user": None, "allowed": None})
 
 
@@ -45,8 +61,8 @@ async def main():
     llm = ResourceHub.instance().get("llm:inhouse")
     eng = {
         "control": Operon(control, params={"system": None, "user": None}),
-        "step_lp": mk(True),
-        "step_nolp": mk(False),
+        "step_lp": mk(step_lp),
+        "step_nolp": mk(step_nolp),
     }
 
     async def raw_native(t):
