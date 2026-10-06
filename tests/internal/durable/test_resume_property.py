@@ -134,27 +134,28 @@ def counter(limit):
     START >> s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
 
 
-def _flow(parallel: bool):
-    @graph
-    def flow(n, fail, limit):
-        PARENT.declare(acc=[], reducers={"acc": operator.add})
-        g = items(n=n, fail=fail)
-        w = work(i=g["i"].parallel() if parallel else g["i"], fail=g["fail"])
-        w["acc"] >> PARENT["acc"]
-        r = rescue()
-        w.on_error(r)
-        c = gather(vals=w["v"].collect())
-        k = check(total=c["total"])
-        b, s = big(total=c["total"]), small(total=c["total"])
-        m = merge(big_label=b["label"], small_label=s["label"])
-        sub = inner(label=m["label"])
-        loop = counter(limit=limit)
-        START >> g >> w >> c >> k >> if_(k["big"] == True, b).else_(s)  # noqa: E712
-        b >> m
-        s >> m
-        m >> sub >> loop >> END
+@graph
+def flow(n, fail, limit, parallel=False):
+    PARENT.declare(acc=[], reducers={"acc": operator.add})
+    g = items(n=n, fail=fail)
+    w = work(i=g["i"].parallel() if parallel else g["i"], fail=g["fail"])  # topology, at build
+    w["acc"] >> PARENT["acc"]
+    r = rescue()
+    w.on_error(r)
+    c = gather(vals=w["v"].collect())
+    k = check(total=c["total"])
+    b, s = big(total=c["total"]), small(total=c["total"])
+    m = merge(big_label=b["label"], small_label=s["label"])
+    sub = inner(label=m["label"])
+    loop = counter(limit=limit)
+    START >> g >> w >> c >> k >> if_(k["big"] == True, b).else_(s)  # noqa: E712
+    b >> m
+    s >> m
+    m >> sub >> loop >> END
 
-    return flow
+
+def _flow(parallel: bool):
+    return flow(n=None, fail=None, limit=None, parallel=parallel)
 
 
 def _outcome(out: dict, state, parallel: bool) -> dict:
@@ -172,7 +173,7 @@ def _outcome(out: dict, state, parallel: bool) -> dict:
 
 async def _uninterrupted(parallel, inputs):
     RAN.clear()
-    out = await Operon(_flow(parallel), params={"n": None, "fail": None, "limit": None}).run(inputs)
+    out = await Operon(_flow(parallel)).run(inputs)
     return _outcome(out, out["$state"], parallel), sum(RAN.values())
 
 
@@ -180,7 +181,6 @@ async def _stopped_then_resumed(parallel, inputs, after):
     journal = StoppingJournal(after)
     engine = Operon(
         _flow(parallel),
-        params={"n": None, "fail": None, "limit": None},
         journal=journal,
         durability="sync",
     )
@@ -244,7 +244,6 @@ async def _drained_then_resumed(parallel, inputs, after):
     journal = DrainingJournal(after)
     engine = Operon(
         _flow(parallel),
-        params={"n": None, "fail": None, "limit": None},
         journal=journal,
         durability="sync",  # append runs in a worker thread
     )

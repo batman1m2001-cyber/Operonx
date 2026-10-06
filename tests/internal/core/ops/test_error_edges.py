@@ -170,27 +170,27 @@ def other(x):
     START >> n >> END
 
 
+@graph
+def handler_on_start(x):
+    n = note()
+    START.on_error(n)
+
+
+@graph
+def handler_on_branch(x):
+    b_ = boom(x=x)
+    n = note()
+    route = if_(b_["y"] == 1, n).else_(n)
+    START >> b_ >> route
+    route.on_error(n)
+
+
 def test_on_error_wiring_is_checked():
     with pytest.raises(TypeError, match="sentinel"):
-
-        @graph
-        def a(x):
-            n = note()
-            START.on_error(n)
-
-        a(x=1)
+        handler_on_start(x=1)
 
     with pytest.raises(TypeError, match="branch"):
-
-        @graph
-        def b(x):
-            b_ = boom(x=x)
-            n = note()
-            route = if_(b_["y"] == 1, n).else_(n)
-            START >> b_ >> route
-            route.on_error(n)
-
-        b(x=1)
+        handler_on_branch(x=1)
 
     with pytest.raises(ValueError, match="same graph"):
 
