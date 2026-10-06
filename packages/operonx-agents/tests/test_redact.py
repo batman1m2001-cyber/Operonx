@@ -206,18 +206,23 @@ async def call_api(url: str, token: str) -> str:
     return "200 OK"
 
 
-def traced(agent, trace=None):
-    @op
-    async def chat(question: str) -> dict:
-        res = await Runner.run(agent, question, store=InMemoryStateStore())
-        return {"answer": res.output, "status": res.status}
+@op(exclude={"trace": ["agent"]})
+async def chat(agent, question: str) -> dict:
+    """The agent a test built, run as one step."""
+    res = await Runner.run(agent, question, store=InMemoryStateStore())
+    return {"answer": res.output, "status": res.status}
 
-    @graph
-    def flow(question):
-        c = chat(question=question)
-        START >> c >> END
 
-    return Operon(flow, params={"question": None}, trace=trace)
+@graph
+def chatted(agent, question):
+    c = chat(agent=agent, question=question)
+    START >> c >> END
+
+
+def start(agent, question, trace=None, **kwargs):
+    """One run of ``chatted`` for ``agent``: the handle."""
+    engine = Operon(chatted, params={"agent": None, "question": None}, trace=trace)
+    return engine.start({"agent": agent, "question": question}, **kwargs)
 
 
 class TestWhereItApplies:
@@ -227,7 +232,7 @@ class TestWhereItApplies:
 
     async def test_the_run_scrubs_nothing_in_memory(self, hub):
         agent, _ = make(hub, asks(("read_env", {})), says("done"), tools=[read_env])
-        handle = traced(agent).start({"question": "go"})
+        handle = start(agent, "go")
         await handle.result()
         tool_record = next(n for n in handle.trace.nodes if n.op_name == "read_env")
         assert SECRET in tool_record.outputs["tool_message"]["content"]
@@ -237,7 +242,7 @@ class TestWhereItApplies:
         """The run's input is on its first turn's record (what a dataset made
         from runs replays), scrubbed where the trace leaves the process."""
         agent, _ = make(hub, asks(("read_env", {})), says("done"), tools=[read_env])
-        handle = traced(agent).start({"question": f"my key is {SECRET}"})
+        handle = start(agent, f"my key is {SECRET}")
         await handle.result()
         first, second = [n for n in handle.trace.nodes if n.op_name == "turn"]
         assert first.inputs["input"] == [{"role": "user", "content": f"my key is {SECRET}"}]
@@ -249,7 +254,7 @@ class TestWhereItApplies:
 
         agent, _ = make(hub, asks(("read_env", {})), says(f"it is {SECRET}"), tools=[read_env])
         store = SqliteRunStore(path=tmp_path / "runs.sqlite")
-        handle = traced(agent, trace=store).start({"question": "go"}, trace_id="redact-a4")
+        handle = start(agent, "go", trace=store, trace_id="redact-a4")
         await handle.collect()
         rows = [r for r in store.get_run("redact-a4").nodes if r["op_name"] != "c"]
         assert sorted(r["op_name"] for r in rows) == ["model", "model", "read_env", "turn", "turn"]
@@ -258,7 +263,7 @@ class TestWhereItApplies:
 
     async def test_traces_are_scrubbed_by_default_and_the_model_reads_the_real_output(self, hub):
         agent, llm = make(hub, asks(("read_env", {})), says("done"), tools=[read_env])
-        handle = traced(agent).start({"question": f"my key is {SECRET}"})
+        handle = start(agent, f"my key is {SECRET}")
         assert (await handle.result())["answer"] == "done"
         mine = [n for n in handle.trace.nodes if n.op_name != "c"]  # `c` is the caller's op
         assert sorted(n.op_name for n in mine) == ["model", "model", "read_env", "turn", "turn"]
@@ -273,7 +278,7 @@ class TestWhereItApplies:
 
     async def test_redact_none_records_as_is(self, hub):
         agent, _ = make(hub, asks(("read_env", {})), says("done"), tools=[read_env], redact=None)
-        handle = traced(agent).start({"question": "go"})
+        handle = start(agent, "go")
         await handle.result()
         tool_record = next(n for n in handle.trace.nodes if n.op_name == "read_env")
         assert SECRET in tool_record.exported()[1]["tool_message"]["content"]
@@ -329,7 +334,7 @@ class TestWhereItApplies:
             tools=[read_env],
             context=ContextPolicy(window=1000, keep_recent=1, summarizer=Model("s")),
         )
-        handle = traced(agent).start({"question": "go"})
+        handle = start(agent, "go")
         assert (await handle.result())["status"] == "completed"
         assert summarizer.calls == 1 and SECRET in summarizer.requests[0]["messages"][0]["content"]
         mine = [n for n in handle.trace.nodes if n.op_name != "c"]
@@ -340,7 +345,7 @@ class TestWhereItApplies:
     async def test_a_model_repeating_a_secret_is_scrubbed_in_its_record(self, hub):
         args = {"text": f"token: {SECRET}"}
         agent, _ = make(hub, asks(("note", args)), says(f"saved {SECRET}"))
-        handle = traced(agent).start({"question": "go"})
+        handle = start(agent, "go")
         assert (await handle.result())["answer"] == f"saved {SECRET}", "the run is untouched"
         models = [n for n in handle.trace.nodes if n.op_name == "model"]
         assert SECRET not in json.dumps([n.exported()[1] for n in models], default=str)

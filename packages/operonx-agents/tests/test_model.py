@@ -11,7 +11,7 @@ from pathlib import Path
 import httpx
 import pytest
 from openai.types.chat import ChatCompletion
-from operonx import END, START, Operon, graph, op
+from operonx import END, START, Operon, child, graph, op
 
 from operonx_agents import Model, ModelError, ModelRefused, ModelSettings, ModelTimeout, Usage
 from tests.fakes import ScriptedLLM, StatusError, chunk, completion
@@ -183,6 +183,36 @@ class TestUsage:
         assert (usage.input_tokens, usage.output_tokens, usage.requests) == (12, 3, 2)
 
 
+FALLBACK = Model("a", fallback=["b"])
+
+
+@op
+async def ask_once(q: str) -> dict:
+    return {"text": (await FALLBACK.request([{"role": "user", "content": q}])).content}
+
+
+@graph
+def asked(q):
+    s = ask_once(q=q)
+    START >> s >> END
+
+
+@op
+async def spoken(q: str) -> dict:
+    text = ""
+    async for piece in FALLBACK.stream([{"role": "user", "content": q}]):
+        if isinstance(piece, str):
+            async with child("speak", inputs={"text": piece}):
+                text += piece
+    return {"text": text}
+
+
+@graph
+def streamed(q):
+    s = spoken(q=q)
+    START >> s >> END
+
+
 class TestRequest:
     async def test_settings_and_extras_reach_the_backend(self, hub):
         llm = ScriptedLLM(completion("ok"))
@@ -204,18 +234,7 @@ class TestRequest:
 
     async def test_each_resource_tried_is_a_child_execution(self, hub):
         hub(a=ScriptedLLM(StatusError(503)), b=ScriptedLLM(completion("ok")))
-        model = Model("a", fallback=["b"])
-
-        @op
-        async def step(q: str) -> dict:
-            return {"text": (await model.request([{"role": "user", "content": q}])).content}
-
-        @graph
-        def flow(q):
-            s = step(q=q)
-            START >> s >> END
-
-        handle = Operon(flow, params={"q": None}).start({"q": "hi"})
+        handle = Operon(asked, params={"q": None}).start({"q": "hi"})
         assert (await handle.result())["text"] == "ok"
         calls = [n for n in handle.trace.nodes if n.op_type == "llm"]
         assert [(n.op_name, n.status) for n in calls] == [("model", "error"), ("model", "ok")]
@@ -226,29 +245,11 @@ class TestRequest:
     async def test_a_stream_records_each_resource_tried_and_its_consumer_stays_outside(self, hub):
         """The stream's record stays open across its yields; the consumer's
         own steps between the yields are its siblings, not its children."""
-        from operonx import child
-
         hub(
             a=ScriptedLLM(stream_script=[ConnectionError("refused")]),
             b=ScriptedLLM(completion("Monday then Tuesday.")),
         )
-        model = Model("a", fallback=["b"])
-
-        @op
-        async def step(q: str) -> dict:
-            text = ""
-            async for piece in model.stream([{"role": "user", "content": q}]):
-                if isinstance(piece, str):
-                    async with child("speak", inputs={"text": piece}):
-                        text += piece
-            return {"text": text}
-
-        @graph
-        def flow(q):
-            s = step(q=q)
-            START >> s >> END
-
-        handle = Operon(flow, params={"q": None}).start({"q": "hi"})
+        handle = Operon(streamed, params={"q": None}).start({"q": "hi"})
         assert (await handle.result())["text"] == "Monday then Tuesday."
         nodes = handle.trace.nodes
         calls = [n for n in nodes if n.op_type == "llm"]

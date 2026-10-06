@@ -52,6 +52,17 @@ async def balance(account: str) -> str:
     return "1200"
 
 
+@op(exclude={"trace": ["agent"]})
+async def chat(agent, question: str) -> dict:
+    return {"answer": (await Runner.run(agent, question)).output}
+
+
+@graph
+def flow(agent, question):
+    c = chat(agent=agent, question=question)
+    START >> c >> END
+
+
 def billing_and_support(hub, parent_script, child_script):
     parent_llm, child_llm = ScriptedLLM(*parent_script), ScriptedLLM(*child_script)
     hub(p=parent_llm, b=child_llm)
@@ -155,17 +166,8 @@ class TestAgentAsTool:
             [asks(("ask_billing", {"task": "balance of 7"})), says("1200")],
             [asks(("balance", {"account": "7"})), says("1200")],
         )
-
-        @op
-        async def chat(question: str) -> dict:
-            return {"answer": (await Runner.run(support, question)).output}
-
-        @graph
-        def flow(question):
-            c = chat(question=question)
-            START >> c >> END
-
-        handle = Operon(flow, params={"question": None}).start({"question": "hi"})
+        inputs = {"agent": support, "question": "hi"}
+        handle = Operon(flow, params={"agent": None, "question": None}).start(inputs)
         assert (await handle.result())["answer"] == "1200"
         records = {n.op_id: n for n in handle.trace.nodes}
         tree = build_tree(handle.trace)
@@ -236,58 +238,52 @@ class TestAgentOp:
         )
 
 
+TELL = TELLER.as_op()
+REFUNDER = Agent(name="teller", model=Model("m"), tools=[refund])
+REFUND_STORE = InMemoryStateStore()
+
+
+@graph
+def told_by_factory(question):
+    t = TELL(input=question)
+    s = shout(output=t["output"], status=t["status"])
+    START >> t >> s >> END
+
+
+@graph
+def refund_asked(question):
+    t = AgentOp.of(agent=REFUNDER, store=REFUND_STORE, input=question)
+    START >> t >> END
+
+
+@graph
+def streamed(question):
+    t = AgentOp.of(agent=TELLER, stream=True, input=question)
+    e = EmitOp(payload=t["event"], channel="agent", transient=True)
+    START >> t >> e >> END
+
+
 class TestAgentAsOp:
     async def test_outputs_bind_downstream(self, hub):
         hub(m=ScriptedLLM(asks(("balance", {"account": "9"})), says("1200")))
-        agent = Agent(name="teller", model=Model("m"), tools=[balance])
-        teller = agent.as_op()
-
-        @op
-        def shout(output: str, status: str) -> dict:
-            return {"loud": f"{status}: {output.upper()}!"}
-
-        @graph
-        def flow(question):
-            t = teller(input=question)
-            s = shout(output=t["output"], status=t["status"])
-            START >> t >> s >> END
-
-        out = await Operon(flow, params={"question": None}).run({"question": "balance?"})
+        out = await Operon(told_by_factory, params={"question": None}).run({"question": "balance?"})
         assert out["loud"] == "completed: 1200!"
 
     async def test_an_interrupted_run_is_resumed_from_its_state_id(self, hub):
         hub(m=ScriptedLLM(asks(("refund", {"order_id": "A1", "amount": 5})), says("refunded")))
-        agent = Agent(name="teller", model=Model("m"), tools=[refund])
-        store = InMemoryStateStore()
-        teller = agent.as_op(store=store)
-
-        @graph
-        def flow(question):
-            t = teller(input=question)
-            START >> t >> END
-
-        out = await Operon(flow, params={"question": None}).run({"question": "refund"})
+        out = await Operon(refund_asked, params={"question": None}).run({"question": "refund"})
         assert out["status"] == "interrupted" and RAN == []
         (asked,) = out["interruptions"]
         assert asked["tool"] == "refund" and asked["path"] == ["teller"]
         done = await Runner.resume(
-            agent, out["state_id"], store=store, approvals={asked["id"]: Approve()}
+            REFUNDER, out["state_id"], store=REFUND_STORE, approvals={asked["id"]: Approve()}
         )
         assert (done.status, RAN) == ("completed", ["refund:A1:5"])
 
     async def test_streamed_events_reach_the_custom_stream(self, hub):
         hub(m=ScriptedLLM(asks(("balance", {"account": "9"})), says("It is 1200")))
-        agent = Agent(name="teller", model=Model("m"), tools=[balance])
-        teller = agent.as_op(stream=True)
-
-        @graph
-        def flow(question):
-            t = teller(input=question)
-            e = EmitOp(payload=t["event"], channel="agent", transient=True)
-            START >> t >> e >> END
-
         got = []
-        async for chunk in Operon(flow, params={"question": None}).stream(
+        async for chunk in Operon(streamed, params={"question": None}).stream(
             {"question": "balance?"}, mode="custom"
         ):
             got.append(chunk)
@@ -303,15 +299,7 @@ class TestAgentAsOp:
         """The op and the EmitOp are transient: one record for the stream,
         none per event; the trace stays agent → turn → model / tool."""
         hub(m=ScriptedLLM(asks(("balance", {"account": "9"})), says("It is 1200 and more")))
-        teller = Agent(name="teller", model=Model("m"), tools=[balance]).as_op(stream=True)
-
-        @graph
-        def flow(question):
-            t = teller(input=question)
-            e = EmitOp(payload=t["event"], channel="agent", transient=True)
-            START >> t >> e >> END
-
-        handle = Operon(flow, params={"question": None}).start({"question": "q"})
+        handle = Operon(streamed, params={"question": None}).start({"question": "q"})
         await handle.result()
         assert sorted(n.op_name for n in handle.trace.nodes) == [
             "balance", "model", "model", "t", "turn", "turn",

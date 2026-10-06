@@ -28,18 +28,91 @@ def classifier(**kw):
     return llm_step(**{**defaults, **kw})
 
 
-def engine(step):
-    @graph
-    def turn(analyzer_system_prompt, intent_prompt, allowed_intents):
-        classify = step(
-            analyzer_system_prompt=analyzer_system_prompt,
-            intent_prompt=intent_prompt,
-            allowed_intents=allowed_intents,
-        )
-        START >> classify >> END
+# One module-level graph per step configuration under test (operonx guide 05).
+STEP = classifier()
+WITH_LOGPROBS = classifier(settings=ModelSettings(logprobs=True))
+RETRIED = classifier(on_invalid="fallback", output_retries=1)
+SHORT_DEADLINE = classifier(model=Model("inhouse", deadline=0.1), on_timeout="fallback")
+DEGRADED = classifier(on_error={"value": "fallback", "confidence": 0.25})
+NO_DEADLINE = classifier(model=Model("inhouse"))
 
+
+@graph
+def turn(analyzer_system_prompt, intent_prompt, allowed_intents):
+    classify = STEP(
+        analyzer_system_prompt=analyzer_system_prompt,
+        intent_prompt=intent_prompt,
+        allowed_intents=allowed_intents,
+    )
+    START >> classify >> END
+
+
+@graph
+def turn_with_logprobs(analyzer_system_prompt, intent_prompt, allowed_intents):
+    classify = WITH_LOGPROBS(
+        analyzer_system_prompt=analyzer_system_prompt,
+        intent_prompt=intent_prompt,
+        allowed_intents=allowed_intents,
+    )
+    START >> classify >> END
+
+
+@graph
+def turn_retried(analyzer_system_prompt, intent_prompt, allowed_intents):
+    classify = RETRIED(
+        analyzer_system_prompt=analyzer_system_prompt,
+        intent_prompt=intent_prompt,
+        allowed_intents=allowed_intents,
+    )
+    START >> classify >> END
+
+
+@graph
+def turn_short_deadline(analyzer_system_prompt, intent_prompt, allowed_intents):
+    classify = SHORT_DEADLINE(
+        analyzer_system_prompt=analyzer_system_prompt,
+        intent_prompt=intent_prompt,
+        allowed_intents=allowed_intents,
+    )
+    START >> classify >> END
+
+
+@graph
+def turn_degraded(analyzer_system_prompt, intent_prompt, allowed_intents):
+    classify = DEGRADED(
+        analyzer_system_prompt=analyzer_system_prompt,
+        intent_prompt=intent_prompt,
+        allowed_intents=allowed_intents,
+    )
+    START >> classify >> END
+
+
+@graph
+def turn_no_deadline(analyzer_system_prompt, intent_prompt, allowed_intents):
+    classify = NO_DEADLINE(
+        analyzer_system_prompt=analyzer_system_prompt,
+        intent_prompt=intent_prompt,
+        allowed_intents=allowed_intents,
+    )
+    START >> classify >> END
+
+
+class Callback(BaseModel):
+    hour: int
+
+
+EXTRACT = llm_step(model=Model("m"), system="Extract the hour.", output=Callback)
+
+
+@graph
+def extracted(messages):
+    extract = EXTRACT(messages=messages)
+    START >> extract >> END
+
+
+def engine(graph_):
     return Operon(
-        turn,
+        graph_,
         params={"analyzer_system_prompt": None, "intent_prompt": None, "allowed_intents": None},
     )
 
@@ -59,7 +132,7 @@ async def test_ok(hub):
         structured_output="native",
     )
     hub(inhouse=llm)
-    out = await engine(classifier(settings=ModelSettings(logprobs=True))).run(INPUTS)
+    out = await engine(turn_with_logprobs).run(INPUTS)
     assert (out["value"], out["outcome"], out["error"]) == ("busy", "ok", None)
     assert out["confidence"] == pytest.approx(0.951, abs=1e-3)
     assert out["model_used"] == "inhouse" and out["usage"]["requests"] == 1
@@ -77,7 +150,7 @@ async def test_ok(hub):
 async def test_the_allow_list_is_read_per_call(hub):
     llm = ScriptedLLM(completion('{"intent": "agree"}'), structured_output="native")
     hub(inhouse=llm)
-    eng = engine(classifier())
+    eng = engine(turn)
     await eng.run({**INPUTS, "allowed_intents": ["agree"]})
     await eng.run({**INPUTS, "allowed_intents": ["agree", "busy"]})
     enums = [
@@ -90,7 +163,7 @@ async def test_the_allow_list_is_read_per_call(hub):
 async def test_out_of_set_label_goes_to_on_invalid(hub):
     llm = ScriptedLLM(completion('{"intent": "banana"}'), structured_output="native")
     hub(inhouse=llm)
-    out = await engine(classifier(on_invalid="fallback", output_retries=1)).run(INPUTS)
+    out = await engine(turn_retried).run(INPUTS)
     assert (out["value"], out["outcome"], out["confidence"]) == ("fallback", "invalid", 0.0)
     assert "banana" not in str(out["value"]) and "intent: Input should be" in out["error"]
     assert llm.calls == 2
@@ -98,7 +171,7 @@ async def test_out_of_set_label_goes_to_on_invalid(hub):
 
 async def test_slow_model_goes_to_on_timeout_within_20ms(hub):
     hub(inhouse=ScriptedLLM(completion('{"intent": "busy"}'), delay=5, structured_output="native"))
-    eng = engine(classifier(model=Model("inhouse", deadline=0.1), on_timeout="fallback"))
+    eng = engine(turn_short_deadline)
     late = []
     for _ in range(5):
         start = time.perf_counter()
@@ -111,7 +184,7 @@ async def test_slow_model_goes_to_on_timeout_within_20ms(hub):
 
 async def test_a_dict_degrade_sets_outputs_by_name(hub):
     hub(inhouse=ScriptedLLM(StatusError(500), structured_output="native"))
-    out = await engine(classifier(on_error={"value": "fallback", "confidence": 0.25})).run(INPUTS)
+    out = await engine(turn_degraded).run(INPUTS)
     assert (out["value"], out["confidence"], out["outcome"]) == ("fallback", 0.25, "error")
 
 
@@ -122,7 +195,7 @@ def test_a_degrade_naming_an_unknown_output_is_refused():
 
 async def test_no_degrade_value_means_the_op_fails(hub):
     hub(inhouse=ScriptedLLM(completion('{"intent": "banana"}'), structured_output="native"))
-    eng = engine(classifier())
+    eng = engine(turn)
     out = await eng.run(INPUTS)
     assert "value" not in out
     (error,) = out["$errors"].values()
@@ -134,7 +207,7 @@ async def test_cancelled_step_writes_nothing(hub):
     hub(
         inhouse=ScriptedLLM(completion('{"intent": "busy"}'), delay=0.5, structured_output="native")
     )
-    eng = engine(classifier(model=Model("inhouse")))
+    eng = engine(turn_no_deadline)
     handle = eng.start(INPUTS)
     await asyncio.sleep(0.05)
     handle.cancel()
@@ -144,18 +217,8 @@ async def test_cancelled_step_writes_nothing(hub):
 
 
 async def test_typed_model_output_and_messages_input(hub):
-    class Callback(BaseModel):
-        hour: int
-
     hub(m=ScriptedLLM(completion(json.dumps({"hour": 17})), structured_output="native"))
-    step = llm_step(model=Model("m"), system="Extract the hour.", output=Callback)
-
-    @graph
-    def flow(messages):
-        extract = step(messages=messages)
-        START >> extract >> END
-
-    out = await Operon(flow, params={"messages": None}).run(
+    out = await Operon(extracted, params={"messages": None}).run(
         {"messages": [{"role": "user", "content": "call me at 5pm"}]}
     )
     assert out["value"] == Callback(hour=17)
@@ -163,6 +226,6 @@ async def test_typed_model_output_and_messages_input(hub):
 
 async def test_missing_template_input_names_it(hub):
     hub(inhouse=ScriptedLLM(completion("{}"), structured_output="native"))
-    out = await engine(classifier()).run({**INPUTS, "intent_prompt": None})
+    out = await engine(turn).run({**INPUTS, "intent_prompt": None})
     (error,) = out["$errors"].values()
     assert "the template needs ['intent_prompt'], which arrived empty" in error["message"]
