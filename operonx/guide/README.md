@@ -104,7 +104,15 @@ from operonx.providers.ops import (
 
 ## Where this guide lives
 
-It ships inside the package, so it always matches the installed version:
+It ships inside the package, so it always matches the installed version.
+To move a project to a newer operonx and refresh its copy of the guide:
+
+```bash
+uv lock --upgrade-package operonx && uv sync   # the new operonx (add operonx-agents, operonx-kb if used)
+uv run operonx guide                           # refresh .operonx/guide/ and AGENTS.md's operonx block
+```
+
+Then re-read `.operonx/guide/README.md`: an API may have changed. The rest:
 
 ```bash
 operonx guide                  # sync .operonx/guide/ with the installed packages
