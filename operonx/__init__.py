@@ -33,6 +33,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Optional, Union
 
+from operonx import _aliases
+
+_aliases.install()  # operonx.agents / operonx.kb: the separately installed packages
+
 from operonx.core import (
     END,
     LOGGER,

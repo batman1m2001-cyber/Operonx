@@ -1,8 +1,8 @@
 """OpenAI-shaped backends send only the message keys Chat Completions defines.
 
-``operonx.agents`` keeps bookkeeping on its messages: an ``id`` on every
-one (``add_messages`` upserts on it), and ``name``/``status`` on a tool
-result. The Chat Completions schema has none of those on a tool message
+An agent layer keeps bookkeeping on its messages: an ``id`` on a
+message (an upsert key), and ``name``/``status`` on a tool result
+(operonx-agents' ``tool_message``). The Chat Completions schema has none of those on a tool message
 and no ``id`` anywhere, and a strict gateway rejects the unknown
 property — so an agent's second request, the first one carrying a tool
 result, failed there. The backends strip them before sending, the way
@@ -16,8 +16,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from operonx.agents.graphs.dispatch import tool_message
-from operonx.agents.ops.model_ops import adapt_llm_output
 from operonx.providers.llms.base import BaseLLM, openai_message
 
 pytestmark = pytest.mark.unit
@@ -30,13 +28,13 @@ CALL = {
 
 
 def _agent_conversation() -> list:
-    """The messages a ReAct turn actually hands the backend."""
-    assistant = adapt_llm_output.__wrapped__(content="", tool_calls=[CALL])["assistant_message"][0]
+    """The messages an agent turn hands the backend, bookkeeping keys included."""
     return [
         {"id": "sys", "role": "system", "content": "Be brief.", "cache_control": {"type": "x"}},
         {"id": "u1", "role": "user", "content": "Weather in Hanoi?"},
-        assistant,
-        tool_message("call_1", "get_weather", "31C"),
+        {"id": "a1", "role": "assistant", "content": "", "tool_calls": [CALL]},
+        {"role": "tool", "tool_call_id": "call_1", "name": "get_weather", "content": "31C",
+         "status": "success"},
     ]
 
 
