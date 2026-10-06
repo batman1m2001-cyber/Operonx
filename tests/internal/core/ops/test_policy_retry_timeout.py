@@ -82,41 +82,52 @@ async def test_retry_not_on_valueerror():
     assert "not a number" in str(out["$errors"]) and "ValueError" in str(out["$errors"])
 
 
+#: Arguments each op below was called with, cleared per test.
+SEEN = {"always_down": [], "spaced": [], "sync_flaky": [], "shaky": []}
+
+
+@pytest.fixture(autouse=True)
+def _fresh_seen():
+    for calls in SEEN.values():
+        calls.clear()
+
+
+@op(retry=Retry(max_attempts=2, **FAST))
+async def always_down(x: int) -> dict:
+    SEEN["always_down"].append(x)
+    raise TimeoutError("upstream timed out")
+
+
+@graph
+def always_down_graph(x):
+    a = always_down(x=x)
+    p = plus_one(y=a["y"])
+    START >> a >> p >> END
+
+
 async def test_retry_gives_up_after_max_attempts():
-    calls = []
-
-    @op(retry=Retry(max_attempts=2, **FAST))
-    async def always_down(x: int) -> dict:
-        calls.append(x)
-        raise TimeoutError("upstream timed out")
-
-    @graph
-    def g(x):
-        a = always_down(x=x)
-        p = plus_one(y=a["y"])
-        START >> a >> p >> END
-
     CALLS["after"] = 0
-    out = await Operon(g, params={"x": None}).run({"x": 1})
-    assert len(calls) == 2
+    out = await Operon(always_down_graph, params={"x": None}).run({"x": 1})
+    assert len(SEEN["always_down"]) == 2
     assert CALLS["after"] == 0
     assert "upstream timed out" in str(out["$errors"])
 
 
+@op(retry=Retry(max_attempts=4, initial=0.05, backoff=2.0, jitter=False))
+async def spaced(x: int) -> dict:
+    SEEN["spaced"].append(time.perf_counter())
+    raise ConnectionError("down")
+
+
+@graph
+def spaced_graph(x):
+    s = spaced(x=x)
+    START >> s >> END
+
+
 async def test_retry_backoff_spacing():
-    stamps = []
-
-    @op(retry=Retry(max_attempts=4, initial=0.05, backoff=2.0, jitter=False))
-    async def spaced(x: int) -> dict:
-        stamps.append(time.perf_counter())
-        raise ConnectionError("down")
-
-    @graph
-    def g(x):
-        s = spaced(x=x)
-        START >> s >> END
-
-    await Operon(g, params={"x": None}).run({"x": 1})
+    stamps = SEEN["spaced"]
+    await Operon(spaced_graph, params={"x": None}).run({"x": 1})
     gaps = [b - a for a, b in zip(stamps, stamps[1:])]
     assert len(gaps) == 3
     for gap, want in zip(gaps, (0.05, 0.1, 0.2)):
@@ -192,24 +203,24 @@ async def test_generator_retried_before_first_yield():
     assert "$errors" not in out
 
 
+@op(retry=Retry(max_attempts=2, **FAST))
+def sync_flaky(x: int) -> dict:
+    SEEN["sync_flaky"].append(x)
+    if len(SEEN["sync_flaky"]) == 1:
+        raise ConnectionError("blip")
+    return {"y": x}
+
+
+@graph
+def sync_flaky_graph(x):
+    s = sync_flaky(x=x)
+    p = plus_one(y=s["y"])
+    START >> s >> p >> END
+
+
 async def test_sync_op_with_retry_runs_and_retries():
-    calls = []
-
-    @op(retry=Retry(max_attempts=2, **FAST))
-    def sync_flaky(x: int) -> dict:
-        calls.append(x)
-        if len(calls) == 1:
-            raise ConnectionError("blip")
-        return {"y": x}
-
-    @graph
-    def g(x):
-        s = sync_flaky(x=x)
-        p = plus_one(y=s["y"])
-        START >> s >> p >> END
-
-    out = await Operon(g, params={"x": None}).run({"x": 7})
-    assert out["z"] == 8 and len(calls) == 2  # consumed downstream
+    out = await Operon(sync_flaky_graph, params={"x": None}).run({"x": 7})
+    assert out["z"] == 8 and len(SEEN["sync_flaky"]) == 2  # consumed downstream
 
 
 # ── timeout ──────────────────────────────────────────────────────────────────
@@ -279,112 +290,126 @@ async def test_timed_out_op_degrades_to_its_fallback_and_downstream_runs(errors)
     assert "TimeoutError" in str(out["$errors"]), "handled, still on the record"
 
 
+@graph
+def slow_retried_graph(x):
+    s = slow(x=x, retry=Retry(max_attempts=2, **FAST))
+    START >> s >> END
+
+
 async def test_timeout_records_and_retries():
     CALLS["slow"] = 0
     retried = slow(x=1, retry=Retry(max_attempts=2, **FAST))  # outside a graph: just the op
     assert retried._policy.retry.max_attempts == 2
 
-    @graph
-    def g(x):
-        s = slow(x=x, retry=Retry(max_attempts=2, **FAST))
-        START >> s >> END
-
-    handle = Operon(g, params={"x": None}).start({"x": 1})
+    handle = Operon(slow_retried_graph, params={"x": None}).start({"x": 1})
     out = await handle.result()
     assert CALLS["slow"] == 2
     assert [n.status for n in _nodes(handle, "s")] == ["retried", "error"]
     assert "TimeoutError" in str(out["$errors"])
 
 
+@op(timeout=Timeout(idle=0.2))
+async def stalls(n: int):
+    for i in range(n):
+        if i == 2:
+            await asyncio.sleep(5)
+        yield {"item": i}
+
+
+@graph
+def stalls_graph(n):
+    s = stalls(n=n)
+    k = keep(item=s["item"])
+    START >> s >> k >> END
+
+
 async def test_idle_timeout_generator():
-    @op(timeout=Timeout(idle=0.2))
-    async def stalls(n: int):
-        for i in range(n):
-            if i == 2:
-                await asyncio.sleep(5)
-            yield {"item": i}
-
-    @graph
-    def g(n):
-        s = stalls(n=n)
-        k = keep(item=s["item"])
-        START >> s >> k >> END
-
     t0 = time.perf_counter()
-    out = await Operon(g, params={"n": None}).run({"n": 4})
+    out = await Operon(stalls_graph, params={"n": None}).run({"n": 4})
     assert time.perf_counter() - t0 < 0.5
     assert out["kept"] == [0, 1]
     assert "Timeout(idle=0.2)" in str(out["$errors"])
 
 
+@op(timeout=Timeout(run=0.25))
+async def ticker(n: int):
+    for i in range(n):
+        await asyncio.sleep(0.1)
+        yield {"item": i}
+
+
+@graph
+def ticker_graph(n):
+    t = ticker(n=n)
+    k = keep(item=t["item"])
+    START >> t >> k >> END
+
+
 async def test_run_timeout_spans_a_generator():
-    @op(timeout=Timeout(run=0.25))
-    async def ticker(n: int):
-        for i in range(n):
-            await asyncio.sleep(0.1)
-            yield {"item": i}
-
-    @graph
-    def g(n):
-        t = ticker(n=n)
-        k = keep(item=t["item"])
-        START >> t >> k >> END
-
-    out = await Operon(g, params={"n": None}).run({"n": 10})
+    out = await Operon(ticker_graph, params={"n": None}).run({"n": 10})
     assert out["kept"] == [0, 1]
     assert "TimeoutError" in str(out["$errors"])
 
 
+@op(bound="cpu", timeout=Timeout(run=0.2))
+def crunch(x: int) -> dict:
+    time.sleep(1.0)
+    return {"y": x}
+
+
+@graph
+def crunch_graph(x):
+    c = crunch(x=x)
+    START >> c >> END
+
+
 async def test_cpu_timeout_abandons_thread():
-    @op(bound="cpu", timeout=Timeout(run=0.2))
-    def crunch(x: int) -> dict:
-        time.sleep(1.0)
-        return {"y": x}
-
-    @graph
-    def g(x):
-        c = crunch(x=x)
-        START >> c >> END
-
     t0 = time.perf_counter()
-    out = await Operon(g, params={"x": None}).run({"x": 1})
+    out = await Operon(crunch_graph, params={"x": None}).run({"x": 1})
     assert time.perf_counter() - t0 < 0.5
     assert "TimeoutError" in str(out["$errors"])
 
 
+@op(timeout=Timeout(run=1.0), retry=Retry(max_attempts=2, **FAST))
+async def quick(x: int) -> dict:
+    return {"y": x + 1}
+
+
+@graph
+def quick_graph(x):
+    q = quick(x=x)
+    p = plus_one(y=q["y"])
+    START >> q >> p >> END
+
+
 async def test_timeout_does_not_fire_on_a_fast_op():
-    @op(timeout=Timeout(run=1.0), retry=Retry(max_attempts=2, **FAST))
-    async def quick(x: int) -> dict:
-        return {"y": x + 1}
-
-    @graph
-    def g(x):
-        q = quick(x=x)
-        p = plus_one(y=q["y"])
-        START >> q >> p >> END
-
-    handle = Operon(g, params={"x": None}).start({"x": 1})
+    handle = Operon(quick_graph, params={"x": None}).start({"x": 1})
     out = await handle.result()
     assert out["z"] == 3 and "$errors" not in out  # consumed downstream
     assert [n.attempt for n in _nodes(handle, "q")] == [1]
 
 
+#: Set by ``waits`` once it runs; a fresh Event per test.
+WAITING = {}
+
+
+@op(timeout=Timeout(run=5))
+async def waits(x: int) -> dict:
+    WAITING["started"].set()
+    await asyncio.sleep(5)
+    return {"y": x}
+
+
+@graph
+def waits_graph(x):
+    w = waits(x=x)
+    START >> w >> END
+
+
 async def test_outer_cancel_is_not_a_timeout():
-    started = asyncio.Event()
-
-    @op(timeout=Timeout(run=5))
-    async def waits(x: int) -> dict:
-        started.set()
-        await asyncio.sleep(5)
-        return {"y": x}
-
-    @graph
-    def g(x):
-        w = waits(x=x)
-        START >> w >> END
-
-    handle = Operon(g, params={"x": None}).start({"x": 1})
-    await started.wait()
+    WAITING["started"] = asyncio.Event()
+    handle = Operon(waits_graph, params={"x": None}).start({"x": 1})
+    await WAITING["started"].wait()
     handle.cancel()
     with pytest.raises(asyncio.CancelledError):
         await handle.result()
@@ -432,31 +457,32 @@ async def fetch(url: str, timeout: float = 1.0) -> dict:
     return {"got": f"{url}@{timeout}"}
 
 
-async def test_timeout_param_stays_an_input():
-    @graph
-    def g(url):
-        f = fetch(url=url, timeout=7.5)  # a float: the function's own argument
-        START >> f >> END
+@graph
+def fetch_graph(url):
+    f = fetch(url=url, timeout=7.5)  # a float: the function's own argument
+    START >> f >> END
 
-    out = await Operon(g, params={"url": None}).run({"url": "u"})
+
+async def test_timeout_param_stays_an_input():
+    out = await Operon(fetch_graph, params={"url": None}).run({"url": "u"})
     assert out["got"] == "u@7.5"
 
 
+@op(retry=Retry(max_attempts=5, **FAST))
+async def shaky(x: int) -> dict:
+    SEEN["shaky"].append(x)
+    raise ConnectionError("down")
+
+
+@graph
+def shaky_graph(x):
+    s = shaky(x=x, retry=Retry(max_attempts=2, **FAST))
+    START >> s >> END
+
+
 async def test_per_call_override():
-    calls = []
-
-    @op(retry=Retry(max_attempts=5, **FAST))
-    async def shaky(x: int) -> dict:
-        calls.append(x)
-        raise ConnectionError("down")
-
-    @graph
-    def g(x):
-        s = shaky(x=x, retry=Retry(max_attempts=2, **FAST))
-        START >> s >> END
-
-    await Operon(g, params={"x": None}).run({"x": 1})
-    assert len(calls) == 2
+    await Operon(shaky_graph, params={"x": None}).run({"x": 1})
+    assert len(SEEN["shaky"]) == 2
 
 
 # ── a subgraph as an op ─────────────────────────────────────────────────────
@@ -477,13 +503,14 @@ def slow_sub(x):
     START >> s >> END
 
 
-async def test_graph_timeout_cancels_its_ops():
-    @graph
-    def outer(x):
-        sub = slow_sub(x=x, timeout=Timeout(run=0.2))
-        p = plus_one(y=sub["y"])
-        START >> sub >> p >> END
+@graph
+def outer(x):
+    sub = slow_sub(x=x, timeout=Timeout(run=0.2))
+    p = plus_one(y=sub["y"])
+    START >> sub >> p >> END
 
+
+async def test_graph_timeout_cancels_its_ops():
     DONE["inner"] = 0
     CALLS["after"] = 0
     t0 = time.perf_counter()
@@ -507,58 +534,66 @@ def test_graph_refuses_retry_and_idle():
 # ── a retried op's output is consumed downstream ────────────────────────────
 
 
+COUNTS = {"batch": 0, "gen": 0, "handler": 0}
+
+
+@op(retry=Retry(max_attempts=3, **FAST))
+async def lookup(x: int) -> dict:
+    COUNTS["batch"] += 1
+    if COUNTS["batch"] < 3:
+        raise ConnectionError("blip")
+    return {"y": x * 10}
+
+
+@op(timeout=Timeout(run=1.0))
+async def consume(y: int) -> dict:
+    return {"z": y + 1}
+
+
+@op(retry=Retry(max_attempts=2, **FAST))
+async def stream(n: int):
+    COUNTS["gen"] += 1
+    if COUNTS["gen"] == 1:
+        raise ConnectionError("not connected yet")
+    for i in range(n):
+        yield {"item": i}
+
+
+@op
+def per_item(item: int) -> dict:
+    return {"kept": item * 2}
+
+
+@op
+def handler(error: str) -> dict:
+    COUNTS["handler"] += 1
+    return {"z": -1}
+
+
+@graph
+def retried_graph(x):
+    look = lookup(x=x)
+    c = consume(y=look["y"])
+    st = stream(n=x)
+    k = per_item(item=st["item"])
+    h = handler()
+    START >> [look, st]
+    look >> c >> END
+    st >> k >> END
+    look.on_error(h)
+    h >> END
+
+
 async def test_retried_outputs_reach_their_consumers():
     """Batch and generator retried, read by the next op, in a fail-fast run
     whose graph also has an error edge — every R1 path at once."""
-    calls = {"batch": 0, "gen": 0, "handler": 0}
-
-    @op(retry=Retry(max_attempts=3, **FAST))
-    async def lookup(x: int) -> dict:
-        calls["batch"] += 1
-        if calls["batch"] < 3:
-            raise ConnectionError("blip")
-        return {"y": x * 10}
-
-    @op(timeout=Timeout(run=1.0))
-    async def consume(y: int) -> dict:
-        return {"z": y + 1}
-
-    @op(retry=Retry(max_attempts=2, **FAST))
-    async def stream(n: int):
-        calls["gen"] += 1
-        if calls["gen"] == 1:
-            raise ConnectionError("not connected yet")
-        for i in range(n):
-            yield {"item": i}
-
-    @op
-    def per_item(item: int) -> dict:
-        return {"kept": item * 2}
-
-    @op
-    def handler(error: str) -> dict:
-        calls["handler"] += 1
-        return {"z": -1}
-
-    @graph
-    def g(x):
-        look = lookup(x=x)
-        c = consume(y=look["y"])
-        st = stream(n=x)
-        k = per_item(item=st["item"])
-        h = handler()
-        START >> [look, st]
-        look >> c >> END
-        st >> k >> END
-        look.on_error(h)
-        h >> END
-
-    handle = Operon(g, params={"x": None}, errors="raise").start({"x": 3})
+    COUNTS.update(batch=0, gen=0, handler=0)
+    handle = Operon(retried_graph, params={"x": None}, errors="raise").start({"x": 3})
     out = await handle.result()
 
     assert out["z"] == 31  # the third attempt's y reached consume
     assert out["kept"] == [0, 2, 4]  # the second attempt's items reached per_item
-    assert calls == {"batch": 3, "gen": 2, "handler": 0}
+    assert COUNTS == {"batch": 3, "gen": 2, "handler": 0}
     assert "$errors" not in out
     (c_node,) = [n for n in handle.trace.nodes if n.op_name == "c"]
     final = [n for n in handle.trace.nodes if n.op_name == "look"][-1]
