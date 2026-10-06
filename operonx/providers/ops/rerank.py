@@ -7,6 +7,7 @@ from operonx.core.exceptions import RerankError
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, split_shorthand_kwargs
 from operonx.core.utils.common import Param
+from operonx.providers.ops._runtime_resource import RESOURCE_PARAM, per_call, take_resource
 from operonx.providers.ops._utils import resolve_hub
 
 
@@ -38,7 +39,7 @@ class RerankOp(BaseOp):
 
     show_keys_default = ("reranks",)
 
-    __slots__ = ["resource", "backend", "_initialized"]
+    __slots__ = ["resource", "backend", "_initialized", "_dynamic", "_bound"]
 
     type: OpType = "rerank"
 
@@ -61,6 +62,8 @@ class RerankOp(BaseOp):
         kwargs.setdefault("bound", "io")
         super().__init__(**kwargs)
 
+        resource, inputs, self._dynamic = take_resource(resource, inputs)
+        self._bound = {}
         self.resource = resource
 
         # Define input/output schema
@@ -76,6 +79,8 @@ class RerankOp(BaseOp):
         }
 
         # Merge with user-provided
+        if self._dynamic:
+            input_schema = {**input_schema, "resource": RESOURCE_PARAM}
         self.inputs = self._merge_params(input_schema, inputs)
         self.outputs = self._merge_params(output_schema, outputs)
 
@@ -83,10 +88,12 @@ class RerankOp(BaseOp):
         # graph construction before ResourceHub is set up
         self.backend = None
         self._initialized = False
-        self._set_core(self._process)
+        self._set_core(per_call(self, "_process") if self._dynamic else self._process)
 
     def warmup(self) -> None:
         """Eagerly initialize reranker backend on engine startup."""
+        if self._dynamic:  # the key arrives with each call
+            return
         self._ensure_initialized()
 
     def _ensure_initialized(self):
@@ -179,7 +186,8 @@ class RerankOp(BaseOp):
 
     def serialize(self) -> dict:
         """Serialize RerankOp, including the resolved backend config."""
-        self._ensure_initialized()
+        if not self._dynamic:  # a runtime resource has no backend to describe
+            self._ensure_initialized()
         base = super().serialize()
         base["resource"] = self.resource
         if self.backend and hasattr(self.backend, "config"):
