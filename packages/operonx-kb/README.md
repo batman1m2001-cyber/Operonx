@@ -32,7 +32,7 @@ answer["citations"]  # each: quote, canonical span, pages, bboxes; unverified on
 
 ```bash
 operonx-kb query handbook "how many days of leave" --mode hybrid --tag hr
-operonx-kb query wiki "who directed the film that won in 1999" --mode graph   # created with --graph
+operonx-kb query wiki "who directed the film that won in 1999"   # created with --graph: mode auto sends relation questions to the graph (docs/bench/router.md)
 operonx-kb query handbook "how many days of leave" --answer assistant
 operonx-kb eval handbook datasets/handbook.jsonl --mode hybrid
 ```

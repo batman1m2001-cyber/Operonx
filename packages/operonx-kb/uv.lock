@@ -1708,6 +1708,15 @@ faiss = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
+huggingface = [
+    { name = "httpx" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "numpy", version = "2.5.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+    { name = "transformers" },
+]
 openai = [
     { name = "httpx" },
     { name = "openai" },
@@ -1832,8 +1841,8 @@ provides-extras = ["openai", "anthropic", "gemini", "bedrock", "onnx", "triton",
 
 [[package]]
 name = "operonx-agents"
-version = "0.1.1"
-source = { editable = "../operonx-agents" }
+version = "0.1.3"
+source = { directory = "../operonx-agents" }
 dependencies = [
     { name = "httpx" },
     { name = "operonx", extra = ["anthropic", "openai"] },
@@ -1868,7 +1877,7 @@ dev = [
 
 [[package]]
 name = "operonx-kb"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "." }
 dependencies = [
     { name = "defusedxml" },
@@ -1896,6 +1905,11 @@ all = [
 ]
 answer = [
     { name = "operonx", extra = ["openai"] },
+]
+bench = [
+    { name = "operonx", extra = ["faiss", "huggingface"] },
+    { name = "torch", version = "2.14.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
 ]
 faiss = [
     { name = "operonx", extra = ["faiss"] },
@@ -1950,10 +1964,12 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24" },
     { name = "operonx", editable = "../../" },
     { name = "operonx", extras = ["faiss"], marker = "extra == 'faiss'", editable = "../../" },
+    { name = "operonx", extras = ["huggingface"], marker = "extra == 'bench'", editable = "../../" },
     { name = "operonx", extras = ["openai"], marker = "extra == 'answer'", editable = "../../" },
     { name = "operonx", extras = ["pgvector"], marker = "extra == 'pgvector'", editable = "../../" },
     { name = "operonx", extras = ["qdrant"], marker = "extra == 'qdrant'", editable = "../../" },
     { name = "operonx", extras = ["serve"], marker = "extra == 'admin'", editable = "../../" },
+    { name = "operonx-kb", extras = ["faiss"], marker = "extra == 'bench'" },
     { name = "operonx-kb", extras = ["pdf", "postgres", "faiss", "answer", "admin"], marker = "extra == 'all'" },
     { name = "pillow", marker = "extra == 'admin'", specifier = ">=10" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
@@ -1961,10 +1977,11 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pypdfium2", marker = "extra == 'admin'", specifier = ">=4.30" },
     { name = "pypdfium2", marker = "extra == 'layout'", specifier = ">=4.30" },
+    { name = "torch", marker = "extra == 'bench'", specifier = ">=2.2.2", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "extra == 'layout'", specifier = ">=2.2.2", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchvision", marker = "extra == 'layout'", index = "https://download.pytorch.org/whl/cpu" },
 ]
-provides-extras = ["pdf", "layout", "postgres", "answer", "admin", "all", "faiss", "pgvector", "qdrant"]
+provides-extras = ["pdf", "layout", "postgres", "answer", "admin", "all", "bench", "faiss", "pgvector", "qdrant"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1972,7 +1989,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "openai", specifier = ">=1.0" },
-    { name = "operonx-agents", editable = "../operonx-agents" },
+    { name = "operonx-agents", directory = "../operonx-agents" },
     { name = "pillow", specifier = ">=10" },
     { name = "pypdfium2", specifier = ">=4.30" },
     { name = "pytest", specifier = ">=8" },

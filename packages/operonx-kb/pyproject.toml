@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-kb"
-version = "0.2.1"
+version = "0.2.2"
 description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,6 +35,9 @@ answer = ["operonx[openai]"]
 # operonx's own serve layer mounts it, and page images rendered with pypdfium2.
 admin = ["operonx[serve]", "pypdfium2>=4.30", "pillow>=10"]
 all = ["operonx-kb[pdf,postgres,faiss,answer,admin]"]
+# The benchmarks' embedder (scripts/bench_*.py: multilingual-e5 through operonx's HF
+# backend), on CPU-only torch (see [tool.uv.sources]).
+bench = ["operonx[huggingface]", "torch>=2.2.2", "operonx-kb[faiss]"]
 
 # Dense index backends: operonx's vector stores.
 faiss = ["operonx[faiss]"]
@@ -72,7 +75,9 @@ dev = [
 [tool.uv.sources]
 # Editable from this repo's own operonx (the package lives in packages/).
 operonx = { path = "../..", editable = true }
-operonx-agents = { path = "../operonx-agents", editable = true }
+# Not editable: an editable install puts the agents checkout on sys.path, and its
+# `tests` package would shadow this one.
+operonx-agents = { path = "../operonx-agents", editable = false }
 # CPU-only torch for the `layout` extra: the default PyPI wheel pulls ~3 GB of CUDA.
 torch = { index = "pytorch-cpu" }
 torchvision = { index = "pytorch-cpu" }

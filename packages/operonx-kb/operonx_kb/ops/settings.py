@@ -15,18 +15,22 @@ from operonx import op
 
 from operonx_kb.errors import KBError, QueryError
 from operonx_kb.ops._resources import catalog_of
+from operonx_kb.retrieval.router import relation_rule
 
 __all__ = [
     "search_settings",
     "index_settings",
     "default_mode",
+    "search_mode",
     "check_mode",
     "embedding_name",
     "MODES",
 ]
 
-#: Retrieval modes. ``tree`` and ``graph`` are seeded by the collection's default mode.
-MODES = ("dense", "lexical", "hybrid", "tree", "graph")
+#: Retrieval modes. ``tree`` and ``graph`` are seeded by the collection's default mode;
+#: ``auto`` routes a relation question to ``graph`` (when the collection has a concept
+#: graph) and everything else to the default mode (:mod:`operonx_kb.retrieval.router`).
+MODES = ("dense", "lexical", "hybrid", "tree", "graph", "auto")
 
 
 def embedding_name(key: str) -> str:
@@ -42,8 +46,16 @@ def embedding_name(key: str) -> str:
     )
 
 
+def search_mode(spec) -> str:
+    """The mode a search uses when it names none: ``auto`` on a collection with a
+    concept graph (relation questions to the graph, the rest to :func:`default_mode`;
+    docs/bench/router.md), else :func:`default_mode`."""
+    return "auto" if spec.graph is not None else default_mode(spec)
+
+
 def default_mode(spec) -> str:
-    """Hybrid when the collection has both indexes, else the one it has."""
+    """Hybrid when the collection has both indexes, else the one it has: the index
+    mode, and the seed of tree, graph and auto search."""
     if spec.dense is not None and spec.lexical is not None:
         return "hybrid"
     return "dense" if spec.dense is not None else "lexical"
@@ -63,7 +75,7 @@ def check_mode(collection_id: str, spec, mode: str) -> None:
             f"collection {collection_id!r} has no concept graph for mode 'graph'; set "
             "CollectionSpec(graph=GraphSpec()) and re-add its documents"
         )
-    seed = default_mode(spec) if mode in ("tree", "graph") else mode
+    seed = default_mode(spec) if mode in ("tree", "graph", "auto") else mode
     if seed in ("dense", "hybrid") and spec.dense is None:
         raise QueryError(f"collection {collection_id!r} has no dense index for mode {mode!r}")
     if seed in ("lexical", "hybrid") and spec.lexical is None:
@@ -73,23 +85,40 @@ def check_mode(collection_id: str, spec, mode: str) -> None:
         )
 
 
-@op(bound="cpu", show_keys="mode")
+def route(spec, mode: str, query: Optional[str]) -> tuple:
+    """``(mode, rule)``: ``auto`` resolved to ``graph`` for a relation question on a
+    collection with a concept graph, else to the default mode; any other mode as given."""
+    if mode != "auto":
+        return mode, None
+    rule = relation_rule(query or "") if spec.graph is not None else None
+    return ("graph", rule) if rule else (default_mode(spec), None)
+
+
+@op(bound="cpu", show_keys=("mode", "route"))
 def search_settings(
-    collection: str, catalog: str, mode: Optional[str] = None, embeds: bool = False
+    collection: str,
+    catalog: str,
+    mode: Optional[str] = None,
+    embeds: bool = False,
+    query: Optional[str] = None,
 ) -> dict:
     """What a search of ``collection`` runs with: the resolved mode, the seed mode of
     tree/graph search, and each index's settings (``None`` for an index it lacks).
     ``embeds``: the caller embeds the query (``dense_retrieve``), so the embedder's
-    ``EmbeddingOp`` name is resolved — and refused when ``EmbeddingOp`` cannot reach it."""
+    ``EmbeddingOp`` name is resolved — and refused when ``EmbeddingOp`` cannot reach it.
+    ``query``: what ``mode="auto"`` routes on; ``route`` names the rule that sent it to
+    ``graph`` (``None``: not routed)."""
     coll = catalog_of(catalog).get_collection(collection)
     if coll is None:
         raise QueryError(f"no collection {collection!r}; create it with create_collection()")
     spec = coll.spec
-    mode = mode or default_mode(spec)
+    mode = mode or search_mode(spec)
     check_mode(collection, spec, mode)
+    mode, rule = route(spec, mode, query)
     dense, tree = spec.dense, spec.tree
     return {
         "mode": mode,
+        "route": rule,
         "seed_mode": default_mode(spec),
         "embedder": embedding_name(dense.embedder) if embeds and dense else None,
         "store": dense.store if dense else None,

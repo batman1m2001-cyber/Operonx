@@ -93,6 +93,8 @@ def _modes(kb: KnowledgeBase, collection_id: str) -> List[str]:
     # Tree search is seeded by the collection's default mode and walks its tree index.
     have["tree"] = spec.tree is not None and (have["dense"] or have["lexical"])
     have["graph"] = spec.graph is not None and (have["dense"] or have["lexical"])
+    # auto routes between the graph and the default mode: offered where there is a graph
+    have["auto"] = have["graph"]
     return [m for m in MODES if have[m]]
 
 
