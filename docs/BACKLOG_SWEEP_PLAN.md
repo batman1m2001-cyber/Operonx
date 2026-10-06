@@ -22,3 +22,22 @@ and least risky first; the callbot last, on `refactor/operonx-studio` only.
 Rules: module-level graphs only, edges written out; evidence before every fix;
 never the telco gateways 9922/9926/9924; recorded calls are read in place, never
 copied or replayed against a model; callbot never toward staging.
+
+## Results (2026-10-06)
+
+| # | Outcome | Where |
+|---|---|---|
+| B1 | Both zone tests pass in mock mode, along with the rest of meeting-prep's suite (155 tests). The seminar's mock model didn't stream, so agents returned empty answers. That exposed an agents bug: a stream with no reply counted as an empty success. It is now a `ModelError` after fallback. | ai-workflow-seminar #10; Operon #114 (agents 0.1.3) |
+| B2 | All operonx-agents tests use module-level graphs. | #113 |
+| B3 | `auto` is the default for a collection with a graph. Multi-hop R@5 +0.162 (2Wiki) and +0.068 (MuSiQue); single-hop unchanged. | #116 (kb 0.2.2), `packages/operonx-kb/docs/bench/router.md` |
+| B4 | D5 answer review: 20 correct, 1 partial, 7 wrong, 2 abstained, 0 fabricated. OCR (`CollectionSpec.ocr`, extra `ocr` + the `tesseract` binary) ships opt-in. The corpus has no real scans: its 2 "scans" are blank pages. Median CER 4.2% on legal prose; diagrams and tables measure badly. | kb 0.2.3; `docs/bench/d5_review.md`, `docs/bench/ocr.md` |
+| B5 | `operonx-kb mcp` serves `kb_search`/`kb_read` on stdio. The scope is the **server's**, fixed at start: an MCP client never says who it is. `S3Source` and `DriveSource` are job sources (extras `s3`, `drive`). Tested against fake clients, not live accounts. | kb 0.2.3 |
+| B6 | `OnlineEval` over the 121 recorded callbot runs, read in place: 363 scores in 2.9 s, 120 of 121 runs pass. The failure is the run with cancelled ops. An alert fired past its threshold (0.0083 > 0.005). | scratchpad only (no repo change) |
+| B7 | `logprobs` costs about +2.5% of p95 step latency, and nothing reads the score: it stays opt-in. | #115 |
+| B8 | Deleted; main already does what it was building. Kept as the tag `archive/layered-layout`. | operonx-studio |
+| B9 | An agent op's card and inspector list its tools. Also fixed: an op naming `assistant` without the `llm:` prefix now finds its resource. | operonx-studio #24 |
+| B10 | Pinned to operonx 1.16, 303 tests pass. Live traces are left off (`live: false`): measuring them would mean opening the team ClickHouse with the new operonx. | callbot `refactor/operonx-studio` b41be1b |
+| B11 | `qwen-turbo` was retired at the gateway; the fallback now uses `qwen3.7-flash`. | callbot `refactor/operonx-studio` 26416e6 |
+
+Still open: operonx core's own tests define 186 graphs inside test functions. Many of them
+test graph-building errors and are left as they are; the rest are next.

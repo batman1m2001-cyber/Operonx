@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-kb"
-version = "0.2.2"
+version = "0.2.3"
 description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,6 +35,15 @@ answer = ["operonx[openai]"]
 # operonx's own serve layer mounts it, and page images rendered with pypdfium2.
 admin = ["operonx[serve]", "pypdfium2>=4.30", "pillow>=10"]
 all = ["operonx-kb[pdf,postgres,faiss,answer,admin]"]
+# The KB over MCP (operonx_kb.mcp, `operonx-kb mcp`): for clients outside our code.
+mcp = ["mcp>=2.0"]
+# Ingest from object storage and Google Drive (operonx_kb.sources).
+s3 = ["boto3>=1.28"]
+drive = ["google-api-python-client>=2.100", "google-auth>=2.20"]
+# OCR for scanned PDF pages (CollectionSpec.ocr): page rendering. The engine is the
+# `tesseract` binary with its language data, a system package (apt install
+# tesseract-ocr tesseract-ocr-vie), not a Python dependency.
+ocr = ["operonx-kb[pdf]", "pypdfium2>=4.30", "pillow>=10"]
 # The benchmarks' embedder (scripts/bench_*.py: multilingual-e5 through operonx's HF
 # backend), on CPU-only torch (see [tool.uv.sources]).
 bench = ["operonx[huggingface]", "torch>=2.2.2", "operonx-kb[faiss]"]
@@ -70,6 +79,7 @@ dev = [
     "pypdfium2>=4.30",  # page images (tests/admin)
     "pillow>=10",
     "operonx-agents",  # kb_tools on a real Agent (tests/graphs/test_agent_tools.py)
+    "mcp>=2.0",  # the KB over MCP (tests/graphs/test_mcp.py)
 ]
 
 [tool.uv.sources]

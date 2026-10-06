@@ -16,6 +16,7 @@ __all__ = [
     "AnalyzerSpec",
     "ChunkerSpec",
     "LayoutSpec",
+    "OcrSpec",
     "DenseIndexSpec",
     "LexicalIndexSpec",
     "ContextualSpec",
@@ -63,6 +64,26 @@ class LayoutSpec(_Spec):
     """
 
     model: Literal["heuristic"] = "heuristic"
+
+
+class OcrSpec(_Spec):
+    """OCR for scanned PDF pages (:mod:`operonx_kb.pdf.ocr`): a page with no text layer
+    is rendered and read by Tesseract (the ``tesseract`` binary and its language data,
+    e.g. ``apt install tesseract-ocr tesseract-ocr-vie``; rendering needs the ``ocr``
+    extra). Pages with a text layer are never OCR'd.
+
+    Attributes:
+        languages: Tesseract language codes joined by ``+``.
+        dpi: Resolution a page is rendered at.
+        min_words: A page with fewer words than this is OCR'd.
+        min_confidence: Words read below this confidence (0–100) are dropped.
+    """
+
+    engine: Literal["tesseract"] = "tesseract"
+    languages: str = "vie+eng"
+    dpi: int = Field(default=200, ge=72, le=600)
+    min_words: int = Field(default=3, ge=1)
+    min_confidence: float = Field(default=30.0, ge=0, le=100)
 
 
 class DenseIndexSpec(_Spec):
@@ -282,10 +303,13 @@ class CollectionSpec(_Spec):
             ``tree`` retrieval mode; ``None`` (default) builds none.
         graph: The concept graph and the ``graph`` retrieval mode; ``None``
             (default) builds none.
+        ocr: OCR for scanned PDF pages; ``None`` (default) leaves a page without
+            a text layer empty.
     """
 
     chunker: ChunkerSpec = ChunkerSpec()
     layout: LayoutSpec = LayoutSpec()
+    ocr: Optional[OcrSpec] = None
     dense: Optional[DenseIndexSpec] = None
     lexical: Optional[LexicalIndexSpec] = None
     filterable: Dict[str, FieldType] = Field(default_factory=dict)

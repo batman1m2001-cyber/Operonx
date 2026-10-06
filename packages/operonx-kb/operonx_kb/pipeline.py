@@ -18,7 +18,24 @@ from operonx_kb.parsing.base import Parser
 from operonx_kb.parsing.router import ParserRouter
 from operonx_kb.structure.build import VersionTree, structure_fingerprint
 
-__all__ = ["Pipeline", "tree_to_dict", "tree_from_dict"]
+__all__ = ["Pipeline", "parsers_for", "tree_to_dict", "tree_from_dict"]
+
+
+def parsers_for(spec: CollectionSpec) -> List[Parser]:
+    """The built-in parsers, the PDF one reading scanned pages by OCR when the spec
+    asks for it (``CollectionSpec.ocr``)."""
+    from operonx_kb.parsing.router import default_parsers
+
+    parsers = default_parsers()
+    if spec.ocr is None:
+        return parsers
+    from operonx_kb.pdf.ocr import OcrBackend, TesseractEngine
+    from operonx_kb.pdf.parser import PdfParser
+
+    ocr = spec.ocr
+    engine = TesseractEngine(languages=ocr.languages, min_confidence=ocr.min_confidence)
+    backend = OcrBackend(engine=engine, dpi=ocr.dpi, min_words=ocr.min_words)
+    return [PdfParser(backend=backend) if isinstance(p, PdfParser) else p for p in parsers]
 
 
 class Pipeline:
@@ -26,7 +43,7 @@ class Pipeline:
 
     def __init__(self, spec: CollectionSpec, router: Optional[ParserRouter] = None):
         self.spec = spec
-        self.router = router or ParserRouter()
+        self.router = router or ParserRouter(parsers_for(spec))
         self.chunker: Chunker = chunker_from_spec(spec.chunker)
 
     def parser_for(

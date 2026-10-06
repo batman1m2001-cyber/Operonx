@@ -28,6 +28,7 @@ from operonx_kb.model.collection import (
     DenseIndexSpec,
     GraphSpec,
     LayoutSpec,
+    OcrSpec,
     TreeSpec,
 )
 from operonx_kb.model.document import (
@@ -40,7 +41,7 @@ from operonx_kb.model.document import (
     VersionChunk,
 )
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 __all__ = [
     "Chunk",
@@ -57,6 +58,7 @@ __all__ = [
     "Region",
     "TreeSpec",
     "GraphSpec",
+    "OcrSpec",
     "VersionChunk",
     "DEFAULT_MODE",
     "IngestError",
