@@ -28,24 +28,27 @@ WINDOWS: dict = {}  # job -> (start, end)
 FAIL: set = set()  # job names that fail their item
 
 
+@op(bound="io")
+async def work(item: dict = None, job: str = "", seconds: float = 0.0) -> dict:
+    t0 = perf_counter()
+    await asyncio.sleep(seconds)
+    WINDOWS[job] = (t0, perf_counter())
+    if job in FAIL:
+        raise ValueError(f"{job} failed")
+    return {"out": {"id": item["id"], "by": job}}
+
+
+@graph
+def flow(job, seconds):
+    src = ingress()
+    step = work(item=src["item"], job=job, seconds=seconds)
+    out = egress(item=step["out"])
+    START >> src >> step >> out >> END
+
+
 def _job(name: str, record_dir, seconds: float = 0.03) -> Job:
-    @op(bound="io")
-    async def work(item: dict = None) -> dict:
-        t0 = perf_counter()
-        await asyncio.sleep(seconds)
-        WINDOWS[name] = (t0, perf_counter())
-        if name in FAIL:
-            raise ValueError(f"{name} failed")
-        return {"out": {"id": item["id"], "by": name}}
-
-    @graph
-    def flow():
-        src = ingress()
-        step = work(item=src["item"])
-        out = egress(item=step["out"])
-        START >> src >> step >> out >> END
-
-    return Job(name, graph=flow, source=[{"id": "x"}], sink=[], key="id", record_dir=record_dir)
+    return Job(name, graph=flow, source=[{"id": "x"}], sink=[], key="id", record_dir=record_dir,
+               inputs={"job": name, "seconds": seconds})  # fmt: skip
 
 
 @pytest.fixture(autouse=True)

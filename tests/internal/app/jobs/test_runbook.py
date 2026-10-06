@@ -76,15 +76,36 @@ async def cluster_op(item: dict = None) -> dict:
     return {"member": {"id": item["id"], "cluster": item["dim"] % 2}}
 
 
-def _flow(name, fn, out_key):
-    @graph
-    def flow():
-        src = ingress()
-        step = fn(item=src["item"])
-        out = egress(item=step[out_key])
-        START >> src >> step >> out >> END
+@graph
+def extract_flow():
+    src = ingress()
+    step = extract_op(item=src["item"])
+    out = egress(item=step["doc"])
+    START >> src >> step >> out >> END
 
-    return flow
+
+@graph
+def embed_flow():
+    src = ingress()
+    step = embed_op(item=src["item"])
+    out = egress(item=step["vec"])
+    START >> src >> step >> out >> END
+
+
+@graph
+def score_flow():
+    src = ingress()
+    step = score_op(item=src["item"])
+    out = egress(item=step["scored"])
+    START >> src >> step >> out >> END
+
+
+@graph
+def cluster_flow():
+    src = ingress()
+    step = cluster_op(item=src["item"])
+    out = egress(item=step["member"])
+    START >> src >> step >> out >> END
 
 
 class Capture(Consumer):
@@ -113,26 +134,24 @@ def jobs(tmp_path):
     scores: list = []
     members: list = []
     common = dict(key="id", record_dir=tmp_path / "jobs", trace=[cap], concurrency=4)
-    extract = Job(
-        "extract", graph=_flow("extract_flow", extract_op, "doc"), source=raw, sink=docs, **common
-    )
+    extract = Job("extract", graph=extract_flow, source=raw, sink=docs, **common)
     embed = Job(
         "embed",
-        graph=_flow("embed_flow", embed_op, "vec"),
+        graph=embed_flow,
         source=lambda: docs,
         sink=vecs,
         **common,
     )
     score = Job(
         "score",
-        graph=_flow("score_flow", score_op, "scored"),
+        graph=score_flow,
         source=lambda: docs,
         sink=scores,
         **common,
     )
     cluster = Job(
         "cluster",
-        graph=_flow("cluster_flow", cluster_op, "member"),
+        graph=cluster_flow,
         source=lambda: vecs,
         sink=members,
         session="stream",
@@ -250,7 +269,7 @@ async def test_continue_runs_every_step_and_the_run_is_failed(tmp_path, jobs):
 async def test_a_job_that_raises_is_a_failed_node_not_a_crash(tmp_path):
     broken = Job(
         "broken",
-        graph=_flow("broken_flow", extract_op, "doc"),
+        graph=extract_flow,
         source="/nonexistent/x.jsonl",
         record_dir=tmp_path / "jobs",
     )
@@ -315,7 +334,7 @@ def test_what_a_runbook_refuses(tmp_path, jobs):
     a, b, c = jobs["extract"], jobs["embed"], jobs["cluster"]
     with pytest.raises(ValueError, match="cycle: extract >> extract"):
         Runbook("x", a >> a, record_dir=tmp_path)
-    twin = Job("extract", graph=_flow("twin", extract_op, "doc"), source=[], record_dir=tmp_path)
+    twin = Job("extract", graph=extract_flow, source=[], record_dir=tmp_path)
     with pytest.raises(ValueError, match="appears twice: extract"):
         Runbook("x", a >> twin, record_dir=tmp_path)
     with pytest.raises(TypeError, match="made of Jobs"):

@@ -120,25 +120,27 @@ def test_trace_project_outside_a_project_says_so(tmp_path, monkeypatch):
         Operon(doubling, params={"val": None}, trace="project")
 
 
+@op
+async def helper(x: int = 0, inner=None) -> dict:
+    handle = inner.start(inputs={"val": x})
+    out = await handle.result()
+    return {"y": out["result"], "nested_nodes": len(handle.trace.nodes)}
+
+
+@graph
+def runs_a_graph(x, inner):
+    h = helper(x=x, inner=inner)
+    START >> h >> END
+
+
 async def test_an_engine_run_inside_an_op_opens_no_trace_of_its_own():
     """A graph an op runs is part of that op's run, not a run of its own:
     its consumers are not called, so a service that runs a helper graph
     per call does not file a second trace per call."""
     inner_cap, outer_cap = Capture(), Capture()
     inner = Operon(doubling, params={"val": None}, trace=[inner_cap])
-
-    @op
-    async def helper(x: int = 0) -> dict:
-        handle = inner.start(inputs={"val": x})
-        out = await handle.result()
-        return {"y": out["result"], "nested_nodes": len(handle.trace.nodes)}
-
-    @graph
-    def outer(x):
-        h = helper(x=x)
-        START >> h >> END
-
-    out = await Operon(outer, params={"x": None}, trace=[outer_cap]).run(inputs={"x": 3})
+    outer = Operon(runs_a_graph, params={"x": None, "inner": None}, trace=[outer_cap])
+    out = await outer.run(inputs={"x": 3, "inner": inner})
     assert out["y"] == 6
     assert out["nested_nodes"] == 1  # the nested run still records into its own handle
     assert len(outer_cap.traces) == 1
