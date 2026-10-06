@@ -1,0 +1,929 @@
+{
+ "embedder": "intfloat/multilingual-e5-small",
+ "llm": "gpt-4o-mini",
+ "seed": 3,
+ "corpus": [
+  "legal_000_10065_vpcp-kgvx_02102026_1-signed.signed.pdf",
+  "legal_019_122-vbhn-bxd.signed.pdf",
+  "legal_023_95-vbhn-bxd.signed.pdf",
+  "legal_027_75-bxd.signed.pdf",
+  "legal_029_43-bnnmt.signed.pdf",
+  "legal_030_1._phuluc_i_tu_viet_tat_thuat_ngu_ky_thuat_va_thuat_ngu_nghiep_vu_du_lieu_261001102410__01102026160903_signed.pdf",
+  "legal_031_2._phuluc_ii_so_do_kien_truc_du_lieu_linh_vuc_lam_nghiep_261001102436__01102026160912_signed.pdf",
+  "legal_038_9._phuluc_ix_so_do_mo_hinh_trien_khai_kien_truc_va_ha_tang_dung_chung_261001102824__01102026161013_signed.pdf",
+  "legal_045_43_2026_nq-cp_30092026_1-signed.signed.pdf",
+  "legal_049_08-vbhn-bvhttdl.signed.pdf",
+  "legal_067_nq28phattrienvanhoa.pdf",
+  "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+  "legal_091_347_2026_nd-cp_08092026_7-signed.signed.pdf",
+  "legal_093_347_2026_nd-cp_08092026_12-signed.pdf",
+  "legal_142_22-bnv.signed.pdf",
+  "legal_153_76-bgddt-pl2.pdf",
+  "legal_159_70-bxd-pl2.pdf",
+  "legal_160_70-bxd-pl3.pdf",
+  "legal_163_69-bxd.signed.pdf",
+  "legal_194_ttlt-14.pdf",
+  "wiki_0038_stade_de_reims.html",
+  "wiki_0059_amanda_seyfried.html",
+  "wiki_0099_grover_furr.html",
+  "wiki_0101_enceladus_v_tinh.html",
+  "wiki_0121_romnia.html",
+  "wiki_0133_anne_n_hong_ca_lin_hip_anh.html",
+  "wiki_0140_preah_ko.html",
+  "wiki_0162_vng_loi_gii_v_ch_bng_n_th_gii_2007.html",
+  "wiki_0163_jennifer_lee_nh_lm_phim.html",
+  "wiki_0214_lee_kun_hee.html",
+  "wiki_0220_spartacus.html",
+  "wiki_0222_sms_kronprinz_1914.html"
+ ],
+ "ingest": {
+  "documents": 32,
+  "chunks": 688,
+  "seconds": 192.5
+ },
+ "citations": [
+  {
+   "marker": 2,
+   "key": "legal_159_70-bxd-pl2.pdf",
+   "quote": "Chi phí vật liệu được xác định bằng hao phí vật liệu nhân với đơn giá vật\n\nliệu thời điểm lập dự toán.",
+   "pages": [
+    4
+   ],
+   "regions": [
+    {
+     "page_no": 4,
+     "bbox": [
+      0.1904921984812863,
+      0.09956170473892238,
+      0.90474385096073,
+      0.1132388487523787
+     ]
+    },
+    {
+     "page_no": 4,
+     "bbox": [
+      0.1428691496630813,
+      0.12250742190235643,
+      0.39142618483002467,
+      0.13618456591581263
+     ]
+    }
+   ],
+   "shown_page": 4,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "a) Chi phí vật liệu được xác định bằng hao phí vật liệu nhân với đơn giá vật\nliệu thời điểm lập dự toán.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Chi phí vật liệu được xác định như thế nào trong dự toán xây dựng?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Là đầu mối quản lý dữ liệu tại địa phương; tạo lập, cập nhật dữ liệu quản\n\nlý nhà nước thuộc nguồn của Sở;",
+   "pages": [
+    22
+   ],
+   "regions": [
+    {
+     "page_no": 22,
+     "bbox": [
+      0.20241895898124557,
+      0.47605060111605274,
+      0.9047707288043854,
+      0.48972774512950895
+     ]
+    },
+    {
+     "page_no": 22,
+     "bbox": [
+      0.14286914966308134,
+      0.4970839764772302,
+      0.9047673678770526,
+      0.5528278734698414
+     ]
+    }
+   ],
+   "shown_page": 22,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "a) Là đầu mối quản lý dữ liệu tại địa phương; tạo lập, cập nhật dữ liệu quản\nlý nhà nước thuộc nguồn của Sở; đề nghị cấp mới, thay đổi, thu hồi vai trò và \r\nphạm vi tài khoản của người sử dụng tại địa phương; khai thác dữ liệu phục vụ\r\nquản lý nhà nước;",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Sở Xây dựng có trách nhiệm gì trong việc quản lý dữ liệu tại địa phương?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "quote": "quản lý\n\nnhà nước đối với ngành, lĩnh vực do bộ quản lý",
+   "pages": [
+    2
+   ],
+   "regions": [
+    {
+     "page_no": 2,
+     "bbox": [
+      0.21432771581714882,
+      0.2893040464964371,
+      0.9047451456535301,
+      0.3029795665425034
+     ]
+    },
+    {
+     "page_no": 2,
+     "bbox": [
+      0.16670866560738815,
+      0.308424002351544,
+      0.90474514501525,
+      0.3794593809368028
+     ]
+    }
+   ],
+   "shown_page": 2,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "4. Ban hành thông tư, quyết định, chỉ thị và các văn bản khác về quản lý \nnhà nước đối với ngành, lĩnh vực do bộ quản lý; chỉ đạo, hướng dẫn, kiểm tra \r\nvà tổ chức thực hiện các văn bản quy phạm pháp luật thuộc phạm vi quản lý \r\ncủa bộ; chỉ đạo và tổ chức thực hiện công tác tuyên truyền, phổ biến, giáo dục\r\npháp luật, truyền thông chính sách thuộc phạm vi quản lý nhà nước của bộ.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Tình hình và kết quả thực hiện quy hoạch, báo cáo tình hình sản xuất và thực hiện dự án đầu tư lĩnh vực nào?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_029_43-bnnmt.signed.pdf",
+   "quote": "Dữ liệu lịch sử được cơ quan quản lý dữ liệu lưu trữ đầy đủ, bảo đảm khả\n\nnăng truy cập, phục vụ tra cứu, kiểm tra, đối soát dữ liệu.",
+   "pages": [
+    8
+   ],
+   "regions": [
+    {
+     "page_no": 8,
+     "bbox": [
+      0.2034200094067056,
+      0.418662438236412,
+      0.9143800309077468,
+      0.433020619536298
+     ]
+    },
+    {
+     "page_no": 8,
+     "bbox": [
+      0.1429550493852046,
+      0.43961454770049413,
+      0.6819035812672177,
+      0.45397272900038005
+     ]
+    }
+   ],
+   "shown_page": 8,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "a) Dữ liệu lịch sử được cơ quan quản lý dữ liệu lưu trữ đầy đủ, bảo đảm khả \nnăng truy cập, phục vụ tra cứu, kiểm tra, đối soát dữ liệu.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Các quy định về việc xử lý và lưu trữ dữ liệu lịch sử trong hệ thống thông tin là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_029_43-bnnmt.signed.pdf",
+   "quote": "Việc xóa, hủy dữ liệu lịch sử phải tuân thủ quy trình quản lý vòng đời dữ\n\nliệu, pháp luật về lưu trữ và quy định pháp luật có liên quan.",
+   "pages": [
+    8
+   ],
+   "regions": [
+    {
+     "page_no": 8,
+     "bbox": [
+      0.2034200094067056,
+      0.537984939186621,
+      0.9144743667271378,
+      0.552343120486507
+     ]
+    },
+    {
+     "page_no": 8,
+     "bbox": [
+      0.1429550493852046,
+      0.5590795800076016,
+      0.7108095142108442,
+      0.5734377613074876
+     ]
+    }
+   ],
+   "shown_page": 8,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "c) Việc xóa, hủy dữ liệu lịch sử phải tuân thủ quy trình quản lý vòng đời dữ \nliệu, pháp luật về lưu trữ và quy định pháp luật có liên quan.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "row",
+   "query": "Các quy định về việc xử lý và lưu trữ dữ liệu lịch sử trong hệ thống thông tin là gì?"
+  },
+  {
+   "marker": 2,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Dữ liệu chỉ được xóa khỏi Hệ thống thông tin khi hết thời hạn lưu trữ,\n\nkhông còn giá trị sử dụng và có quyết định của cơ quan hoặc người có thẩm quyền theo pháp luật về lưu trữ.",
+   "pages": [
+    16
+   ],
+   "regions": [
+    {
+     "page_no": 16,
+     "bbox": [
+      0.20241895898124557,
+      0.2763297323729554,
+      0.9047472112497283,
+      0.2900068763864117
+     ]
+    },
+    {
+     "page_no": 16,
+     "bbox": [
+      0.14286914966308134,
+      0.2954519575935594,
+      0.9047673678770531,
+      0.38561799345035347
+     ]
+    }
+   ],
+   "shown_page": 16,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "4. Dữ liệu chỉ được xóa khỏi Hệ thống thông tin khi hết thời hạn lưu trữ,\nkhông còn giá trị sử dụng và có quyết định của cơ quan hoặc người có thẩm quyền\r\ntheo pháp luật về lưu trữ. Việc xóa phải lưu nhật ký về mã định danh dữ liệu, thời\r\nđiểm, người thực hiện và căn cứ xóa; bảo đảm toàn vẹn dữ liệu liên kết. Không \r\nxóa dữ liệu đang phục vụ kiểm tra, thanh tra, kiểm toán hoặc giải quyết khiếu nại,\r\ntố cáo, tranh chấp.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Các quy định về việc xử lý và lưu trữ dữ liệu lịch sử trong hệ thống thông tin là gì?"
+  },
+  {
+   "marker": 2,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Tổng CN-C-44 hoàn thành trong kỳ.",
+   "pages": [
+    79
+   ],
+   "regions": [
+    {
+     "page_no": 79,
+     "bbox": [
+      0.05054044186519517,
+      0.11951957498628246,
+      0.9494595128325138,
+      0.8806870453942361
+     ]
+    }
+   ],
+   "shown_page": 79,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "16 KPI-16 Chiều dài tuyến ống truyền tải\r\nđược cải tạo, thay thế Tổng CN-C-44 hoàn thành trong kỳ. km Hằng quý; tổnghợp hằng năm\r\n17 KPI-17 Chiều dài mạng phân phối được cải\r\ntạo, thay thế Tổng CN-C-45 hoàn thành trong kỳ. km Hằng quý; tổnghợp hằng năm\r\n18 KPI-18 Thời gian cấp nước liên tục Giá trị bình quân từ CN-C-50; ghi rõ phạm vi và số ngày \r\ncó dữ liệu.\r\nGiờ/ngày hoặc\r\n%\r\nHằng tháng; \r\ntổng hợp theo \r\nquý, năm\r\n19 KPI-19 Áp lực nước tại điểm kiểm soát Giá trị bình quân và tối thiểu từ CN-C-49 theo nhóm điểm\r\nkiểm soát đại diện. m hoặc bar\r\nHằng tháng; \r\ntổng hợp theo \r\nquý, năm\r\n20 KPI-2",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Chiều dài tuyến ống truyền tải được cải tạo, thay thế trong kỳ là bao nhiêu km?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_160_70-bxd-pl3.pdf",
+   "quote": "Trang bị và cấp phát đồ dùng bảo hộ lao động cho nhân viên hiện trường",
+   "pages": [
+    27
+   ],
+   "regions": [
+    {
+     "page_no": 27,
+     "bbox": [
+      0.12859063195043105,
+      0.8105296964900464,
+      0.8486746379847426,
+      0.8242068405035027
+     ]
+    }
+   ],
+   "shown_page": 27,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "V. Trang bị và cấp phát đồ dùng bảo hộ lao động cho nhân viên hiện trường.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Các chi phí nào liên quan đến an toàn lao động trong doanh nghiệp?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_160_70-bxd-pl3.pdf",
+   "quote": "Chi phí tuyên truyền, giáo dục, đào tạo an toàn lao động",
+   "pages": [
+    27
+   ],
+   "regions": [
+    {
+     "page_no": 27,
+     "bbox": [
+      0.12859063195043105,
+      0.889280182910881,
+      0.8859264445609977,
+      0.9029573269243372
+     ]
+    }
+   ],
+   "shown_page": 27,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "VI. Chi phí tuyên truyền, giáo dục, đào tạo an toàn lao động và khen thưởng cho ",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "row",
+   "query": "Các chi phí nào liên quan đến an toàn lao động trong doanh nghiệp?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "tính\n\nchính xác, hợp lệ, toàn vẹn, đầy đủ, cập nhật kịp thời và nhất quán",
+   "pages": [
+    8
+   ],
+   "regions": [
+    {
+     "page_no": 8,
+     "bbox": [
+      0.20241895898124557,
+      0.40651264571448664,
+      0.9047236936950718,
+      0.4201897897279428
+     ]
+    },
+    {
+     "page_no": 8,
+     "bbox": [
+      0.14286914966308134,
+      0.4281042835847183,
+      0.9047673678770527,
+      0.484964705607316
+     ]
+    }
+   ],
+   "shown_page": 8,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "1. Dữ liệu trong Cơ sở dữ liệu về cấp nước, thoát nước phải bảo đảm tính \nchính xác, hợp lệ, toàn vẹn, đầy đủ, cập nhật kịp thời và nhất quán; đồng thời bảo\r\nđảm khả năng truy vết, kết nối, chia sẻ và tái sử dụng theo quy định của Thông tư\r\nnày và pháp luật về dữ liệu.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Các yêu cầu về chất lượng dữ liệu trong Cơ sở dữ liệu về cấp nước, thoát nước là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Dữ liệu cập nhật phải có nguồn gốc rõ ràng; phù hợp với hồ sơ, văn bản,\n\nkết quả quan trắc, đo đếm, báo cáo nghiệp vụ hoặc tài liệu chứng minh",
+   "pages": [
+    8
+   ],
+   "regions": [
+    {
+     "page_no": 8,
+     "bbox": [
+      0.20241895898124557,
+      0.5000059386683158,
+      0.9047472112497287,
+      0.5136830826817719
+     ]
+    },
+    {
+     "page_no": 8,
+     "bbox": [
+      0.14286914966308134,
+      0.5215975765385474,
+      0.9047673678770531,
+      0.5568663550251576
+     ]
+    }
+   ],
+   "shown_page": 8,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "2. Dữ liệu cập nhật phải có nguồn gốc rõ ràng; phù hợp với hồ sơ, văn bản,\nkết quả quan trắc, đo đếm, báo cáo nghiệp vụ hoặc tài liệu chứng minh; đúng kiểu\r\ndữ liệu, định dạng, đơn vị đo, mã danh mục và quy tắc kiểm tra hợp lệ.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "row",
+   "query": "Các yêu cầu về chất lượng dữ liệu trong Cơ sở dữ liệu về cấp nước, thoát nước là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Hệ thống thông tin phải có chức năng kiểm tra tự động trường bắt buộc,\n\nmiền giá trị, logic nghiệp vụ, trùng lặp, quan hệ không gian, sai lệch bất thường và cảnh báo dữ liệu hết hạn hoặc chậm cập nhật",
+   "pages": [
+    8
+   ],
+   "regions": [
+    {
+     "page_no": 8,
+     "bbox": [
+      0.20241895898124557,
+      0.5719075835488013,
+      0.9047472112497285,
+      0.5855847275622575
+     ]
+    },
+    {
+     "page_no": 8,
+     "bbox": [
+      0.14286914966308134,
+      0.5934992214190331,
+      0.9047438503223963,
+      0.6287679999056431
+     ]
+    }
+   ],
+   "shown_page": 8,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "3. Hệ thống thông tin phải có chức năng kiểm tra tự động trường bắt buộc,\nmiền giá trị, logic nghiệp vụ, trùng lặp, quan hệ không gian, sai lệch bất thường\r\nvà cảnh báo dữ liệu hết hạn hoặc chậm cập nhật.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "row",
+   "query": "Các yêu cầu về chất lượng dữ liệu trong Cơ sở dữ liệu về cấp nước, thoát nước là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Siêu dữ liệu là dữ liệu mô tả đặc tính của dữ liệu, bao gồm thông tin về\n\nnội dung, nguồn gốc, cấu trúc, định dạng, thời điểm tạo lập, cập nhật, chất lượng, quyền truy cập và các đặc tính khác nhằm phục vụ quản lý, tìm kiếm, khai thác và sử dụng dữ liệu.",
+   "pages": [
+    3
+   ],
+   "regions": [
+    {
+     "page_no": 3,
+     "bbox": [
+      0.20241895898124557,
+      0.2899952381176104,
+      0.9047472112497285,
+      0.30367238213106673
+     ]
+    },
+    {
+     "page_no": 3,
+     "bbox": [
+      0.14286914966308134,
+      0.31142771353848375,
+      0.9047438503223962,
+      0.3679698061250088
+     ]
+    }
+   ],
+   "shown_page": 3,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "7. Siêu dữ liệu là dữ liệu mô tả đặc tính của dữ liệu, bao gồm thông tin về\nnội dung, nguồn gốc, cấu trúc, định dạng, thời điểm tạo lập, cập nhật, chất lượng,\r\nquyền truy cập và các đặc tính khác nhằm phục vụ quản lý, tìm kiếm, khai thác \r\nvà sử dụng dữ liệu.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Siêu dữ liệu là gì và có vai trò như thế nào trong việc quản lý dữ liệu?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "quote": "phê duyệt kế hoạch vận hành thị trường điện cạnh tranh hằng năm",
+   "pages": [
+    3
+   ],
+   "regions": [
+    {
+     "page_no": 3,
+     "bbox": [
+      0.16670866560738815,
+      0.2653159207600951,
+      0.9047686605952854,
+      0.3172313480151875
+     ]
+    }
+   ],
+   "shown_page": 3,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "trường điện cạnh tranh các cấp độ và tổ chức thực hiện; phê duyệt kế hoạch vận\r\nhành thị trường điện cạnh tranh hằng năm; giám sát vận hành thị trường điện\r\ncạnh tranh;",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Các quy định về khung giá điện và thủ tục phê duyệt giá dịch vụ điện lực được quy định như thế nào?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "quote": "Tổ chức lập, phê duyệt hoặc trình cấp có thẩm quyền phê duyệt, điều\n\nchỉnh quy hoạch điều tra cơ bản địa chất, khoáng sản, quy hoạch khoáng sản theo quy định của pháp luật",
+   "pages": [
+    5
+   ],
+   "regions": [
+    {
+     "page_no": 5,
+     "bbox": [
+      0.21432771581714882,
+      0.7234892829809977,
+      0.90474514565353,
+      0.737164803027064
+     ]
+    },
+    {
+     "page_no": 5,
+     "bbox": [
+      0.16670866560738815,
+      0.7426092388361046,
+      0.9047451450152498,
+      0.7754047102242138
+     ]
+    }
+   ],
+   "shown_page": 5,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "b) Tổ chức lập, phê duyệt hoặc trình cấp có thẩm quyền phê duyệt, điều\nchỉnh quy hoạch điều tra cơ bản địa chất, khoáng sản, quy hoạch khoáng sản\r\ntheo quy định của pháp luật về quy hoạch, địa chất và khoáng sản;",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Các nhiệm vụ và quyền hạn của cơ quan nhà nước trong lĩnh vực địa chất, khoáng sản và khuyến công là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "quote": "Cấp, cấp lại, gia hạn, điều chỉnh, thu hồi, chấp thuận trả lại, cấp đổi và chấp thuận chuyển nhượng quyền thăm dò, khai thác khoáng sản",
+   "pages": [
+    6
+   ],
+   "regions": [
+    {
+     "page_no": 6,
+     "bbox": [
+      0.16670866560738815,
+      0.08872090454869361,
+      0.9047921761753203,
+      0.23623609186316857
+     ]
+    }
+   ],
+   "shown_page": 6,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "đ) Cấp, cấp lại, gia hạn, điều chỉnh, thu hồi, chấp thuận trả lại, cấp đổi và \r\nchấp thuận chuyển nhượng quyền thăm dò, khai thác khoáng sản đối với giấy\r\nphép thăm dò khoáng sản, giấy phép khai thác khoáng sản theo thẩm quyền;\r\ngiấy phép thăm dò khoáng sản, giấy phép khai thác khoáng sản tại khu vực biển\r\nnằm ngoài ranh giới quản lý hành chính trên biển của các tỉnh, thành phố hoặc\r\nkhu vực biển chưa xác định ranh giới quản lý hành chính trên biển của các tỉnh,\r\nthành phố; thực hiện các nhiệm vụ khác về cấp phép theo quy định của pháp \r\nluật;",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "row",
+   "query": "Các nhiệm vụ và quyền hạn của cơ quan nhà nước trong lĩnh vực địa chất, khoáng sản và khuyến công là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "quote": "Quản lý nhà nước về hoạt động khuyến công; tổ chức thực hiện Chương\n\ntrình khuyến công quốc gia theo giai đoạn",
+   "pages": [
+    7
+   ],
+   "regions": [
+    {
+     "page_no": 7,
+     "bbox": [
+      0.21432771581714882,
+      0.3369275607719715,
+      0.9047686612335651,
+      0.3506030808180378
+     ]
+    },
+    {
+     "page_no": 7,
+     "bbox": [
+      0.16670866560738815,
+      0.3560475166270784,
+      0.5696481295122379,
+      0.3697230366731447
+     ]
+    }
+   ],
+   "shown_page": 7,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "a) Quản lý nhà nước về hoạt động khuyến công; tổ chức thực hiện Chương\ntrình khuyến công quốc gia theo giai đoạn;",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "row",
+   "query": "Các nhiệm vụ và quyền hạn của cơ quan nhà nước trong lĩnh vực địa chất, khoáng sản và khuyến công là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_049_08-vbhn-bvhttdl.signed.pdf",
+   "quote": "Kiểm tra, đối chiếu và quyết định việc đình chỉ lưu hành, buộc tiêu hủy\n\nbản ghi âm, ghi hình khi phát hiện vi phạm quy định tại Điều 3 Nghị định này và các quy định khác của pháp luật có liên quan.",
+   "pages": [
+    15
+   ],
+   "regions": [
+    {
+     "page_no": 15,
+     "bbox": [
+      0.202412148088423,
+      0.3680638065374382,
+      0.9051266545723309,
+      0.3824219878373242
+     ]
+    },
+    {
+     "page_no": 15,
+     "bbox": [
+      0.1429550493852046,
+      0.3881607278601292,
+      0.9051722099039168,
+      0.42247329912580767
+     ]
+    }
+   ],
+   "shown_page": 15,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "1. Kiểm tra, đối chiếu và quyết định việc đình chỉ lưu hành, buộc tiêu hủy \nbản ghi âm, ghi hình khi phát hiện vi phạm quy định tại Điều 3 Nghị định này và \r\ncác quy định khác của pháp luật có liên quan.",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Trách nhiệm của cơ quan nhà nước có thẩm quyền khi phát hiện vi phạm quy định về bản ghi âm, ghi hình là gì?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Công suất khai thác, vận hành bình quân ngày của nhà máy trong kỳ báo cáo.",
+   "pages": [
+    33
+   ],
+   "regions": [
+    {
+     "page_no": 33,
+     "bbox": [
+      0.041008431095123164,
+      0.11951957498628246,
+      0.958991508873996,
+      0.9049051253467016
+     ]
+    }
+   ],
+   "shown_page": 33,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "dụng. thái chất lượng: Sở Xây \r\ndựng rà soát, ghi nhận\r\ntrạng thái chất lượng theo \r\nphân quyền\r\n25 CN-B\u000224\r\nCông suất khai \r\nthác, vận hành \r\nbình quân\r\nCông suất khai thác, vận hành \r\nbình quân ngày của nhà máy \r\ntrong kỳ báo cáo.\r\nƯu tiên tiếp nhận tự động từ thiết\r\nbị đo lưu lượng.\r\nSố thập\r\nphân m³/ngày đêm Đơn vị cấpnước\r\nPhối hợp đối chiếu: Theo \r\nnhu cầu đối chiếu\r\nRà soát, ghi nhận trạng\r\nthái chất lượng: Sở Xây \r\ndựng rà soát, ghi nhận\r\ntrạng thái chất lượng theo \r\nphân quyền\r\nTheo tần\r\nsuất của\r\nHệ thống\r\nnguồn;\r\ntổng hợp\r\nhằng\r\ntháng\r\n26 CN-B\u000225\r\nTỷ lệ huy động\r\ncông suất cấp\r\nnước",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Công suất khai thác, vận hành bình quân của nhà máy trong kỳ báo cáo được tính như thế nào?"
+  },
+  {
+   "marker": 1,
+   "key": "legal_163_69-bxd.signed.pdf",
+   "quote": "Sở Xây dựng rà soát, ghi nhận trạng thái chất lượng theo phân quyền",
+   "pages": [
+    63
+   ],
+   "regions": [
+    {
+     "page_no": 63,
+     "bbox": [
+      0.05054044186519517,
+      0.11951957498628246,
+      0.9494595128325138,
+      0.9198572522786106
+     ]
+    }
+   ],
+   "shown_page": 63,
+   "page_ok": true,
+   "image_ok": true,
+   "boxes_ok": true,
+   "text_in_boxes": "nối liệu được kết nối từ hệ thống dữ liệu\r\nquan trắc môi trường của cơ quan có \r\nthẩm quyền; đơn vị thoát nước và Sở\r\nXây dựng chỉ đối chiếu liên kết công \r\ntrình, phản hồi sai lệch, không nhập\r\nlại, không sửa đổi và không ghi nhận\r\ntrạng thái chất lượng thay cơ quan, tổ\r\nchức quản lý Hệ thống nguồn.\r\nthẩm quyền dựng phối hợp\r\nRà soát, ghi nhận\r\ntrạng thái chất\r\nlượng: Kế thừa trạng\r\nthái chất lượng của\r\nHệ thống nguồn\r\nthống\r\nnguồn\r\n50 TN-C\u000249\r\nThông số nước\r\nthải sau xử lý \r\nđược kết nối\r\nCác thông số do hệ thống dữ liệu\r\nquan trắc môi trường có thẩm quyền\r\nchia sẻ, gồm lưu lượng, pH, nhiệt ",
+   "text_ok": true,
+   "ok": true,
+   "clicked": "marker",
+   "query": "Ai là đơn vị chịu trách nhiệm rà soát và ghi nhận trạng thái chất lượng của hệ thống thoát nước mưa chính?"
+  }
+ ],
+ "text_citations": [],
+ "asked": [
+  {
+   "query": "Chi phí vật liệu được xác định như thế nào trong dự toán xây dựng?",
+   "from_key": "legal_159_70-bxd-pl2.pdf",
+   "from_chunk": "ch_419dd08a0ea0e03880bfb6cf36549f02",
+   "answer": "Chi phí vật liệu được xác định bằng hao phí vật liệu nhân với đơn giá vật liệu thời điểm lập dự toán [2].",
+   "trace_id": "b9307ce185f2426e88bc6b86f7f610f9",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Sở Xây dựng có trách nhiệm gì trong việc quản lý dữ liệu tại địa phương?",
+   "from_key": "legal_163_69-bxd.signed.pdf",
+   "from_chunk": "ch_ec3b858164f45c8622df1b30ae493dd4",
+   "answer": "Sở Xây dựng có trách nhiệm là đầu mối quản lý dữ liệu tại địa phương [1], tạo lập, cập nhật dữ liệu quản lý nhà nước thuộc nguồn của Sở [1].",
+   "trace_id": "25401b0480974eb68aa2b0a8f7603c11",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Tình hình và kết quả thực hiện quy hoạch, báo cáo tình hình sản xuất và thực hiện dự án đầu tư lĩnh vực nào?",
+   "from_key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "from_chunk": "ch_a4a3d1e5291a5a2570da6fc6425bca87",
+   "answer": "Tình hình và kết quả thực hiện quy hoạch, báo cáo tình hình sản xuất và thực hiện dự án đầu tư thuộc lĩnh vực quản lý nhà nước của Bộ Công Thương [1].",
+   "trace_id": "b6458351d10c48aa9f89137da3182592",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Các quy định về việc xử lý và lưu trữ dữ liệu lịch sử trong hệ thống thông tin là gì?",
+   "from_key": "legal_029_43-bnnmt.signed.pdf",
+   "from_chunk": "ch_4a270a6dbe79e90dabd615ffae5bce54",
+   "answer": "Dữ liệu lịch sử được cơ quan quản lý dữ liệu lưu trữ đầy đủ, bảo đảm khả năng truy cập, phục vụ tra cứu, kiểm tra, đối soát dữ liệu [1]. Việc xóa, hủy dữ liệu lịch sử phải tuân thủ quy trình quản lý vòng đời dữ liệu, pháp luật về lưu trữ và quy định pháp luật có liên quan [1]. Dữ liệu chỉ được xóa khỏi Hệ thống thông tin khi hết thời hạn lưu trữ, không còn giá trị sử dụng và có quyết định của cơ quan hoặc người có thẩm quyền theo pháp luật về lưu trữ [2].",
+   "trace_id": "96df7154e510402ab8764b791c3cc813",
+   "verified": 3,
+   "dropped": 0,
+   "with_pages": 3
+  },
+  {
+   "query": "Chiều dài tuyến ống truyền tải được cải tạo, thay thế trong kỳ là bao nhiêu km?",
+   "from_key": "legal_163_69-bxd.signed.pdf",
+   "from_chunk": "ch_67654f6da356738eb9a1e26a765890ed",
+   "answer": "Chiều dài tuyến ống truyền tải được cải tạo, thay thế trong kỳ báo cáo là tổng CN-C-44 hoàn thành trong kỳ [2].",
+   "trace_id": "d1cb4cd5922d4a5980794e69bddc3e11",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Các chi phí nào liên quan đến an toàn lao động trong doanh nghiệp?",
+   "from_key": "legal_160_70-bxd-pl3.pdf",
+   "from_chunk": "ch_7602831ad771c34e7dc684fcc1c86567",
+   "answer": "Các chi phí liên quan đến an toàn lao động trong doanh nghiệp bao gồm chi phí kiểm tra, đánh giá, giám sát các nguồn nguy hiểm lớn tiềm ẩn [1], chi phí trang bị và cấp phát đồ dùng bảo hộ lao động cho nhân viên hiện trường [1], và chi phí tuyên truyền, giáo dục, đào tạo an toàn lao động [1].",
+   "trace_id": "ef7d8faf892b4286a60bc033c217e2cb",
+   "verified": 2,
+   "dropped": 1,
+   "with_pages": 2
+  },
+  {
+   "query": "Các yêu cầu về chất lượng dữ liệu trong Cơ sở dữ liệu về cấp nước, thoát nước là gì?",
+   "from_key": "legal_163_69-bxd.signed.pdf",
+   "from_chunk": "ch_6e332dd4b629d6c4be3c81f155afd12c",
+   "answer": "Dữ liệu trong Cơ sở dữ liệu về cấp nước, thoát nước phải bảo đảm tính chính xác, hợp lệ, toàn vẹn, đầy đủ, cập nhật kịp thời và nhất quán [1]. Dữ liệu cập nhật phải có nguồn gốc rõ ràng; phù hợp với hồ sơ, văn bản, kết quả quan trắc, đo đếm, báo cáo nghiệp vụ hoặc tài liệu chứng minh [1]. Hệ thống thông tin phải có chức năng kiểm tra tự động trường bắt buộc, miền giá trị, logic nghiệp vụ, trùng lặp, quan hệ không gian, sai lệch bất thường và cảnh báo dữ liệu hết hạn hoặc chậm cập nhật [1].",
+   "trace_id": "be1c92a161f5418d83b29d438df9d7ff",
+   "verified": 3,
+   "dropped": 0,
+   "with_pages": 3
+  },
+  {
+   "query": "Siêu dữ liệu là gì và có vai trò như thế nào trong việc quản lý dữ liệu?",
+   "from_key": "legal_030_1._phuluc_i_tu_viet_tat_thuat_ngu_ky_thuat_va_thuat_ngu_nghiep_vu_du_lieu_261001102410__01102026160903_signed.pdf",
+   "from_chunk": "ch_b6fabf6f48234b8ab3775a9540b9e448",
+   "answer": "Siêu dữ liệu là dữ liệu mô tả đặc tính của dữ liệu, bao gồm thông tin về nội dung, nguồn gốc, cấu trúc, định dạng, thời điểm tạo lập, cập nhật, chất lượng, quyền truy cập và các đặc tính khác nhằm phục vụ quản lý, tìm kiếm, khai thác và sử dụng dữ liệu [1].",
+   "trace_id": "addb26ad201d4e03af7bfc52a34f98c9",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Các lớp dữ liệu trong hệ thống quản lý dữ liệu được phân loại như thế nào?",
+   "from_key": "legal_029_43-bnnmt.signed.pdf",
+   "from_chunk": "ch_f6e9be6d3d3ed644e28e0d234bd68172",
+   "answer": "Các lớp dữ liệu trong hệ thống quản lý dữ liệu được phân loại thành các lớp như sau: lớp siêu dữ liệu (SDL), lớp dữ liệu gốc (DLG), lớp dữ liệu danh mục (DM), lớp dữ liệu chủ (DLC), lớp dữ liệu giao dịch (GD), lớp dữ liệu tổng hợp và phân tích (TH), và lớp dữ liệu mở (MO).",
+   "trace_id": "90273331ff5f40b4b1d09e7518fe7a5f",
+   "verified": 0,
+   "dropped": 1,
+   "with_pages": 0
+  },
+  {
+   "query": "Các quy định về khung giá điện và thủ tục phê duyệt giá dịch vụ điện lực được quy định như thế nào?",
+   "from_key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "from_chunk": "ch_6001f09abe8a37c7931b4ba2954e7af2",
+   "answer": "Các quy định về khung giá điện và thủ tục phê duyệt giá dịch vụ điện lực được quy định trong các văn bản pháp luật liên quan đến điện lực [1]. Cụ thể, việc xây dựng và ban hành các quy định để vận hành, điều hành giao dịch thị trường điện cạnh tranh các cấp độ và tổ chức thực hiện; phê duyệt kế hoạch vận hành thị trường điện cạnh tranh hằng năm [1].",
+   "trace_id": "1d78e420063947a4944df2eac68a856f",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Nhà nước có những chính sách gì để quảng bá và phát triển sản phẩm văn hóa Việt Nam?",
+   "from_key": "legal_067_nq28phattrienvanhoa.pdf",
+   "from_chunk": "ch_d08574af401006d9f9f65b1504e167fa",
+   "answer": "Nhà nước thực hiện chính sách hỗ trợ, thúc đẩy quảng bá hình ảnh, đất nước, con người Việt Nam thông qua tổ chức Tuần Văn hóa Việt Nam, chương trình giao lưu nghệ thuật, truyền dạy và biểu diễn nghệ thuật truyền thống.",
+   "trace_id": "31cf3a909f1b4083adcfc3c80c2967c2",
+   "verified": 0,
+   "dropped": 2,
+   "with_pages": 0
+  },
+  {
+   "query": "Các nhiệm vụ và quyền hạn của cơ quan nhà nước trong lĩnh vực địa chất, khoáng sản và khuyến công là gì?",
+   "from_key": "legal_089_351_2026_nd-cp_11092026_1-signed.signed.pdf",
+   "from_chunk": "ch_24a5c68ff3d2a7201e49e0365bc9bed8",
+   "answer": "Cơ quan nhà nước có nhiệm vụ tổ chức lập, phê duyệt hoặc trình cấp có thẩm quyền phê duyệt, điều chỉnh quy hoạch điều tra cơ bản địa chất, khoáng sản, quy hoạch khoáng sản theo quy định của pháp luật [1]. Ngoài ra, họ cũng có quyền cấp, cấp lại, gia hạn, điều chỉnh, thu hồi, chấp thuận trả lại, cấp đổi và chấp thuận chuyển nhượng quyền thăm dò, khai thác khoáng sản [1]. Về khuyến công, cơ quan nhà nước quản lý hoạt động khuyến công và tổ chức thực hiện Chương trình khuyến công quốc gia theo giai đoạn [1].",
+   "trace_id": "49bef1d99aac47e29094a6d8d36c3e5e",
+   "verified": 3,
+   "dropped": 0,
+   "with_pages": 3
+  },
+  {
+   "query": "Trách nhiệm của cơ quan nhà nước có thẩm quyền khi phát hiện vi phạm quy định về bản ghi âm, ghi hình là gì?",
+   "from_key": "legal_049_08-vbhn-bvhttdl.signed.pdf",
+   "from_chunk": "ch_b6b7b154299bd086649ceade0af10742",
+   "answer": "Trách nhiệm của cơ quan nhà nước có thẩm quyền khi phát hiện vi phạm quy định về bản ghi âm, ghi hình là kiểm tra, đối chiếu và quyết định việc đình chỉ lưu hành, buộc tiêu hủy bản ghi âm, ghi hình khi phát hiện vi phạm quy định tại Điều 3 Nghị định này và các quy định khác của pháp luật có liên quan [1].",
+   "trace_id": "f4c36b1e95a3422699c04debcd8328bb",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Công suất khai thác, vận hành bình quân của nhà máy trong kỳ báo cáo được tính như thế nào?",
+   "from_key": "legal_163_69-bxd.signed.pdf",
+   "from_chunk": "ch_16a24b7d73e3190b2307f0ee45e5d5f9",
+   "answer": "Công suất khai thác, vận hành bình quân ngày của nhà máy trong kỳ báo cáo được tính theo số thập phân m³/ngày đêm [1].",
+   "trace_id": "81c7aaac32fc4e3ab312899e2222af3e",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  },
+  {
+   "query": "Ai là đơn vị chịu trách nhiệm rà soát và ghi nhận trạng thái chất lượng của hệ thống thoát nước mưa chính?",
+   "from_key": "legal_163_69-bxd.signed.pdf",
+   "from_chunk": "ch_9a36129e038de9c475b7819067d36879",
+   "answer": "Đơn vị chịu trách nhiệm rà soát và ghi nhận trạng thái chất lượng của hệ thống thoát nước mưa chính là Sở Xây dựng [1].",
+   "trace_id": "37e163bee2a648b9b855245479407a2d",
+   "verified": 1,
+   "dropped": 0,
+   "with_pages": 1
+  }
+ ],
+ "screenshots": [
+  "docs/bench/k3/gate-first-citation.png",
+  "docs/bench/k3/desktop-light-documents.png",
+  "docs/bench/k3/desktop-light-viewer.png",
+  "docs/bench/k3/desktop-light-chunk.png",
+  "docs/bench/k3/desktop-light-text.png",
+  "docs/bench/k3/desktop-light-ask.png",
+  "docs/bench/k3/desktop-light-ask-hits.png",
+  "docs/bench/k3/desktop-light-citation.png",
+  "docs/bench/k3/desktop-dark-documents.png",
+  "docs/bench/k3/desktop-dark-viewer.png",
+  "docs/bench/k3/desktop-dark-chunk.png",
+  "docs/bench/k3/desktop-dark-text.png",
+  "docs/bench/k3/desktop-dark-ask.png",
+  "docs/bench/k3/desktop-dark-ask-hits.png",
+  "docs/bench/k3/desktop-dark-citation.png",
+  "docs/bench/k3/phone-light-documents.png",
+  "docs/bench/k3/phone-light-viewer.png",
+  "docs/bench/k3/phone-light-chunk.png",
+  "docs/bench/k3/phone-light-text.png",
+  "docs/bench/k3/phone-light-ask.png",
+  "docs/bench/k3/phone-light-ask-hits.png",
+  "docs/bench/k3/phone-light-citation.png",
+  "docs/bench/k3/phone-dark-documents.png",
+  "docs/bench/k3/phone-dark-viewer.png",
+  "docs/bench/k3/phone-dark-chunk.png",
+  "docs/bench/k3/phone-dark-text.png",
+  "docs/bench/k3/phone-dark-ask.png",
+  "docs/bench/k3/phone-dark-ask-hits.png",
+  "docs/bench/k3/phone-dark-citation.png",
+  "docs/bench/k3/desktop-nopanel-light-documents.png",
+  "docs/bench/k3/desktop-nopanel-light-viewer.png",
+  "docs/bench/k3/desktop-nopanel-light-chunk.png",
+  "docs/bench/k3/desktop-nopanel-light-text.png",
+  "docs/bench/k3/desktop-nopanel-light-ask.png",
+  "docs/bench/k3/desktop-nopanel-light-ask-hits.png",
+  "docs/bench/k3/desktop-nopanel-light-citation.png"
+ ],
+ "summary": {
+  "citations": 20,
+  "ok": 20,
+  "page_ok": 20,
+  "image_ok": 20,
+  "boxes_ok": 20,
+  "text_ok": 20,
+  "text_citations": 0,
+  "text_citations_ok": 0,
+  "questions_asked": 15,
+  "documents_cited": 6,
+  "pages_cited": 16,
+  "dropped": 4,
+  "verified": 20
+ }
+}

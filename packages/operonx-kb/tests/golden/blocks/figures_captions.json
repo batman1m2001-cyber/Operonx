@@ -1,0 +1,15 @@
+{"blocks": [
+ {"kind": "page_header", "text": "ACME Corp — Q3 report"},
+ {"kind": "heading", "level": 1, "text": "Results"},
+ {"kind": "paragraph", "text": "Revenue grew as Figure 1 shows; Table 2 breaks it down."},
+ {"kind": "figure", "attrs": {"alt": "Revenue chart"}},
+ {"kind": "caption", "text": "Figure 1: Revenue by quarter."},
+ {"kind": "caption", "text": "Table 2: Revenue | by region"},
+ {"kind": "table", "attrs": {"rows": [["Region", "Q2", "Q3"], ["North", "1.2", "1.5"], ["South", "0.9"]]}},
+ {"kind": "figure", "attrs": {}},
+ {"kind": "footnote", "text": "1 Unaudited."},
+ {"kind": "heading", "level": 3, "text": "Deep heading after a gap"},
+ {"kind": "paragraph", "text": "   "},
+ {"kind": "formula", "text": "E = m c^2"},
+ {"kind": "page_footer", "text": "3"}
+]}

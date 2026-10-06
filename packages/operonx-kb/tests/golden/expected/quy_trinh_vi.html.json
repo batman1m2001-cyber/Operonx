@@ -1,0 +1,19 @@
+{
+ "title": "Quy trình xin nghỉ phép",
+ "pages": [],
+ "canonical": "# Quy trình xin nghỉ phép\n\nNhân viên đăng ký nghỉ phép trên hệ thống nhân sự ít nhất ba ngày làm việc trước ngày nghỉ.\n\n## Các bước thực hiện\n\n1. Đăng nhập vào cổng thông tin nhân sự.\n2. Chọn loại nghỉ và ngày nghỉ.\n3. Gửi yêu cầu để quản lý trực tiếp phê duyệt.\n\n## Lưu ý\n\nNgày phép chưa sử dụng được chuyển sang năm sau nhưng phải dùng hết trước ngày 31 tháng 3.",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [2, 364]},
+  {"path": "0.0", "kind": "title", "span": [2, 25], "text": "Quy trình xin nghỉ phép"},
+  {"path": "0.1", "kind": "paragraph", "span": [27, 118], "text": "Nhân viên đăng ký nghỉ phép trên hệ thống nhân sự ít nhất ba ngày làm việc trước ngày nghỉ."},
+  {"path": "0.2", "kind": "section", "level": 1, "span": [123, 262]},
+  {"path": "0.2.0", "kind": "heading", "level": 1, "span": [123, 141], "text": "Các bước thực hiện"},
+  {"path": "0.2.1", "kind": "list", "span": [146, 262], "ordered": true},
+  {"path": "0.2.1.0", "kind": "list_item", "span": [146, 183], "text": "Đăng nhập vào cổng thông tin nhân sự.", "ordered": true, "marker": "1."},
+  {"path": "0.2.1.1", "kind": "list_item", "span": [187, 215], "text": "Chọn loại nghỉ và ngày nghỉ.", "ordered": true, "marker": "2."},
+  {"path": "0.2.1.2", "kind": "list_item", "span": [219, 262], "text": "Gửi yêu cầu để quản lý trực tiếp phê duyệt.", "ordered": true, "marker": "3."},
+  {"path": "0.3", "kind": "section", "level": 1, "span": [267, 364]},
+  {"path": "0.3.0", "kind": "heading", "level": 1, "span": [267, 272], "text": "Lưu ý"},
+  {"path": "0.3.1", "kind": "paragraph", "span": [274, 364], "text": "Ngày phép chưa sử dụng được chuyển sang năm sau nhưng phải dùng hết trước ngày 31 tháng 3."}
+ ]
+}

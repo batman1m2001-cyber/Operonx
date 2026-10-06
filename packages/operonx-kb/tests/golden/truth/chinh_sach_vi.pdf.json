@@ -1,0 +1,49 @@
+{
+ "source": "chinh_sach_vi.pdf",
+ "note": "Hand-written from tests/golden/make_pdfs.py: what each generator draws, in reading order.",
+ "blocks": [
+  {
+   "kind": "title",
+   "text": "Chính sách nghỉ phép năm 2026"
+  },
+  {
+   "kind": "heading",
+   "text": "1. Phạm vi áp dụng",
+   "level": 1
+  },
+  {
+   "kind": "paragraph",
+   "text": "Chính sách này áp dụng cho toàn bộ nhân viên chính thức của công ty. Nhân viên thử việc được hưởng chế độ theo hợp đồng thử việc."
+  },
+  {
+   "kind": "heading",
+   "text": "2. Số ngày nghỉ phép",
+   "level": 1
+  },
+  {
+   "kind": "paragraph",
+   "text": "Nhân viên được nghỉ phép 12 ngày làm việc mỗi năm. Cứ đủ 5 năm công tác, số ngày nghỉ phép được tăng thêm 1 ngày."
+  },
+  {
+   "kind": "list_item",
+   "text": "Đăng ký nghỉ trên hệ thống trước ít nhất 3 ngày."
+  },
+  {
+   "kind": "list_item",
+   "text": "Quản lý trực tiếp phê duyệt trong vòng 2 ngày làm việc."
+  },
+  {
+   "kind": "list_item",
+   "text": "Phòng nhân sự cập nhật số ngày phép còn lại."
+  },
+  {
+   "kind": "heading",
+   "text": "3. Nghỉ ốm",
+   "level": 1
+  },
+  {
+   "kind": "paragraph",
+   "text": "Nghỉ ốm từ 2 ngày trở lên cần có giấy xác nhận của cơ sở y tế. Trường hợp đặc biệt, giám đốc nhân sự quyết định."
+  }
+ ]
+}

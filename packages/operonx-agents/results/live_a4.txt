@@ -1,0 +1,6 @@
+qwen3.7-plus approval round trip: interrupted after 2.8s (id 54715532789214d05c012e3183d5a967, reason "'refund' asks for approval for these arguments"); resumed completed in 2.0s, 2 turns, usage {'input_tokens': 846, 'output_tokens': 73, 'cached_input_tokens': 0, 'reasoning_tokens': 0, 'requests': 2, 'cost_usd': None}, refunds [('A1B2C3D4', 900)]
+answer: 'Refunded 900 on order A1B2C3D4. Reference: R-0001.'
+.
+qwen3.7-plus + MCP reference server (streamable HTTP): completed, 2 turns, tool results ['The sum of 1234 and 4321 is 5555.'], answer '5555'
+.
+2 passed in 14.16s

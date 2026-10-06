@@ -1,0 +1,81 @@
+{
+ "source": "table_report.pdf",
+ "note": "Hand-written from tests/golden/make_pdfs.py: what each generator draws, in reading order.",
+ "blocks": [
+  {
+   "kind": "title",
+   "text": "Leave Policy Summary"
+  },
+  {
+   "kind": "paragraph",
+   "text": "Table 1 lists the leave entitlements by contract type. Part-time staff receive leave pro rata to their hours."
+  },
+  {
+   "kind": "caption",
+   "text": "Table 1: Leave entitlements by contract"
+  },
+  {
+   "kind": "table",
+   "rows": [
+    [
+     "Contract",
+     "Annual leave",
+     "Sick leave",
+     "Notes"
+    ],
+    [
+     "Full-time",
+     "12 days",
+     "30 days",
+     "Carry over until March"
+    ],
+    [
+     "Part-time",
+     "Pro rata",
+     "30 days",
+     "Based on hours"
+    ],
+    [
+     "Intern",
+     "6 days",
+     "10 days",
+     ""
+    ]
+   ]
+  },
+  {
+   "kind": "heading",
+   "text": "Allowances",
+   "level": 1
+  },
+  {
+   "kind": "paragraph",
+   "text": "Monthly allowances are paid with the salary and adjusted every year accordingly to the consumer price index."
+  },
+  {
+   "kind": "table",
+   "rows": [
+    [
+     "Item",
+     "Amount",
+     "Frequency"
+    ],
+    [
+     "Lunch",
+     "730,000",
+     "monthly"
+    ],
+    [
+     "Parking",
+     "150,000",
+     "monthly"
+    ],
+    [
+     "Phone",
+     "200,000",
+     "monthly"
+    ]
+   ]
+  }
+ ]
+}

@@ -1,0 +1,113 @@
+{
+ "python": "3.11.15",
+ "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+ "operonx_file": "/home/thanglq/operonx-wt/a2-main/operonx/__init__.py",
+ "redact": "on",
+ "trace_records_per_run": {
+  "1": 30,
+  "3": 48
+ },
+ "idle_lag_ms": {
+  "p50": 0.24284531921148297,
+  "p99": 0.3992413878440857,
+  "max": 1.5389092043042183
+ },
+ "rows": [
+  {
+   "variant": "runner",
+   "calls": 1,
+   "concurrency": 1,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 0.3007679944857955,
+   "turn_p95_ms": 0.3451740834861994,
+   "cpu_per_turn_ms": 0.30025397101417184,
+   "lag_p99_ms": 1.0847609266638756,
+   "lag_max_ms": 1.3437216877937317
+  },
+  {
+   "variant": "runner",
+   "calls": 1,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 1.3184174429625273,
+   "turn_p95_ms": 1.4383448753505945,
+   "cpu_per_turn_ms": 0.26523410133086145,
+   "lag_p99_ms": 3.4083730317652225,
+   "lag_max_ms": 3.824873059988022
+  },
+  {
+   "variant": "stream",
+   "calls": 1,
+   "concurrency": 1,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 0.34747798927128315,
+   "turn_p95_ms": 0.3974444232881069,
+   "cpu_per_turn_ms": 0.3480919466819614,
+   "lag_p99_ms": 1.372110728174448,
+   "lag_max_ms": 1.5209449231624603
+  },
+  {
+   "variant": "stream",
+   "calls": 1,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 1.5782779082655907,
+   "turn_p95_ms": 1.7085305880755186,
+   "cpu_per_turn_ms": 0.3190452780108899,
+   "lag_p99_ms": 4.254104733467102,
+   "lag_max_ms": 4.6774248369038105
+  },
+  {
+   "variant": "runner",
+   "calls": 3,
+   "concurrency": 1,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 0.4517391789704561,
+   "turn_p95_ms": 0.8354787714779377,
+   "cpu_per_turn_ms": 0.5058188245166093,
+   "lag_p99_ms": 0.98777811601758,
+   "lag_max_ms": 1.8441469185054302
+  },
+  {
+   "variant": "runner",
+   "calls": 3,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 2.0741653628647327,
+   "turn_p95_ms": 3.9145733695477247,
+   "cpu_per_turn_ms": 0.5142514305189252,
+   "lag_p99_ms": 3.6229190193116665,
+   "lag_max_ms": 80.51359483599663
+  },
+  {
+   "variant": "stream",
+   "calls": 3,
+   "concurrency": 1,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 0.5453895544633269,
+   "turn_p95_ms": 0.6196230184286833,
+   "cpu_per_turn_ms": 0.5453904694877565,
+   "lag_p99_ms": 0.8271561712026596,
+   "lag_max_ms": 1.5126300752162933
+  },
+  {
+   "variant": "stream",
+   "calls": 3,
+   "concurrency": 5,
+   "turns": 10,
+   "runs": 200,
+   "turn_p50_ms": 2.1185806253924966,
+   "turn_p95_ms": 2.2066527977585793,
+   "cpu_per_turn_ms": 0.44810458249412477,
+   "lag_p99_ms": 2.0745910480618477,
+   "lag_max_ms": 49.643990747630596
+  }
+ ]
+}

@@ -15,12 +15,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── Detect a version bump on push to main ───────────────────────────────
-  check-version:
+  # ── One job per distribution: detect its version bump, publish, tag ─────
+  # operonx (repo root, tag vX.Y.Z) and the packages under packages/ (tag
+  # <name>-vX.Y.Z). Each compares its own pyproject.toml with the previous
+  # commit on main, so a bump in one never republishes the others.
+  publish:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.detect.outputs.version }}
-      changed: ${{ steps.detect.outputs.changed }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { dir: ".", tag_prefix: "v" }
+          - { dir: "packages/operonx-agents", tag_prefix: "operonx-agents-v" }
+          - { dir: "packages/operonx-kb", tag_prefix: "operonx-kb-v" }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,85 +38,48 @@ jobs:
       - id: detect
         env:
           FORCE: ${{ inputs.force }}
+          DIR: ${{ matrix.dir }}
         run: |
-          # Compare against the previous commit on main (before this merge).
           # Merge commit: HEAD^1 = previous main tip. Regular commit: HEAD~1.
-          if git rev-parse HEAD^2 >/dev/null 2>&1; then
-            BASE="HEAD^1"
-          else
-            BASE="HEAD~1"
-          fi
-          echo "Comparing against $BASE ($(git rev-parse --short $BASE))"
-          if [ "$FORCE" = "true" ]; then
-            echo "force=true — bypassing version diff and publishing current version."
-          fi
-
-          OLD=$(git show $BASE:pyproject.toml 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
-          NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' pyproject.toml)
-          if { [ "$OLD" != "$NEW" ] || [ "$FORCE" = "true" ]; } && [ -n "$NEW" ]; then
-            if [ "$FORCE" = "true" ] && [ "$OLD" = "$NEW" ]; then
-              echo "python: $NEW (forced)"
-            else
-              echo "python: $OLD -> $NEW (CHANGED)"
-            fi
+          if git rev-parse HEAD^2 >/dev/null 2>&1; then BASE="HEAD^1"; else BASE="HEAD~1"; fi
+          FILE="$DIR/pyproject.toml"; FILE="${FILE#./}"
+          OLD=$(git show "$BASE:$FILE" 2>/dev/null | awk -F'"' '/^version *= */ {print $2; exit}' || true)
+          NEW=$(awk -F'"' '/^version *= */ {print $2; exit}' "$FILE")
+          echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          if [ -n "$NEW" ] && { [ "$OLD" != "$NEW" ] || [ "$FORCE" = "true" ]; }; then
+            echo "$FILE: '$OLD' -> '$NEW' (publish)"
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "version=$NEW" >> "$GITHUB_OUTPUT"
           else
-            echo "python: $NEW (unchanged)"
+            echo "$FILE: $NEW (unchanged)"
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "version=$NEW" >> "$GITHUB_OUTPUT"
           fi
-
-  # ── Publish to PyPI ─────────────────────────────────────────────────────
-  publish-pypi:
-    needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
 
       - name: Install uv
+        if: steps.detect.outputs.changed == 'true'
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
 
-      - name: Set up Python
-        run: uv python install 3.10
-
       - name: Build wheel + sdist
-        run: uv build
+        if: steps.detect.outputs.changed == 'true'
+        working-directory: ${{ matrix.dir }}
+        run: |
+          uv python install 3.10
+          uv build --out-dir dist/
 
       - name: Publish to PyPI
+        if: steps.detect.outputs.changed == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
+          packages-dir: ${{ matrix.dir }}/dist/
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
 
-  # ── Tag the release ─────────────────────────────────────────────────────
-  tag-release:
-    needs: [check-version, publish-pypi]
-    if: needs.publish-pypi.result == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Create git tag
+        if: steps.detect.outputs.changed == 'true'
         env:
-          VERSION: ${{ needs.check-version.outputs.version }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ matrix.tag_prefix }}${{ steps.detect.outputs.version }}
         run: |
-          if [ -z "$VERSION" ]; then
-            echo "No version detected; skipping tag."
-            exit 0
-          fi
-          TAG="v$VERSION"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists; skipping."
             exit 0

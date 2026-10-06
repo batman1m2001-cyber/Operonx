@@ -1,0 +1,836 @@
+{
+ "embedder": "intfloat/multilingual-e5-small",
+ "reranker": "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1",
+ "sets": {
+  "xquad_vi": {
+   "documents": 48,
+   "chunks": 170,
+   "seconds": 37.0,
+   "cases": 397
+  },
+  "xquad_en": {
+   "documents": 48,
+   "chunks": 159,
+   "seconds": 23.8,
+   "cases": 397
+  },
+  "corpus_vi": {
+   "documents": 200,
+   "chunks": 1355,
+   "seconds": 157.7,
+   "cases": 120
+  }
+ },
+ "analyzers": {
+  "xquad_vi": {
+   "simple": {
+    "accented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9849,
+      "recall@10": 0.9874,
+      "recall@20": 0.9899,
+      "mrr": 0.9424,
+      "ndcg@10": 0.9535
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 24.615915957838297,
+     "p95_ms": 26.8614012748003,
+     "errors": 0,
+     "error_samples": []
+    },
+    "unaccented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.5768,
+      "recall@10": 0.6398,
+      "recall@20": 0.7103,
+      "mrr": 0.4654,
+      "ndcg@10": 0.5039
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 21.876586135476828,
+     "p95_ms": 24.55884125083685,
+     "errors": 0,
+     "error_samples": []
+    }
+   },
+   "simple+fold": {
+    "accented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9395,
+      "recall@10": 0.9597,
+      "recall@20": 0.9824,
+      "mrr": 0.8856,
+      "ndcg@10": 0.9025
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 23.89652980491519,
+     "p95_ms": 26.19829121977091,
+     "errors": 0,
+     "error_samples": []
+    },
+    "unaccented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9395,
+      "recall@10": 0.9597,
+      "recall@20": 0.9824,
+      "mrr": 0.8856,
+      "ndcg@10": 0.9025
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 23.663338739424944,
+     "p95_ms": 27.303850278258324,
+     "errors": 0,
+     "error_samples": []
+    }
+   },
+   "vi": {
+    "accented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9899,
+      "recall@10": 0.995,
+      "recall@20": 0.9975,
+      "mrr": 0.9473,
+      "ndcg@10": 0.9591
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 26.77578292787075,
+     "p95_ms": 30.842119362205267,
+     "errors": 0,
+     "error_samples": []
+    },
+    "unaccented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.5819,
+      "recall@10": 0.6448,
+      "recall@20": 0.7128,
+      "mrr": 0.4775,
+      "ndcg@10": 0.5143
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 23.942839354276657,
+     "p95_ms": 28.545287903398275,
+     "errors": 0,
+     "error_samples": []
+    }
+   },
+   "vi+fold": {
+    "accented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9798,
+      "recall@10": 0.9975,
+      "recall@20": 0.9975,
+      "mrr": 0.9428,
+      "ndcg@10": 0.9561
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 26.645687874406576,
+     "p95_ms": 31.649477779865265,
+     "errors": 0,
+     "error_samples": []
+    },
+    "unaccented": {
+     "cases": 397,
+     "metrics": {
+      "recall@5": 0.9798,
+      "recall@10": 0.9975,
+      "recall@20": 0.9975,
+      "mrr": 0.9428,
+      "ndcg@10": 0.9561
+     },
+     "scored": {
+      "recall@5": 397,
+      "recall@10": 397,
+      "recall@20": 397,
+      "mrr": 397,
+      "ndcg@10": 397
+     },
+     "p50_ms": 27.007215190678835,
+     "p95_ms": 30.32467607408762,
+     "errors": 0,
+     "error_samples": []
+    }
+   }
+  },
+  "corpus_vi": {
+   "simple": {
+    "accented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 0.9748,
+      "recall@10": 1.0,
+      "recall@20": 1.0,
+      "mrr": 0.8087,
+      "ndcg@10": 0.8564
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 28.730586636811495,
+     "p95_ms": 30.737508088350296,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    },
+    "unaccented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 0.4874,
+      "recall@10": 0.6387,
+      "recall@20": 0.7143,
+      "mrr": 0.3158,
+      "ndcg@10": 0.3872
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 27.482385281473398,
+     "p95_ms": 35.66928207874298,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    }
+   },
+   "simple+fold": {
+    "accented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 0.9412,
+      "recall@10": 0.9916,
+      "recall@20": 1.0,
+      "mrr": 0.7592,
+      "ndcg@10": 0.8164
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 28.494620230048895,
+     "p95_ms": 36.60556813701987,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    },
+    "unaccented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 0.9412,
+      "recall@10": 0.9916,
+      "recall@20": 1.0,
+      "mrr": 0.7592,
+      "ndcg@10": 0.8164
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 29.0916720405221,
+     "p95_ms": 37.461353931576014,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    }
+   },
+   "vi": {
+    "accented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "recall@20": 1.0,
+      "mrr": 0.8588,
+      "ndcg@10": 0.8947
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 31.459849327802658,
+     "p95_ms": 34.33072427287698,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    },
+    "unaccented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 0.4706,
+      "recall@10": 0.6387,
+      "recall@20": 0.7143,
+      "mrr": 0.3182,
+      "ndcg@10": 0.389
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 29.953605961054564,
+     "p95_ms": 44.36485609039664,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    }
+   },
+   "vi+fold": {
+    "accented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "recall@20": 1.0,
+      "mrr": 0.864,
+      "ndcg@10": 0.8985
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 32.03258756548166,
+     "p95_ms": 52.88174981251359,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    },
+    "unaccented": {
+     "cases": 120,
+     "metrics": {
+      "recall@5": 1.0,
+      "recall@10": 1.0,
+      "recall@20": 1.0,
+      "mrr": 0.864,
+      "ndcg@10": 0.8985
+     },
+     "scored": {
+      "recall@5": 119,
+      "recall@10": 119,
+      "recall@20": 119,
+      "mrr": 119,
+      "ndcg@10": 119
+     },
+     "p50_ms": 32.77979791164398,
+     "p95_ms": 48.14911726862192,
+     "errors": 5,
+     "error_samples": [
+      "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+      "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+     ]
+    }
+   }
+  }
+ },
+ "gate": {
+  "xquad_vi": {
+   "dense": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9698,
+     "recall@10": 0.9773,
+     "recall@20": 0.9874,
+     "mrr": 0.9179,
+     "ndcg@10": 0.9322
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 88.28263217583299,
+    "p95_ms": 98.94774109125137,
+    "errors": 0,
+    "error_samples": []
+   },
+   "lexical": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9798,
+     "recall@10": 0.9975,
+     "recall@20": 0.9975,
+     "mrr": 0.9428,
+     "ndcg@10": 0.9561
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 26.458019390702248,
+    "p95_ms": 29.821974225342274,
+    "errors": 0,
+    "error_samples": []
+   },
+   "hybrid": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.995,
+     "recall@10": 0.9975,
+     "recall@20": 0.9975,
+     "mrr": 0.9597,
+     "ndcg@10": 0.9691
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 92.72944973781705,
+    "p95_ms": 107.00315469875932,
+    "errors": 0,
+    "error_samples": []
+   },
+   "hybrid+rerank": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9849,
+     "recall@10": 0.9899,
+     "recall@20": 1.0,
+     "mrr": 0.9529,
+     "ndcg@10": 0.9615
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 4848.1007469818,
+    "p95_ms": 5418.489805422723,
+    "errors": 0,
+    "error_samples": []
+   },
+   "hybrid_minus_dense_r10": {
+    "mean": 0.0202,
+    "ci95": [
+     0.005,
+     0.0378
+    ],
+    "cases": 397,
+    "better": 9,
+    "worse": 1
+   }
+  },
+  "xquad_en": {
+   "dense": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9824,
+     "recall@10": 0.995,
+     "recall@20": 1.0,
+     "mrr": 0.9384,
+     "ndcg@10": 0.9521
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 84.9248580634594,
+    "p95_ms": 101.35387675836682,
+    "errors": 0,
+    "error_samples": []
+   },
+   "lexical": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9899,
+     "recall@10": 0.9899,
+     "recall@20": 0.9924,
+     "mrr": 0.9551,
+     "ndcg@10": 0.9639
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 24.18004535138607,
+    "p95_ms": 27.04075677320361,
+    "errors": 0,
+    "error_samples": []
+   },
+   "hybrid": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9924,
+     "recall@10": 0.9975,
+     "recall@20": 1.0,
+     "mrr": 0.9674,
+     "ndcg@10": 0.9748
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 88.01717357710004,
+    "p95_ms": 98.16567320376635,
+    "errors": 0,
+    "error_samples": []
+   },
+   "hybrid+rerank": {
+    "cases": 397,
+    "metrics": {
+     "recall@5": 0.9899,
+     "recall@10": 0.9924,
+     "recall@20": 1.0,
+     "mrr": 0.972,
+     "ndcg@10": 0.9769
+    },
+    "scored": {
+     "recall@5": 397,
+     "recall@10": 397,
+     "recall@20": 397,
+     "mrr": 397,
+     "ndcg@10": 397
+    },
+    "p50_ms": 4611.608429811895,
+    "p95_ms": 5349.988535046577,
+    "errors": 0,
+    "error_samples": []
+   },
+   "hybrid_minus_dense_r10": {
+    "mean": 0.0025,
+    "ci95": [
+     -0.005,
+     0.0126
+    ],
+    "cases": 397,
+    "better": 2,
+    "worse": 1
+   }
+  },
+  "corpus_vi": {
+   "dense": {
+    "cases": 120,
+    "metrics": {
+     "recall@5": 0.9076,
+     "recall@10": 0.9664,
+     "recall@20": 1.0,
+     "mrr": 0.7462,
+     "ndcg@10": 0.7974
+    },
+    "scored": {
+     "recall@5": 119,
+     "recall@10": 119,
+     "recall@20": 119,
+     "mrr": 119,
+     "ndcg@10": 119
+    },
+    "p50_ms": 95.33747704699636,
+    "p95_ms": 109.44408597424626,
+    "errors": 5,
+    "error_samples": [
+     "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+     "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+    ]
+   },
+   "lexical": {
+    "cases": 120,
+    "metrics": {
+     "recall@5": 1.0,
+     "recall@10": 1.0,
+     "recall@20": 1.0,
+     "mrr": 0.864,
+     "ndcg@10": 0.8985
+    },
+    "scored": {
+     "recall@5": 119,
+     "recall@10": 119,
+     "recall@20": 119,
+     "mrr": 119,
+     "ndcg@10": 119
+    },
+    "p50_ms": 30.88918700814247,
+    "p95_ms": 45.13727966696024,
+    "errors": 5,
+    "error_samples": [
+     "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+     "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+    ]
+   },
+   "hybrid": {
+    "cases": 120,
+    "metrics": {
+     "recall@5": 0.9832,
+     "recall@10": 1.0,
+     "recall@20": 1.0,
+     "mrr": 0.8265,
+     "ndcg@10": 0.8698
+    },
+    "scored": {
+     "recall@5": 119,
+     "recall@10": 119,
+     "recall@20": 119,
+     "mrr": 119,
+     "ndcg@10": 119
+    },
+    "p50_ms": 143.75314768403769,
+    "p95_ms": 178.57421608641744,
+    "errors": 5,
+    "error_samples": [
+     "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+     "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+    ]
+   },
+   "hybrid+rerank": {
+    "cases": 120,
+    "metrics": {
+     "recall@5": 0.9832,
+     "recall@10": 1.0,
+     "recall@20": 1.0,
+     "mrr": 0.7926,
+     "ndcg@10": 0.8448
+    },
+    "scored": {
+     "recall@5": 119,
+     "recall@10": 119,
+     "recall@20": 119,
+     "mrr": 119,
+     "ndcg@10": 119
+    },
+    "p50_ms": 4361.332791857421,
+    "p95_ms": 4767.843639012426,
+    "errors": 5,
+    "error_samples": [
+     "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+     "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+    ]
+   },
+   "hybrid_minus_dense_r10": {
+    "mean": 0.0336,
+    "ci95": [
+     0.0084,
+     0.0672
+    ],
+    "cases": 119,
+    "better": 4,
+    "worse": 0
+   }
+  }
+ },
+ "pg_fts": {
+  "xquad_vi": {
+   "cases": 397,
+   "metrics": {
+    "recall@5": 0.8564,
+    "recall@10": 0.9093,
+    "recall@20": 0.9521,
+    "mrr": 0.6783,
+    "ndcg@10": 0.7325
+   },
+   "scored": {
+    "recall@5": 397,
+    "recall@10": 397,
+    "recall@20": 397,
+    "mrr": 397,
+    "ndcg@10": 397
+   },
+   "p50_ms": 60.12674607336521,
+   "p95_ms": 100.0498509965837,
+   "errors": 0,
+   "error_samples": []
+  },
+  "xquad_en": {
+   "cases": 397,
+   "metrics": {
+    "recall@5": 0.4534,
+    "recall@10": 0.5995,
+    "recall@20": 0.7204,
+    "mrr": 0.3299,
+    "ndcg@10": 0.3871
+   },
+   "scored": {
+    "recall@5": 397,
+    "recall@10": 397,
+    "recall@20": 397,
+    "mrr": 397,
+    "ndcg@10": 397
+   },
+   "p50_ms": 34.19650299474597,
+   "p95_ms": 45.80719582736492,
+   "errors": 0,
+   "error_samples": []
+  },
+  "corpus_vi": {
+   "cases": 120,
+   "metrics": {
+    "recall@5": 0.5882,
+    "recall@10": 0.6975,
+    "recall@20": 0.7731,
+    "mrr": 0.49,
+    "ndcg@10": 0.5347
+   },
+   "scored": {
+    "recall@5": 119,
+    "recall@10": 119,
+    "recall@20": 119,
+    "mrr": 119,
+    "ndcg@10": 119
+   },
+   "p50_ms": 89.29117396473885,
+   "p95_ms": 262.00113678351045,
+   "errors": 5,
+   "error_samples": [
+    "recall@5: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'",
+    "recall@10: LabelError: quote not found in 'doc_185.pdf'; the label is stale or wrong\n  quote: 'Chi phí đi taxi khi công tác của khối Công nghệ thông tin đồng bằng sông Cửu Long được hoàn tối đa 350.000 đồng mỗi chuyến.'"
+   ]
+  }
+ },
+ "answers": {
+  "xquad_vi": {
+   "cases": 10,
+   "metrics": {
+    "citation_precision": 0.9,
+    "faithfulness": 0.6357,
+    "grounded_recall": 0.7
+   },
+   "scored": {
+    "citation_precision": 10,
+    "faithfulness": 10,
+    "grounded_recall": 10
+   },
+   "p50_ms": 1725.3910419531167,
+   "p95_ms": 3643.2371409609914,
+   "errors": 0,
+   "error_samples": []
+  },
+  "xquad_en": {
+   "cases": 10,
+   "metrics": {
+    "citation_precision": 0.6,
+    "faithfulness": 0.4065,
+    "grounded_recall": 0.5
+   },
+   "scored": {
+    "citation_precision": 10,
+    "faithfulness": 10,
+    "grounded_recall": 10
+   },
+   "p50_ms": 1568.4960461221635,
+   "p95_ms": 1662.5748821534216,
+   "errors": 0,
+   "error_samples": []
+  },
+  "corpus_vi": {
+   "cases": 10,
+   "metrics": {
+    "citation_precision": 0.9,
+    "faithfulness": 0.7774,
+    "grounded_recall": 0.7
+   },
+   "scored": {
+    "citation_precision": 10,
+    "faithfulness": 10,
+    "grounded_recall": 10
+   },
+   "p50_ms": 1860.6226020492613,
+   "p95_ms": 3487.1708378195763,
+   "errors": 0,
+   "error_samples": []
+  }
+ },
+ "analyzer_chosen": "vi+fold",
+ "hybrid_wins_r10": [
+  "xquad_vi",
+  "xquad_en",
+  "corpus_vi"
+ ],
+ "default_mode": "hybrid"
+}

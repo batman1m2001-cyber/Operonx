@@ -1,0 +1,22 @@
+{
+ "title": "Results",
+ "pages": [],
+ "canonical": "## Results\n\nRevenue grew as Figure 1 shows; Table 2 breaks it down.\n\nRevenue chart\n\nFigure 1: Revenue by quarter.\n\nTable 2: Revenue | by region\n\n| Region | Q2 | Q3 |\n| --- | --- | --- |\n| North | 1.2 | 1.5 |\n| South | 0.9 |  |\n\n1 Unaudited.\n\n#### Deep heading after a gap\n\nE = m c^2",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [3, 282]},
+  {"path": "0.0", "kind": "section", "level": 1, "span": [3, 282]},
+  {"path": "0.0.0", "kind": "heading", "level": 1, "span": [3, 10], "text": "Results"},
+  {"path": "0.0.1", "kind": "paragraph", "span": [12, 67], "text": "Revenue grew as Figure 1 shows; Table 2 breaks it down."},
+  {"path": "0.0.2", "kind": "figure", "span": [69, 82], "text": "Revenue chart"},
+  {"path": "0.0.3", "kind": "caption", "span": [84, 113], "text": "Figure 1: Revenue by quarter.", "caption_of": "0.0.2"},
+  {"path": "0.0.4", "kind": "caption", "span": [115, 143], "text": "Table 2: Revenue | by region", "caption_of": "0.0.5"},
+  {"path": "0.0.5", "kind": "table", "span": [145, 226], "text": "| Region | Q2 | Q3 |\n| --- | --- | --- |\n| North | 1.2 | 1.5 |\n| South | 0.9 |  |", "header_rows": 1},
+  {"path": "0.0.6", "kind": "figure", "span": [226, 226], "text": ""},
+  {"path": "0.0.7", "kind": "footnote", "span": [228, 240], "text": "1 Unaudited."},
+  {"path": "0.0.8", "kind": "section", "level": 3, "span": [247, 282]},
+  {"path": "0.0.8.0", "kind": "heading", "level": 3, "span": [247, 271], "text": "Deep heading after a gap"},
+  {"path": "0.0.8.1", "kind": "formula", "span": [273, 282], "text": "E = m c^2"},
+  {"path": "0.1", "kind": "page_header", "layer": "furniture", "span": null, "text": "ACME Corp — Q3 report"},
+  {"path": "0.2", "kind": "page_footer", "layer": "furniture", "span": null, "text": "3"}
+ ]
+}

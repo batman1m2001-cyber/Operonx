@@ -1,0 +1,14 @@
+{
+ "title": "Level clamps to 6",
+ "pages": [],
+ "canonical": "No title, no heading: a lone paragraph with tabs and nbsp and zerowidth.\n\nDecomposed: Nghệ phép.\n\n###### Level clamps to 6\n\n| only one cell |\n| --- |\n\nOwner: HR",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [0, 160]},
+  {"path": "0.0", "kind": "paragraph", "span": [0, 72], "text": "No title, no heading: a lone paragraph with tabs and nbsp and zerowidth."},
+  {"path": "0.1", "kind": "paragraph", "span": [74, 96], "text": "Decomposed: Nghệ phép."},
+  {"path": "0.2", "kind": "section", "level": 6, "span": [105, 160]},
+  {"path": "0.2.0", "kind": "heading", "level": 6, "span": [105, 122], "text": "Level clamps to 6"},
+  {"path": "0.2.1", "kind": "table", "span": [124, 149], "text": "| only one cell |\n| --- |", "header_rows": 0},
+  {"path": "0.2.2", "kind": "kv", "span": [151, 160], "text": "Owner: HR"}
+ ]
+}

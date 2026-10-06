@@ -1,0 +1,17 @@
+{
+ "title": "Budget",
+ "pages": [],
+ "canonical": "## Budget\n\nBudget 2026\n\n| Item | Q1 | Q2 |\n| --- | --- | --- |\n| Laptops | 12000 | 8000 |\n| Licences |  | 1500.5 |\n\n| Notes |\n| --- |\n| Approved by finance |\n\nApproved by finance\n\n## Phụ cấp\n\n| Chi phí | Số tiền |\n| --- | --- |\n| Ăn trưa | 730000 |\n| Gửi xe | 150000 |\n| TRUE |  |",
+ "elements": [
+  {"path": "0", "kind": "document", "span": [3, 280]},
+  {"path": "0.0", "kind": "section", "level": 1, "span": [3, 178]},
+  {"path": "0.0.0", "kind": "heading", "level": 1, "span": [3, 9], "text": "Budget"},
+  {"path": "0.0.1", "kind": "paragraph", "span": [11, 22], "text": "Budget 2026"},
+  {"path": "0.0.2", "kind": "table", "span": [24, 114], "text": "| Item | Q1 | Q2 |\n| --- | --- | --- |\n| Laptops | 12000 | 8000 |\n| Licences |  | 1500.5 |", "header_rows": 1},
+  {"path": "0.0.3", "kind": "table", "span": [116, 157], "text": "| Notes |\n| --- |\n| Approved by finance |", "header_rows": 1},
+  {"path": "0.0.4", "kind": "paragraph", "span": [159, 178], "text": "Approved by finance"},
+  {"path": "0.1", "kind": "section", "level": 1, "span": [183, 280]},
+  {"path": "0.1.0", "kind": "heading", "level": 1, "span": [183, 190], "text": "Phụ cấp"},
+  {"path": "0.1.1", "kind": "table", "span": [192, 280], "text": "| Chi phí | Số tiền |\n| --- | --- |\n| Ăn trưa | 730000 |\n| Gửi xe | 150000 |\n| TRUE |  |", "header_rows": 1}
+ ]
+}

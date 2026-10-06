@@ -1,0 +1,417 @@
+"""The library API: :class:`KnowledgeBase` (track5 §14.1).
+
+A thin layer over the resources and the graphs — ``add``, ``delete`` and ``gc``
+run the same operonx graphs a Job or a service runs, so a script's ingest is
+traced exactly like a served one.
+
+    import operonx, operonx_kb
+    operonx.bootstrap(resources="resources.yaml")
+    kb = operonx_kb.KnowledgeBase()
+    kb.create_collection("handbook", CollectionSpec(dense=DenseIndexSpec(embedder="bge-m3", store="kb")))
+    result = await kb.add("handbook", "raw/policy.pdf", key="policy")
+"""
+
+from __future__ import annotations
+
+import inspect
+import re
+from typing import Any, Dict, List, Optional, Sequence
+
+from operonx import Operon
+
+from operonx_kb.errors import CatalogError, IngestError, KBError, QueryError  # noqa: F401
+from operonx_kb.graphs.answer import answer as answer_graph
+from operonx_kb.graphs.ingest import ingest_document
+from operonx_kb.graphs.maintenance import collect_garbage, delete_document, drop_index, drop_lexical
+from operonx_kb.graphs.maintenance import rebuild_index as rebuild_index_graph
+from operonx_kb.graphs.maintenance import rebuild_lexical as rebuild_lexical_graph
+from operonx_kb.graphs.retrieve import ranked_search
+from operonx_kb.maintenance import VerifyReport, verify
+from operonx_kb.model.collection import (
+    Collection,
+    CollectionSpec,
+    DenseIndexSpec,
+    LexicalIndexSpec,
+)
+from operonx_kb.model.document import Document
+from operonx_kb.model.filter import KBFilter
+from operonx_kb.model.ids import document_id
+from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
+from operonx_kb.ops.settings import MODES, check_mode, default_mode
+
+__all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
+
+#: Retrieval modes of :meth:`KnowledgeBase.search`. ``tree`` needs the collection's
+#: ``tree`` spec (PLAN E7), ``graph`` its ``graph`` spec (PLAN G4); both are seeded
+#: by the collection's default mode.
+
+#: The mode a search uses unless told otherwise, for a collection that has both a
+#: dense and a lexical index. Hybrid beat dense on Recall@10 on all three K2 eval
+#: sets (the PLAN gate asks for two of three; the table is in ``docs/bench/k2.md``).
+#: A collection with only one index uses that one (:meth:`KnowledgeBase.default_mode`).
+DEFAULT_MODE = "hybrid"
+
+
+_EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit|Interrupt)\b.*")
+
+
+def _exception_text(traceback: str) -> str:
+    """The exception a traceback ends with, all of its message lines joined.
+
+    A KB error's message runs over several lines (the message, then one context
+    fact per line); the last line alone would be a context fact without the error.
+    """
+    lines = [line for line in traceback.strip().splitlines() if line.strip()]
+    for i in range(len(lines) - 1, -1, -1):
+        if _EXCEPTION_LINE.match(lines[i]):
+            return " ".join(line.strip() for line in lines[i:])
+    return lines[-1].strip() if lines else traceback
+
+
+class KnowledgeBase:
+    """A catalog, a blob store and the collections in them.
+
+    Args:
+        catalog: ``kb_catalog`` resource key.
+        blobs: ``kb_blob`` resource key.
+        trace: Passed to ``Operon(trace=...)`` for every run.
+    """
+
+    def __init__(
+        self, catalog: str = "kb_catalog:main", blobs: str = "kb_blob:main", trace: Any = None
+    ):
+        self.catalog_key = catalog
+        self.blobs_key = blobs
+        self.trace = trace
+        self.catalog = catalog_of(catalog)
+        self.blobs = blobs_of(blobs)
+        self._engines: Dict[str, Operon] = {}  # graph name -> engine, shared by every collection
+
+    # collections -----------------------------------------------------------------
+
+    def create_collection(
+        self, collection_id: str, spec: Optional[CollectionSpec] = None
+    ) -> Collection:
+        """Create a collection, or update its spec."""
+        collection = Collection(id=collection_id, spec=spec or CollectionSpec())
+        self.catalog.put_collection(collection)
+        return collection
+
+    def collection(self, collection_id: str) -> Collection:
+        found = self.catalog.get_collection(collection_id)
+        if found is None:
+            raise CatalogError(
+                f"no collection {collection_id!r}; create it with create_collection()"
+            )
+        return found
+
+    def _dense(self, collection_id: str) -> DenseIndexSpec:
+        dense = self.collection(collection_id).spec.dense
+        if dense is None:
+            raise CatalogError(
+                f"collection {collection_id!r} has no dense index; set CollectionSpec(dense=...)"
+            )
+        return dense
+
+    def _engine(self, graph_: Any) -> Operon:
+        """One engine per module-level graph, shared by every collection: what differs
+        per collection arrives as the run's inputs."""
+        name = graph_.__name__
+        if name not in self._engines:
+            params = {name: None for name in inspect.signature(graph_).parameters}
+            self._engines[name] = Operon(graph_, params={**params, "name": name},
+                                                trace=self.trace)  # fmt: skip
+        return self._engines[name]
+
+    async def _run_graph(
+        self,
+        graph_: Any,
+        collection_id: str,
+        inputs: Dict[str, Any],
+        output: Optional[str],
+        error: type = IngestError,
+        required: Sequence[str] = (),
+        trace_id: Optional[str] = None,
+    ) -> Any:
+        """Run a graph; return ``out[output]``, or every output when ``output`` is ``None``.
+        ``catalog`` and ``blobs`` are this knowledge base's keys; ``trace_id`` is the run's
+        id (default: a new one).
+
+        Raises:
+            error: An op failed, or an expected output is missing.
+        """
+        kind = graph_.__name__
+        engine = self._engine(graph_)
+        wanted = set(inspect.signature(graph_).parameters)
+        base = {"catalog": self.catalog_key, "blobs": self.blobs_key}
+        full = {**{k: v for k, v in base.items() if k in wanted}, **inputs}
+        out = await engine.run(inputs=full, trace_id=trace_id)
+        expected = [*required, *([output] if output is not None else [])]
+        if "$errors" in out or any(name not in out for name in expected):
+            errors = out.get("$errors") or {kind: {"message": "the run produced no result"}}
+            # Records arrive in the order the ops failed: the first is the cause, the
+            # others are ops downstream of it that ran without its outputs.
+            op, record = next(iter(errors.items()))
+            text = record.get("message", "") if isinstance(record, dict) else str(record)
+            raise error(
+                f"{kind} in {collection_id!r} failed in {op}: {_exception_text(text)}",
+                {"ops": sorted(errors)},
+            )
+        return out[output] if output is not None else out
+
+    # ingest ------------------------------------------------------------------------
+
+    async def add(
+        self,
+        collection_id: str,
+        path: Optional[str] = None,
+        *,
+        data: Optional[bytes] = None,
+        key: Optional[str] = None,
+        name: Optional[str] = None,
+        mime: Optional[str] = None,
+        title: Optional[str] = None,
+        tags: Optional[Sequence[str]] = None,
+        acl: Optional[Sequence[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Ingest one document; return the run's result (``action``: new, update or skip).
+
+        Args:
+            acl: Principals allowed to read the document (``KBFilter.acl_any``).
+            metadata: Free-form; the fields the collection declares ``filterable``
+                are copied into its index entries and must have the declared type.
+
+        Raises:
+            IngestError: An op failed. The failure is also recorded in the ingest log.
+        """
+        item: Dict[str, Any] = {"path": str(path) if path is not None else None, "data": data, "key": key, "name": name,
+                                "mime": mime, "title": title, "tags": list(tags or []), "acl": list(acl or []),
+                                "metadata": metadata or {}}  # fmt: skip
+        doc_key = key or (str(path) if path is not None else "")
+        self._dense(collection_id)  # no dense index: refused before a run
+        try:
+            return await self._run_graph(ingest_document, collection_id,
+                                         {"item": item, "collection": collection_id}, "result")  # fmt: skip
+        except IngestError as exc:
+            self.catalog.log_ingest(
+                collection_id, doc_key, "failed",
+                document_id=document_id(collection_id, doc_key) if doc_key else None, error=str(exc),
+            )  # fmt: skip
+            raise
+
+    # reads -------------------------------------------------------------------------------
+
+    def documents(self, collection_id: str, include_deleted: bool = False) -> List[Document]:
+        return self.catalog.list_documents(collection_id, include_deleted=include_deleted)
+
+    def document(self, collection_id: str, key: str) -> Optional[Document]:
+        return self.catalog.get_document(document_id(collection_id, key))
+
+    def canonical_text(self, version_id: str) -> str:
+        version = self.catalog.get_version(version_id)
+        if version is None:
+            raise CatalogError(f"no version {version_id!r}")
+        data = self.blobs.get(version.text_sha)
+        if data is None:
+            raise CatalogError(
+                f"canonical text of {version_id} is missing from the blob store",
+                {"sha": version.text_sha},
+            )
+        return data.decode("utf-8")
+
+    # retrieval ------------------------------------------------------------------------------
+
+    def default_mode(self, collection_id: str) -> str:
+        """:data:`DEFAULT_MODE` when the collection has both indexes, else the one it has."""
+        return default_mode(self.collection(collection_id).spec)
+
+    def check_mode(self, collection_id: str, mode: Optional[str] = None) -> str:
+        """``mode`` (default :meth:`default_mode`) if the collection can serve it.
+
+        Raises:
+            QueryError: Unknown mode, or the collection lacks the index it needs.
+        """
+        spec = self.collection(collection_id).spec
+        mode = mode or default_mode(spec)
+        check_mode(collection_id, spec, mode)
+        return mode
+
+    async def search(
+        self,
+        collection_id: str,
+        query: str,
+        *,
+        filter: Optional[Any] = None,
+        k: int = 10,
+        mode: Optional[str] = None,
+        reranker: Optional[str] = None,
+        rerank_depth: int = 30,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Search a collection; return ``{"hits", "stats"}`` (hits hydrated, best first).
+
+        Args:
+            filter: A :class:`~operonx_kb.model.filter.KBFilter` or its dict.
+            mode: ``dense``, ``lexical``, ``hybrid``, ``tree`` or ``graph`` (default
+                :meth:`default_mode`).
+            reranker: A ``reranking:`` resource name to rerank with.
+            trace_id: The run's trace id (default: a new one), for a caller that links
+                to the run's trace.
+
+        Raises:
+            QueryError: An op failed (a filter on an undeclared field, a missing index…).
+        """
+        mode = self.check_mode(collection_id, mode)
+        flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
+        out = await self._run_graph(
+            ranked_search, collection_id,
+            {"query": query, "collection": collection_id, "filter": flt, "k": k, "mode": mode,
+             "reranker": reranker, "rerank_depth": rerank_depth},
+            None, error=QueryError, required=("hits",), trace_id=trace_id,
+        )  # fmt: skip
+        return {"hits": out["hits"], "stats": out.get("stats", {})}
+
+    async def ask(
+        self,
+        collection_id: str,
+        question: str,
+        llm: str,
+        *,
+        filter: Optional[Any] = None,
+        k: int = 8,
+        mode: Optional[str] = None,
+        reranker: Optional[str] = None,
+        rerank_depth: int = 30,
+        budget_tokens: int = 1500,
+        neighbours: int = 1,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Answer a question from the collection with verified citations (track5 §10).
+
+        ``trace_id`` names the run (default: a new one), as in :meth:`search`.
+
+        Returns:
+            ``{"text", "citations", "dropped", "unsupported_sentences", "sources",
+            "stats", "usage"}``. Every citation's quote was found in its source and
+            carries its canonical span, pages and boxes; the rest are in ``dropped``.
+
+        Raises:
+            QueryError: An op failed, or the model's reply did not parse.
+        """
+        mode = self.check_mode(collection_id, mode)
+        flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
+        return await self._run_graph(
+            answer_graph, collection_id,
+            {"query": question, "collection": collection_id, "filter": flt, "k": k, "mode": mode,
+             "reranker": reranker, "rerank_depth": rerank_depth, "llm": llm,
+             "budget_tokens": budget_tokens, "neighbours": neighbours},
+            "answer", error=QueryError, trace_id=trace_id,
+        )  # fmt: skip
+
+    # maintenance ----------------------------------------------------------------------------
+
+    async def delete(self, collection_id: str, key: str, *, purge: bool = False) -> Dict[str, Any]:
+        """Tombstone a document and delete its vectors; with ``purge``, erase it and prove it."""
+        self._dense(collection_id)
+        return await self._run_graph(delete_document, collection_id,
+                                     {"collection": collection_id, "key": key, "purge": purge}, "report")  # fmt: skip
+
+    async def gc(
+        self, collection_id: str, *, blobs: bool = False, blob_grace_seconds: float = 3600.0
+    ) -> Dict[str, Any]:
+        """Delete vectors no active version holds; with ``blobs``, unreferenced blobs too."""
+        self._dense(collection_id)
+        return await self._run_graph(collect_garbage, collection_id,
+                                     {"collection": collection_id, "blobs_enabled": blobs,
+                                      "grace_seconds": blob_grace_seconds}, "report")  # fmt: skip
+
+    async def rebuild(
+        self,
+        collection_id: str,
+        *,
+        store: Optional[str] = None,
+        collection: Optional[str] = None,
+        switch: bool = True,
+        drop_previous: bool = False,
+    ) -> Dict[str, Any]:
+        """Rebuild the dense index from the catalog (track5 §11.6): a new generation in
+        ``store``/``collection`` (default: the current ones), switched to when ``switch``.
+
+        Nothing is parsed; vectors come from the embedding cache when the embedder is
+        unchanged. With ``drop_previous`` the old generation's vectors are deleted after
+        the switch (when it was a different store or collection).
+        """
+        current = self._dense(collection_id)
+        target = current.model_copy(
+            update={
+                "store": store or current.store,
+                "collection": collection if collection is not None else current.collection,
+            }
+        )
+        report = await self._run_graph(
+            rebuild_index_graph, collection_id,
+            {"collection": collection_id, "switch": switch, "embedder": target.embedder,
+             "store": target.store, "vector_collection": target.collection,
+             "vcollection": target.collection or "", "batch_size": target.batch_size,
+             "passage_template": target.passage_template},
+            "report",
+        )  # fmt: skip
+        moved = (target.store, target.collection or "") != (current.store, current.collection or "")
+        if drop_previous and switch and moved:
+            out = await self._run_graph(
+                drop_index, collection_id,
+                {"collection": collection_id, "store": current.store,
+                 "vector_collection": current.collection, "vcollection": current.collection or ""},
+                None,
+            )  # fmt: skip
+            report["previous_deleted"] = out.get("deleted")
+        return report
+
+    async def rebuild_lexical(
+        self,
+        collection_id: str,
+        lexical: Optional[LexicalIndexSpec] = None,
+        *,
+        switch: bool = True,
+        drop_previous: bool = False,
+    ) -> Dict[str, Any]:
+        """Rebuild the lexical index from the catalog into ``lexical`` (default: the current
+        spec): another table, or the same text under another analyzer. Nothing is parsed or
+        embedded. With ``switch`` it becomes the collection's lexical index; with
+        ``drop_previous`` the old one's entries are deleted after the switch."""
+        current = self.collection(collection_id).spec.lexical
+        target = lexical or current
+        if target is None:
+            raise CatalogError(
+                f"collection {collection_id!r} has no lexical index; pass one to rebuild_lexical()"
+            )
+        report = await self._run_graph(
+            rebuild_lexical_graph, collection_id,
+            {"collection": collection_id, "switch": switch, "lexical": target.model_dump(mode="json")},
+            "report",
+        )  # fmt: skip
+        moved = current is not None and (target.index, target.collection) != (
+            current.index,
+            current.collection,
+        )
+        if drop_previous and switch and moved:
+            out = await self._run_graph(
+                drop_lexical, collection_id,
+                {"collection": collection_id, "lexical": current.model_dump(mode="json")}, None,
+            )  # fmt: skip
+            report["previous_deleted"] = out.get("deleted")
+        return report
+
+    def verify(self, collection_id: str) -> VerifyReport:
+        spec = self.collection(collection_id).spec
+        dense, lexical = spec.dense, spec.lexical
+        return verify(
+            self.catalog,
+            self.blobs,
+            collection_id,
+            full_key(dense.store, "vector_store") if dense else None,
+            (dense.collection or "") if dense else "",
+            full_key(lexical.index, "kb_lexical") if lexical else None,
+            (lexical.collection or "") if lexical else "",
+        )
