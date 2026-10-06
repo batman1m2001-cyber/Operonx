@@ -52,6 +52,10 @@ operonx = { path = "../Operon", editable = true }
 [tool.hatch.build.targets.wheel]
 packages = ["operonx_agents"]
 
+# The source archive is the package, not the repo: no results/, evals/ or scripts/.
+[tool.hatch.build.targets.sdist]
+include = ["operonx_agents", "README.md", "LICENSE", "pyproject.toml"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
