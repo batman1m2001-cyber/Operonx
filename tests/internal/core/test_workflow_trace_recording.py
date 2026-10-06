@@ -64,15 +64,22 @@ def boom(x: int):
 # ---------------------------------------------------------------------------
 
 
+@graph
+def chain(x: int):
+    a = add_one(x=PARENT["x"])
+    b = double(y=a["y"])
+    START >> a >> b >> END
+
+
+@graph
+def one_op(x: int):
+    a = add_one(x=PARENT["x"])
+    START >> a >> END
+
+
 class TestBatchOps:
     async def test_two_op_linear_chain(self):
-        @graph
-        def wf(x: int):
-            a = add_one(x=PARENT["x"])
-            b = double(y=a["y"])
-            START >> a >> b >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(chain, params={"x": 0})
         handle = engine.start(inputs={"x": 5})
         await handle.collect()
 
@@ -84,12 +91,7 @@ class TestBatchOps:
         assert all(n.status == STATUS_OK for n in trace.nodes)
 
     async def test_inputs_outputs_captured(self):
-        @graph
-        def wf(x: int):
-            a = add_one(x=PARENT["x"])
-            START >> a >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(one_op, params={"x": 0})
         handle = engine.start(inputs={"x": 7})
         await handle.collect()
 
@@ -102,13 +104,7 @@ class TestBatchOps:
         """`double` has one upstream: `add_one.y → double.y`. The
         upstream's `from_op_id` matches `add_one`'s `OpExecution.op_id`."""
 
-        @graph
-        def wf(x: int):
-            a = add_one(x=PARENT["x"])
-            b = double(y=a["y"])
-            START >> a >> b >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(chain, params={"x": 0})
         handle = engine.start(inputs={"x": 3})
         await handle.collect()
 
@@ -126,14 +122,15 @@ class TestBatchOps:
 # ---------------------------------------------------------------------------
 
 
+@graph
+def stream(n: int):
+    src = repeat_stream(n=PARENT["n"])
+    START >> src >> END
+
+
 class TestStreamingOps:
     async def test_yields_produce_n_executions(self):
-        @graph
-        def wf(n: int):
-            src = repeat_stream(n=PARENT["n"])
-            START >> src >> END
-
-        engine = Operon(wf, params={"n": 0})
+        engine = Operon(stream, params={"n": 0})
         handle = engine.start(inputs={"n": 3})
         await handle.collect()
 
@@ -141,12 +138,7 @@ class TestStreamingOps:
         assert len(streams) == 3
 
     async def test_yields_have_nested_ctx(self):
-        @graph
-        def wf(n: int):
-            src = repeat_stream(n=PARENT["n"])
-            START >> src >> END
-
-        engine = Operon(wf, params={"n": 0})
+        engine = Operon(stream, params={"n": 0})
         handle = engine.start(inputs={"n": 3})
         await handle.collect()
 
@@ -166,20 +158,21 @@ class TestStreamingOps:
 # ---------------------------------------------------------------------------
 
 
+@graph
+def fan_in(x: int, y: int):
+    a = add_one(x=PARENT["x"])
+    b = add_one(x=PARENT["y"])
+    c = combine(a=a["y"], b=b["y"])
+    START >> a
+    START >> b
+    a >> c
+    b >> c
+    c >> END
+
+
 class TestMultiUpstream:
     async def test_two_upstreams_captured(self):
-        @graph
-        def wf(x: int, y: int):
-            a = add_one(x=PARENT["x"])
-            b = add_one(x=PARENT["y"])
-            c = combine(a=a["y"], b=b["y"])
-            START >> a
-            START >> b
-            a >> c
-            b >> c
-            c >> END
-
-        engine = Operon(wf, params={"x": 0, "y": 0})
+        engine = Operon(fan_in, params={"x": 0, "y": 0})
         handle = engine.start(inputs={"x": 3, "y": 4})
         await handle.collect()
 
@@ -198,14 +191,15 @@ class TestMultiUpstream:
 # ---------------------------------------------------------------------------
 
 
+@graph
+def failing(x: int):
+    b = boom(x=PARENT["x"])
+    START >> b >> END
+
+
 class TestErrorRecording:
     async def test_error_captured_with_status_and_traceback(self):
-        @graph
-        def wf(x: int):
-            b = boom(x=PARENT["x"])
-            START >> b >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(failing, params={"x": 0})
         handle = engine.start(inputs={"x": 99})
         try:
             await handle.collect()
@@ -226,12 +220,7 @@ class TestErrorRecording:
 
 class TestConcurrentIsolation:
     async def test_two_engines_get_own_traces(self):
-        @graph
-        def wf(x: int):
-            a = add_one(x=PARENT["x"])
-            START >> a >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(one_op, params={"x": 0})
 
         # Fire two runs concurrently — each MUST get its own WorkflowTrace.
         h1 = engine.start(inputs={"x": 10})
@@ -253,12 +242,7 @@ class TestConcurrentIsolation:
 
 class TestTraceMetadata:
     async def test_metadata_populated(self):
-        @graph
-        def wf(x: int):
-            a = add_one(x=PARENT["x"])
-            START >> a >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(one_op, params={"x": 0})
         handle = engine.start(
             inputs={"x": 1},
             user_id="u-1",
@@ -275,12 +259,7 @@ class TestTraceMetadata:
         assert handle.trace.trace_id == "req-1"
 
     async def test_ended_at_set_after_collect(self):
-        @graph
-        def wf(x: int):
-            a = add_one(x=PARENT["x"])
-            START >> a >> END
-
-        engine = Operon(wf, params={"x": 0})
+        engine = Operon(one_op, params={"x": 0})
         handle = engine.start(inputs={"x": 1})
         assert handle.trace.ended_at == 0.0  # not yet finished
         await handle.collect()
