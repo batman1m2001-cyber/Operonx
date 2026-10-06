@@ -29,6 +29,31 @@ services and jobs.
 - **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`. Never
   put `[[serve]]` or `[[job]]` blocks in it.
 
+## Never define a `@graph` inside a function
+
+Every `@graph` is defined at module level in `graph.py`. No factory that
+builds a graph in a nested `def` and returns it:
+
+```python
+# no
+def build_answer_flow(answer, k=8):
+    @graph
+    def answer_flow(): ...
+    return answer_flow
+
+# yes
+@graph
+def answer_flow(question, k):          # a setting is a graph input
+    ...
+```
+
+- A setting (`k`, a model name, a threshold) is a graph input or an op
+  setting, never a closure variable.
+- A different shape is a different module-level graph (`dense_search`,
+  `hybrid_search`), or one graph with an `if_` branch. Pick which one to
+  run in `app/main.py`, not by generating graphs.
+- Keep the edges: `START >> a >> b >> END` is written out, always.
+
 ## Layout
 
 - One feature is one folder: `src/<feature>/graph.py` (wiring only: no
