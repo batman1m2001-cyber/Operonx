@@ -92,22 +92,24 @@ async def test_collect_dict_reducer_does_not_raise():
     assert "$errors" not in out
 
 
+@op
+def work_one(i: int) -> dict:
+    return {"row": [i]}
+
+
+@graph
+def g(n):
+    PARENT.declare(rows=[], reducers={"rows": operator.add})
+    e = each(n=n)
+    w = work_one(i=e["i"])
+    w["row"] >> PARENT["rows"]
+    r = report(rows=w["row"].collect())
+    START >> e >> w >> r >> END
+
+
 async def test_the_collected_var_itself_is_not_pushed_again():
     """The collected list is the consumer's input, not a new write of the
     var: a push on that var must not receive it."""
-
-    @op
-    def work_one(i: int) -> dict:
-        return {"row": [i]}
-
-    @graph
-    def g(n):
-        PARENT.declare(rows=[], reducers={"rows": operator.add})
-        e = each(n=n)
-        w = work_one(i=e["i"])
-        w["row"] >> PARENT["rows"]
-        r = report(rows=w["row"].collect())
-        START >> e >> w >> r >> END
 
     out, rows = await _cell(g, "rows")
 

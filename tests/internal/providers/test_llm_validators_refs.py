@@ -31,6 +31,12 @@ def _build(validators):
     )
 
 
+@graph
+def classify(q, allowed):
+    llm = LLMOp.of(resource="r", prompt="{q}", q=q, fields=["intent: str"], validators=allowed)
+    START >> llm >> END
+
+
 class TestRefsAreRefused:
     @pytest.mark.parametrize(
         "validators",
@@ -45,13 +51,6 @@ class TestRefsAreRefused:
             _build(validators)
 
     def test_a_graph_parameter_is_a_ref_too(self):
-        @graph
-        def classify(q, allowed):
-            llm = LLMOp.of(
-                resource="r", prompt="{q}", q=q, fields=["intent: str"], validators=allowed
-            )
-            START >> llm >> END
-
         with pytest.raises(TypeError, match="validators"):
             Operon(classify, params={"q": None, "allowed": None})
 

@@ -71,15 +71,16 @@ def test_allow_race_names_are_checked():
         Operon(_p2(allow_race=["nope"]), params={"d1": None, "d2": None})
 
 
-def test_ordered_writers_build():
-    @graph
-    def g(d):
-        PARENT.declare(v=None)
-        a, b = w_fast(d=d), w_slow(d=d)
-        a["v"] >> PARENT["v"]
-        b["v"] >> PARENT["v"]
-        START >> a >> b >> END
+@graph
+def g(d):
+    PARENT.declare(v=None)
+    a, b = w_fast(d=d), w_slow(d=d)
+    a["v"] >> PARENT["v"]
+    b["v"] >> PARENT["v"]
+    START >> a >> b >> END
 
+
+def test_ordered_writers_build():
     Operon(g, params={"d": None})
 
 
@@ -98,18 +99,19 @@ def small(n: int) -> dict:
     return {"label": "small"}
 
 
-async def test_branch_arms_are_not_concurrent():
-    @graph
-    def g(n):
-        PARENT.declare(label=None)
-        c = check(n=n)
-        b, s = big(n=n), small(n=n)
-        b["label"] >> PARENT["label"]
-        s["label"] >> PARENT["label"]
-        START >> c >> if_(c["big"] == True, b).else_(s)  # noqa: E712
-        [b, s] >> END
+@graph
+def g_branch_arms_are_not_concurrent(n):
+    PARENT.declare(label=None)
+    c = check(n=n)
+    b, s = big(n=n), small(n=n)
+    b["label"] >> PARENT["label"]
+    s["label"] >> PARENT["label"]
+    START >> c >> if_(c["big"] == True, b).else_(s)  # noqa: E712
+    [b, s] >> END
 
-    engine = Operon(g, params={"n": None})
+
+async def test_branch_arms_are_not_concurrent():
+    engine = Operon(g_branch_arms_are_not_concurrent, params={"n": None})
     assert (await engine.run({"n": 30}))["label"] == "big"
 
 
@@ -123,19 +125,20 @@ def fallback(error: str) -> dict:
     return {"v": "fallback"}
 
 
-def test_an_op_and_its_error_handler_are_not_concurrent():
-    @graph
-    def g(x):
-        PARENT.declare(v=None)
-        m = may_fail(x=x)
-        f = fallback()
-        m["v"] >> PARENT["v"]
-        f["v"] >> PARENT["v"]
-        START >> m >> END
-        m.on_error(f)
-        f >> END
+@graph
+def g_an_op_and_its_error_handler_are_not_concurrent(x):
+    PARENT.declare(v=None)
+    m = may_fail(x=x)
+    f = fallback()
+    m["v"] >> PARENT["v"]
+    f["v"] >> PARENT["v"]
+    START >> m >> END
+    m.on_error(f)
+    f >> END
 
-    Operon(g, params={"x": None})
+
+def test_an_op_and_its_error_handler_are_not_concurrent():
+    Operon(g_an_op_and_its_error_handler_are_not_concurrent, params={"x": None})
 
 
 @op
@@ -148,17 +151,18 @@ def side(x: int) -> dict:
     return {"n": 100}
 
 
-def test_a_loop_racing_a_sibling_is_reported():
-    @graph
-    def g(x):
-        PARENT.declare(n=0)
-        s = step(n=PARENT["n"])
-        o = side(x=x)
-        s["n"] >> PARENT["n"]
-        o["n"] >> PARENT["n"]
-        START >> [s, o]
-        s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
-        o >> END
+@graph
+def g_a_loop_racing_a_sibling_is_reported(x):
+    PARENT.declare(n=0)
+    s = step(n=PARENT["n"])
+    o = side(x=x)
+    s["n"] >> PARENT["n"]
+    o["n"] >> PARENT["n"]
+    START >> [s, o]
+    s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
+    o >> END
 
+
+def test_a_loop_racing_a_sibling_is_reported():
     with pytest.raises(GraphValidationError, match=r"'s' \(in a loop\)"):
-        Operon(g, params={"x": None})
+        Operon(g_a_loop_racing_a_sibling_is_reported, params={"x": None})

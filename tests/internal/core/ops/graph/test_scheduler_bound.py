@@ -234,14 +234,21 @@ class TestInlineErrorPropagation:
 # ============================================================
 
 
+@graph
+def inner(x):
+    d = double(x=x)
+    START >> d >> END
+
+
+@graph
+def inner_nested_with_io_child_is_task(x):
+    d = async_double(x=x)  # io bound
+    START >> d >> END
+
+
 class TestNestedGraph:
     @pytest.mark.asyncio
     async def test_nested_all_inline(self):
-        @graph
-        def inner(x):
-            d = double(x=x)
-            START >> d >> END
-
         with GraphOp(name="outer") as g:
             sub = inner(x=PARENT["x"])
             a = add_ten(x=sub["result"])
@@ -252,11 +259,6 @@ class TestNestedGraph:
 
     @pytest.mark.asyncio
     async def test_nested_dispatch_type_auto(self):
-        @graph
-        def inner(x):
-            d = double(x=x)
-            START >> d >> END
-
         with GraphOp(name="outer") as g:
             sub = inner(x=PARENT["x"])
             START >> sub >> END
@@ -266,13 +268,8 @@ class TestNestedGraph:
 
     @pytest.mark.asyncio
     async def test_nested_with_io_child_is_task(self):
-        @graph
-        def inner(x):
-            d = async_double(x=x)  # io bound
-            START >> d >> END
-
         with GraphOp(name="outer") as g:
-            sub = inner(x=PARENT["x"])
+            sub = inner_nested_with_io_child_is_task(x=PARENT["x"])
             START >> sub >> END
         g.build()
         assert g._ops["sub"].bound == "io"
@@ -283,23 +280,26 @@ class TestNestedGraph:
 # ============================================================
 
 
+@op
+def increment(counter: int):
+    return {"counter": counter + 1}
+
+
+@graph
+def counter():
+    PARENT.declare(count=0)
+    inc = increment(counter=PARENT["count"])
+    inc["counter"] >> PARENT["count"]
+    START >> inc >> if_(PARENT["count"] >= 3, END).else_(inc)
+
+
 class TestInlineLoop:
     @pytest.mark.asyncio
     async def test_loop_inline(self):
         from operonx.core.ops.flow.branch_op import if_
         from operonx.core.states import StateSchema
 
-        @op
-        def increment(counter: int):
-            return {"counter": counter + 1}
-
         # 1.0.0 migration: back-edge inside @graph instead of GraphOp.loop.
-        @graph
-        def counter():
-            PARENT.declare(count=0)
-            inc = increment(counter=PARENT["count"])
-            inc["counter"] >> PARENT["count"]
-            START >> inc >> if_(PARENT["count"] >= 3, END).else_(inc)
 
         g = counter()
         g.build()
@@ -354,16 +354,23 @@ class TestInlineBranch:
 # ============================================================
 
 
+@graph(bound="io")
+def inner_graph_bound_io_forces_task(x):
+    d = double(x=x)  # all inline children
+    START >> d >> END
+
+
+@graph(bound="io")
+def inner_graph_bound_io_still_correct(x):
+    d = double(x=x)
+    START >> d >> END
+
+
 class TestGraphOpBoundOverride:
     @pytest.mark.asyncio
     async def test_graph_bound_io_forces_task(self):
-        @graph(bound="io")
-        def inner(x):
-            d = double(x=x)  # all inline children
-            START >> d >> END
-
         with GraphOp(name="outer") as g:
-            sub = inner(x=PARENT["x"])
+            sub = inner_graph_bound_io_forces_task(x=PARENT["x"])
             START >> sub >> END
         g.build()
         # Should be io despite all children being sync
@@ -371,13 +378,8 @@ class TestGraphOpBoundOverride:
 
     @pytest.mark.asyncio
     async def test_graph_bound_io_still_correct(self):
-        @graph(bound="io")
-        def inner(x):
-            d = double(x=x)
-            START >> d >> END
-
         with GraphOp(name="outer") as g:
-            sub = inner(x=PARENT["x"])
+            sub = inner_graph_bound_io_still_correct(x=PARENT["x"])
             START >> sub >> END
 
         result = await Operon(g).run(inputs={"x": 5})

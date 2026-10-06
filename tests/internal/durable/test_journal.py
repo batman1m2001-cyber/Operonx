@@ -149,14 +149,15 @@ def test_a_resumed_run_does_not_run_again_what_ended():
     assert [h.status for h in journal.runs()] == ["ok"]
 
 
+@graph
+def rewired(x):  # the run's graph, changed: one op fewer
+    a = first(x=x)
+    START >> a >> END
+
+
 def test_resume_refuses_a_changed_graph():
     journal = MemoryJournal()
     asyncio.run(Operon(chain, params={"x": None}, journal=journal).run({"x": 1}, run_id="r"))
-
-    @graph
-    def rewired(x):  # the run's graph, changed: one op fewer
-        a = first(x=x)
-        START >> a >> END
 
     other = Operon(rewired, params={"x": None}, journal=journal)
     with pytest.raises(JournalError, match="this engine's graph is"):
@@ -164,16 +165,18 @@ def test_resume_refuses_a_changed_graph():
     assert _resume(other, allow_graph_change=True) is not None
 
 
+@op
+async def opens(x: int) -> dict:
+    return {"handle": lambda: x}  # a lambda does not pickle
+
+
+@graph
+def g(x):
+    o = opens(x=x)
+    START >> o >> END
+
+
 def test_an_unjournalable_value_names_the_op_and_var():
-    @op
-    async def opens(x: int) -> dict:
-        return {"handle": lambda: x}  # a lambda does not pickle
-
-    @graph
-    def g(x):
-        o = opens(x=x)
-        START >> o >> END
-
     engine = Operon(g, params={"x": None}, journal=MemoryJournal(), durability="sync")
     with pytest.raises(JournalError, match=r"\.o\.handle wrote a function"):
         asyncio.run(engine.run({"x": 1}, run_id="r"))
@@ -192,6 +195,11 @@ def test_every_durability_resumes_to_the_same_result(durability):
     assert CALLS == []  # everything had ended: replayed, nothing run
 
 
+@op
+async def sink(v: int) -> dict:
+    return {"w": v}
+
+
 def test_a_generator_that_yields_otherwise_on_resume_is_refused():
     seen = {"n": 0}
 
@@ -200,10 +208,6 @@ def test_a_generator_that_yields_otherwise_on_resume_is_refused():
         seen["n"] += 1
         yield {"v": x + seen["n"]}  # differs on the second run
         yield {"v": 0}
-
-    @op
-    async def sink(v: int) -> dict:
-        return {"w": v}
 
     @graph
     def g(x):

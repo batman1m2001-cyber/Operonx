@@ -53,12 +53,13 @@ def test_a_string_scalar_annotation_still_names_one_output():
     assert set(is_small().outputs) == {SCALAR_OUTPUT}
 
 
-async def test_an_op_returning_a_helpers_dict_runs_in_a_graph():
-    @graph
-    def flow(x):
-        s = built_elsewhere(x=x)
-        p = plus(a=s["a"])
-        START >> s >> p >> END
+@graph
+def flow(x):
+    s = built_elsewhere(x=x)
+    p = plus(a=s["a"])
+    START >> s >> p >> END
 
+
+async def test_an_op_returning_a_helpers_dict_runs_in_a_graph():
     out = await Operon(flow, params={"x": None}).run({"x": 1})
     assert out["b"] == 2 and "$errors" not in out

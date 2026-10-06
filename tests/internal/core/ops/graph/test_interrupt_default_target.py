@@ -136,6 +136,12 @@ class TestGeneratorEmitter:
         assert len(event.ctx_to_cancel) > len(event.ctx)
 
 
+@op
+async def slow(i: int):
+    await asyncio.sleep(0.02)
+    return {"j": i}
+
+
 class TestNestedGraph:
     """A subgraph runs its own scheduler, with `output_queue=None`.
 
@@ -155,11 +161,6 @@ class TestNestedGraph:
         def src(n: int):
             for i in range(6):
                 yield {"i": i}
-
-        @op
-        async def slow(i: int):
-            await asyncio.sleep(0.02)
-            return {"j": i}
 
         @op
         def guard(j: int):

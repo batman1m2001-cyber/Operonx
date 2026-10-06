@@ -19,6 +19,11 @@ from operonx.core.ops.graph.task_scheduler import InterruptTargetError
 pytestmark = pytest.mark.unit
 
 
+@op
+def stopper(x: int):
+    return Interrupt(reason="child stops itself")
+
+
 class TestSelfAtTheRootContext:
     """`Interrupt.SELF` was still `ALL` for any op at the graph root.
 
@@ -98,10 +103,6 @@ class TestSelfAtTheRootContext:
         its own scheduler and cannot reach the parent — bounded by
         construction rather than by the tuple, so SELF stays legal."""
         from operonx.core.ops.graph.graph_op import graph
-
-        @op
-        def stopper(x: int):
-            return Interrupt(reason="child stops itself")
 
         @op
         async def slow_sibling(n: int) -> dict:

@@ -145,15 +145,16 @@ async def test_delete_with_nothing_to_select_is_refused(store):
         await VectorDeleteOp(name="d", resource="docs")._process()
 
 
+@graph
+def sync(ids, vectors, gone, query):
+    write = VectorUpsertOp.of(resource="docs", ids=ids, vectors=vectors)
+    drop = VectorDeleteOp.of(resource="docs", ids=gone)
+    hits = VectorSearchOp.of(resource="docs", query_vector=query, top_k=5)
+    START >> write >> drop >> hits >> END
+
+
 async def test_a_graph_keeps_the_index_in_step_with_deletes(faiss_hub):
     """Write, delete, search — the GC step of an ingest pipeline."""
-
-    @graph
-    def sync(ids, vectors, gone, query):
-        write = VectorUpsertOp.of(resource="docs", ids=ids, vectors=vectors)
-        drop = VectorDeleteOp.of(resource="docs", ids=gone)
-        hits = VectorSearchOp.of(resource="docs", query_vector=query, top_k=5)
-        START >> write >> drop >> hits >> END
 
     params = {"ids": None, "vectors": None, "gone": None, "query": None}
     out = await Operon(sync, params=params).run(
@@ -211,12 +212,13 @@ async def test_no_hits_under_a_filter_is_an_answer_not_an_empty_index(caplog):
     assert not [r for r in caplog.records if "holds no vectors" in r.getMessage()]
 
 
-async def test_an_empty_index_is_flagged_in_a_graph_run(faiss_hub):
-    @graph
-    def ask(query):
-        hits = VectorSearchOp.of(resource="docs", query_vector=query)
-        START >> hits >> END
+@graph
+def ask(query):
+    hits = VectorSearchOp.of(resource="docs", query_vector=query)
+    START >> hits >> END
 
+
+async def test_an_empty_index_is_flagged_in_a_graph_run(faiss_hub):
     out = await Operon(ask, params={"query": None}).run(inputs={"query": [1, 0, 0, 0]})
     assert "$errors" not in out
     assert out["ids"] == [] and out["empty_index"] is True

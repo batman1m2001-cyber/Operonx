@@ -71,6 +71,21 @@ def _pair_graph(condition, a, b):
 COMPARISONS = [operator.lt, operator.le, operator.gt, operator.ge, operator.eq, operator.ne]
 
 
+@graph
+def inner(a, b):
+    p = pair(a=a, b=b)
+    f, s = first(), second()
+    START >> p >> if_(p["a"] >= p["b"], f).else_(s)
+    f >> END
+    s >> END
+
+
+@graph
+def outer(a, b):
+    i = inner(a=a, b=b)
+    START >> i >> END
+
+
 class TestRefComparedWithRef:
     @pytest.mark.parametrize("cmp", COMPARISONS, ids=lambda c: c.__name__)
     @pytest.mark.parametrize("a,b", [(1, 100), (100, 1), (5, 5)])
@@ -99,19 +114,6 @@ class TestRefComparedWithRef:
     @pytest.mark.parametrize("a,b,want", [(1, 100, "second"), (100, 1, "first")])
     async def test_inside_a_subgraph(self, a, b, want):
         """Names change when a graph is nested; the lookup must not care."""
-
-        @graph
-        def inner(a, b):
-            p = pair(a=a, b=b)
-            f, s = first(), second()
-            START >> p >> if_(p["a"] >= p["b"], f).else_(s)
-            f >> END
-            s >> END
-
-        @graph
-        def outer(a, b):
-            i = inner(a=a, b=b)
-            START >> i >> END
 
         out = await Operon(outer, params={"a": None, "b": None}).run(inputs={"a": a, "b": b})
         assert out["w"] == want

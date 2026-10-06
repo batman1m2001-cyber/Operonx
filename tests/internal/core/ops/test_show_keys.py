@@ -75,21 +75,23 @@ class TestNormalisation:
             declared(show_keys=3)
 
 
+@graph
+def sub(x):
+    n = declared(x=x)
+    n["text"] >> PARENT["text"]
+    START >> n >> END
+
+
+@graph
+def main(x):
+    s = sub(x=x, show_keys="text")
+    t = undeclared(text=s["text"])
+    START >> s >> t >> END
+    return {"out": t["out"]}
+
+
 class TestGraphCallSite:
     def test_graph_takes_show_keys_at_the_call_site(self):
-        @graph
-        def sub(x):
-            n = declared(x=x)
-            n["text"] >> PARENT["text"]
-            START >> n >> END
-
-        @graph
-        def main(x):
-            s = sub(x=x, show_keys="text")
-            t = undeclared(text=s["text"])
-            START >> s >> t >> END
-            return {"out": t["out"]}
-
         g = main(x=1)
         assert g._ops["s"].show_keys == ("text",)
         assert g._ops["t"].show_keys == ()

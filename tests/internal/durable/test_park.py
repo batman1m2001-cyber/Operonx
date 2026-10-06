@@ -101,20 +101,22 @@ def test_an_answer_to_an_unknown_question_is_refused():
         asyncio.run(_answer(engine, {"nope": 1}))
 
 
+@op
+async def slow(i: int) -> dict:
+    CALLS.append(f"slow{i}")
+    await asyncio.sleep(0.02)
+    return {"i": i + 1}
+
+
+@graph
+def chain(i):
+    a = slow(i=i)
+    b = slow(i=a["i"])
+    c = slow(i=b["i"])
+    START >> a >> b >> c >> END
+
+
 def test_drain_then_resume_ends_as_the_run_that_never_stopped():
-    @op
-    async def slow(i: int) -> dict:
-        CALLS.append(f"slow{i}")
-        await asyncio.sleep(0.02)
-        return {"i": i + 1}
-
-    @graph
-    def chain(i):
-        a = slow(i=i)
-        b = slow(i=a["i"])
-        c = slow(i=b["i"])
-        START >> a >> b >> c >> END
-
     expected = asyncio.run(Operon(chain, params={"i": None}).run({"i": 0}))
 
     CALLS.clear()
@@ -153,12 +155,13 @@ def test_drain_needs_a_journal():
         asyncio.run(go())
 
 
+@op
+async def echo(item: str) -> dict:
+    return {"out": item}
+
+
 def test_a_graph_with_a_door_is_journalled_but_not_resumed():
     from operonx.app.serve import ingress
-
-    @op
-    async def echo(item: str) -> dict:
-        return {"out": item}
 
     @graph
     def served():

@@ -20,6 +20,29 @@ def inner_op(data: str) -> dict:
     return {"output": data}
 
 
+@graph
+def good_graph(data):
+    inner = inner_op(data=data)
+    START >> inner >> END
+
+
+@op
+def step1(text: str) -> dict:
+    return {"mid": text}
+
+
+@op
+def step2(mid: str) -> dict:
+    return {"out": mid}
+
+
+@graph
+def wf(text):
+    s1 = step1(text=text)
+    s2 = step2(mid=s1["mid"])
+    START >> s1 >> s2 >> END
+
+
 class TestRefScopeValidation:
     def test_ref_to_parent_op_raises(self):
         """Ref to an op in parent graph should raise ValueError at build time."""
@@ -38,31 +61,12 @@ class TestRefScopeValidation:
     def test_ref_to_parent_via_parent_ok(self):
         """Ref via PARENT is valid — no error."""
 
-        @graph
-        def good_graph(data):
-            inner = inner_op(data=data)
-            START >> inner >> END
-
         # Should not raise
         g = good_graph(data="hello")
         assert g is not None
 
     def test_ref_to_sibling_op_ok(self):
         """Ref to another op inside the same graph is valid."""
-
-        @op
-        def step1(text: str) -> dict:
-            return {"mid": text}
-
-        @op
-        def step2(mid: str) -> dict:
-            return {"out": mid}
-
-        @graph
-        def wf(text):
-            s1 = step1(text=text)
-            s2 = step2(mid=s1["mid"])
-            START >> s1 >> s2 >> END
 
         g = wf(text="test")
         assert g is not None

@@ -74,13 +74,14 @@ def sync_bad(x: int) -> dict:
     raise KeyError("missing")
 
 
-async def test_errors_raise_from_an_inline_op():
-    @graph
-    def g(x):
-        b = sync_bad(x=x)
-        a = after(y=b["y"])
-        START >> b >> a >> END
+@graph
+def g(x):
+    b = sync_bad(x=x)
+    a = after(y=b["y"])
+    START >> b >> a >> END
 
+
+async def test_errors_raise_from_an_inline_op():
     SEEN["after"] = 0
     with pytest.raises(OpFailed, match="missing"):
         await Operon(g, params={"x": None}, errors="raise").run({"x": 1})
@@ -93,14 +94,15 @@ def inner(x):
     START >> b >> END
 
 
-async def test_errors_raise_inside_subgraph():
-    @graph
-    def outer(x):
-        sub = inner(x=x)
-        s = slow_sibling(x=x)
-        START >> [sub, s]
-        [sub, s] >> END
+@graph
+def outer(x):
+    sub = inner(x=x)
+    s = slow_sibling(x=x)
+    START >> [sub, s]
+    [sub, s] >> END
 
+
+async def test_errors_raise_inside_subgraph():
     SEEN["slow_done"] = 0
     engine = Operon(outer, params={"x": None}, errors="raise")
     with pytest.raises(OpFailed) as caught:
@@ -144,14 +146,15 @@ def step(n: int) -> dict:
     return {"n": n + 1, "done": False}
 
 
-async def test_errors_raise_on_loop_limit():
-    @graph
-    def spin():
-        PARENT.declare(n=0)
-        s = step(n=PARENT["n"])
-        s["n"] >> PARENT["n"]
-        START >> s >> if_(s["done"] == True, END, max_iterations=3).else_(s)  # noqa: E712
+@graph
+def spin():
+    PARENT.declare(n=0)
+    s = step(n=PARENT["n"])
+    s["n"] >> PARENT["n"]
+    START >> s >> if_(s["done"] == True, END, max_iterations=3).else_(s)  # noqa: E712
 
+
+async def test_errors_raise_on_loop_limit():
     with pytest.raises(OpFailed, match="LoopLimitExceeded"):
         await Operon(spin, errors="raise").run({})
 

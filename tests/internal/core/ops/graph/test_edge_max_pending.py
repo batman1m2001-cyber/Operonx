@@ -321,12 +321,13 @@ def test_unbounded_parallel_has_nothing_to_bound():
         async_items(n=1)["i"].parallel(max_pending=4)
 
 
-def test_collect_with_max_pending_is_a_compile_error():
-    @graph
-    def _bad(n):
-        it = async_items(n=n)
-        w = slow_async(i=it["i"].sequential(max_pending=2).collect())
-        START >> it >> w >> END
+@graph
+def _bad(n):
+    it = async_items(n=n)
+    w = slow_async(i=it["i"].sequential(max_pending=2).collect())
+    START >> it >> w >> END
 
+
+def test_collect_with_max_pending_is_a_compile_error():
     with pytest.raises(ValueError, match="max_pending"):
         Operon(_bad, params={"n": None})

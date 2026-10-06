@@ -148,22 +148,24 @@ async def test_a_subgraph_that_answers_none_without_failing_still_flows():
 starlette = pytest.importorskip("starlette")
 
 
+@op(bound="sync")
+def explode(item=None) -> dict:
+    raise RuntimeError("upstream rejected the request")
+    return {"answer": item}
+
+
+@graph
+def stage(item):
+    x = explode(item=item)
+    START >> x >> END
+
+
 def test_http_door_answers_500_not_200_null():
     from starlette.testclient import TestClient
 
     from operonx.app.manifest import ServeSpec
     from operonx.app.serve import egress, ingress
     from operonx.app.serve.app import build_app
-
-    @op(bound="sync")
-    def explode(item=None) -> dict:
-        raise RuntimeError("upstream rejected the request")
-        return {"answer": item}
-
-    @graph
-    def stage(item):
-        x = explode(item=item)
-        START >> x >> END
 
     @graph
     def door():

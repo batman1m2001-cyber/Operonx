@@ -53,6 +53,49 @@ def step(count: int = 0) -> dict:
     return {"count": count, "done": count >= 3, "width": 2}
 
 
+@graph
+def g():
+    PARENT.declare(count=0, done=False)
+    s = step(count=PARENT["count"])
+    s["count"] >> PARENT["count"]
+    s["done"] >> PARENT["done"]
+    gen = emit_items(n=s["width"])
+    d = double(item=gen["item"].parallel(max=4))
+    START >> s >> if_(s["done"] == True, END).else_(gen)  # noqa: E712
+    gen >> d >> s
+
+
+@graph
+def g_plain_backedge_still_terminates():
+    PARENT.declare(count=0, done=False)
+    s = step(count=PARENT["count"])
+    s["count"] >> PARENT["count"]
+    s["done"] >> PARENT["done"]
+    START >> s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
+
+
+@op
+def step_wide_zero(count: int = 0) -> dict:
+    count = (count or 0) + 1
+    # `done` stays False so only the empty fan-out can stop this.
+    return {"count": count, "done": False, "width": 0}
+
+
+@graph
+def g_generator_yielding_nothing_terminates():
+    PARENT.declare(count=0, done=False)
+    s = step_wide_zero(count=PARENT["count"])
+    s["count"] >> PARENT["count"]
+    s["done"] >> PARENT["done"]
+    gen = emit_items(n=s["width"])
+    d = double(item=gen["item"].parallel(max=4))
+    # An exit is mandatory — the rewrite refuses a cycle without
+    # one — but this branch never fires, so termination has to
+    # come from the back-edge source never running.
+    START >> s >> if_(s["done"] == True, END).else_(gen)  # noqa: E712
+    gen >> d >> s
+
+
 class TestLoopWithGeneratorInside:
     async def _run(self, build):
         built = build()
@@ -94,17 +137,6 @@ class TestLoopWithGeneratorInside:
     async def test_parallel_consumer_as_backedge_source_iterates(self):
         """Same defect one level shallower — no collect(), just fan-out."""
 
-        @graph
-        def g():
-            PARENT.declare(count=0, done=False)
-            s = step(count=PARENT["count"])
-            s["count"] >> PARENT["count"]
-            s["done"] >> PARENT["done"]
-            gen = emit_items(n=s["width"])
-            d = double(item=gen["item"].parallel(max=4))
-            START >> s >> if_(s["done"] == True, END).else_(gen)  # noqa: E712
-            gen >> d >> s
-
         built, result = await self._run(g)
         assert result["$state"][built.full_name, "count"] == 3
 
@@ -113,15 +145,7 @@ class TestLoopWithGeneratorInside:
         """The pre-existing path must be untouched — including the branch
         source case, where firing depends on which target was chosen."""
 
-        @graph
-        def g():
-            PARENT.declare(count=0, done=False)
-            s = step(count=PARENT["count"])
-            s["count"] >> PARENT["count"]
-            s["done"] >> PARENT["done"]
-            START >> s >> if_(s["done"] == True, END).else_(s)  # noqa: E712
-
-        built, result = await self._run(g)
+        built, result = await self._run(g_plain_backedge_still_terminates)
         assert result["$state"][built.full_name, "count"] == 3
 
     @pytest.mark.asyncio
@@ -129,25 +153,5 @@ class TestLoopWithGeneratorInside:
         """A fan-out over an empty list means the back-edge source never
         runs — the loop must stop rather than spin to max_iterations."""
 
-        @op
-        def step_wide_zero(count: int = 0) -> dict:
-            count = (count or 0) + 1
-            # `done` stays False so only the empty fan-out can stop this.
-            return {"count": count, "done": False, "width": 0}
-
-        @graph
-        def g():
-            PARENT.declare(count=0, done=False)
-            s = step_wide_zero(count=PARENT["count"])
-            s["count"] >> PARENT["count"]
-            s["done"] >> PARENT["done"]
-            gen = emit_items(n=s["width"])
-            d = double(item=gen["item"].parallel(max=4))
-            # An exit is mandatory — the rewrite refuses a cycle without
-            # one — but this branch never fires, so termination has to
-            # come from the back-edge source never running.
-            START >> s >> if_(s["done"] == True, END).else_(gen)  # noqa: E712
-            gen >> d >> s
-
-        built, result = await self._run(g)
+        built, result = await self._run(g_generator_yielding_nothing_terminates)
         assert result["$state"][built.full_name, "count"] == 1

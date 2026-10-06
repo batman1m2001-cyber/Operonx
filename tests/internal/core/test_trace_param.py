@@ -34,12 +34,13 @@ def _add(a: int, b: int):
     return {"sum": a + b}
 
 
-def _mk_engine(**operon_kwargs):
-    @graph
-    def wf(a: int, b: int):
-        s = _add(a=PARENT["a"], b=PARENT["b"])
-        START >> s >> END
+@graph
+def wf(a: int, b: int):
+    s = _add(a=PARENT["a"], b=PARENT["b"])
+    START >> s >> END
 
+
+def _mk_engine(**operon_kwargs):
     return Operon(wf, params={"a": 0, "b": 0}, **operon_kwargs)
 
 

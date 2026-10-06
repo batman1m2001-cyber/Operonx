@@ -43,6 +43,17 @@ def _seen() -> dict:
     return {"slow_done": 0, "after": 0}
 
 
+@op
+def double(x: int) -> dict:
+    return {"y": x * 2}
+
+
+@graph
+def quick(x):
+    d = double(x=x)
+    START >> d >> END
+
+
 class TestCancelWakesWaiters:
     async def test_result_raises_cancelled_instead_of_waiting_forever(self):
         handle = _slow_graph(_seen()).start({"x": 1})
@@ -88,15 +99,6 @@ class TestCancelWakesWaiters:
             await asyncio.wait_for(iterate(), timeout=1)
 
     async def test_cancel_after_the_run_finished_keeps_its_result(self):
-        @op
-        def double(x: int) -> dict:
-            return {"y": x * 2}
-
-        @graph
-        def quick(x):
-            d = double(x=x)
-            START >> d >> END
-
         handle = Operon(quick, params={"x": None}).start({"x": 2})
         assert (await handle.result())["y"] == 4
         handle.cancel()

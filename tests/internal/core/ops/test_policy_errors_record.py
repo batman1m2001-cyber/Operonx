@@ -45,14 +45,15 @@ def items(n: int):
         yield {"i": i}
 
 
+@graph
+def g(n):
+    it = items(n=n)
+    d = down(x=it["i"])
+    START >> it >> d >> END
+
+
 async def test_per_item_retried_failures_count_items_not_attempts():
     CALLS.clear()
-
-    @graph
-    def g(n):
-        it = items(n=n)
-        d = down(x=it["i"])
-        START >> it >> d >> END
 
     engine = Operon(g, params={"n": None})
     out = await engine.run({"n": 2})
