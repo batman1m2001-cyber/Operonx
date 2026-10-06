@@ -56,11 +56,10 @@ scorer/
   def search(query, k): ...
   ```
 
-  The one thing a graph input cannot carry today is a provider op's
-  `resource=` (`LLMOp`, `EmbeddingOp`, `VectorSearchOp`, `RerankOp` take it
-  when the graph is built). Name the resource in `resources.yaml` under a
-  fixed key and point that key at the model you want — do not generate a
-  graph per resource.
+  A provider op's `resource=` can be a graph input too
+  (`LLMOp.of(resource=model, ...)` in `@graph def chat(model, q)`): the
+  model or store is picked per run, so one graph serves them all.
+
 - **Name graphs and ops for what they do**, and pin with `name=` any name
   that other code reads (state keys, trace filters).
 - **One feature, one folder.** Share code between features through a

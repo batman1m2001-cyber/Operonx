@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-10-06
+
+### Removed
+
+- **The built-in `operonx.agents`** (deprecated since 1.14). `operonx.agents` now names the
+  operonx-agents package; see MIGRATION.md.
+- **Graph factories as a door's graph.** `variants=` bind a module-level `@graph`'s parameters; a
+  plain function that returns a graph is refused, naming guide 05.
+
+### Added
+
+- `operonx.agents` and `operonx.kb`: the separately installed operonx-agents and operonx-kb by a
+  short name — the same module objects, submodules included; a missing one raises `ImportError`
+  with its pip install.
+- A provider op's `resource=` may be a graph input (`LLMOp`, `EmbeddingOp`, `RerankOp`,
+  `VectorSearchOp`, `VectorUpsertOp`, `VectorDeleteOp`, `DocFetchOp`): the model or store is
+  picked per run, each key on its own bound copy of the op, so concurrent runs stay apart.
+- Guide 05: every `@graph` is defined at module level, never inside a function; the `operonx init`
+  AGENTS.md says so too.
+
 ## [1.15.0] - 2026-10-05
 
 ### Added
@@ -3072,7 +3092,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.15.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.16.0...HEAD
+[1.16.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.15.0...v1.16.0
 [1.15.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.14.0...v1.15.0
 [1.14.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.12.2...v1.13.0

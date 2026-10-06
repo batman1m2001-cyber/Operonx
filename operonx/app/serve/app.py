@@ -59,12 +59,12 @@ def compile_graph(
     was built with, which is the failure mode where a deep op holds
     ``None`` forever and every call fails on it.
 
-    With ``bind`` — a variant of one door — the named parameters are
-    fixed at build time and the rest stay runtime inputs. Each bound
-    value that reads as ``module:attr`` is loaded; anything else is a
-    literal. A ``@graph`` takes them as its own parameters (the
-    decorator passes a static value into the body as-is); a plain
-    function is a factory that takes them and returns a ``@graph``.
+    With ``bind`` — a variant of one door — the named parameters of the
+    ``@graph`` are fixed at build time and the rest stay runtime inputs.
+    Each bound value that reads as ``module:attr`` is loaded; anything
+    else is a literal; the decorator passes a static value into the body
+    as-is. A plain function that builds and returns a graph is refused:
+    graphs are defined at module level (guide 05).
     """
     from operonx.core import Operon
 
@@ -72,10 +72,13 @@ def compile_graph(
     entry = ref_name(entry)
     bound: Dict[str, Any] = {}
     if bind:
-        if getattr(graph_fn, "_operonx_graph", False):
-            bound = _resolve_bind(bind, where)
-        else:
-            graph_fn = _bind_factory(graph_fn, entry, bind, where)
+        if not getattr(graph_fn, "_operonx_graph", False):
+            raise TypeError(
+                f"{where} graph {entry!r} is a plain function; variants bind a @graph's own "
+                f"parameters {sorted(bind)}. Define the @graph at module level with them as "
+                "parameters, not built inside a function (operonx guide 05)."
+            )
+        bound = _resolve_bind(bind, where)
     # `Operon(...)` on something that is not a graph fails as
     # `AttributeError: 'str' object has no attribute 'name'`, which names
     # neither the manifest entry nor what was actually wrong.
@@ -126,18 +129,6 @@ def _resolve_bind(bind: Dict[str, Any], where: str) -> Dict[str, Any]:
         else value
         for name, value in bind.items()
     }
-
-
-def _bind_factory(factory: Any, entry: str, bind: Dict[str, Any], where: str) -> Any:
-    """Call a plain-function factory with a variant's bound parameters."""
-    resolved = _resolve_bind(bind, where)
-    try:
-        result = factory(**resolved)
-    except TypeError as exc:
-        raise TypeError(f"{where} graph {entry!r} could not take {sorted(bind)}: {exc}") from exc
-    if not hasattr(result, "name") and not callable(result):
-        raise TypeError(f"{where} graph {entry!r} returned a {type(result).__name__}, not a @graph")
-    return result
 
 
 def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:

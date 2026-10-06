@@ -73,7 +73,7 @@ def test_every_template_is_declared_here():
 
 #: What a template's generated code needs besides operonx: its tests and
 #: CLIs run only where that is installed (core cannot depend on it).
-NEEDS = {"agent": "operonx_agents"}
+NEEDS = {"agent": "operonx_agents"}  # the package behind operonx.agents
 
 
 def _installed(module: str) -> bool:
@@ -98,17 +98,18 @@ def _needs_its_package(template: str) -> None:
 
 def test_the_agent_template_is_built_on_operonx_agents(tmp_path):
     """`operonx init --template agent` writes the operonx-agents API (D3):
-    the package is declared, and nothing imports the deprecated
-    `operonx.agents`."""
+    the package is declared and imported by its short name, and nothing
+    uses the removed built-in agents API."""
     root = tmp_path / "bot"
     assert main(["init", str(root), "--template", "agent"]) == 0
     pyproject = (root / "pyproject.toml").read_text()
     assert '"operonx-agents>=' in pyproject
     code = {p.relative_to(root).as_posix(): p.read_text() for p in root.rglob("*.py")}
-    assert not [p for p, text in code.items() if "operonx.agents" in text]
+    assert not [p for p, t in code.items() if "build_react_agent" in t or "operonx_agents" in t]
+    assert "from operonx.agents import" in code["src/assistant/graph.py"]
     assert "agent_service(" in code["app/main.py"]
     assert "Agent(" in code["src/assistant/graph.py"]
-    assert "operonx_agents.testing" in code["tests/test_assistant.py"]
+    assert "operonx.agents.testing" in code["tests/test_assistant.py"]
     for other in ("hello", "http", "chat"):
         assert b"operonx-agents" not in plan(other, "x")["pyproject.toml"]
 

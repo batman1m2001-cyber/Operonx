@@ -6,7 +6,7 @@ variant, and who picks the variant.
 """
 
 from greet import door, styles
-from greet.graph import build
+from greet.graph import greet
 
 from operonx.app import Application, Service, env, http
 
@@ -16,7 +16,7 @@ APP = Application(
         Service(
             "greet",
             http("POST", "/greet", port=env("HTTP_PORT", 8018)),
-            graph=build,  # a factory: build(style, sign_off) -> @graph
+            graph=greet,  # @graph greet(style, sign_off): each variant binds both
             variants={
                 "formal": dict(style=styles.formal, sign_off="Regards"),
                 "casual": dict(style=styles.casual, sign_off="Cheers"),
