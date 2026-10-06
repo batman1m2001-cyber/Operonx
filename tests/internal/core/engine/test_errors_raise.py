@@ -11,7 +11,7 @@ import time
 
 import pytest
 
-from operonx import END, PARENT, START, Operon, OpFailed, Retry, graph, op
+from operonx import END, PARENT, START, Operon, OpFailed, Retry, Timeout, graph, op
 from operonx.core.ops import if_
 
 SEEN = {"slow_done": 0, "after": 0}
@@ -176,15 +176,14 @@ def stalling(x):
     START >> s >> END
 
 
+@graph
+def outer_errors_raise_on_a_subgraph_timeout(x):
+    sub = stalling(x=x, timeout=Timeout(run=0.1))
+    START >> sub >> END
+
+
 async def test_errors_raise_on_a_subgraph_timeout():
-    from operonx import Timeout
-
-    @graph
-    def outer(x):
-        sub = stalling(x=x, timeout=Timeout(run=0.1))
-        START >> sub >> END
-
-    engine = Operon(outer, params={"x": None}, errors="raise")
+    engine = Operon(outer_errors_raise_on_a_subgraph_timeout, params={"x": None}, errors="raise")
     with pytest.raises(OpFailed) as caught:
         await engine.run({"x": 1})
     assert caught.value.op == f"{engine.name}.sub"

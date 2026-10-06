@@ -14,6 +14,7 @@ import httpx
 import openai
 import pytest
 
+from operonx import END, START, Operon, Retry, graph, op
 from operonx.providers.llms.config import LLMType, OpenAIConfig
 from operonx.providers.ops.llm import LLMOp, _is_empty_completion
 
@@ -340,8 +341,6 @@ class TestComposesWithOpRetry:
 
     @staticmethod
     async def _run(max_retries, calls):
-        from operonx import END, START, Operon, Retry, graph, op
-
         async def down(**kw):
             calls.append(1)
             raise openai.APIConnectionError(request=httpx.Request("POST", "http://localhost"))

@@ -35,6 +35,7 @@ from operonx.app.evals import (
     verdict_of,
 )
 from operonx.app.jobs import Job
+from operonx.app.serve import egress, ingress
 from operonx.core import END, START, graph, op
 from operonx.telemetry.runs.files import FilesRunStore
 
@@ -207,17 +208,17 @@ def test_a_broken_case_or_evaluator_fails_its_case_only(tmp_path):
     assert not check["passed"] and check["error"] == "RuntimeError: judge down"
 
 
+@graph
+def door_flow():
+    src = ingress()
+    c = classify(text=src["item"])
+    out = egress(item=c["label"])
+    START >> src >> c >> out >> END
+
+
 def test_an_eval_of_a_graph_with_doors(tmp_path):
     """A served graph is evaluated through its doors: the case's input is
     fed to ingress, what egress sends is the output."""
-    from operonx.app.serve import egress, ingress
-
-    @graph
-    def door_flow():
-        src = ingress()
-        c = classify(text=src["item"])
-        out = egress(item=c["label"])
-        START >> src >> c >> out >> END
 
     run = Eval(
         "door_eval",

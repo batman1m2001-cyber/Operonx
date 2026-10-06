@@ -16,6 +16,7 @@ from operonx import END, START, graph, op
 from operonx.app.evals.online import Cursor, OnlineEval, RunStoreSource, sampled
 from operonx.app.evals.queues import queue_items
 from operonx.app.jobs import Job
+from operonx.app.serve import egress, ingress
 from operonx.telemetry.runs.model import RunFilter
 from operonx.telemetry.runs.sqlite import SqliteRunStore
 from operonx.telemetry.scores import ScoreFilter, open_score_store
@@ -329,6 +330,14 @@ def test_cursor_round_trips(tmp_path):
 # ── never inline (D76) ───────────────────────────────────────────────────
 
 
+@graph
+def door():
+    src = ingress()
+    a = answer(text=src["item"])
+    out = egress(item=a["reply"])
+    START >> src >> a >> out >> END
+
+
 def test_a_served_request_runs_no_evaluator(runs, scores, tmp_path):
     """The service writes its run and answers; the evaluator runs only when
     the online pass reads the run later."""
@@ -337,7 +346,6 @@ def test_a_served_request_runs_no_evaluator(runs, scores, tmp_path):
 
     from operonx import Operon
     from operonx.app.manifest import ServeSpec
-    from operonx.app.serve import egress, ingress
     from operonx.app.serve.app import build_app
 
     calls = []
@@ -345,13 +353,6 @@ def test_a_served_request_runs_no_evaluator(runs, scores, tmp_path):
     def watched(output) -> bool:
         calls.append(output)
         return True
-
-    @graph
-    def door():
-        src = ingress()
-        a = answer(text=src["item"])
-        out = egress(item=a["reply"])
-        START >> src >> a >> out >> END
 
     online = OnlineEval(
         "watch",

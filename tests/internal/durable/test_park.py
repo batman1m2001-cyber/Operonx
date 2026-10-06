@@ -13,6 +13,7 @@ import textwrap
 import pytest
 
 from operonx import END, START, InterruptOp, Operon, graph, op
+from operonx.app.serve import ingress
 from operonx.durable import JournalError, MemoryJournal, SqliteJournal
 
 pytestmark = pytest.mark.unit
@@ -160,15 +161,14 @@ async def echo(item: str) -> dict:
     return {"out": item}
 
 
+@graph
+def served():
+    door = ingress()
+    e = echo(item=door["item"])
+    START >> door >> e >> END
+
+
 def test_a_graph_with_a_door_is_journalled_but_not_resumed():
-    from operonx.app.serve import ingress
-
-    @graph
-    def served():
-        door = ingress()
-        e = echo(item=door["item"])
-        START >> door >> e >> END
-
     journal = MemoryJournal()
     engine = Operon(served, journal=journal)
     with pytest.raises(JournalError, match=r"door .*ingress"):

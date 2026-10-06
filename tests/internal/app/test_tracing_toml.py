@@ -28,6 +28,7 @@ import pytest
 
 from operonx.app import Application, ManifestError
 from operonx.app.manifest import Manifest, _toml
+from operonx.core import END, START, graph, op
 from operonx.core.registry import REGISTRY, ResourceHub
 from operonx.core.utils.yaml_model import YamlModel
 from operonx.telemetry.consumer import Consumer
@@ -367,18 +368,19 @@ def test_tracing_and_project_trace_together_is_an_error():
 # -- the "local" alias --------------------------------------------------------------
 
 
+@op
+def one() -> dict:
+    return {"n": 1}
+
+
+@graph
+def flow():
+    o = one()
+    START >> o >> END
+
+
 def test_local_is_the_builtin_local_consumer_on_an_engine():
     from operonx.app.serve.app import compile_graph
-    from operonx.core import END, START, graph, op
-
-    @op
-    def one() -> dict:
-        return {"n": 1}
-
-    @graph
-    def flow():
-        o = one()
-        START >> o >> END
 
     engine = compile_graph(flow, trace=["local"])
     (consumer,) = engine._trace_consumers
@@ -658,20 +660,10 @@ def test_the_start_check_does_not_cache_a_sink_before_its_category_registers(tmp
     from operonx.app import Service, http
     from operonx.app.serve.app import compile_graph
     from operonx.app.tracing import check_sinks
-    from operonx.core import END, START, graph, op
 
     cfg = tmp_path / "resources.yaml"
     cfg.write_text("trace_late:\n  x: {tag: late}\n", encoding="utf-8")
     ResourceHub.set_instance(ResourceHub.from_yaml(str(cfg)))
-
-    @op
-    def one() -> dict:
-        return {"n": 1}
-
-    @graph
-    def flow():
-        o = one()
-        START >> o >> END
 
     check_sinks("t", [Service("s", http("POST", "/s"), graph=flow, trace=["trace_late:x"])])
 

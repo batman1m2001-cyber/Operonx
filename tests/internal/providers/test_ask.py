@@ -10,6 +10,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
+from operonx.core import END, START
+from operonx.core.ops.graph.graph_op import graph
+from operonx.providers.ops import LLMOp
+
 
 def _mock_resource_hub():
     mock_hub = Mock()
@@ -112,27 +116,37 @@ class TestLLMStructuredConstruction:
         assert node._extract_fields[1].type_hint == "int"
 
 
+@graph
+def detect(prompt: str, transcript: str):
+    c = LLMOp.of(
+        resource="gpt-4",
+        prompt=prompt,
+        fields=["result: str"],
+        parser="json",
+        transcript=transcript,
+    )
+    START >> c >> END
+
+
+@graph
+def detect_static_prompt_works_in_graph(transcript: str):
+    c = LLMOp.of(
+        resource="gpt-4",
+        prompt="Analyze: {transcript}",
+        fields=["result: str"],
+        parser="json",
+        transcript=transcript,
+    )
+    START >> c >> END
+
+
 class TestLLMStructuredInsideGraph:
     def test_ref_prompt_still_infers_template_vars(self):
         """LLMOp inside a @graph with prompt=PARENT[...] still picks up
         template vars from the enclosing graph's inputs."""
-        from operonx.core import END, START
-        from operonx.core.ops.graph.graph_op import graph
-        from operonx.providers.ops import LLMOp
 
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_hub.instance.return_value = _mock_resource_hub()
-
-            @graph
-            def detect(prompt: str, transcript: str):
-                c = LLMOp.of(
-                    resource="gpt-4",
-                    prompt=prompt,
-                    fields=["result: str"],
-                    parser="json",
-                    transcript=transcript,
-                )
-                START >> c >> END
 
             node = detect(
                 prompt="Analyze this: {transcript}",
@@ -143,25 +157,10 @@ class TestLLMStructuredInsideGraph:
         assert "transcript" in llm_op.inputs
 
     def test_static_prompt_works_in_graph(self):
-        from operonx.core import END, START
-        from operonx.core.ops.graph.graph_op import graph
-        from operonx.providers.ops import LLMOp
-
         with patch("operonx.providers.ops._utils.ResourceHub") as mock_hub:
             mock_hub.instance.return_value = _mock_resource_hub()
 
-            @graph
-            def detect(transcript: str):
-                c = LLMOp.of(
-                    resource="gpt-4",
-                    prompt="Analyze: {transcript}",
-                    fields=["result: str"],
-                    parser="json",
-                    transcript=transcript,
-                )
-                START >> c >> END
-
-            node = detect(transcript="Hello world")
+            node = detect_static_prompt_works_in_graph(transcript="Hello world")
 
         llm_op = next(iter(node._ops.values()))
         assert "transcript" in llm_op.inputs

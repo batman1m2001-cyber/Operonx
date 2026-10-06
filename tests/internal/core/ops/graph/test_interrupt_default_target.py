@@ -18,6 +18,8 @@ import pytest
 
 from operonx.core import END, PARENT, START, GraphOp, Interrupt, Operon, op
 from operonx.core.ops._events import SELF_CTX
+from operonx.core.ops.flow.branch_op import if_
+from operonx.core.ops.graph.graph_op import graph
 
 pytestmark = pytest.mark.unit
 
@@ -155,8 +157,6 @@ class TestNestedGraph:
 
     @staticmethod
     def _graph(recorder):
-        from operonx.core.ops.graph.graph_op import graph
-
         @op
         def src(n: int):
             for i in range(6):
@@ -217,9 +217,6 @@ class TestInsideALoop:
 
     @pytest.mark.asyncio
     async def test_an_iteration_can_stop_itself(self):
-        from operonx.core.ops.flow.branch_op import if_
-        from operonx.core.ops.graph.graph_op import graph
-
         trace: list = []
 
         @op
