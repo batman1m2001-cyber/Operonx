@@ -9,7 +9,7 @@ cases that an ``Eval`` of the same service then passes.
 from __future__ import annotations
 
 import pytest
-from operonx import END, START, Operon, graph
+from operonx import END, START, Operon, graph, op
 from operonx.app import http
 from operonx.app.evals import Eval, TraceView, trajectory
 from operonx.app.serve.app import build_app
@@ -22,10 +22,12 @@ from operonx_agents import (
     Agent,
     InMemoryStateStore,
     Model,
+    Runner,
     UsageLimits,
     agent_service,
     tool,
 )
+from operonx_agents.compose import _outputs
 from operonx_agents.evals import (
     cost_at_most,
     dataset_from_runs,
@@ -66,17 +68,23 @@ async def balance(account: str) -> str:
     return "1200"
 
 
+@op(exclude={"trace": ["agent"]})
+async def run_agent(agent: Agent, question: str) -> dict:
+    """The agent a test built, run as one step: ``AgentOp``'s outputs."""
+    out = _outputs(await Runner.run(agent, question))
+    return {"output": out["output"], "status": out["status"], "error": out["error"]}
+
+
+@graph
+def asked(agent, question):
+    a = run_agent(agent=agent, question=question)
+    START >> a >> END
+
+
 async def traced(agent: Agent, question: str):
     """One run of ``agent`` in a graph: its outputs and its TraceView."""
-    run = agent.as_op()
-
-    @graph
-    def flow(q):
-        a = run(input=q)
-        START >> a >> END
-
-    engine = Operon(flow, params={"q": None})
-    handle = engine.start({"q": question})
+    engine = Operon(asked, params={"agent": None, "question": None})
+    handle = engine.start({"agent": agent, "question": question})
     async for _ in handle:
         pass
     return await handle.result(), TraceView.from_trace(handle.trace)

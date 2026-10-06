@@ -388,28 +388,30 @@ class TestTypedOutput:
         assert system.startswith("You refund.") and '"refunded"' in system
 
 
+@op(exclude={"trace": ["agent"]})
+async def support(agent, question: str) -> dict:
+    res = await Runner.run(agent, question)
+    return {"answer": res.output}
+
+
+@graph
+def chat(agent, question):
+    s = support(agent=agent, question=question)
+    START >> s >> END
+
+
 @pytest.fixture
 def traced_agent(hub):
     agent, _ = make(
         hub, asks(("echo", {"a": 1}), ("note", {"text": "x"})), says("done"),
     )  # fmt: skip
-
-    @op
-    async def support(question: str) -> dict:
-        res = await Runner.run(agent, question)
-        return {"answer": res.output}
-
-    @graph
-    def chat(question):
-        s = support(question=question)
-        START >> s >> END
-
-    return chat
+    return agent
 
 
 async def test_the_trace_reads_as_the_conversation(traced_agent):
     """agent op → turn[n] → model, tool: one root, a row per step."""
-    handle = Operon(traced_agent, params={"question": None}).start({"question": "hi"})
+    engine = Operon(chat, params={"agent": None, "question": None})
+    handle = engine.start({"agent": traced_agent, "question": "hi"})
     assert (await handle.result())["answer"] == "done"
     tree = build_tree(handle.trace)
     records = {n.op_id: n for n in handle.trace.nodes}

@@ -66,32 +66,37 @@ async def refund_policy(tier: str) -> str:
     return {"gold": "60 days", "silver": "30 days"}.get(tier.lower(), "14 days")
 
 
+SUPPORT = Agent(
+    name="support",
+    model=Model("qwen3.7-plus", deadline=90, settings=ModelSettings(max_tokens=400)),
+    instructions=(
+        "You answer customer-support questions. Use the tools for every fact; never "
+        "guess. Be brief."
+    ),
+    tools=[order_status, customer_tier, refund_policy],
+    limits=UsageLimits(turns=6, total_tokens=20_000),
+)
+EVENTS: list = []
+
+
+@op
+async def support(question: str) -> dict:
+    async for event in Runner.stream(SUPPORT, question):
+        EVENTS.append(event)
+    res = event.result
+    return {"status": res.status, "output": res.output, "turns": res.turns}
+
+
+@graph
+def chat(question):
+    s = support(question=question)
+    START >> s >> END
+
+
 async def test_a_three_tool_agent_on_qwen(live_hub):
     CALLED.clear()
-    agent = Agent(
-        name="support",
-        model=Model("qwen3.7-plus", deadline=90, settings=ModelSettings(max_tokens=400)),
-        instructions=(
-            "You answer customer-support questions. Use the tools for every fact; never "
-            "guess. Be brief."
-        ),
-        tools=[order_status, customer_tier, refund_policy],
-        limits=UsageLimits(turns=6, total_tokens=20_000),
-    )
-    events: list = []
-
-    @op
-    async def support(question: str) -> dict:
-        async for event in Runner.stream(agent, question):
-            events.append(event)
-        res = event.result
-        return {"status": res.status, "output": res.output, "turns": res.turns}
-
-    @graph
-    def chat(question):
-        s = support(question=question)
-        START >> s >> END
-
+    EVENTS.clear()
+    events = EVENTS
     question = (
         "Customer C-42 asks about order A1B2C3D4: has it shipped, what is their loyalty "
         "tier, and how many days do they have to ask for a refund?"

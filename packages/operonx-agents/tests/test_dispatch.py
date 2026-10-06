@@ -229,21 +229,34 @@ class TestIsolation:
             Toolset([lookup, other])
 
 
+@op
+async def agent_turn(order_id: str) -> dict:
+    msgs = await dispatch(
+        [call("lookup", {"order_id": order_id}, "t1"), call("nope", {}, "t2")], TOOLS
+    )
+    return {"messages": msgs}
+
+
+@graph
+def two_calls(order_id):
+    t = agent_turn(order_id=order_id)
+    START >> t >> END
+
+
+@op
+async def odd_turn() -> dict:
+    return {"m": await dispatch([call("a.b[0]", {})], TOOLS)}
+
+
+@graph
+def odd_name():
+    t = odd_turn()
+    START >> t >> END
+
+
 class TestTracing:
     async def test_each_call_is_a_child_execution(self):
-        @op
-        async def agent_turn(order_id: str) -> dict:
-            msgs = await dispatch(
-                [call("lookup", {"order_id": order_id}, "t1"), call("nope", {}, "t2")], TOOLS
-            )
-            return {"messages": msgs}
-
-        @graph
-        def flow(order_id):
-            t = agent_turn(order_id=order_id)
-            START >> t >> END
-
-        handle = Operon(flow, params={"order_id": None}).start({"order_id": "A1"})
+        handle = Operon(two_calls, params={"order_id": None}).start({"order_id": "A1"})
         out = await handle.result()
         assert len(out["messages"]) == 2
         # Recorded as each finishes; the two ran together.
@@ -261,15 +274,6 @@ class TestTracing:
         assert tools[0].op_full_name.endswith(".t.lookup")
 
     async def test_a_name_no_trace_segment_can_hold(self):
-        @op
-        async def turn() -> dict:
-            return {"m": await dispatch([call("a.b[0]", {})], TOOLS)}
-
-        @graph
-        def flow():
-            t = turn()
-            START >> t >> END
-
-        handle = Operon(flow).start({})
+        handle = Operon(odd_name).start({})
         out = await handle.result()
         assert "no tool named 'a.b[0]'" in out["m"][0]["content"]
