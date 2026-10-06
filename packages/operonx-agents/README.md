@@ -216,6 +216,11 @@ The step's p95 is 2.1–2.8 ms above control's. `results/shadow_latency_decompos
 attributes all of it to `logprobs=True`: without it, the step's p95 is the
 control's (107.4 vs 107.3 ms over 174 pairs).
 
+**Decision (2026-10-06): `logprobs` stays opt-in** (`ModelSettings.logprobs`
+defaults to `False`). It costs ~2.5% of a classify step's p95 and buys one
+thing, a `Choice`'s `confidence`; turn it on where something reads
+`confidence` (a threshold, a fallback, an eval), not by default.
+
 ## A3 gate (2026-10-04)
 
 A3 needed one core change: **operonx #86** (`99b1634`), `child(current=False)`.
