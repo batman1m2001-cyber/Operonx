@@ -25,7 +25,6 @@ Guides: [Deployment](../guide/08-deployment.md), [Jobs](../guide/10-jobs.md),
 
 ::: operonx.app.manifest.Manifest
 ::: operonx.app.manifest.ServeSpec
-::: operonx.app.manifest.JobSpec
 
 ## Tracing
 

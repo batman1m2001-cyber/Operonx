@@ -292,7 +292,8 @@ def done(
 @graph
 def classify(n):
     c = check(n=n)
-    b, s = big(n=n), small(n=n)
+    b = big(n=n)
+    s = small(n=n)
     d = done(big_label=b["label"], small_label=s["label"])
     START >> c >> if_(c["big"] == True, b).else_(s)  # noqa: E712
     b >> d
@@ -322,6 +323,19 @@ asyncio.run(main())
   `bool`.
 - Write a branch inline (it is named `route_1`, `route_2`, … in its
   graph); assign it (`size = if_(...)`) only when another op refers to it.
+- **Always `if_(...).else_(...)`, never a hand-built `BranchOp` or
+  `Branch`.** `if_` builds the branch, its conditions and its merge, and
+  names it; the classes are its internals. Two-way, many-way
+  (`.if_(...)` chained), a back-edge (`.else_(s)` to loop) and a bounded
+  loop (`max_iterations=`) are all `if_`.
+
+```python norun
+# yes
+START >> c >> if_(c["big"] == True, b).else_(s)  # noqa: E712
+
+# no
+router = BranchOp(name="router", ...)  # internals; the build may change under you
+```
 
 ## `~` — fire on whichever arrives first
 
@@ -358,7 +372,8 @@ def reply(cached: str = None, computed: str = None) -> dict:
 
 @graph
 def fastest():
-    c, s = cache_lookup(), slow_compute()
+    c = cache_lookup()
+    s = slow_compute()
     r = reply(cached=c["answer"], computed=s["answer"])
     START >> [c, s]
     c >> ~r  # ~ marks the edge into r as soft:

@@ -62,8 +62,11 @@ scorer/
   (`LLMOp.of(resource=model, ...)` in `@graph def chat(model, q)`): the
   model or store is picked per run, so one graph serves them all.
 
-- **Name graphs and ops for what they do**, and pin with `name=` any name
-  that other code reads (state keys, trace filters).
+- **Name graphs and ops for what they do** through their variables
+  (`score = score_call(...)`), one op per line. Pin with `name=` only a
+  name that other code reads (state keys, trace filters, evals).
+- **Branch with `if_(...).else_(...)`** in the `>>` chain, never a
+  hand-built `BranchOp`.
 - **One feature, one folder.** Share code between features through a
   plain module, not by importing another feature's graph.
 - **Test the ops directly** (`score(call=...)()`), and the graphs by
