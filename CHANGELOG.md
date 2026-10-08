@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.7] - 2026-10-08
+
+### Fixed
+
+- **A nested subgraph's output survives a failure elsewhere in the run.** When any op in a run
+  records a failure, each subgraph drops the outputs no op under it wrote, so a graph never hands
+  on its own input as an answer. It read "wrote" from the writer's `error` cell, which a subgraph
+  never writes: two levels down, every output a subgraph wrote was dropped. With 1.17.6's handled
+  failures this surfaced as a graph that finished `ok` and returned nothing (a scorer kept a
+  verdict through an `on_failure="error"` timeout, three graphs deep, and its result was gone).
+  A subgraph writer now counts as having written an output when one of its own writers of it did;
+  a raise inside it still drops the input passed through.
+
 ## [1.17.6] - 2026-10-08
 
 ### Added
