@@ -51,6 +51,14 @@ class Link(NamedTuple):
     soft: bool
 
 
+def _child_var(owner: Any, child: Any, var: str) -> Optional[str]:
+    """The output of *child* that *owner* exports as its own *var*."""
+    for child_var, owner_var in (getattr(owner, "_out_vars", {}) or {}).get(child.name, {}).items():
+        if owner_var == var:
+            return child_var
+    return None
+
+
 class GraphOp(BaseOp):
     """Container op that holds and executes a directed graph of child ops.
 
@@ -878,16 +886,25 @@ class GraphOp(BaseOp):
         cells = state._cells
         n = len(context_id)
 
-        def wrote(op) -> bool:
+        def wrote(op, var: Optional[str]) -> bool:
             idx = schema.get_index(op.full_name, "error")
-            return idx >= 0 and any(
-                err is None and ctx[:n] == context_id for ctx, err in cells[idx].items()
-            )
+            if idx >= 0:
+                runs = [err for ctx, err in cells[idx].items() if ctx[:n] == context_id]
+                if runs:
+                    return any(err is None for err in runs)
+            # A subgraph never writes its `error` cell: it wrote *var* when
+            # one of its own writers of it did. Read as "never ran", every
+            # output a nested subgraph wrote was dropped the moment any op
+            # in the run recorded a failure, a handled one included.
+            inner = getattr(op, "_output_writers", None)
+            if not inner or var is None:
+                return False
+            return any(wrote(w, _child_var(op, w, var)) for w in inner.get(var, ()))
 
         for var, writers in self._output_writers.items():
             if outputs.get(var) is None or var in self._shared_vars:
                 continue
-            if not any(wrote(w) for w in writers):
+            if not any(wrote(w, _child_var(self, w, var)) for w in writers):
                 outputs[var] = None
 
     @staticmethod
