@@ -79,8 +79,14 @@ def _llm_graph(**kwargs):
         return {"result": {"summary": summary, "error": (error or "").split(":")[0] or None}}
 
     with GraphOp(name="chain") as g:
-        ex = LLMOp.of(resource="mock", prompt={"user": "{text}"}, fields=["summary: str"],
-                      parser="json", text=PARENT["text"], **kwargs)
+        ex = LLMOp.of(
+            resource="mock",
+            prompt={"user": "{text}"},
+            fields=["summary: str"],
+            parser="json",
+            text=PARENT["text"],
+            **kwargs,
+        )
         go = carry_on(summary=ex["summary"], error=ex["error"])
         START >> ex >> go >> END
     return g
@@ -114,7 +120,9 @@ def test_a_parse_failure_is_not_handled_and_fails_the_item(tmp_path):
 
 
 def test_a_trace_with_only_handled_failures_is_ok(tmp_path):
-    engine = Operon(answer, params={"order": None}, trace=LocalConsumer(config={"root": str(tmp_path)}))
+    engine = Operon(
+        answer, params={"order": None}, trace=LocalConsumer(config={"root": str(tmp_path)})
+    )
     asyncio.run(engine.run({"order": -1}))
     (meta_path,) = tmp_path.rglob("meta.json")
     meta = json.loads(meta_path.read_text())
@@ -131,3 +139,24 @@ def test_one_unhandled_failure_clears_handled():
     assert unhandled(state._op_errors) == {}
     state.record_op_error("g.a", "ValueError: y")
     assert list(unhandled(state._op_errors)) == ["g.a"] and state._op_errors["g.a"]["count"] == 2
+
+
+def test_fail_run_false_keeps_a_batch_with_a_failed_item_ok(tmp_path):
+    """A batch scorer writes an error file for a failed item and goes on:
+    the run stays ok, the failure is still counted and recorded."""
+    job = Job(
+        "t",
+        graph=answer_unhandled,
+        items=[{"order": -1}, {"order": 7}],
+        key="order",
+        record_dir=tmp_path,
+        trace=[],
+        fail_run=False,
+    )
+    run = asyncio.run(job.run())
+    assert run.status == "ok" and run.counts["failed"] == 1 and run.counts["ok"] == 1
+
+
+def test_fail_run_defaults_to_the_class():
+    assert Job("a", graph=answer).items_fail_run is True
+    assert Job("b", graph=answer, fail_run=False).items_fail_run is False

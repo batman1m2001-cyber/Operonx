@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.17.6] - 2026-10-08
 
+### Added
+
+- **`Job(fail_run=False)`**: a batch where a failed item is an outcome, not a broken run — a
+  scorer that writes an error file for a call and goes on. Each failure is still counted and
+  recorded (`on_item` sees it); the run, and the step after it in a job of `steps`, stay `ok`.
+  It was a class attribute only (`items_fail_run`, which `Eval` sets), so the one way to get it
+  was a subclass of `Job`.
+
 ### Fixed
 
 - **A failure the graph handles no longer fails the run.** An `LLMOp(on_failure="error")`

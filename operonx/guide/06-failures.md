@@ -182,8 +182,10 @@ asyncio.run(main())
   failed op's full name) and `inputs` (what it was called with) receive the
   failure; take any of them. It runs once per failed run of the op, after
   the last `retry=` attempt.
-- The failure stays in `"$errors"`. A handled failure does not end an
-  `errors="raise"` run.
+- The failure stays in `"$errors"`, marked `"handled": true`. A handled
+  failure does not end an `errors="raise"` run, fail a `Job`'s item or a
+  served request, or turn the trace's status to `error`; neither does an
+  `LLMOp(on_failure="error")` hard failure. A parse failure is not handled.
 - On a per-item op the handler runs per failed item, in that item's
   context.
 
