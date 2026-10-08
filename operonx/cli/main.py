@@ -134,7 +134,9 @@ def _init(args: argparse.Namespace) -> int:
         print(f"  cd {args.dir}")
     for step in TEMPLATES[result.template].next_steps:
         print(f"  {step}")
-    print("\nSee it: operonx studio   (install the studio once: see .operonx/guide/core/09-studio.md)")
+    print(
+        "\nSee it: operonx studio   (install the studio once: see .operonx/guide/core/09-studio.md)"
+    )
     print("Coding assistants: start at AGENTS.md.")
     return 0
 

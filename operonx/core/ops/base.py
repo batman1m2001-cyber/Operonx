@@ -1602,7 +1602,10 @@ class BaseOp(ABC):
                     error=error_msg.rstrip(),
                 ),
             )
-            state.record_op_error(self.full_name, sys.exc_info()[1], ctx_for_end)
+            # an error edge takes it: seen, but it does not fail the run
+            state.record_op_error(
+                self.full_name, sys.exc_info()[1], ctx_for_end, handled=bool(self._error_routes)
+            )
             error_text = f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
             # Recorded first, so "$errors" and the trace show it either way.
             # Then an error edge handles it — `errors="raise"` leaves a

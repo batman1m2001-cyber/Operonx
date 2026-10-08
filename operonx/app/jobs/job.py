@@ -103,7 +103,11 @@ class Job:
         concurrency: Items in flight at once.
         on_error: ``"skip"`` (carry on) or ``"stop"`` (start nothing new,
             and do not reduce). Either way the run is ``failed`` when an
-            item failed.
+            item failed — unless ``fail_run=False``.
+        fail_run: ``False`` for a batch where a failed item is an
+            outcome, not a broken run: each failure is still in the record
+            (``on_item`` sees it), and the run — and the next step — goes on
+            ``ok``. Default: the class's (``True``; ``False`` for an ``Eval``).
         retry: ``Retry(max_attempts=N)``: a failed or timed-out item runs
             again, with the policy's backoff between attempts.
         timeout: Seconds one item's run may take; past it, the run is
@@ -157,9 +161,12 @@ class Job:
         record_dir: Union[str, Path, None] = None,
         on_item: Optional[Callable[[Any], Any]] = None,
         description: str = "",
+        fail_run: Optional[bool] = None,
     ):
         if not name or not isinstance(name, str):
             raise ValueError("a job needs a name")
+        if fail_run is not None:
+            self.items_fail_run = fail_run
         self.name = name
         self.description = description
         self.steps: Optional[List[Job]] = None

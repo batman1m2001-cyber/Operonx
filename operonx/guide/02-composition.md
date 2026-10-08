@@ -133,6 +133,9 @@ asyncio.run(main())
   that did not finish.
 - `on_error="skip"` (default) or `"stop"`; `retry=Retry(max_attempts=3)` and
   `timeout=30` per item. A timed-out item keeps its `trace_id`.
+- A failed item fails the run. `fail_run=False` when a failed item is
+  an outcome (a batch scorer writing an error file for it): the run, and the
+  step after it, stay `ok`.
 - Runs are recorded under `.operonx/jobs/<job>/<run>/` in the project
   (`[jobs] dir` in `operonx.toml`, or `record_dir=`, to move them).
 - `job.run_sync()` from plain code; `job.main()` turns it into a CLI.

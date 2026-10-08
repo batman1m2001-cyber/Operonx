@@ -61,6 +61,17 @@ STATUS_RETRIED = "retried"
 # ---------------------------------------------------------------------------
 
 
+def unhandled(errors: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+    """The records of *errors* (``handle.errors``, a run's ``"$errors"``)
+    that fail the run: every one but those the graph handled — an
+    ``LLMOp(on_failure="error")`` hard failure, a failure an error edge
+    took. A job's item, a served request, a judge and a trace's status all
+    decide "failed" from this, never from ``errors`` itself."""
+    return {
+        op: r for op, r in (errors or {}).items() if not (isinstance(r, dict) and r.get("handled"))
+    }
+
+
 def format_ctx(ctx: Tuple[str, ...]) -> str:
     """Serialize a runtime ctx tuple to a compact string.
 
@@ -359,11 +370,15 @@ class WorkflowTrace:
 
         A failed node or an ``errors`` record: either alone is a failed
         run. The record is the one that catches a structured ``LLMOp``
-        step whose node is ``ok`` but whose ``error`` output is set.
+        step whose node is ``ok`` but whose ``error`` output is set. A
+        failure the graph handled (:func:`unhandled`) fails neither way.
         """
-        if self.errors:
+        handled = {op for op, r in self.errors.items() if isinstance(r, dict) and r.get("handled")}
+        if unhandled(self.errors):
             return "error"
-        failed = [n for n in self.nodes if n.status == STATUS_ERROR]
+        failed = [
+            n for n in self.nodes if n.status == STATUS_ERROR and n.op_full_name not in handled
+        ]
         if not failed:
             return "ok"
         # a step that failed inside a retried attempt is not the run's failure

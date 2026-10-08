@@ -28,8 +28,7 @@ __all__ = ["INSTALL", "main", "studio_command"]
 
 #: How to get the studio, said wherever it is missing.
 INSTALL = (
-    "git clone https://github.com/batman1m2001-cyber/operonx-studio"
-    " && operonx-studio/install.sh"
+    "git clone https://github.com/batman1m2001-cyber/operonx-studio && operonx-studio/install.sh"
 )
 
 

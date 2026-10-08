@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from operonx.app.serve.protocol import RunRequest
 from operonx.app.serve.runner import RunTimeout, serve_session
 from operonx.core.loggings import LOGGER
-from operonx.core.workflow_trace import STATUS_ERROR
+from operonx.core.workflow_trace import STATUS_ERROR, unhandled
 
 from .items import iter_items
 from .record import (
@@ -63,10 +63,14 @@ def _first_error(trace: Any, handle: Any = None) -> Optional[str]:
     subgraph failing around its children leaves no errored trace node, and
     without the second look its item was recorded ``empty``.
     """
+    errors = getattr(handle, "errors", None) or getattr(trace, "errors", None) or {}
+    # a failure the graph handled (on_failure="error", an error edge) is in
+    # the record and the trace, but it is not the item's failure
+    handled = set(errors) - set(unhandled(errors))
     for node in getattr(trace, "nodes", None) or ():
-        if node.status == STATUS_ERROR:
+        if node.status == STATUS_ERROR and node.op_full_name not in handled:
             return _as_item_error(node.op_name, node.error)
-    for op_name, record in (getattr(handle, "errors", None) or {}).items():
+    for op_name, record in unhandled(errors).items():
         return _as_item_error(op_name.rsplit(".", 1)[-1], record["message"])
     return None
 

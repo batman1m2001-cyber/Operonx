@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence, Tuple, Union
 
 from operonx.core.ops import op
+from operonx.core.workflow_trace import unhandled
 
 from .evaluators import verdict_of
 from .fingerprint import canonical, config_identity, config_spec, digest, graph_spec, models_of
@@ -297,7 +298,7 @@ async def run_judge(
                 origin_metadata("eval", **judging.metadata, role="judge", evaluator=ev.eval_name)
             )
         out = await handle.collect(unwrap=True)
-    errors = out.get("$errors") or {}
+    errors = unhandled(out.get("$errors"))
     if errors:
         # The first record, `{type, message, count, first_ctx}`, read the
         # way a job reads an item's failure: the op and its message's last line.

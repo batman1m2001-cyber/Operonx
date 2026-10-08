@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, Optional
 from operonx.app.declare import ref_name
 from operonx.app.manifest import ServeSpec
 from operonx.core.loggings import LOGGER
+from operonx.core.workflow_trace import unhandled
 
 from .protocol import SESSION_KEY, RunRequest, Session
 from .registry import resolve_ref, resolve_transport
@@ -263,7 +264,7 @@ class ServeRunner:
                 metadata=metadata,
                 on_start=lambda h: _note_trace_id(session, h),
             )
-            failed = bool(handle.errors)
+            failed = bool(unhandled(handle.errors))
         except Exception as exc:  # noqa: BLE001
             # One session failing is not the server failing. It is logged
             # here rather than swallowed, because a transport that loses

@@ -848,6 +848,9 @@ class GraphOp(BaseOp):
             idx = schema.get_index(child.full_name, "error")
             if idx < 0:
                 continue
+            record = state._op_errors.get(child.full_name)
+            if record is not None and record.get("handled"):
+                continue  # on_failure="error", an error edge: the graph carried on
             for ctx, err in cells[idx].items():
                 if err is not None and ctx[:n] == context_id:
                     failed.append(child.full_name)
@@ -996,7 +999,9 @@ class GraphOp(BaseOp):
                         # A synthetic loop is not an op its author wrote;
                         # the graph around it reports the failure.
                         error_msg = self._subgraph_error(failed)
-                        state.record_op_error(self.full_name, error_msg, context_id)
+                        state.record_op_error(
+                            self.full_name, error_msg, context_id, handled=bool(self._error_routes)
+                        )
                         if self._error_routes:
                             yield (
                                 context_id,

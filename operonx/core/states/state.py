@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from operonx.core.states.cell import DEFAULT_CONTEXT, Cell
 from operonx.core.states.schema import StateSchema
 from operonx.core.utils.tracebacks import user_traceback
-from operonx.core.workflow_trace import format_ctx
+from operonx.core.workflow_trace import format_ctx, unhandled  # noqa: F401  (re-exported)
 
 __all__ = ["MemoryState", "ReducerError"]
 
@@ -386,6 +386,8 @@ class MemoryState:
         op: str,
         error: Union[BaseException, str],
         ctx: Optional[tuple] = None,
+        *,
+        handled: bool = False,
     ) -> None:
         """Note that *op* (its full name) failed with *error*, at *ctx*.
 
@@ -410,6 +412,11 @@ class MemoryState:
         * ``first_ctx`` — where the first failure ran, formatted like the
           trace's ctx: the failed execution's trace ``op_id`` is
           ``f"{op}#{first_ctx}"``. ``None`` when the caller had no ctx.
+        * ``handled`` — present (``True``) when the graph declared what
+          the failure does: an ``LLMOp(on_failure="error")`` hard failure,
+          or a failure an error edge (``op.on_error``) takes. It is still
+          recorded, so it is seen; it does not fail the run
+          (:func:`unhandled`). One unhandled failure of the op clears it.
 
         Args:
             op: The op's full name, ``"<graph>.<op>"``.
@@ -417,12 +424,16 @@ class MemoryState:
                 subgraph whose child raised, a loop at its cap, a structured
                 ``LLMOp`` step's ``error``) — its text, ``"<Type>: <what>"``.
             ctx: The context the failure ran in.
+            handled: The graph handles this failure (see ``handled`` above).
         """
         record = self._op_errors.get(op)
         if record is not None:
             # A new dict, not an in-place bump: a `handle.errors` snapshot
             # a caller already holds must not change under it.
-            self._op_errors[op] = {**record, "count": record["count"] + 1}
+            bumped = {**record, "count": record["count"] + 1}
+            if not handled:
+                bumped.pop("handled", None)
+            self._op_errors[op] = bumped
             return
         if isinstance(error, BaseException):
             kind, message = type(error).__name__, user_traceback(error)
@@ -435,6 +446,7 @@ class MemoryState:
             "message": message,
             "count": 1,
             "first_ctx": format_ctx(ctx) if ctx is not None else None,
+            **({"handled": True} if handled else {}),
         }
 
     def resume_interrupt(self, interrupt_id: str, value: Any) -> bool:
