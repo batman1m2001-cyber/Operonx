@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.6] - 2026-10-08
+
+### Fixed
+
+- **A failure the graph handles no longer fails the run.** An `LLMOp(on_failure="error")`
+  hard failure, and a failure an error edge (`op.on_error`) takes, were still read as the
+  run's failure: a `Job` marked the item `failed` (a score job kept a call's verdict, then
+  wrote it as `{"error": ...}`), a served request counted as failed, an LLM judge as
+  errored, and the trace's status was `error`. The record stays in `"$errors"` and the
+  trace, now with `"handled": true`; everything that decides "failed" reads
+  `operonx.core.workflow_trace.unhandled(errors)`. A parse failure is not handled: left
+  unchecked it reads as "no", and it still fails the item. One unhandled failure of the
+  same op clears `handled`.
+
 ## [1.17.5] - 2026-10-08
 
 ### Added

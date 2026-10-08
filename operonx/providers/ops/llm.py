@@ -1059,7 +1059,7 @@ class LLMOp(BaseOp):
                 if self.on_failure != "error":
                     raise
                 LOGGER.warning("LLMOp hard failure, reported as error: %s", e)
-                self._record_failure(e)
+                self._record_failure(e, handled=True)
                 field_nones = {f.output_key: None for f in self._extract_fields}
                 return {**field_nones, "error": f"{type(e).__name__}: {e}"}
 
@@ -1086,7 +1086,7 @@ class LLMOp(BaseOp):
         field_nones = {f.output_key: None for f in self._extract_fields}
         return {**last_result, **field_nones, "error": last_error}
 
-    def _record_failure(self, error: Union[BaseException, str]) -> None:
+    def _record_failure(self, error: Union[BaseException, str], *, handled: bool = False) -> None:
         """Put a failure this op returns as ``error`` in the run's ``"$errors"``.
 
         The op does not raise — a downstream op branches on ``error`` — so
@@ -1094,10 +1094,14 @@ class LLMOp(BaseOp):
         reported only what failed *because* of it: the next templated
         step's ``PromptError`` on the ``None`` fields, with the parse
         failure that caused it sitting unread in this op's ``error`` cell.
+
+        *handled*: an ``on_failure="error"`` hard failure — the author
+        declared the output optional, so it is seen but fails nothing. A
+        parse failure is not handled: unchecked, it reads as "no".
         """
         state = _current_state_var.get(None)
         if state is not None:
-            state.record_op_error(self.full_name, error, _current_ctx())
+            state.record_op_error(self.full_name, error, _current_ctx(), handled=handled)
 
     # =========================================================================
     # Core: stream
