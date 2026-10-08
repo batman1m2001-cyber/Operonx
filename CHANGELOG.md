@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.5] - 2026-10-08
+
+### Added
+
+- `operonx studio [DIR]`: open the project at or above here in operonx-studio. It starts the
+  studio when none is running and otherwise hands the project to the running one, which adds it
+  to its list and shows it. operonx never imports the studio: the command finds `operonx-studio`
+  and says how to install it when it is missing.
+- Guide page 9, "Seeing a project": installing operonx-studio from its repository
+  (`install.sh`), opening a project, reading the canvas (Workflow and Data Flow views) and what
+  each page is for. `operonx init` copies it into new projects with the rest of the guide, and
+  ends with how to open the project. The install docs gain a studio section.
+
 ## [1.17.4] - 2026-10-06
 
 ### Changed
@@ -3178,6 +3191,7 @@ Unreleased — folded into 0.7.0 above.
   before constructing the engine.
 
 [Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...HEAD
+[1.17.5]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...v1.17.5
 [1.17.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.3...v1.17.4
 [1.17.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.2...v1.17.3
 [1.17.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.1...v1.17.2

@@ -8,8 +8,9 @@
     operonx serve ...               # serve the services     (operonx.cli.serve)
     operonx play ...                # drive a served door    (operonx.app.play)
     operonx eval ...                # experiments: run, compare, report (operonx.cli.eval)
+    operonx studio [DIR]            # open the project in operonx-studio (operonx.cli.studio)
 
-``run``, ``serve``, ``play`` and ``eval`` are handed the rest of the
+``run``, ``serve``, ``play``, ``eval`` and ``studio`` are handed the rest of the
 command line untouched: each is its module's own ``main(argv)`` (for the
 first three, the one the deprecated ``operonx-<name>`` alias calls too),
 so there is one parser per command and two spellings cannot differ.
@@ -37,6 +38,7 @@ DELEGATED = {
     "serve": ("operonx.cli.serve", "serve the application's services"),
     "play": ("operonx.app.play", "the playground bridge: drive a service's doors over JSON lines"),
     "eval": ("operonx.cli.eval", "run experiments, compare and report them, size them"),
+    "studio": ("operonx.cli.studio", "open this project in operonx-studio (starts it if needed)"),
 }
 
 
@@ -132,7 +134,8 @@ def _init(args: argparse.Namespace) -> int:
         print(f"  cd {args.dir}")
     for step in TEMPLATES[result.template].next_steps:
         print(f"  {step}")
-    print("\nCoding assistants: start at AGENTS.md.")
+    print("\nSee it: operonx studio   (install the studio once: see .operonx/guide/core/09-studio.md)")
+    print("Coding assistants: start at AGENTS.md.")
     return 0
 
 

@@ -59,6 +59,24 @@ says:
 | `chat` | An `LLMOp` on an `llm:assistant` resource; tested against a fake model |
 | `agent` | A ReAct agent with one `@tool`; tested with a scripted model |
 
+## See it: operonx-studio
+
+`operonx-studio` is the local web app for a project. It draws every graph
+(what runs after what, and which value goes where), plays the graph turn by
+turn, and shows runs, evals, jobs and services. It is a tool, not a
+dependency of the project, so install it once on its own, from a clone of its repository:
+
+```bash
+git clone https://github.com/batman1m2001-cyber/operonx-studio
+operonx-studio/install.sh             # again after a `git pull` to upgrade
+cd myapp && uv sync
+operonx studio                        # http://127.0.0.1:8765; first sign-in root / 123
+```
+
+It reads the project with the project's own `.venv` and redraws when you
+save. More in the guide page
+[Seeing a project](https://github.com/batman1m2001-cyber/Operonx/blob/main/operonx/guide/09-studio.md).
+
 Existing files are never overwritten unless you pass `--force`; on an
 existing project `init` only adds what is missing. After upgrading
 operonx, `operonx guide --sync` refreshes `.operonx/guide/`.

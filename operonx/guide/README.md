@@ -24,6 +24,8 @@ websocket, and an **Application** bundles a product's jobs and services.
    `operonx eval`, reports, calibrate, the pytest plugin.
 8. [Inside a run](08-runs.md): `run_context()`, `child()`, several stream
    modes at once and `tasks`, live traces.
+9. [Seeing a project](09-studio.md): `operonx-studio`, a local web app that
+   draws the graphs, plays them, and shows runs, evals, jobs and services.
 
 Other operonx packages ship their own guides beside this one, in the
 project's `.operonx/guide/` (its `README.md` indexes them all):
