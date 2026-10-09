@@ -388,3 +388,34 @@ async def test_invoke_refuses_a_plain_function():
 
     with pytest.raises(TypeError, match="@op function or a @graph"):
         await invoke(plain, x=1)
+
+
+@op
+async def sees_its_run(x: int) -> dict:
+    from operonx.core.workflow_trace import _current_trace
+
+    trace = _current_trace.get()
+    return {"root": trace.root.trace_id, "nested": trace.parent is not None}
+
+
+@op
+async def outer_sees(x: int) -> dict:
+    from operonx.core.workflow_trace import _current_trace
+
+    inner = await invoke(sees_its_run, x=x)
+    return {"mine": _current_trace.get().trace_id, "root": inner["root"], "nested": inner["nested"]}
+
+
+@graph
+def root_app(x):
+    h = outer_sees(x=x)
+    START >> h >> END
+
+
+@pytest.mark.asyncio
+async def test_a_nested_runs_trace_knows_the_run_it_is_a_step_of():
+    handle = Operon(root_app, params={"x": None}).start({"x": 1}, trace_id="the-run")
+    out = await handle.result()
+    assert out["mine"] == "the-run"
+    assert out["nested"] is True and out["root"] == "the-run"
+    assert handle.trace.parent is None and handle.trace.root is handle.trace

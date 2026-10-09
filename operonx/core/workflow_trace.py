@@ -331,6 +331,20 @@ class WorkflowTrace:
     _task_listeners: List[Callable[[Any], None]] = field(
         default_factory=list, repr=False, compare=False
     )
+    # The trace of the run this one is a step of: set on a run started
+    # inside an op body (operonx.core.nested), None for a run of its own.
+    parent: Optional["WorkflowTrace"] = field(default=None, repr=False, compare=False)
+
+    @property
+    def root(self) -> "WorkflowTrace":
+        """The outermost run's trace: this one, unless it is a nested run
+        (``invoke``, a graph an op runs). Run-scoped state keyed on the
+        trace (a per-run cache) keys on ``root`` to be shared by the steps a
+        nested run takes."""
+        trace = self
+        while trace.parent is not None:
+            trace = trace.parent
+        return trace
 
     @property
     def duration_ms(self) -> float:

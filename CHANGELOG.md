@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-10-09
+
+### Added
+
+- **A nested run's trace knows the run it is a step of.** `WorkflowTrace.parent` is the caller's
+  trace for a run started inside an op body (`invoke`, a plain `Operon(g).run()`), and `.root`
+  the outermost run's. State a project keeps per run, keyed on the trace (a per-run cache of
+  tool calls), keys on `.root` so the steps a nested run takes share it: an agent's tools that
+  are ops each run as a nested run, and keyed on their own trace they shared nothing.
+
 ## [1.18.0] - 2026-10-09
 
 ### Added
