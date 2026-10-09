@@ -735,6 +735,15 @@ class Ref:
         "not_": "not",
     }
 
+    # How tightly each written operator binds, as in Python: a side that
+    # binds looser than the operator it sits in is bracketed in the text.
+    _PRECEDENCE: dict = {
+        "or_": 1, "and_": 2, "not_": 3,
+        "eq": 4, "ne": 4, "lt": 4, "le": 4, "gt": 4, "ge": 4, "contains": 4,
+        "add": 5, "sub": 5, "mul": 6, "truediv": 6, "floordiv": 6, "mod": 6,
+    }
+    _ATOM = 9   # a name, an index, a call: never needs brackets
+
     def describe(self) -> str:
         """Human-readable description of this Ref and its transforms.
 
@@ -744,25 +753,50 @@ class Ref:
 
             Ref(PARENT, "call_code") with transforms [("eq", ("Hua_tra",))]
             → "call_code == 'Hua_tra'"
+
+        The text reads as Python would: a part that binds looser than the
+        operator around it is bracketed, so
+        ``((a == 1) | (b >= 3)) & (c > 0.5)`` → ``(a == 1 or b >= 3) and c > 0.5``,
+        never the ``a == 1 or b >= 3 and c > 0.5`` that means something else.
         """
-        result = self.var
+        return self._describe()[0]
+
+    def _describe(self):
+        """This Ref's text, and how tightly its outermost operator binds."""
+        P = self._PRECEDENCE
+        result, prec = self.var, self._ATOM
         for op, args in self._transforms:
             symbol = self._TRANSFORM_SYMBOLS.get(op)
             if symbol and args:
+                mine = P.get(op, self._ATOM)
+                # the left side: bracketed when it binds looser, or when two
+                # comparisons would chain (`a > 3 == True` means two tests)
+                if prec < mine or (prec == mine == 4):
+                    result = f"({result})"
                 arg = args[0]
-                shown = arg.describe() if isinstance(arg, Ref) else repr(arg)
-                result = f"{result} {symbol} {shown}"
+                if isinstance(arg, Ref):
+                    shown, aprec = arg._describe()
+                    # the right side: bracketed unless it binds tighter, or
+                    # it repeats an `and`/`or` (those read the same either way)
+                    if aprec < mine or (aprec == mine and op not in ("and_", "or_")):
+                        shown = f"({shown})"
+                else:
+                    shown = repr(arg)
+                result, prec = f"{result} {symbol} {shown}", mine
             elif symbol and not args:
-                result = f"{symbol} {result}"
+                mine = P.get(op, self._ATOM)
+                result, prec = f"{symbol} {f'({result})' if prec < mine else result}", mine
             elif op == "getitem":
-                result = f"{result}[{args[0]!r}]"
+                result = f"{f'({result})' if prec < self._ATOM else result}[{args[0]!r}]"
+                prec = self._ATOM
             elif op == "getattr":
-                result = f"{result}.{args[0]}"
+                result = f"{f'({result})' if prec < self._ATOM else result}.{args[0]}"
+                prec = self._ATOM
             elif op == "apply":
                 func = args[0]
                 fname = getattr(func, "__name__", str(func))
-                result = f"{fname}({result})"
-        return result
+                result, prec = f"{fname}({result})", self._ATOM
+        return result, prec
 
     # =========================================================================
     # Serialization

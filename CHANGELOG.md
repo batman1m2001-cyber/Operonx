@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.9] - 2026-10-09
+
+### Fixed
+
+- **A condition's text keeps its brackets.** `Ref.describe()` (what a router's routes show,
+  in the studio and in traces) joined each step with a space, so
+  `((a == 1) | (b >= 3)) & (c > 0.5)` read `a == 1 or b >= 3 and c > 0.5`, which Python reads as
+  `a == 1 or (b >= 3 and c > 0.5)`: the wrong logic. A part that binds looser than the operator
+  around it is now bracketed (`(a == 1 or b >= 3) and c > 0.5`), comparisons never chain
+  (`(a > 3) == True`), and a run of one `and` / `or` stays flat.
+
 ## [1.17.8] - 2026-10-09
 
 ### Added
