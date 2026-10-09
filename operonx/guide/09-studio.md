@@ -16,7 +16,7 @@ operonx-studio/install.sh             # again after a `git pull` to upgrade
 
 It installs `operonx-studio` (and `operonx-lint`, `operonx-extract`,
 `operonx-new`) as a uv tool, in an environment of its own, or with plain
-pip when uv is missing.
+pip when uv is missing. Without bash (Windows): `pip install ./operonx-studio`.
 
 ## Open a project
 
@@ -27,8 +27,11 @@ operonx init myapp        # a project to look at (any operonx project works)
 ```bash
 cd myapp
 uv sync                   # the studio reads the project with the project's own .venv
-operonx studio            # starts the studio, adds the project, opens it in the browser
+uv run operonx studio     # starts the studio, adds the project, opens it in the browser
 ```
+
+With pip, set the project up as its `AGENTS.md` says (a `.venv`, then
+`pip install -e ".[test]"`), and run `operonx studio` in the activated `.venv`.
 
 `operonx studio` finds the project at or above the current folder. If no
 studio is running, it starts one (Ctrl+C stops it). If one is already

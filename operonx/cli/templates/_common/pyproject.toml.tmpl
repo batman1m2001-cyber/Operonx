@@ -8,11 +8,14 @@ dependencies = [
     "python-dotenv>=1.0",  # operonx.bootstrap() reads .env with it
 ]
 
-[dependency-groups]
-dev = [
+[project.optional-dependencies]
+test = [  # pip: pip install -e ".[test]"
     "pytest>=8",
     "httpx>=0.24",  # starlette's TestClient
 ]
+
+[dependency-groups]
+dev = ["{{dist}}[test]"]  # uv: `uv sync` installs the test extra too
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

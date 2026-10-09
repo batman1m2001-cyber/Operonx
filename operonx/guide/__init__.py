@@ -35,6 +35,7 @@ __all__ = [
     "COPY_DIR",
     "Guide",
     "agents_block",
+    "toolchain_of",
     "changes",
     "files",
     "find_project",
@@ -132,8 +133,9 @@ def _index(guides: List[Guide]) -> str:
             lines.append(f"- [{rel}]({rel}) — {_title(page)}")
     lines += [
         "",
-        "Another operonx package (`uv add operonx-agents`, `uv add operonx-kb`) adds",
-        "its guide here at the next `operonx` command, or `operonx guide`.",
+        "Another operonx package (`uv add operonx-agents` or `pip install operonx-agents`;",
+        "`operonx-kb` the same) adds its guide here at the next `operonx` command, or",
+        "`operonx guide`.",
         "",
     ]
     return "\n".join(lines)
@@ -191,16 +193,27 @@ def _matches(dest: Path, want: Dict[str, bytes]) -> bool:
     return all((dest / rel).read_bytes() == data for rel, data in want.items())
 
 
-def agents_block(guides: Optional[List[Guide]] = None) -> str:
-    """The marked block :func:`sync` keeps in AGENTS.md."""
+def toolchain_of(project: Union[str, Path]) -> str:
+    """How *project* is set up: ``"uv"`` once it has a ``uv.lock`` (``uv run``
+    and ``uv sync`` write one), else ``"pip"``."""
+    return "uv" if (Path(project) / "uv.lock").is_file() else "pip"
+
+
+def agents_block(guides: Optional[List[Guide]] = None, toolchain: str = "uv") -> str:
+    """The marked block :func:`sync` keeps in AGENTS.md, naming *toolchain*'s
+    commands."""
+    from operonx.cli.init import TOOLCHAINS
+
     guides = installed() if guides is None else guides
     names = ", ".join(f"{g.dist} {g.version}" for g in guides)
+    t = TOOLCHAINS[toolchain]
+    refresh = f"`{t['run']}operonx guide`"
     return (
         f"{AGENTS_BEGIN}\n"
         f"Installed: {names}. Read `.operonx/guide/README.md` first: it lists every\n"
         "page of every installed operonx package, each tested against that version.\n"
-        "Upgrade: `uv lock --upgrade-package operonx && uv sync`, then `uv run operonx guide`\n"
-        "(after `uv add operonx-agents` or `operonx-kb`, just `uv run operonx guide`).\n"
+        f"Upgrade: `{t['upgrade']}`, then {refresh}\n"
+        f"(after `{t['add']} operonx-agents` or `operonx-kb`, just {refresh}).\n"
         "Names come from variables: write `name=` only when other code reads the name,\n"
         "one op per line. Branch with `if_(cond, a).else_(b)` in the `>>` chain, never a\n"
         "hand-built `BranchOp`.\n"
@@ -224,11 +237,13 @@ def _sync_agents_md(project: Path, block: str) -> bool:
     return True
 
 
-def sync(project: Union[str, Path]) -> List[str]:
+def sync(project: Union[str, Path], toolchain: Optional[str] = None) -> List[str]:
     """Make ``<project>/.operonx/guide/`` the installed guides, and AGENTS.md's
-    block name them. Returns what changed (:func:`changes`); running it
-    twice changes nothing."""
+    block name them, with *toolchain*'s commands (default: the project's,
+    :func:`toolchain_of`). Returns what changed (:func:`changes`); running
+    it twice changes nothing."""
     project = Path(project)
+    toolchain = toolchain or toolchain_of(project)
     guides = installed()
     done = changes(project, guides)
     want = files(guides)
@@ -249,7 +264,7 @@ def sync(project: Union[str, Path]) -> List[str]:
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.is_file() or target.read_bytes() != data:
                 target.write_bytes(data)
-    _sync_agents_md(project, agents_block(guides))
+    _sync_agents_md(project, agents_block(guides, toolchain))
     return done
 
 

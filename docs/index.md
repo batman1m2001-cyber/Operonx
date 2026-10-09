@@ -15,76 +15,34 @@ built-in tracing.
   swap with one line.
 - **Type-safe state** — O(1) state access with schema validation.
 
-## Quick start
+## Start a project
+
+You build with operonx through a coding assistant. `operonx init` makes a
+project it can work in at once: a layout, a first feature with its tests,
+the rules in `AGENTS.md`, and the API guide of the installed operonx in
+`.operonx/guide/`.
 
 ```bash
+# with uv
+uvx operonx init myapp
+cd myapp && uv sync && uv run pytest
+
+# with pip only
 pip install operonx
+operonx init myapp && cd myapp
+python -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -e ".[test]" && pytest
 ```
 
-To start a whole project instead (layout, app, tests and an `AGENTS.md` for
-coding assistants), run `operonx init myapp`; see
-[Installation](guide/00-installation.md#start-a-project-operonx-init).
-
-```python
-import asyncio
-from operonx.core import Operon, GraphOp, op, START, END, PARENT
-
-@op
-def greet(name: str):
-    return {"message": f"Hello, {name}!"}
-
-async def main():
-    with GraphOp(name="hello") as graph:
-        step = greet(name=PARENT["name"])
-        START >> step >> END
-
-    result = await Operon(graph).run(inputs={"name": "World"})
-    print(result["message"])
-
-asyncio.run(main())
-```
-
-## LLM integration
-
-```bash
-pip install "operonx[standard]"
-```
-
-Configure resources in `resources.yaml`, credentials in `.env`, then:
-
-```python
-import asyncio
-import operonx
-from operonx.core import Operon, GraphOp, START, END, PARENT
-from operonx.providers import LLMOp
-
-async def main():
-    operonx.bootstrap()  # loads ./.env + ./resources.yaml
-
-    with GraphOp(name="chat") as graph:
-        c = LLMOp(
-            name="llm",
-            resource="gpt-4o",
-            inputs={
-                "prompt": {"system": "You are a helpful assistant.", "user": "{question}"},
-                "*": PARENT,
-            },
-            outputs={"*": PARENT},
-        )
-        START >> c >> END
-
-    result = await Operon(graph).run(inputs={"question": "What is Python?"})
-    print(result["content"])
-
-asyncio.run(main())
-```
-
-See [Resource hub](architecture/resource-hub.md) for the full setup model.
+Then open the folder in your coding assistant and ask for what you want.
+[Installation](guide/00-installation.md) shows what the project holds and
+which files the assistant reads.
 
 ## Where to go next
 
-- **New users:** start with [Installation](guide/00-installation.md) and
-  [First workflow](guide/01-first-workflow.md).
+- **New users:** start with [Installation](guide/00-installation.md), then
+  [First workflow](guide/01-first-workflow.md) to read how a graph works.
 - **LLM workflows:** see [LLM chat](guide/02-llm-chat.md) and [RAG](guide/04-rag.md).
 - **Internals:** [Architecture overview](architecture/overview.md) explains
   how the engine, scheduler, and state model fit together.

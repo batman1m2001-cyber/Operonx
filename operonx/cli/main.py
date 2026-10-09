@@ -1,6 +1,6 @@
 """`operonx` — the command line: one command, a subcommand each.
 
-    operonx init [DIR] [--template NAME] [--name NAME] [--force]
+    operonx init [DIR] [--template NAME] [--name NAME] [--force] [--uv | --pip]
     operonx guide [DIR]             # sync the installed guides into DIR/.operonx/guide/
     operonx guide --check [DIR]     # exit 1 when that copy is stale (CI)
     operonx guide --path            # where the installed core guide is
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from operonx.cli.init import TEMPLATES, InitError, init_project
+from operonx.cli.init import TEMPLATES, InitError, init_project, next_steps
 
 __all__ = ["main", "TEMPLATES", "DELEGATED"]
 
@@ -74,6 +74,21 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="use the operonx checkout at PATH instead of PyPI (default inside a checkout)",
     )
+    tool = init.add_mutually_exclusive_group()
+    tool.add_argument(
+        "--uv",
+        dest="toolchain",
+        action="store_const",
+        const="uv",
+        help="the project's docs use uv (the default when uv is installed)",
+    )
+    tool.add_argument(
+        "--pip",
+        dest="toolchain",
+        action="store_const",
+        const="pip",
+        help="the project's docs use a .venv and pip, for machines without uv",
+    )
 
     guide = sub.add_parser(
         "guide",
@@ -107,6 +122,7 @@ def _init(args: argparse.Namespace) -> int:
             name=args.name,
             force=args.force,
             editable=Path(args.editable) if args.editable else None,
+            toolchain=args.toolchain,
         )
     except InitError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -132,10 +148,12 @@ def _init(args: argparse.Namespace) -> int:
     print("\nNext:")
     if root.resolve() != Path.cwd().resolve():
         print(f"  cd {args.dir}")
-    for step in TEMPLATES[result.template].next_steps:
+    for step in next_steps(result.template, result.toolchain):
         print(f"  {step}")
+    run = "uv run " if result.toolchain == "uv" else ""
     print(
-        "\nSee it: operonx studio   (install the studio once: see .operonx/guide/core/09-studio.md)"
+        f"\nSee it: {run}operonx studio   "
+        "(install the studio once: see .operonx/guide/core/09-studio.md)"
     )
     print("Coding assistants: start at AGENTS.md.")
     return 0
