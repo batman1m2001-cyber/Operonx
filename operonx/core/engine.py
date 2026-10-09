@@ -1184,6 +1184,7 @@ class Operon:
         )
 
         if nest is not None:
+            _wf_trace.parent = nested_in
             _wf_trace._execution_listeners.append(nest.record)
             if nest.forwards_tasks:
                 _wf_trace._task_listeners.append(nest.task)
