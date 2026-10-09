@@ -379,6 +379,22 @@ class WorkflowTrace:
         failed = [
             n for n in self.nodes if n.status == STATUS_ERROR and n.op_full_name not in handled
         ]
+        if failed:
+            # A run an op body started (operonx.core.nested) fails this one
+            # only through that op: the caller's own record decides.
+            from operonx.core.nested import NESTED_RUN, nested_owner
+
+            roots: Dict[str, List[OpExecution]] = {}
+            for n in self.nodes:
+                if n.op_type == NESTED_RUN:
+                    roots.setdefault(n.op_full_name, []).append(n)
+            if roots:
+                failed = [
+                    n
+                    for n in failed
+                    if n.op_type != NESTED_RUN
+                    and nested_owner(n.op_full_name, tuple(n.ctx), roots) is None
+                ]
         if not failed:
             return "ok"
         # a step that failed inside a retried attempt is not the run's failure

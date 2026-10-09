@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-10-09
+
+### Added
+
+- **`invoke(target, **inputs)` runs an `@op` function or a `@graph` from inside an op body.** An
+  agent's tool, a helper graph a service op runs per call: `await invoke(lookup, order_id=...)`
+  returns the target's outputs. A bare `@op` runs as a graph of one node; each target's engine is
+  built once and reused. A failure inside raises `OpFailed` in the caller.
+- **A run started inside an op body is a step of the caller's run.** `invoke`, and a plain
+  `Operon(g).run()` in an op body, used to record into a trace of their own that nothing read, so
+  the caller's trace stopped at the op. Their records now also join the caller's trace, under the
+  op or `child()` step that started them:
+  - the run's own record (`op_type="graph"`, the target's inputs and outputs), one step under
+    the caller;
+  - its ops beneath it, with names and ctx prefixed by it.
+
+  `build_tree` (Langfuse, the studio) places them there, so a trace viewer opens the step onto the
+  graph, and `stream(mode="tasks")` forwards their task events. A failure inside it fails the
+  caller's run only through the caller: `trace.status` reads the caller's own record.
+
+### Changed
+
+- **Calling an `@op` function inside a running op raises `TypeError`.** It builds a graph node and
+  never ran the function, so it silently handed the caller a `FuncOp` instead of a result. The
+  message points at `invoke`. Building graphs, inside an op body or not, is unchanged.
+
 ## [1.17.9] - 2026-10-09
 
 ### Fixed

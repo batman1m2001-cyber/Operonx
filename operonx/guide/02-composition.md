@@ -46,6 +46,53 @@ async def main():
 asyncio.run(main())
 ```
 
+### An op that runs another op or graph: `invoke`
+
+Calling an `@op` function builds a graph node; it does not run the function. Inside a running op,
+that call raises `TypeError`. To run an op or a graph from an op body (an agent's tool, a helper
+graph per call), `await invoke(target, **inputs)`:
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, graph, invoke, op
+
+
+@op
+def lookup(order_id: str) -> dict:
+    return {"status": f"{order_id}: shipped"}
+
+
+@op
+async def answer(order_id: str) -> dict:
+    found = await invoke(lookup, order_id=order_id)  # runs it; a @graph works the same way
+    return {"text": f"Order {found['status']}"}
+
+
+@graph
+def support(order_id):
+    a = answer(order_id=order_id)
+    START >> a >> END
+
+
+async def main():
+    handle = Operon(support, params={"order_id": None}).start({"order_id": "A1"})
+    assert (await handle.result())["text"] == "Order A1: shipped"
+    names = [n.op_full_name for n in handle.trace.nodes]
+    # the run invoke started is a step of this one, recorded under the op that started it
+    assert names[:2] == ["support.a.lookup.lookup", "support.a.lookup"]
+
+
+asyncio.run(main())
+```
+
+- The target runs as a run of its own graph (a bare `@op` gets a graph of one node), built once and
+  reused. Its records join the caller's trace under the calling op, or under the `child()` step it
+  ran in, so the studio opens that step onto the graph. A plain `Operon(g).run()` inside an op body
+  nests the same way.
+- A failure inside it raises `OpFailed` in the caller. It fails the caller's run only if the
+  caller lets it through.
+
 ## Doors: one graph for jobs and services
 
 Jobs and services feed a graph through **doors**: `ingress()` yields each
