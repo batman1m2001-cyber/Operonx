@@ -146,6 +146,7 @@ def op(
             return _build(kwargs, {})
 
         def _build(kwargs, settings):
+            _refuse_inside_op_body(fn)
             mappings, init_kwargs = split_shorthand_kwargs(kwargs, {"return_keys"}, own=own)
             init_kwargs.update(settings)
             op_bound = init_kwargs.pop("bound", bound)
@@ -188,6 +189,27 @@ def op(
         return decorator(func)
     # @op(bound="cpu") with parentheses
     return decorator
+
+
+def _refuse_inside_op_body(fn: Callable) -> None:
+    """Calling an ``@op`` function builds a graph node. In an op body that
+    is running, with no graph being built, the caller meant to run it — and
+    would get a ``FuncOp`` back instead of a result, silently."""
+    from operonx.core.runtime import _current_frame
+
+    if _current_frame.get() is None:
+        return
+    from operonx.core.ops.graph.graph_op import GraphOp
+
+    if GraphOp.get_current_graph() is not None:
+        return
+    name = fn.__name__
+    raise TypeError(
+        f"{name}(...) was called inside a running op. Calling an @op function builds a graph "
+        f"node; it does not run the function. Run it as a step of this run with "
+        f"`await operonx.invoke({name}, ...)`, or call the plain function "
+        f"`{name}.__wrapped__(...)`."
+    )
 
 
 TYPE_MAP = {

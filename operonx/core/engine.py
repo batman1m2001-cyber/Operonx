@@ -96,6 +96,32 @@ def _ingress_of(graph: Any) -> Optional[str]:
     return None
 
 
+def _close_nested(nest: Any, graph: Any, state: Any, trace: Any, outcome: str) -> None:
+    """A nested run ended: its own record, with the graph's outputs, into
+    the caller's trace. Never raises: a trace record must not fail a run."""
+    from operonx.core.workflow_trace import STATUS_CANCELLED, STATUS_ERROR, STATUS_OK, unhandled
+
+    try:
+        try:
+            outputs = graph.get_outputs(state, ("main",))
+        except Exception:  # noqa: BLE001 - a run cut short has no outputs
+            outputs = {}
+        failed = unhandled(trace.errors)
+        if outcome == "running":
+            status, error = STATUS_CANCELLED, None
+        elif outcome == "error" or trace.status == STATUS_ERROR:
+            status = STATUS_ERROR
+            first = next(iter(failed.items()), None)
+            error = (
+                f"{first[0]}: {first[1].get('type')}: {first[1].get('message')}" if first else None
+            )
+        else:
+            status, error = STATUS_OK, None
+        nest.close(outputs, status, error)
+    except Exception:  # noqa: BLE001
+        LOGGER.exception("nested run %s: its record could not be written", nest.full)
+
+
 class ExecutionHandle:
     """Async-iterable handle for a running workflow execution.
 
@@ -909,6 +935,7 @@ class Operon:
             scratch=scratch,
             checkpointer=checkpointer,
             context=context,
+            inputs=inputs,
         )
 
     @property
@@ -1053,9 +1080,10 @@ class Operon:
         scratch: Optional[Dict[str, Any]],
         checkpointer: Any,
         context: Any,
+        inputs: Optional[Dict[str, Any]] = None,
     ) -> "ExecutionHandle":
         """Run *state* in the background: the part of :meth:`start` that a
-        resume shares."""
+        resume shares. ``inputs`` are what a nested run's own record shows."""
         # `state.tracing` gates the per-op metric writes in `BaseOp.run`.
         # It is not dead and it is not back-compat: `MemoryState` defaults
         # it on, so an op driven directly — as several tests do — records
@@ -1118,6 +1146,16 @@ class Operon:
         # root trace per call is not something its caller asked for.
         nested_in = _v3_trace_var.get()
         consumers = [] if nested_in is not None else self._trace_consumers
+        # ...and its records join that run's trace too, under the step that
+        # started it (operonx.core.nested), so the step opens onto the graph.
+        nest = None
+        if nested_in is not None:
+            from operonx.core.nested import NestedRun
+            from operonx.core.runtime import _current_frame
+
+            caller = _current_frame.get()
+            if caller is not None and caller.trace is nested_in:
+                nest = NestedRun(nested_in, caller, self.name, inputs)
         if nested_in is not None and self._trace_consumers:
             LOGGER.debug(
                 "run of %s inside run %s: its trace consumers are not called",
@@ -1144,6 +1182,12 @@ class Operon:
             # copies — so a consumer sees what no node shows.
             errors=state._op_errors,
         )
+
+        if nest is not None:
+            _wf_trace._execution_listeners.append(nest.record)
+            if nest.forwards_tasks:
+                _wf_trace._task_listeners.append(nest.task)
+            nest.opened()
 
         state._run_info = _RunInfo(_wf_trace.run_id, thread_id, context)
         for _consumer in consumers:
@@ -1205,6 +1249,8 @@ class Operon:
             finally:
                 _v3_trace_var.reset(v3_token)
                 _wf_trace.ended_at = perf_counter()
+                if nest is not None:
+                    _close_nested(nest, self.graph, state, _wf_trace, outcome)
                 if recorder is not None:
                     try:
                         await asyncio.to_thread(recorder.close, outcome)

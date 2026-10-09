@@ -61,6 +61,7 @@ from operonx.core import (
     Timeout,
     child,
     graph,
+    invoke,
     op,
     run_context,
 )
@@ -157,6 +158,7 @@ __all__ = [
     "RunContext",
     "run_context",
     "child",
+    "invoke",
     # engine.stream(mode="tasks") events
     "TaskStarted",
     "TaskFinished",

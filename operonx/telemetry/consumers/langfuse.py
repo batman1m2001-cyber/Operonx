@@ -51,6 +51,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 from operonx.core.loggings import LOGGER
+from operonx.core.nested import NESTED_RUN, nested_owner
 from operonx.core.utils.yaml_model import YamlModel
 from operonx.core.workflow_trace import (
     STATUS_ERROR,
@@ -97,6 +98,17 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
         (n.op_name for n in rows if len(n.ctx) == 1 and (n.outputs or {}).get("_transient_stream")),
         None,
     )
+    # A run started inside an op body records under that op's step: its own
+    # record (op_type "graph") is the root its ops hang under.
+    roots: Dict[str, List[OpExecution]] = defaultdict(list)
+    for n in rows:
+        if n.op_type == NESTED_RUN:
+            roots[n.op_full_name].append(n)
+
+    def nested_of(r: OpExecution) -> Optional[Tuple[OpExecution, int]]:
+        if not roots:
+            return None
+        return nested_owner(r.op_full_name, tuple(r.ctx), roots)
 
     def owner_of(r: OpExecution) -> Optional[str]:
         """The record a child execution was recorded under, walking up past
@@ -117,16 +129,25 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
         owner = owner_of(r)
         if owner is not None:
             return owner, "child"
-        if len(ctx) == 1:
-            return None, "root"
+        # Inside a nested run its record is the root: the same rules, with
+        # its ctx as the floor instead of ("main",).
+        nested = nested_of(r)
+        top = nested[0].op_id if nested is not None else None
+        floor = len(nested[0].ctx) if nested is not None else 1
+        if len(ctx) == floor:
+            return (top, "nested run") if nested is not None else (None, "root")
         resolved = [by_id[u.from_op_id] for u in r.upstreams if u.from_op_id in by_id]
-        if len(ctx) == 2 and r.is_yield and not resolved:
-            return None, "level-1 yield"
+        if len(ctx) == floor + 1 and r.is_yield and not resolved:
+            return top, "level-1 yield"
         for c in resolved:
             cc = tuple(c.ctx)
-            if 1 < len(cc) <= len(ctx) and ctx[: len(cc)] == cc and c.start_time <= r.start_time:
+            if (
+                floor < len(cc) <= len(ctx)
+                and ctx[: len(cc)] == cc
+                and c.start_time <= r.start_time
+            ):
                 return c.op_id, "fed by it"
-        for k in range(len(ctx), 1, -1):
+        for k in range(len(ctx), floor, -1):
             cands = [
                 c
                 for c in by_ctx.get(ctx[:k], [])
@@ -134,6 +155,8 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
             ]
             if cands:
                 return cands[-1].op_id, "same-ctx yield" if k == len(ctx) else "ctx prefix"
+        if nested is not None:
+            return top, "nested run"
         return f"stand-in:{format_ctx(ctx[:2])}", "stand-in"
 
     nodes: Dict[str, Dict[str, Any]] = {}
@@ -156,16 +179,23 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
         # placed where the first member's parent is; a member fed by a
         # sibling member keeps that sibling as its parent.
         parts = r.op_full_name.split(".")
-        graphs = parts[1:-1]
+        # the graphs between the run's root (a nested run's record, for its
+        # ops) and the op; a nested run's are named by full path
+        nested = nested_of(r) if child_parent_id(r.op_full_name, ctx) is None else None
+        base = nested[1] if nested is not None else 1
+        graphs = parts[base:-1]
         # A child execution sits under the op that ran it, never in a
         # container named after that op.
         if graphs and child_parent_id(r.op_full_name, ctx) is None:
             parent_rec = by_id.get(parent) if parent else None
-            sibling = parent_rec is not None and parent_rec.op_full_name.split(".")[1:-1] == graphs
+            sibling = (
+                parent_rec is not None and parent_rec.op_full_name.split(".")[base:-1] == graphs
+            )
             if not sibling:
                 above = parent
                 for depth in range(1, len(graphs) + 1):
-                    cid = f"graph:{'.'.join(graphs[:depth])}#{format_ctx(ctx)}"
+                    named = parts[: base + depth] if nested is not None else graphs[:depth]
+                    cid = f"graph:{'.'.join(named)}#{format_ctx(ctx)}"
                     if cid not in nodes:
                         nodes[cid] = {
                             "id": cid,

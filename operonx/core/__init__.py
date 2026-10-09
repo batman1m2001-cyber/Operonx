@@ -62,6 +62,7 @@ from operonx.core.runtime import (
     child,
     run_context,
 )
+from operonx.core.invoke import invoke
 from operonx.core.states import Cell, MemoryState, Ref, ScratchRef, StateSchema
 from operonx.core.utils import Param
 
@@ -89,6 +90,7 @@ __all__ = [
     "RunContext",
     "run_context",
     "child",
+    "invoke",
     "ChildExecution",
     # engine.stream(mode="tasks") events
     "TaskStarted",
