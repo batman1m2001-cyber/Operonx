@@ -788,7 +788,7 @@ wheels = [
 
 [[package]]
 name = "operonx"
-version = "1.17.0"
+version = "1.18.0"
 source = { editable = "../../" }
 dependencies = [
     { name = "orjson" },
@@ -896,7 +896,7 @@ requires-dist = [
     { name = "requests", marker = "extra == 'all'", specifier = ">=2.32" },
     { name = "requests", marker = "extra == 'gemini'", specifier = ">=2.32" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16" },
     { name = "tokenizers", marker = "extra == 'all'", specifier = ">=0.13" },
     { name = "tokenizers", marker = "extra == 'onnx'", specifier = ">=0.13" },
     { name = "tokenizers", marker = "extra == 'triton'", specifier = ">=0.13" },
@@ -918,7 +918,7 @@ provides-extras = ["openai", "anthropic", "gemini", "bedrock", "onnx", "triton",
 
 [[package]]
 name = "operonx-agents"
-version = "0.1.3"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

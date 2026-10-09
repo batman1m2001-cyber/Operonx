@@ -98,15 +98,27 @@ class ToolSpec:
         }
 
 
+#: What a tool is, for a viewer: a plain function, an operonx ``@op`` or
+#: ``@graph`` (run as a step of the agent's run, its ops in the trace),
+#: another agent (``as_tool``), or an MCP server's tool.
+KINDS = ("function", "op", "graph", "agent", "mcp")
+
+
 @dataclass(frozen=True)
 class Tool:
     """A function plus its :class:`ToolSpec`. Calling the tool calls the
-    function, so it stays testable as itself."""
+    function, so it stays testable as itself.
+
+    ``kind`` is one of :data:`KINDS`; ``target`` is what a tool of that
+    kind runs: the ``@op`` / ``@graph`` function, or the ``Agent``
+    (``None`` for a function or an MCP tool)."""
 
     spec: ToolSpec
     function: Callable[..., Any]
     takes_context: bool
     args_model: type = field(repr=False)
+    kind: str = "function"
+    target: Any = field(default=None, repr=False, compare=False)
 
     @property
     def name(self) -> str:
@@ -126,6 +138,30 @@ class Tool:
         return {name: getattr(model, name) for name in type(model).model_fields}
 
 
+def operonx_kind(target: Any) -> Optional[str]:
+    """``"graph"`` for a ``@graph`` function, ``"op"`` for an ``@op``
+    function, ``None`` for anything else."""
+    if getattr(target, "_operonx_graph", False):
+        return "graph"
+    if callable(getattr(target, "configure", None)) and hasattr(target, "__wrapped__"):
+        return "op"
+    return None
+
+
+def _invoker(target: Any) -> Callable[..., Any]:
+    """The function a tool that is an ``@op`` / ``@graph`` calls: a run of
+    the target as a step of the agent's run (``operonx.invoke``), recorded
+    under the tool's step. One output is the result; several are a dict."""
+
+    async def run(**args: Any) -> Any:
+        from operonx import invoke
+
+        out = await invoke(target, **args)
+        return next(iter(out.values())) if len(out) == 1 else out
+
+    return run
+
+
 def tool(
     function: Optional[Callable[..., Any]] = None,
     *,
@@ -142,6 +178,11 @@ def tool(
 ) -> Any:
     """Make a function a :class:`Tool`. Use bare (``@tool``) or with
     arguments (``@tool(readonly=True)``); they are :class:`ToolSpec`'s.
+
+    ``function`` may be an operonx ``@op`` or ``@graph`` function: the
+    schema comes from its parameters and docstring, and a call runs it as a
+    step of the agent's run, so its ops are in the trace under the tool's
+    call (``tool(web_search, readonly=True)``, or just ``tools=[web_search]``).
 
     ``name`` defaults to the function's name and ``description`` to its
     docstring summary. ``sequential`` defaults to ``not readonly``: only a
@@ -178,6 +219,11 @@ def _is_context(annotation: Any) -> bool:
 
 
 def _build(fn: Callable[..., Any], *, name, description, schema, approval, **spec_kwargs) -> Tool:
+    kind = operonx_kind(fn)
+    target = None
+    if kind is not None:
+        # the op's / graph's own function: its signature and docstring
+        target, fn = fn, fn.__wrapped__
     tool_name = name or fn.__name__
     if not (approval in ("never", "always") or callable(approval)):
         raise ToolDefinitionError(
@@ -204,6 +250,12 @@ def _build(fn: Callable[..., Any], *, name, description, schema, approval, **spe
     for index, param in enumerate(inspect.signature(fn).parameters.values()):
         annotation = hints.get(param.name, Any)
         if _is_context(annotation):
+            if target is not None:
+                raise ToolDefinitionError(
+                    f"tool {tool_name!r}: an {kind} cannot take a RunContext; it runs as a step "
+                    "of the run, on its arguments alone. Wrap it in a @tool function that "
+                    "reads the context and invokes it."
+                )
             if index != 0:
                 raise ToolDefinitionError(
                     f"tool {tool_name!r}: the RunContext parameter {param.name!r} must come "
@@ -237,9 +289,11 @@ def _build(fn: Callable[..., Any], *, name, description, schema, approval, **spe
             approval=approval,
             **spec_kwargs,
         ),
-        function=fn,
+        function=fn if target is None else _invoker(target),
         takes_context=takes_context,
         args_model=args_model,
+        kind=kind or "function",
+        target=target,
     )
 
 
