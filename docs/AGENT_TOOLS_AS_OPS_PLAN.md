@@ -1,8 +1,11 @@
 # Agent tools as ops, and the agent card
 
-**Status (2026-10-09, end of day):**
-- **Done:** T1 (operonx 1.18.0, #131, and 1.18.1, #133: `WorkflowTrace.parent` / `.root`), T2 (operonx-agents 0.2.0, #132) and T3 v1 (studio #37).
-- **Next:** T3b, the agent's parts as real ops (§5). Then T4 (meeting-prep, written and checked, not committed).
+**Status (2026-10-09): ALL DONE.**
+- T1: operonx 1.18.0 (#131) and 1.18.1 (#133: `WorkflowTrace.parent` / `.root`).
+- T2: operonx-agents 0.2.0 (#132).
+- T3: studio #37 (the hive cell), then T3b in studio #38 (§5: the agent's parts as real ops).
+- T4: meeting-prep #9 (`web_search` an @op, `fetch_page` a @graph).
+- The live studio (:8766) runs #38.
 
 **Asked for:**
 - An agent's tools can be operonx ops and graphs, and the trace shows what ran inside them.
@@ -246,10 +249,16 @@ Each wire ends in a small ring on the part's card.
    - screens on desktop and phone, light and dark, of a folded agent, a graph tool opened, an agent
      tool opened, and a painted run.
 
-### Also pending
+### How it was built (studio #38)
 
-- **T4, meeting-prep** (branch `feat/tools-as-ops` in ai-workflow-seminar-materials, not committed):
-  - `web_search` is an `@op` and `fetch_page` a `@graph`; `_run_memo` keys on `trace.root`;
-  - the conventions pass 153/153, and it was checked against the web mock;
-  - the README line about `tools.py` is still to update.
-- **The live studio (:8766)** needs a restart, for #37's run-summary change.
+- **Extractor:** `_agent_parts` gives an agent node `parts`: the model (an LLMOp), its memory (the
+  op's `sessions=` store; none, and the memory socket is shown empty), and each tool as the op it
+  is. An agent tool brings its own parts (3 levels at most). The run view still opens an agent onto
+  its recorded turns.
+- **Layout:** an opened agent is one block whose axis is the card's centre. Parts stand in a column
+  `PART_X` to the right. A loop's return goes round the card's top and foot, never across the parts.
+- **Gate passed:**
+  - JS 109 (two new layout tests, one of them over 160 random workflows with agents);
+  - Python 678;
+  - layout_audit: agentlab 29 cases and the matrix 174 cases, 0 errors;
+  - screens checked in light, dark and phone, on agentlab and meeting-prep.
