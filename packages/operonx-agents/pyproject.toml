@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-agents"
-version = "0.1.4"
+version = "0.2.0"
 description = "Typed LLM steps and agents on the operonx workflow engine"
 readme = "README.md"
 license = "Apache-2.0"
@@ -13,7 +13,7 @@ authors = [{ name = "Operon Team" }]
 dependencies = [
     # K7 (operonx main 2279cea): one tool-call shape, `timeout:` and
     # `structured_output:` on llm: resources, logprobs on streams.
-    "operonx[openai,anthropic]>=1.16.0",
+    "operonx[openai,anthropic]>=1.18.0",
     "pydantic>=2.0",
     "httpx>=0.24",
     "python-dotenv>=1.0",   # `operonx-agents probe --env`

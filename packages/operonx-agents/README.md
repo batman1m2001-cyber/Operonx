@@ -129,7 +129,7 @@ APP = Application(
 
 | module | what |
 |---|---|
-| `tools/tool.py` | `@tool`: schema and validation from the signature and docstring; `ToolSpec` |
+| `tools/tool.py` | `@tool`: schema and validation from the signature and docstring; `ToolSpec`; an operonx `@op` / `@graph` as a tool (run with `operonx.invoke`, its ops traced under the call) |
 | `tools/toolset.py` | `Toolset`: the tools one agent owns, the only ones its dispatch runs |
 | `tools/dispatch.py` | one tool message per call; concurrency rules; child executions |
 | `tools/policy.py` | `ToolPolicy`, ported from `operonx.agents` |
@@ -137,7 +137,7 @@ APP = Application(
 | `model/output.py` | `Choice`, the `native` / `tool` / `prompted` strategies, validation and re-asks, logprobs confidence |
 | `step.py` | `llm_step` |
 | `probe.py`, `cli.py` | `operonx-agents probe <resource>` |
-| `agent.py` | `Agent`: the spec, a frozen dataclass |
+| `agent.py` | `Agent`: the spec, a frozen dataclass; `describe()` (the studio's agent card) |
 | `run/runner.py` | `Runner.run` / `.stream` / `.resume` / `.resume_stream`: the loop |
 | `run/state.py`, `run/store.py` | `RunState` (versioned JSON, the crash journal); `StateStore`: memory, Redis, SQLite |
 | `run/limits.py` | `UsageLimits` (the seven caps) and the meter a child run adds to |

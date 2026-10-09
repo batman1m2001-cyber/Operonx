@@ -108,7 +108,8 @@ def agent_tool(
         return await _delegate(child_agent, ctx, task, tool_name)
 
     spec.setdefault("idempotent", True)
-    return tool(delegate, name=tool_name, description=text, **spec)
+    made = tool(delegate, name=tool_name, description=text, **spec)
+    return dataclasses.replace(made, kind="agent", target=agent)
 
 
 async def _delegate(agent: "Agent", ctx: RunContext, task: str, tool_name: str) -> str:

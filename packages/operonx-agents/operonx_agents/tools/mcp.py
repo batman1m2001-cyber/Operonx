@@ -35,6 +35,7 @@ answer.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import json
 import re
@@ -669,7 +670,7 @@ def _proxy(
     proxy.__annotations__ = annotations
     proxy.__name__ = full_name
     proxy.__qualname__ = f"mcp:{full_name}"
-    return tool(
+    made = tool(
         proxy,
         name=full_name,
         description=description,
@@ -677,3 +678,4 @@ def _proxy(
         max_result_chars=40_000,
         **flags,
     )
+    return dataclasses.replace(made, kind="mcp")

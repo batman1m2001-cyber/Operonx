@@ -241,6 +241,82 @@ inputs. Its outputs are `output`, `status`, `usage`, `interruptions`,
 `state_id`, `error`. `AgentOp.of(agent=..., stream=True, input=...)` is a
 transient `event` stream for an `EmitOp` instead.
 
+## Tools that are ops and graphs
+
+An `@op` or a `@graph` is a tool as it is: put it in `tools=[...]`, or wrap it in `tool(...)` for
+the flags. What the model is shown comes from its function's signature and docstring, as for
+`@tool`. A call runs it as a step of the agent's run (`operonx.invoke`), so its ops are in the
+trace under that tool call, and the studio opens the call onto the graph.
+
+```python
+import asyncio
+
+import operonx
+from operonx import END, START, Operon, graph, op
+from operonx.agents import Agent, AgentOp, Model, tool
+
+
+@op
+def fetch_order(order_id: str) -> dict:
+    return {"row": {"id": order_id, "state": "shipped"}}
+
+
+@op
+def describe(row: dict) -> dict:
+    return {"text": f"{row['id']} is {row['state']}"}
+
+
+@graph
+def order_report(order_id: str):
+    """A one-line report on an order.
+
+    Args:
+        order_id: The order's id, like A1.
+    """
+    f = fetch_order(order_id=order_id)
+    d = describe(row=f["row"])
+    START >> f >> d >> END
+
+
+clerk = Agent(
+    name="clerk",
+    model=Model("assistant"),
+    instructions="You report on orders. Use the tools.",
+    tools=[tool(order_report, readonly=True)],
+)
+
+
+@graph
+def desk(question):
+    a = AgentOp.of(agent=clerk, input=question)
+    START >> a >> END
+
+
+async def main():
+    operonx.bootstrap(resources="resources.yaml")
+    handle = Operon(desk, params={"question": None}).start(
+        {"question": "Give me the order report for A1"}
+    )
+    out = await handle.result()
+    assert out["output"] == "Done: A1 is shipped"
+    names = {n.op_full_name for n in handle.trace.nodes}
+    # the tool call, the graph's own run, and its ops, each under the one before
+    assert {"desk.a.turn.order_report", "desk.a.turn.order_report.order_report",
+            "desk.a.turn.order_report.order_report.d"} <= names  # fmt: skip
+
+
+asyncio.run(main())
+```
+
+- The model reads the target's outputs: one output is its value, several are a JSON object.
+- Every tool rule holds: arguments are validated before it runs, the policy and approvals apply,
+  and a failure inside it (`OpFailed`) is a message the model reads, not a failed run.
+- An op or a graph runs on its arguments alone, so it cannot take a `RunContext`. A tool that
+  needs `ctx.deps` is a `@tool` function that reads them and `await invoke(...)`s the op.
+- `agent.describe()` is the agent as JSON: model, instructions, limits, context and each tool's
+  kind (`function`, `op`, `graph`, `agent`, `mcp`) with what the policy decides for it. The studio
+  draws the agent card from it.
+
 ## Check the path: trajectory evals
 
 An agent eval is an operonx `Eval` (page 7) of the service's graph. The

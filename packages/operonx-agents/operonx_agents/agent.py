@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 from operonx_agents.context.compaction import ContextPolicy
 from operonx_agents.model.model import Model, ModelSettings
@@ -131,6 +131,70 @@ class Agent:
         from operonx_agents.compose import agent_op
 
         return agent_op(self, **options)
+
+    def describe(self) -> Dict[str, Any]:
+        """What the agent is, as JSON values, for a viewer (the studio's
+        agent card): its model, instructions, output, limits, context and
+        tools, each tool with its kind and what the policy decides for it.
+        Nothing here runs the agent or builds its prompt."""
+        from operonx_agents.tools.policy import DEFAULT_POLICY
+
+        policy = self.policy or DEFAULT_POLICY
+        dynamic = callable(self.instructions)
+        tools = []
+        for t in self.tools:
+            spec = t.spec
+            meta = {"readonly": spec.readonly, "destructive": spec.destructive}
+            entry: Dict[str, Any] = {
+                "name": t.name,
+                "description": spec.description,
+                "kind": t.kind,
+                "readonly": spec.readonly,
+                "destructive": spec.destructive,
+                "approval": spec.approval if isinstance(spec.approval, str) else "when",
+                "policy": policy.decide(t.name, meta),
+                "sequential": spec.sequential,
+                "timeout": spec.timeout,
+            }
+            if t.kind in ("op", "graph") and t.target is not None:
+                fn = getattr(t.target, "__wrapped__", t.target)
+                entry["target"] = f"{fn.__module__}:{fn.__qualname__}"
+            elif t.kind == "agent" and t.target is not None:
+                entry["agent"] = getattr(t.target, "name", None)
+            tools.append(entry)
+        limits = {k: v for k, v in dataclasses.asdict(self.limits).items() if v is not None}
+        context = None
+        if self.context is not None:
+            c = self.context
+            context = {
+                "window": c.window,
+                "compact_at": c.compact_at,
+                "keep_recent": c.keep_recent,
+                "summarizer": c.summarizer.resource if c.summarizer is not None else None,
+                "clear_tool_results_after": c.clear_tool_results_after,
+            }
+        out = self.output_type
+        return {
+            "name": self.name,
+            "model": list(self.model.resources),
+            "instructions": {
+                "text": None if dynamic else self.instructions,
+                "dynamic": dynamic,
+                "from": (
+                    f"{self.instructions.__module__}:{self.instructions.__qualname__}"
+                    if dynamic
+                    else None
+                ),
+            },
+            "output": "str" if out in (str, None) else getattr(out, "__name__", str(out)),
+            "output_retries": self.output_retries,
+            "limits": limits,
+            "context": context,
+            "hooks": [type(h).__name__ for h in self.hooks.hooks],
+            "redact": self.redact is not None,
+            "approval_ttl": self.approval_ttl,
+            "tools": tools,
+        }
 
     def system_prompt(self, ctx: RunContext) -> str:
         text = self.instructions(ctx) if callable(self.instructions) else self.instructions
