@@ -9,16 +9,16 @@ around an `LLMOp` that calls the `llm:assistant` model from
 ## Run
 
 ```bash
-uv sync
-uv run pytest                 # offline: the tests answer with a local fake model
+{{setup}}
+{{run}}pytest                 # offline: the tests answer with a local fake model
 cp .env.example .env          # then set LLM_API_KEY (and LLM_BASE_URL / LLM_MODEL if not OpenAI)
 ```
 
 ## Serve
 
 ```bash
-uv run operonx serve --list   # what would listen, and where
-uv run operonx serve          # POST /chat on :8000 (PORT overrides)
+{{run}}operonx serve --list   # what would listen, and where
+{{run}}operonx serve          # POST /chat on :8000 (PORT overrides)
 curl -s localhost:8000/chat -d '{"question": "What is a workflow engine?"}'
 ```
 

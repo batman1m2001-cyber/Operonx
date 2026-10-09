@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.8] - 2026-10-09
+
+### Added
+
+- **A project works with uv or with plain pip.** `operonx init --uv` / `--pip` (default: uv when
+  it is on PATH, else pip) writes that toolchain's commands into the project's `AGENTS.md`,
+  `README.md` and the printed next steps; with pip they are a `.venv`, `pip install -e
+  ".[test]"` and bare `pytest` / `operonx`. One `pyproject.toml` serves both: the test tools are a
+  `test` extra (any pip reads it; `[dependency-groups]` needs pip 25.1) that uv's `dev` group
+  includes. `operonx guide` writes the upgrade commands of the project's toolchain into
+  `AGENTS.md`'s block: uv once the project has a `uv.lock`, else pip.
+
+### Changed
+
+- **The README starts from `operonx init`.** It shows what the project holds, which files the
+  coding assistant reads (`AGENTS.md`, `.operonx/guide/`, `app/main.py`), and run / serve / studio,
+  for uv and for pip. The docs site's home and Installation page follow; the Rust note, the
+  `GraphOp` / `PARENT` examples and `operonx guide --sync` are gone from them.
+- The `agent` template requires `operonx-agents>=0.1.4` (on PyPI).
+
 ## [1.17.7] - 2026-10-08
 
 ### Fixed

@@ -12,19 +12,16 @@ serves it with `agent_service`. The tests run it on a scripted model
 ## Run
 
 ```bash
-uv sync
-uv run pytest                 # offline: the tests drive the agent with a scripted model
+{{setup}}
+{{run}}pytest                 # offline: the tests drive the agent with a scripted model
 cp .env.example .env          # then set LLM_API_KEY (and LLM_BASE_URL / LLM_MODEL if not OpenAI)
 ```
-
-`operonx-agents` is a separate package; until it is on PyPI, install it
-from its repository (`uv add <path or git URL>`).
 
 ## Serve
 
 ```bash
-uv run operonx serve --list   # what would listen, and where
-uv run operonx serve          # POST /ask on :8000 (PORT overrides)
+{{run}}operonx serve --list   # what would listen, and where
+{{run}}operonx serve          # POST /ask on :8000 (PORT overrides)
 curl -s localhost:8000/ask -d '{"input": "How many words are in: to be or not to be?"}'
 curl -sN localhost:8000/ask -H 'accept: text/event-stream' -d '{"input": "hi"}'   # its events
 ```

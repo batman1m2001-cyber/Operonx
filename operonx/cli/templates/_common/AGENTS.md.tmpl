@@ -72,12 +72,12 @@ def answer_flow(question, k):  # a setting is a graph input
 
 ## Commands
 
-```bash
-uv run pytest                 # the tests: keep them green
-uv run operonx serve --list   # every service, and where it listens
-uv run operonx run --list     # every job
-uv run operonx serve          # serve every service
-uv run operonx run NAME       # run one job
+{{shell}}```bash
+{{run}}pytest                 # the tests: keep them green
+{{run}}operonx serve --list   # every service, and where it listens
+{{run}}operonx run --list     # every job
+{{run}}operonx serve          # serve every service
+{{run}}operonx run NAME       # run one job
 ```
 
 ## Rules
@@ -91,9 +91,9 @@ uv run operonx run NAME       # run one job
   `BranchOp` or `Branch` yourself.
 - An op that raises does not raise: the run's result has `"$errors"`.
   Check for it.
-- To upgrade operonx: `uv lock --upgrade-package operonx && uv sync`, then
-  `uv run operonx guide`, then re-read `.operonx/guide/README.md`. After
-  adding an operonx package (`uv add operonx-agents`), run `operonx guide`.
+- To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
+  re-read `.operonx/guide/README.md`. After adding an operonx package
+  (`{{add}} operonx-agents`), run `{{run}}operonx guide`.
 
 ## operonx guides
 

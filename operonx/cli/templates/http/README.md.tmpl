@@ -9,15 +9,15 @@ declares the `stats` service that runs it.
 ## Run
 
 ```bash
-uv sync
-uv run pytest                 # the tests, offline; the service is called in-process
+{{setup}}
+{{run}}pytest                 # the tests, offline; the service is called in-process
 ```
 
 ## Serve
 
 ```bash
-uv run operonx serve --list   # what would listen, and where
-uv run operonx serve          # POST /stats on :8000 (PORT overrides)
+{{run}}operonx serve --list   # what would listen, and where
+{{run}}operonx serve          # POST /stats on :8000 (PORT overrides)
 curl -s localhost:8000/stats -d '{"text": "hello operonx"}'
 ```
 

@@ -6,8 +6,14 @@ template adds or replaces. A file there is ``<path>.tmpl``; a leading
 ``dot-`` in a path part becomes ``.`` (``dot-gitignore.tmpl`` →
 ``.gitignore``), so no dotfile has to survive packaging. ``{{name}}``,
 ``{{dist}}``, ``{{version}}``, ``{{extras}}``, ``{{requires}}`` and
-``{{summary}}`` are filled in; nothing else is, so Python braces need
-no escaping.
+``{{summary}}`` are filled in, and the toolchain's commands (``{{run}}``,
+``{{setup}}``, ``{{upgrade}}``, ``{{add}}``, ``{{shell}}``, see
+:data:`TOOLCHAINS`); nothing else is, so Python braces need no escaping.
+
+A project is set up and run with uv or with plain pip (``--uv`` /
+``--pip``; by default uv when it is on PATH). Only the commands the
+project's docs name differ: ``pyproject.toml`` works with both, its test
+tools being the ``test`` extra that uv's ``dev`` group points at.
 
 The project also gets ``.operonx/guide/``, the guides of every installed
 operonx package, so an assistant reads them beside the code (what
@@ -18,11 +24,20 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
-__all__ = ["TEMPLATES", "Template", "InitError", "plan", "init_project"]
+__all__ = [
+    "TEMPLATES",
+    "TOOLCHAINS",
+    "Template",
+    "InitError",
+    "default_toolchain",
+    "plan",
+    "init_project",
+]
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 COMMON = "_common"
@@ -35,7 +50,8 @@ class Template:
     name: str
     summary: str
     extras: str
-    #: The commands after `cd` — what the user runs next, in order.
+    #: The commands after setting up — what the user runs next, in order.
+    #: ``{run}`` is the toolchain's prefix (``uv run `` or nothing).
     next_steps: tuple
     #: Packages the template's code needs besides operonx (requirement
     #: strings), added to the generated pyproject's dependencies.
@@ -49,22 +65,22 @@ TEMPLATES: Dict[str, Template] = {
             "hello",
             "A pure-compute feature, run as a job and served over HTTP.",
             "serve",
-            ("uv run pytest", "uv run operonx run greet_people", "uv run operonx serve"),
+            ("{run}pytest", "{run}operonx run greet_people", "{run}operonx serve"),
         ),
         Template(
             "http",
             "An HTTP service on a doors graph.",
             "serve",
-            ("uv run pytest", "uv run operonx serve --list", "uv run operonx serve"),
+            ("{run}pytest", "{run}operonx serve --list", "{run}operonx serve"),
         ),
         Template(
             "chat",
             "A chat service: one LLMOp on the llm:assistant model.",
             "serve,openai",
             (
-                "uv run pytest",
+                "{run}pytest",
                 "cp .env.example .env   # then set LLM_API_KEY",
-                "uv run operonx serve",
+                "{run}operonx serve",
             ),
         ),
         Template(
@@ -72,15 +88,57 @@ TEMPLATES: Dict[str, Template] = {
             "An agent with one tool (operonx-agents), served over HTTP.",
             "serve,openai",
             (
-                "uv run pytest",
+                "{run}pytest",
                 "cp .env.example .env   # then set LLM_API_KEY",
-                "uv run operonx serve",
+                "{run}operonx serve",
             ),
             # operonx cannot depend on operonx-agents; the project does
-            requires=("operonx-agents>=0.1.0.dev0",),
+            requires=("operonx-agents>=0.1.4",),
         ),
     )
 }
+
+
+#: The commands a project's docs name, per toolchain. With pip, the
+#: project's ``.venv`` is made and activated by hand, so a command needs
+#: no prefix once it is active.
+TOOLCHAINS: Dict[str, Dict[str, str]] = {
+    "uv": {
+        "run": "uv run ",
+        "setup": "uv sync",
+        "upgrade": "uv lock --upgrade-package operonx && uv sync",
+        "add": "uv add",
+        "shell": "",
+    },
+    "pip": {
+        "run": "",
+        "setup": (
+            "python -m venv .venv\n"
+            "source .venv/bin/activate   # Windows: .venv\\Scripts\\activate\n"
+            'pip install -e ".[test]"'
+        ),
+        "upgrade": "pip install -U operonx",
+        "add": "pip install",
+        "shell": (
+            "Run every command in the project's `.venv`: `source .venv/bin/activate`\n"
+            "first in each new shell (Windows: `.venv\\Scripts\\activate`).\n\n"
+        ),
+    },
+}
+
+
+def default_toolchain() -> str:
+    """uv when it is installed, else pip."""
+    return "uv" if shutil.which("uv") else "pip"
+
+
+def next_steps(template: str, toolchain: str) -> List[str]:
+    """What to run after ``cd``: set up, then the template's commands."""
+    t = TOOLCHAINS[toolchain]
+    return [
+        *t["setup"].split("\n"),
+        *(s.format(run=t["run"]) for s in TEMPLATES[template].next_steps),
+    ]
 
 
 class InitError(Exception):
@@ -92,6 +150,7 @@ class InitResult:
     root: Path
     name: str
     template: str
+    toolchain: str = "uv"
     created: List[str] = field(default_factory=list)
     overwritten: List[str] = field(default_factory=list)
     kept: List[str] = field(default_factory=list)
@@ -107,6 +166,34 @@ def _render(text: str, values: Dict[str, str]) -> str:
     for key, value in values.items():
         text = text.replace("{{" + key + "}}", value)
     return text
+
+
+_COMMENT = re.compile(r"^(\S.*?\S|\S)\s{2,}(# .*)$")
+
+
+def _align(markdown: str) -> str:
+    """Line up the ``# comments`` of each shell block: a toolchain's commands
+    differ in length, so no column can be written into the template."""
+    out: List[str] = []
+    block: Optional[List[str]] = None
+    for line in markdown.split("\n"):
+        if block is None:
+            out.append(line)
+            if line.startswith("```bash"):
+                block = []
+        elif line.startswith("```"):
+            found = [_COMMENT.match(b) for b in block]
+            # a long one-off line (a curl) keeps its comment beside it
+            width = max((len(m.group(1)) for m in found if m and len(m.group(1)) <= 40), default=0)
+            out += [
+                f"{m.group(1):<{max(width, len(m.group(1))) + 3}}{m.group(2)}" if m else b
+                for b, m in zip(block, found)
+            ]
+            out.append(line)
+            block = None
+        else:
+            block.append(line)
+    return "\n".join(out + (block or []))
 
 
 def operonx_checkout(start: Path) -> Optional[Path]:
@@ -150,10 +237,16 @@ def _sources(root: Path, editable: Optional[Path]) -> str:
 
 
 def plan(
-    template: str, name: str, *, root: Optional[Path] = None, editable: Optional[Path] = None
+    template: str,
+    name: str,
+    *,
+    root: Optional[Path] = None,
+    editable: Optional[Path] = None,
+    toolchain: str = "uv",
 ) -> Dict[str, bytes]:
-    """Every file *template* writes for a project called *name*, by path.
-    With *editable*, the project's operonx is that checkout."""
+    """Every file *template* writes for a project called *name*, by path,
+    its docs naming *toolchain*'s commands. With *editable*, the project's
+    operonx is that checkout."""
     from operonx import __version__
 
     if template not in TEMPLATES:
@@ -163,8 +256,11 @@ def plan(
             f"project name {name!r} must start with a letter and hold only letters, "
             "digits, '-' and '_' — pass --name"
         )
+    if toolchain not in TOOLCHAINS:
+        raise InitError(f"no toolchain {toolchain!r} (have: {', '.join(TOOLCHAINS)})")
     t = TEMPLATES[template]
     values = {
+        **TOOLCHAINS[toolchain],
         "name": name,
         "dist": name.replace("_", "-").lower(),
         "version": __version__,
@@ -177,8 +273,11 @@ def plan(
     for layer in (COMMON, template):
         base = TEMPLATE_DIR / layer
         for src in sorted(base.rglob("*.tmpl")):
-            text = src.read_text(encoding="utf-8")
-            files[_target(src.relative_to(base))] = _render(text, values).encode("utf-8")
+            target = _target(src.relative_to(base))
+            text = _render(src.read_text(encoding="utf-8"), values)
+            if target.endswith(".md"):
+                text = _align(text)
+            files[target] = text.encode("utf-8")
     return files
 
 
@@ -189,8 +288,11 @@ def init_project(
     name: str = None,
     force: bool = False,
     editable: Optional[Path] = None,
+    toolchain: Optional[str] = None,
 ) -> InitResult:
     """Write *template* into *root*. An existing file is kept unless *force*.
+    Its docs name *toolchain*'s commands (``"uv"`` or ``"pip"``; by default
+    uv when it is installed).
 
     *editable* pins operonx to that checkout (``[tool.uv.sources]``); a
     project made inside an operonx checkout pins it without being asked —
@@ -201,8 +303,9 @@ def init_project(
     name = name or root.resolve().name
     if editable is None:
         editable = operonx_checkout(root.resolve())
-    files = plan(template, name, root=root, editable=editable)
-    result = InitResult(root=root, name=name, template=template)
+    toolchain = toolchain or default_toolchain()
+    files = plan(template, name, root=root, editable=editable, toolchain=toolchain)
+    result = InitResult(root=root, name=name, template=template, toolchain=toolchain)
     for rel, content in files.items():
         path = root / rel
         if path.exists():
@@ -216,5 +319,5 @@ def init_project(
         path.write_bytes(content)
     from operonx import guide
 
-    guide.sync(root)  # generated, so always current — never "kept"
+    guide.sync(root, toolchain=toolchain)  # generated, so always current — never "kept"
     return result

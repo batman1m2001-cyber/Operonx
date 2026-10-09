@@ -110,9 +110,16 @@ It ships inside the package, so it always matches the installed version.
 To move a project to a newer operonx and refresh its copy of the guide:
 
 ```bash
+# with uv
 uv lock --upgrade-package operonx && uv sync   # the new operonx (add operonx-agents, operonx-kb if used)
 uv run operonx guide                           # refresh .operonx/guide/ and AGENTS.md's operonx block
+
+# with pip, in the project's activated .venv
+pip install -U operonx                         # (and operonx-agents, operonx-kb if used)
+operonx guide
 ```
+
+The project's `AGENTS.md` names the commands of its own toolchain.
 
 Then re-read `.operonx/guide/README.md`: an API may have changed. The rest:
 
@@ -123,5 +130,6 @@ operonx guide --path           # where the installed core guide is
 python -m operonx.guide        # every installed guide and its pages
 ```
 
-`uv add operonx-agents` (or `operonx-kb`) adds that package's guide at the
-next `operonx` command run in the project; `uv remove` takes it away.
+`uv add operonx-agents` (or `operonx-kb`; with pip, `pip install` it and
+list it in `pyproject.toml`) adds that package's guide at the next
+`operonx` command run in the project; removing the package takes it away.

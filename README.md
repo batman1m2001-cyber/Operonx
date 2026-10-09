@@ -10,241 +10,167 @@
   <a href="https://github.com/batman1m2001-cyber/Operonx/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="License"></a>
 </p>
 
-> **Coding assistant, or building on operonx?** Start with the guide in
-> [`operonx/guide/`](operonx/guide/README.md) — it ships with the package
-> (`python -m operonx.guide`), and every example in it runs in CI.
+**Operonx** is a Python workflow engine whose ops can `yield`. The same
+graph runs as a batch job over a file, as a streaming pipeline (a voice bot:
+audio → STT → LLM → TTS), or behind an HTTP or WebSocket service.
 
-**Operonx** is a workflow engine where ops can `yield` — so the same async DAG handles **batch jobs** (Airflow-style) and **event-driven streaming pipelines** (pipecat-style callbot / voice / STT → LLM → TTS).
+You build with it through a coding assistant (Claude Code, Codex, Cursor,
+…). `operonx init` makes a project the assistant can work in at once: a
+layout, a first feature with its tests, the project's rules in `AGENTS.md`,
+and the API guide of your installed operonx beside the code.
 
-> The Rust execution backend now lives in its own repo:
-> [batman1m2001-cyber/operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs)
-> ([crates.io](https://crates.io/crates/operonx)). It shares the shared JSON
-> spec fixtures with this repo but ships independently.
+## Start a project
 
-## Why Operonx
+With [uv](https://docs.astral.sh/uv/):
 
-- **Yield-based streaming.** Generator ops emit per-item; downstream dispatches per-frame, not per-batch. The `for_loop` / `map_op` / VAD → STT → LLM → TTS shapes work without bolt-on map/reduce ops.
-- **Operator reference syntax.** `op["key"]`, `PARENT["key"]`, `op["src"] >> PARENT["dst"]`, `outputs={"*": PARENT}` — explicit and local. No `xcom_pull` per node, no JSON serialisation per hop.
-- **Multi-provider LLM / embedding / rerank.** OpenAI, Azure, Gemini, Anthropic, vLLM, TEI, HuggingFace, ONNX, Pinecone — swap with one line in `resources.yaml`. Built-in weighted load balancing + fallback chains.
-- **Tracing built-in.** Langfuse, OpenTelemetry, and a local file consumer. All async-flushed; never blocks the run.
-- **Lean tier-1.** `pip install operonx` is just `pydantic / pyyaml / rich / orjson`. Provider SDKs are extras.
+```bash
+uvx operonx init myapp     # uvx runs operonx without installing it
+cd myapp
+uv sync
+uv run pytest              # the first feature's tests, offline
+```
 
-## Quick Start
+With pip only (no uv, e.g. behind a company mirror):
 
 ```bash
 pip install operonx
+operonx init myapp
+cd myapp
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[test]"
+pytest
 ```
 
-```python
-import asyncio
-from operonx.core import Operon, GraphOp, op, START, END, PARENT
+`operonx init` writes the commands of the toolchain you use into the
+project's docs: uv when it is installed, else pip (`--uv` or `--pip` to
+choose). The first feature is `--template hello` (pure compute, a job and an
+HTTP service), `http`, `chat` (one LLM call) or `agent` (an agent with a
+tool).
 
-@op
-def greet(who: str):
-    return {"message": f"Hello, {who}!"}
+Then open the folder in your coding assistant and ask for what you want:
+*"add a feature that scores each call in `datasets/calls.jsonl` with the
+assistant model, and a job that runs it nightly"*.
 
-async def main():
-    with GraphOp(name="hello") as graph:
-        step = greet(who=PARENT["who"])
-        START >> step >> END
+## What you get
 
-    result = await Operon(graph).run(inputs={"who": "World"})
-    print(result["message"])  # Hello, World!
-
-asyncio.run(main())
+```
+myapp/
+├── AGENTS.md            the rules your assistant reads first (CLAUDE.md is `@AGENTS.md`)
+├── .operonx/guide/      the operonx API guide, for the version installed here
+├── app/main.py          the map: every service and job, in one Application
+├── src/greeting/        one feature, one folder
+│   ├── graph.py         the wiring: which op runs after which, what feeds what
+│   └── ops.py           the logic: plain Python functions
+├── tests/               the feature's tests; no test calls a real model
+├── datasets/            what jobs run over (.jsonl)
+├── resources.yaml       models and stores, by key (`llm:assistant`)
+├── .env.example         the secrets resources.yaml names; copy to .env
+├── operonx.toml         points the operonx command at app/main.py
+└── pyproject.toml       works with uv and with pip
 ```
 
-## Streaming with `yield`
+## What your assistant reads
 
-The differentiator. A generator op yields per item; downstream ops dispatch on each frame. The same engine that runs a batch DAG runs a callbot pipeline.
+| File | What it is | Who writes it |
+|---|---|---|
+| `AGENTS.md` | the project's rules: the layout, the ladder (op → graph → job or service → application), the commands, what never to do | you; start from what `init` wrote |
+| `.operonx/guide/` | how every operonx API is used; every example in it is tested against the installed version | operonx, never edit |
+| `app/main.py` | what the product runs | you and the assistant |
 
-```python
-from operonx.core import Operon, GraphOp, op, START, END, PARENT
+`AGENTS.md` tells the assistant to read the guide before it uses an operonx
+API, so it does not write operonx from memory or from an older version.
+The block between `<!-- operonx:guide -->` markers in `AGENTS.md` belongs to
+operonx; the rest is yours.
 
-@op
-def chunk_text(text: str, chunk_size: int):
-    for i, words in enumerate(words_in(text, chunk_size)):
-        yield {"chunk": " ".join(words), "index": i}
-
-@op
-def analyze(chunk: str, index: int):
-    return {"result": f"[{index}] {len(chunk.split())} words"}
-
-with GraphOp(name="pipeline") as g:
-    src = chunk_text(text=PARENT["text"], chunk_size=PARENT["chunk_size"])
-    step = analyze(chunk=src["chunk"], index=src["index"])
-    START >> src >> step >> END
-```
-
-Each yield triggers a dispatch on a fresh `(parent_ctx, "yield_N")` sub-context. Empty yield = zero downstream dispatches (matches Python's skipped `yield`). N-to-M flows (one VAD chunk → multiple speech segments) work because each yield is independent.
-
-See [examples/python/ex14](examples/python/ex14_streaming_tracing/) for the streaming + tracing demo, [examples/python/ex15](examples/python/ex15_callbot_streaming/) for the callbot pipeline (audio → VAD → STT → intent → handler → TTS).
-
-## LLMs in one line
+After an upgrade, `operonx guide` refreshes the guide and that block. Any
+`operonx` command run in the project notices a stale guide and refreshes it.
 
 ```bash
-pip install "operonx[standard]"
+uv lock --upgrade-package operonx && uv sync && uv run operonx guide   # uv
+pip install -U operonx && operonx guide                                # pip
 ```
 
-```python
-import asyncio
-import operonx
-from operonx.core import Operon, GraphOp, START, END, PARENT
-from operonx.providers import LLMOp
+## Run it, serve it, see it
 
-async def main():
-    operonx.bootstrap()  # loads ./.env + ./resources.yaml
-
-    with GraphOp(name="qa") as graph:
-        c = LLMOp(
-            name="llm",
-            resource="gpt-4o-mini",
-            inputs={
-                "prompt": {"system": "You are a helpful assistant.", "user": "{question}"},
-                "*": PARENT,
-            },
-            outputs={"*": PARENT},
-        )
-        START >> c >> END
-
-    result = await Operon(graph).run(inputs={"question": "What is Python?"})
-    print(result["content"])
-
-asyncio.run(main())
+```bash
+uv run operonx run greet_people   # a job: the graph once per line of datasets/people.jsonl
+uv run operonx serve              # the services: POST /greet on :8000
+uv run operonx studio             # the project in operonx-studio, in the browser
 ```
 
-`LLMOp.prompt` accepts a string, `{"system": ..., "user": ...}` dict, or a full messages list — every non-reserved kwarg becomes a `{var}` substitution.
+With pip, the same commands without `uv run`, in the activated `.venv`.
 
-### Multi-model load balancing + fallback
+[operonx-studio](https://github.com/batman1m2001-cyber/operonx-studio)
+draws every graph (what runs after what, and which value goes where), lets
+you talk to a service turn by turn, and shows runs, evals, jobs and
+services. It is a separate tool, installed once from its repository:
 
-```python
-from operonx.providers import LLMOp
-
-llm = LLMOp.of(
-    resource=["gpt-4o", "gpt-4o-mini"],
-    ratios=[0.7, 0.3],          # 70 / 30 split
-    fallback=["claude-haiku"],  # tried in order on failure
-    messages=PARENT["messages"],
-)
+```bash
+git clone https://github.com/batman1m2001-cyber/operonx-studio
+operonx-studio/install.sh            # or, without bash: pip install ./operonx-studio
 ```
 
-### Branching
+## What the code looks like
+
+An op is a Python function. One that `yield`s runs what follows it once per
+item. A `@graph` wires ops with `>>`:
 
 ```python
-from operonx.core import START, END, GraphOp, PARENT
-from operonx.core.ops.flow.branch_op import if_
+from operonx import END, START, graph, op
 
-router = (if_(PARENT["score"] >= 90, "excellent")
-          .if_(PARENT["score"] >= 70, "good")
-          .else_("fail"))
-START >> router >> excellent >> merge >> END
-router >> good >> merge
-router >> fail >> merge
-```
 
-`if_()` evaluates conditions in order and fires only the matching op. Merge edges below a branch are softened automatically at build time, so the arm that was not selected never blocks the merge. The `~` operator is for the separate case of *trigger control* — making a node fire on whichever predecessor lands first.
+@op
+def words(text: str):
+    for w in text.split():
+        yield {"word": w}
 
-### Loops
 
-Write a back-edge inside `@graph` — the build-time cycle-rewrite pass
-turns it into a hidden `_GraphLoop` so the scheduler still sees a DAG:
+@op
+def shout(word: str) -> dict:
+    return {"loud": word.upper()}
 
-```python
-from operonx.core import graph, START, END, PARENT
-from operonx.core.ops.flow.branch_op import if_
 
 @graph
-def counter():
-    PARENT.declare(count=0)
-    inc = increment(counter=PARENT["count"])
-    inc["counter"] >> PARENT["count"]
-    START >> inc >> if_(PARENT["count"] >= 5, END).else_(inc)
-
-g = counter()
+def flow(text):
+    w = words(text=text)
+    s = shout(word=w["word"])
+    START >> w >> s >> END
 ```
 
-The branch's `else_` target is the back-edge; each iteration commits
-its outputs to the shared `count` cell and the branch decides whether
-to loop again or exit. See `docs/guide/03-loops-and-branches.md`.
+`app/main.py` decides how a graph runs: a `Job` over a file, or a `Service`
+behind `http(...)`, `websocket(...)`, `webhook(...)` or `schedule(...)`.
 
-## Installation
+## Extras
 
-Single Python package, optional extras for each integration:
+Provider SDKs are extras. A project names its extras on the `operonx[...]`
+line of `pyproject.toml` (`init` writes `operonx[serve]`); add one there,
+e.g. `operonx[serve,openai]`, then `uv sync` (with pip, `pip install -e ".[test]"`).
 
-```bash
-pip install operonx                  # Tier 1 — engine only, ~10 MB
-pip install "operonx[openai]"        # OpenAI / Azure
-pip install "operonx[anthropic]"     # Anthropic via httpx
-pip install "operonx[gemini]"        # Vertex AI
-pip install "operonx[onnx]"          # Local ONNX inference
-pip install "operonx[langfuse]"      # Langfuse tracing
-pip install "operonx[otel]"          # OpenTelemetry tracing
-pip install "operonx[standard]"      # Recommended — providers + Langfuse + OTEL
-pip install "operonx[all]"           # Everything except torch / HuggingFace
-```
+| Extra | Contents |
+|---|---|
+| `openai` | OpenAI and Azure, and any OpenAI-compatible endpoint (vLLM, TEI) |
+| `anthropic`, `gemini`, `bedrock` | the other model providers |
+| `onnx`, `triton`, `huggingface` | local inference (`huggingface` brings torch, ~2.5 GB) |
+| `pgvector`, `qdrant`, `faiss`, `postgres`, `mongo`, `clickhouse` | stores |
+| `langfuse` | Langfuse tracing |
+| `serve` | the HTTP and WebSocket services |
+| `mcp` | MCP tools |
+| `standard` | OpenAI, Langfuse and serve |
+| `all` | every provider, store and tracer (not `huggingface` or `mcp`) |
 
-| Extra        | Contents                                          |
-| ------------ | ------------------------------------------------- |
-| `openai`     | OpenAI SDK (also covers Azure)                    |
-| `anthropic`  | `httpx` + OpenAI message types                    |
-| `gemini`     | `google-cloud-aiplatform` + AsyncOpenAI client    |
-| `bedrock`    | `boto3` + OpenAI message types                    |
-| `onnx`       | `onnxruntime` + `tokenizers` + `numpy`            |
-| `huggingface`| `transformers` + `torch` (~2.5 GB; opt in)        |
-| `langfuse`   | Langfuse SDK                                      |
-| `otel`       | OpenTelemetry API + SDK + OTLP exporters          |
-| `standard`   | OpenAI + Langfuse + OTEL (production bundle)     |
-| `all`        | Every provider + tracer except `huggingface`      |
-| `dev`        | pytest, ruff, pre-commit                          |
-
-## Jobs: the same graph over a file
-
-A served graph gets its work from a listener. A `Job` gives it work from
-`items` — a list, a `.jsonl` file, or a function that yields them — one run
-per item, keeps every result, and leaves a record per run: which items were
-`ok`, `failed`, `empty` (ran, sent nothing) or timed out, each with its
-trace id.
-
-```python
-from operonx.app.jobs import Job
-
-score = Job("score_calls", graph=score_call, items="data/calls.jsonl",
-            key="call_id", reduce=report)
-run = score.run_sync()                 # ok=98 failed=2 …; run.failed names them
-run.results                            # {key: result}; run.reduced is the report
-run = score.run_sync(resume=True)      # only the two
-
-nightly = Job("nightly", steps=[extract, score])   # jobs in order, one command
-```
-
-Jobs are declared in `Application(jobs=[...])` beside the services;
-`operonx run <name>` runs one from a shell with an exit status a cron
-can read. See the [guide](docs/guide/10-jobs.md) and `examples/python/ex17_jobs`.
-A door whose graph differs by caller declares `[serve.variants]`: one
-compiled graph per variant, picked per session — `examples/python/ex18_variants`.
-
-## Tracing
-
-```python
-import operonx
-from operonx.core import Operon
-
-operonx.bootstrap()  # registers consumer configs from resources.yaml
-
-engine = Operon(graph, trace=["trace_langfuse:default"])
-```
-
-Consumers are configured in `resources.yaml` (`trace_local:`, `trace_langfuse:`) and referenced by key. See [docs/api/telemetry.md](docs/api/telemetry.md) for the full V3 tracing API.
+[operonx-agents](https://pypi.org/project/operonx-agents/) (agents) and
+[operonx-kb](https://pypi.org/project/operonx-kb/) (knowledge bases) are
+separate packages; each adds its own pages to `.operonx/guide/`.
 
 ## Documentation
 
-| Need                       | Go to                                                   |
-| -------------------------- | ------------------------------------------------------- |
-| Runnable examples (Python) | [examples/python/](examples/python/)                    |
-| Architecture               | [docs/architecture/](docs/architecture/)                |
-| User guide                 | [docs/guide/](docs/guide/)                              |
-| API reference              | [https://batman1m2001-cyber.github.io/Operonx/](https://batman1m2001-cyber.github.io/Operonx/) |
-| Rust runtime               | [operonx-rs](https://github.com/batman1m2001-cyber/operonx-rs) |
+| For | Where |
+|---|---|
+| your coding assistant | [`operonx/guide/`](operonx/guide/README.md), copied into every project as `.operonx/guide/` |
+| reading it yourself | [the documentation site](https://batman1m2001-cyber.github.io/Operonx/) |
+| runnable examples | [examples/python/](examples/python/) |
+| what changed | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Contributing
 

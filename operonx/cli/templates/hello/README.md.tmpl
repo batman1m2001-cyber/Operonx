@@ -9,16 +9,16 @@ it. `app/main.py` declares what runs it: the `greet_people` job over
 ## Run
 
 ```bash
-uv sync
-uv run pytest                     # the tests, offline
-uv run operonx run greet_people   # greet everyone in datasets/people.jsonl → out/greetings.jsonl
+{{setup}}
+{{run}}pytest                     # the tests, offline
+{{run}}operonx run greet_people   # greet everyone in datasets/people.jsonl → out/greetings.jsonl
 ```
 
 ## Serve
 
 ```bash
-uv run operonx serve --list       # what would listen, and where
-uv run operonx serve              # POST /greet on :8000 (PORT overrides)
+{{run}}operonx serve --list       # what would listen, and where
+{{run}}operonx serve              # POST /greet on :8000 (PORT overrides)
 curl -s localhost:8000/greet -d '{"id": "x", "name": "grace"}'
 ```
 

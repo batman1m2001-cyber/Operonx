@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -354,7 +355,8 @@ class TestGuide:
         (tmp_path / "AGENTS.md").write_text("# mine\n\nmy rules\n")
         guide.sync(tmp_path)
         text = (tmp_path / "AGENTS.md").read_text()
-        assert text.startswith("# mine\n\nmy rules\n") and guide.agents_block() in text
+        block = guide.agents_block(toolchain="pip")  # no uv.lock here
+        assert text.startswith("# mine\n\nmy rules\n") and block in text
         guide.sync(tmp_path)
         assert (tmp_path / "AGENTS.md").read_text() == text
 
@@ -417,3 +419,79 @@ def test_init_editable_refuses_a_folder_without_operonx(tmp_path):
 
     with pytest.raises(InitError, match="no operonx package"):
         init_project(tmp_path / "proj", template="hello", editable=tmp_path)
+
+
+# --- uv or pip ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("template", sorted(TEMPLATES))
+def test_a_pip_project_names_no_uv_command(template):
+    files = plan(template, "proj", toolchain="pip")
+    for rel in ("AGENTS.md", "README.md"):
+        text = files[rel].decode()
+        assert not re.search(r"\buv ", text), rel  # no uv command at all
+    assert 'pip install -e ".[test]"' in files["README.md"].decode()
+    assert ".venv/bin/activate" in files["AGENTS.md"].decode()
+
+
+def test_a_uv_project_names_uv_commands():
+    files = plan("hello", "proj", toolchain="uv")
+    assert "uv run pytest" in files["AGENTS.md"].decode()
+    assert "uv sync" in files["README.md"].decode()
+    assert "{{" not in files["AGENTS.md"].decode() + files["README.md"].decode()
+
+
+def test_one_pyproject_serves_both():
+    try:
+        import tomllib
+    except ImportError:  # 3.10
+        import tomli as tomllib
+
+    a = plan("hello", "My_App", toolchain="uv")["pyproject.toml"]
+    b = plan("hello", "My_App", toolchain="pip")["pyproject.toml"]
+    assert a == b
+    meta = tomllib.loads(a.decode())
+    tools = meta["project"]["optional-dependencies"]["test"]  # pip: .[test]
+    assert any(r.startswith("pytest") for r in tools)
+    assert meta["dependency-groups"]["dev"] == ["my-app[test]"]  # uv sync installs it too
+
+
+def test_comments_line_up_in_shell_blocks():
+    from operonx.cli.init import _align
+
+    text = "x\n```bash\na  # one\nlonger cmd   # two\nno comment\n```\nb  # not code"
+    assert _align(text) == (
+        "x\n```bash\na            # one\nlonger cmd   # two\nno comment\n```\nb  # not code"
+    )
+
+
+def test_init_prints_the_toolchains_steps(tmp_path, capsys):
+    code, out = _init(capsys, tmp_path / "p", "--pip")
+    assert code == 0
+    steps = out.out.split("Next:")[1]
+    assert 'pip install -e ".[test]"' in steps and "uv " not in steps
+    code, out = _init(capsys, tmp_path / "q", "--uv")
+    assert "uv sync" in out.out and "uv run operonx studio" in out.out
+
+
+def test_init_defaults_to_uv_only_where_it_is_installed(tmp_path, monkeypatch, capsys):
+    from operonx.cli import init as init_mod
+
+    monkeypatch.setattr(init_mod.shutil, "which", lambda name: None)
+    _init(capsys, tmp_path / "p")
+    assert "uv run" not in (tmp_path / "p" / "AGENTS.md").read_text()
+    monkeypatch.setattr(init_mod.shutil, "which", lambda name: "/usr/bin/uv")
+    _init(capsys, tmp_path / "q")
+    assert "uv run pytest" in (tmp_path / "q" / "AGENTS.md").read_text()
+
+
+def test_the_guide_block_follows_the_project(tmp_path):
+    root = tmp_path / "p"
+    from operonx.cli.init import init_project
+
+    init_project(root, template="hello", toolchain="pip")
+    guide.sync(root)  # no uv.lock: pip
+    assert "`pip install -U operonx`, then `operonx guide`" in (root / "AGENTS.md").read_text()
+    (root / "uv.lock").write_text("")
+    guide.sync(root)  # moved to uv
+    assert "uv lock --upgrade-package operonx" in (root / "AGENTS.md").read_text()
