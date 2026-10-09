@@ -1,6 +1,8 @@
 # Agent tools as ops, and the agent card
 
-**Status:** plan, 2026-10-09. Phases T1–T4 below.
+**Status (2026-10-09, end of day):**
+- **Done:** T1 (operonx 1.18.0, #131, and 1.18.1, #133: `WorkflowTrace.parent` / `.root`), T2 (operonx-agents 0.2.0, #132) and T3 v1 (studio #37).
+- **Next:** T3b, the agent's parts as real ops (§5). Then T4 (meeting-prep, written and checked, not committed).
 
 **Asked for:**
 - An agent's tools can be operonx ops and graphs, and the trace shows what ran inside them.
@@ -170,3 +172,84 @@ T1 → T2 → T3 → T4. Each phase is its own PR, merged when its gate passes.
 - operonx 1.18.0 ships after T1.
 - operonx-agents 0.2.0 ships after T2. It requires `operonx>=1.18.0`.
 - The studio is not published (`install.sh`).
+
+## 5. T3b: the agent's parts as real ops (the design agreed on 2026-10-09)
+
+Studio #37 drew an opened agent as a frame round its loop (model → tools → answer). The user replaced
+that design, after many rounds of mocks.
+
+**Mock:** https://claude.ai/artifact/VWWiB3S3wpruK8jXnPGsjc, version 22, section "With the studio's
+real cards".
+
+### The design
+
+**The agent card:**
+- An octagon "hive cell": a steel edge (#4a6fa5, light #c9dcf3), a soft glow, the bee
+  (`static/agent-bee*.png`), its name, "agent · ≤ N turns" and turn pips.
+- Three ROUND sockets on its right edge, each with an icon: ✧ model (violet #7c4dcc, required), a
+  database cylinder for memory (blue #2f6fd0), ⚒ tools (teal #0e8580).
+
+**Parts are real ops:**
+- Each part is the canvas's own card for that op, drawn by the same `opCard()`:
+  - the LLM cell (assistant);
+  - a FuncOp cell (`web_search`);
+  - a GraphOp card with its ▣ N ▸ badge (`fetch_page`);
+  - an MCP or IO cell;
+  - an agent card, for an agent tool.
+- The parts stand in one column to the right of the agent. Control flow runs straight down through
+  the agent.
+
+**Opening a part reuses what exists:**
+- A `@graph` tool opens as the usual graph container.
+- An agent tool opens as an agent with its own sockets and parts, recursively.
+
+**The wires are thin (about 1.3px) and new.** Control flow (the 4px energy beam) and data flow are
+NEVER changed.
+
+| Part | Wire | Idle | While a run is live |
+|---|---|---|---|
+| model | a "brain signal": a violet nerve with one EEG-like spike mid-way | the spike shows | impulse dots run to the LLM |
+| memory | "bandwidth": three thin blue lanes (0.9px, ±2.6px) | the lanes show | data blocks stream into the store |
+| tools | a rack: one straight trunk from the socket into a vertical bus beside the tool cards, and a straight branch with a joint dot to each tool | straight lines | a call dot goes socket → bus → tool and back |
+
+Each wire ends in a small ring on the part's card.
+
+**Rejected, do not bring back:**
+- the frame round the loop;
+- a parts tray, a drawer, n8n-style dashed curves, abstract shapes;
+- beads, cable bands, twin lines, a pipe, rail crossties, a sine wave, `››`;
+- any change to the existing edges.
+
+### The work
+
+1. **Extractor (`operonx_project/extract.py`):**
+   - Replace `_agent_loop` with the parts.
+   - The model becomes a node for the LLM resource.
+   - Memory becomes the session / deps.
+   - Each tool becomes a real node: a `@graph`'s subgraph via `_tool_graph`, an `@op`'s code, an
+     agent tool's own agent node, recursively.
+   - Each part is an edge `{type: "agent_part", part: "model" | "memory" | "tool"}` from the agent.
+2. **Layout (`flowlayout.js`):**
+   - The agent and its parts are one block: the card, then the parts column to its right, at the
+     card's rank.
+   - Opening a part grows the block.
+   - The main flow stays straight.
+3. **Canvas (`studio.js` / `studio.css`):**
+   - the round sockets on the card's right edge;
+   - the three wire styles, drawn by the edge router as their own class;
+   - the rack routing for tools;
+   - the run painting: counts on the parts, the wire animations only while the run is live.
+4. **The run view** keeps the recorded turns (agentsteps.js).
+5. **Gate:**
+   - the JS tests;
+   - layout_audit (agentlab plus the 174-case matrix);
+   - screens on desktop and phone, light and dark, of a folded agent, a graph tool opened, an agent
+     tool opened, and a painted run.
+
+### Also pending
+
+- **T4, meeting-prep** (branch `feat/tools-as-ops` in ai-workflow-seminar-materials, not committed):
+  - `web_search` is an `@op` and `fetch_page` a `@graph`; `_run_memo` keys on `trace.root`;
+  - the conventions pass 153/153, and it was checked against the web mock;
+  - the README line about `tools.py` is still to update.
+- **The live studio (:8766)** needs a restart, for #37's run-summary change.
