@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Operon.input_schema()` no longer raises.** It read `param.annotation`,
+  which `Param` never had, so every call raised `AttributeError`. It reads
+  `Param.type` now, and a served graph's signature defaults
+  (`inputs_defaults`) mark those parameters optional with their default.
+
 ## [1.19.3] - 2026-10-10
 
 ### Changed
