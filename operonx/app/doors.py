@@ -149,6 +149,7 @@ def serve_inputs(
     defaults: Optional[Mapping[str, Any]] = None,
     tick: bool = False,
     reserved: Iterable[str] = (),
+    input: Optional[str] = None,  # noqa: A002 — the parameter's name
 ) -> Dict[str, Any]:
     """The run inputs a served doorless graph gets for one request.
 
@@ -159,6 +160,10 @@ def serve_inputs(
     parameters are kept, the rest dropped). A name in both ``given`` and
     the body is refused, and so is a parameter that neither sets and that
     has no default. Defaults fill what is left.
+
+    ``input`` names the parameter that takes the whole body as it is — a
+    third party's payload whose fields the graph does not declare (a mail
+    server's webhook), as ``Job(input=...)`` takes a whole item.
     """
     params = list(params)
     defaults = dict(defaults or {})
@@ -170,7 +175,18 @@ def serve_inputs(
             f"{unknown[0]!r} is not a parameter of the graph (it takes {params or 'nothing'})",
             field=str(unknown[0]),
         )
-    if tick:
+    if input is not None:
+        if input not in params:
+            raise BindError(
+                f"input={input!r}, but the graph takes {params or 'no parameters'}", field=input
+            )
+        if input in given:
+            raise BindError(
+                f"{input!r} takes the whole body; it cannot also come from the query",
+                field=input,
+            )
+        inputs = {**given, input: item}
+    elif tick:
         fields = item if isinstance(item, Mapping) else {}
         inputs = dict(given)
         inputs.update({k: v for k, v in fields.items() if k in params and k not in given})
@@ -178,6 +194,14 @@ def serve_inputs(
         inputs = dict(given)
     else:
         if isinstance(item, Mapping):
+            unknown = [k for k in item if k not in params]
+            if unknown:
+                # said here, for a caller of a door — not as a job's item
+                raise BindError(
+                    f"{unknown[0]!r} is not a parameter of the graph "
+                    f"(it takes {params or 'nothing'})",
+                    field=str(unknown[0]),
+                )
             both = [k for k in item if k in given]
             if both:
                 raise BindError(

@@ -284,6 +284,7 @@ class ServeRunner:
             # the default hook hands over the whole query; a project's hook
             # builds exactly what it means
             reserved=RESERVED_QUERY if self.spec.on_session is None else (),
+            input=self.spec.options.get("input"),
         )
 
     async def _bind(self, engine: Any, request: RunRequest, session: Session) -> RunRequest:
@@ -315,7 +316,7 @@ class ServeRunner:
             if self.spec.on_session is None and not self.variants:
                 query = dict((meta or {}).get("query") or {})
                 self._serve_inputs(self.engine, query, payload)
-            elif isinstance(payload, Mapping):
+            elif isinstance(payload, Mapping) and not self.spec.options.get("input"):
                 params = {p for e in engines for p in self._params(e)}
                 unknown = [k for k in payload if k not in params]
                 if unknown:

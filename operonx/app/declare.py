@@ -194,6 +194,7 @@ def Service(  # noqa: N802 — reads as a declaration
     key_ops: Optional[Sequence[str]] = None,
     playground: Any = None,
     replay: bool = False,
+    input: Optional[str] = None,  # noqa: A002 — the graph parameter's name
     **options: Any,
 ) -> ServeSpec:
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
@@ -219,6 +220,10 @@ def Service(  # noqa: N802 — reads as a declaration
     waiting for a human (an agent's approval): the door also answers
     ``POST <path>/resume`` with it, with the door's own codec, hooks and
     streaming. A websocket door resumes on its connection and takes none.
+
+    ``input="payload"`` hands a graph without doors the whole request body
+    as that one parameter, instead of filling parameters by the body's
+    fields: for a payload someone else shapes (a mail server's webhook).
 
     ``replay=True`` records what clients send this door — text and JSON as
     they are, audio and bytes only counted — on each run, so a real session
@@ -272,6 +277,10 @@ def Service(  # noqa: N802 — reads as a declaration
         opts["playground"] = playground
     if replay:
         opts["replay"] = True
+    if input is not None:
+        if not (isinstance(input, str) and input):
+            raise ManifestError(f"{label}: input= is the name of a graph parameter")
+        opts["input"] = input
 
     return ServeSpec(
         name=name,
@@ -430,6 +439,7 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "key_ops": list(s.options.get("key_ops") or []),
         "playground": ref_name(s.options["playground"]) if s.options.get("playground") else None,
         "replay": bool(s.options.get("replay")),
+        "input": s.options.get("input"),
         # what its runs are traced to, and which level of the precedence
         # said so (`operonx.app.tracing`): what an operator checks first
         "sinks": [sink_name(x) for x in s.options.get("trace") or []],

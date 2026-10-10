@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.1] - 2026-10-10
+
+### Added
+
+- **`Service(..., input="payload")`** hands a doorless graph the whole request body as one
+  parameter, instead of filling parameters by the body's fields. Use it for a payload someone else
+  shapes: Mailpit's new-mail webhook carries a dozen fields the graph does not declare, and
+  filling by name refused them. It works like `Job(input=...)`. The parameter cannot also come
+  from the query. `describe_service(...)["input"]` names it.
+
+### Fixed
+
+- **A served request with a field the graph does not take says so in a caller's terms.** It said
+  `pass input="<param>"`, which is a Job's advice. The `400` now reads
+  `'client' is not a parameter of the graph (it takes [...])`.
+
 ## [1.19.0] - 2026-10-10
 
 ### Added
@@ -3369,7 +3385,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.1...HEAD
+[1.19.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.0...v1.19.1
 [1.19.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.18.1...v1.19.0
 [1.17.5]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...v1.17.5
 [1.17.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.3...v1.17.4
