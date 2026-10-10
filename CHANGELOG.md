@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.1] - 2026-10-11
+
+### Fixed
+
+- **Two streams merging into one op fire item by item again.** An op fed by
+  two generators — a call's speech (`detect_speech`) and its prompts
+  (`bot_prompts`) into `merge_frames` — never ran from 1.15.0 on: the fix for
+  ops joining a stream with an op outside it (#88) made each stream's items
+  wait for the other stream to *land* in the parent context, which a stream
+  only does when it ends. A served callbot answered no call (no greeting, no
+  turn). An op outside the stream whose values come from a stream that does
+  not enclose it now counts as arrived, as before 1.15; a batch op outside
+  the stream is still waited for (#88's case). Found by git bisect on a
+  call-shaped reproduction.
+
 ## [1.20.0] - 2026-10-11
 
 A Service is a socket and a graph. The connection's data is the graph's
@@ -3488,7 +3503,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.1...HEAD
+[1.20.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.3...v1.20.0
 [1.19.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.2...v1.19.3
 [1.19.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.1...v1.19.2
