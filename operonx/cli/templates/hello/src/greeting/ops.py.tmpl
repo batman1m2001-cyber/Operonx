@@ -5,6 +5,6 @@ from operonx import op
 
 
 @op
-def greet(person: dict) -> dict:
-    name = " ".join(str(person.get("name", "")).split()).title() or "stranger"
-    return {"result": {"id": person["id"], "greeting": f"Hello, {name}!"}}
+def greet(id: str, full_name: str = "") -> dict:
+    name = " ".join(str(full_name or "").split()).title() or "stranger"
+    return {"id": id, "greeting": f"Hello, {name}!"}
