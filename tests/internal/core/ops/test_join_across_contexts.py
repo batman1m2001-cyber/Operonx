@@ -111,3 +111,57 @@ async def test_a_per_item_op_waits_for_a_slow_sibling():
     out = await _run(per_item_join, 0.05)
     assert "$errors" not in out
     assert sorted(out["scaled"]) == [0, 3, 6]
+
+
+# ── two streams merging into one op: a call's speech and its prompts ──────
+#
+# Each side is a stream of its own; the merge fires per item of either, the
+# other side absent. The other stream never lands in this stream's parent
+# context — it arrives in contexts of its own — so waiting for it there (as a
+# join with an op outside the stream does) waited for that stream's END: the
+# callbot's greeting and every turn after it never ran (1.15–1.20.0).
+
+MERGED: list = []
+
+
+@op
+async def packets(n: int = 0):
+    for i in range(30):
+        await asyncio.sleep(0.005)
+        yield {"chunk": i}
+
+
+@op
+async def detect(chunk: int = None):
+    if chunk is not None and chunk % 10 == 9:  # a segment closes on 3 of 30 packets
+        yield {"frame": f"speech{chunk}"}
+
+
+@op
+async def prompt_frames(n: int = 0):
+    yield {"frame": "greeting"}
+    await asyncio.sleep(0.3)
+
+
+@op(bound="sync")
+def merge_frames(audio: str = None, prompt: str = None) -> dict:
+    MERGED.append(audio or prompt)
+    return {"kind": audio or prompt}
+
+
+@graph
+def call_frames():
+    p = packets()
+    v = detect(chunk=p["chunk"])
+    b = prompt_frames()
+    m = merge_frames(audio=v["frame"], prompt=b["frame"])
+    START >> p >> v >> m
+    START >> b >> m
+    m >> END
+
+
+def test_two_streams_merge_into_one_op_item_by_item():
+    MERGED.clear()
+    asyncio.run(asyncio.wait_for(Operon(call_frames()).run(inputs={}), 10))
+    assert MERGED[0] == "greeting"  # the prompt stream's item, without waiting for speech
+    assert [m for m in MERGED if m.startswith("speech")] == ["speech9", "speech19", "speech29"]

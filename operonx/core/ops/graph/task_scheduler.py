@@ -205,6 +205,7 @@ class Scheduler:
         "_collect_groups",
         "_reach",
         "_join_edges",
+        "_sibling_edges",
     )
 
     def __init__(self, graph):
@@ -334,13 +335,45 @@ class Scheduler:
             if getattr(child, "is_gen", False) or name in self._graph_ops
         } | {src for (src, _dst), (collect, _limit) in self._route_policy.items() if collect}
         self._reach: Dict[str, frozenset] = {}
+        # Which generators' items an op runs in (not across a collect, which
+        # hands one value back to the parent). An op outside an origin's
+        # reach whose values come from a stream that does not enclose the
+        # origin — a sibling stream — never lands in the origin's parent
+        # context: it arrives in contexts of its own. Waiting for it there
+        # (as a join does) waits for that stream's end. Two streams merging
+        # into one op — a call's speech and its prompts — is that shape: the
+        # merge fires per item of either, the other side absent. So such an
+        # edge counts as arrived in the origin's contexts, as before 1.15.
+        streams_of: Dict[str, set] = {}
+        for gen, child in graph._ops.items():
+            if not getattr(child, "is_gen", False):
+                continue
+            seen, stack = {gen}, [gen]
+            while stack:
+                node = stack.pop()
+                for link in graph._adj.get(node, ()):
+                    collect, _limit = self._route_policy.get((node, link.dst), (False, 1))
+                    if collect or link.dst in seen:
+                        continue
+                    seen.add(link.dst)
+                    stack.append(link.dst)
+            for name in seen:
+                streams_of.setdefault(name, set()).add(gen)
         joins = set()
+        siblings: Dict[str, list] = {}
         for origin in origins:
             reach = self._reachable(origin)
+            enclosing = streams_of.get(origin, set())
             for (src, dst), edge in graph._edges.items():
                 if edge.type != "error" and dst in reach and dst != origin and src not in reach:
-                    joins.add((src, dst))
+                    outside = streams_of.get(src, set())
+                    if outside and not (outside & enclosing):
+                        siblings.setdefault(origin, []).append((src, dst, edge.soft))
+                    else:
+                        joins.add((src, dst))
         self._join_edges: frozenset = frozenset(joins)
+        #: per origin, the edges from a sibling stream its contexts count as arrived
+        self._sibling_edges: Dict[str, tuple] = {o: tuple(e) for o, e in siblings.items()}
 
         # When THIS graph is a synthetic loop: the ops whose frames decide
         # how an iteration ended. op -> (back-edge targets, exit targets,
@@ -565,6 +598,7 @@ class Scheduler:
         # counts the arrivals already in; one seeded earlier gets each new
         # arrival forwarded (`_forward`).
         join_edges = self._join_edges
+        sibling_edges = self._sibling_edges
         arrivals: Dict[tuple, List[Tuple[str, str, bool]]] = {}
         below: Dict[tuple, List[Tuple[tuple, str]]] = {}
 
@@ -1031,6 +1065,9 @@ class Scheduler:
             """
             rc = dict(g._initial_ready)
             ready[ctx] = rc
+            for src, dst, soft in sibling_edges.get(origin, ()):
+                if dst in rc:
+                    _count(rc, dst, soft)  # a sibling stream's item comes in its own context
             if not join_edges:
                 return rc
             parent = next((ctx[:i] for i in range(len(ctx) - 1, 0, -1) if ctx[:i] in ready), None)
