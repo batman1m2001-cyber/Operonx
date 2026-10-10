@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.2] - 2026-10-10
+
+### Fixed
+
+- **The studio playground drives a graph without doors the way its door does.** The playground
+  ran a doorless service with no inputs: the form's JSON was fed to an `ingress` the graph does not
+  have, so the first op failed for lack of parameters. Now:
+  - the toy's first message fills the parameters (`ServeRunner._bind`);
+  - the run's outputs come back as the one `out` event;
+  - a message that does not fit ends the session `refused: ...` with no run.
+
+  Found by the plan's S5 studio check on tcb-wepro and mr-finance.
+
 ## [1.19.1] - 2026-10-10
 
 ### Added
@@ -3385,7 +3398,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.2...HEAD
+[1.19.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.1...v1.19.2
 [1.19.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.0...v1.19.1
 [1.19.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.18.1...v1.19.0
 [1.17.5]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...v1.17.5

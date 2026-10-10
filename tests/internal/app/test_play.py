@@ -82,6 +82,17 @@ def chat_flow(prefix: str = ">"):
     START >> src >> said >> out >> END
 
 
+@op(bound="sync")
+def answer(question: str, k: int) -> dict:
+    return {"answer": f"{question}?", "k": k}
+
+
+@graph
+def ask_flow(question, k=3):  # no doors: the form's JSON fills the parameters
+    a = answer(question=question, k=k)
+    START >> a >> END
+
+
 class Upper(Codec):
     toys = ("chat",)
 
@@ -100,6 +111,7 @@ APP = Application(
     on_startup=[warm],
     services=[
         Service("score", http("POST", "/score", port=8124), graph=score_flow),
+        Service("ask", http("POST", "/ask", port=8124), graph=ask_flow),
         Service("chat", websocket("/chat", port=8124), graph=chat_flow, max_inflight=8,
                 on_session=gate, on_close=closed),
         Service("raw", Listener("memory", "/raw"), graph=score_flow, max_inflight=4),
@@ -199,6 +211,37 @@ def test_a_form_request_runs_the_real_door_and_is_filed_as_playground(project):
     )
     assert "origin:playground" in meta["tags"] and meta.get("project") == "playdemo"
     assert (root / ".operonx" / "runs" / "playground").is_dir()
+
+
+def test_a_doorless_service_answers_the_form_with_its_outputs(project):
+    """The playground drives a graph without doors the way its door does: the
+    form's JSON fills the parameters, the run's outputs are the one reply, and
+    a message that does not fit starts no run."""
+    name, root = project
+    bridge, events = _bridge(root)
+
+    async def go(sid, value):
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": sid,
+                "service": "ask",
+                "toy": "form",
+                "send": [{"kind": "json", "value": value}],
+                "end": True,
+            }
+        )
+        return await _until(events, lambda e: e["t"] == "ended" and e["sid"] == sid)
+
+    ended = asyncio.run(go("d1", {"question": "hi"}))
+    (out,) = [e for e in events if e["t"] == "out" and e["sid"] == "d1"]
+    assert out["msg"] == {"kind": "json", "value": {"answer": "hi?", "k": 3}}
+    assert ended["status"] == "ok" and ended["sent"] == 1
+
+    refused = asyncio.run(go("d2", {"nope": 1}))
+    assert refused["status"] == "error" and "refused" in refused["error"]
+    assert "'nope' is not a parameter" in refused["error"]
+    assert not [e for e in events if e["t"] == "out" and e["sid"] == "d2"]
 
 
 def test_a_session_streams_its_ops_as_they_finish(project):
