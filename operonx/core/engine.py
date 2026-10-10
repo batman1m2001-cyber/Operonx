@@ -560,6 +560,8 @@ class Operon:
         "_collector",
         "_trace_consumers",
         "inputs_expected",
+        "inputs_defaults",
+        "_doors",
         "_errors",
         "_max_concurrency",
         "_journal",
@@ -715,6 +717,10 @@ class Operon:
         #: engine knows them (a served graph: its unbound parameters). The
         #: serve layer checks a door's RunRequest against it; None = unchecked.
         self.inputs_expected = None
+        # set by the serve layer (`compile_graph`): the @graph's own defaults
+        self.inputs_defaults: Dict[str, Any] = {}
+        # whether the graph has an ingress door (`operonx.app.doors.has_doors`)
+        self._doors: Optional[bool] = None
 
         # Build graph and create schema immediately
         self.graph.build()

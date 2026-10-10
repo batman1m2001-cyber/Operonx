@@ -50,6 +50,10 @@ def _list(app: Application) -> int:
             print(f"  {j['name']:18s} {j['kind']:6s} {j['items'] or '-'} -> {j['graph']}{reduce}")
         if j["description"]:
             print(f"  {'':18s} {j['description']}")
+        if j.get("schedule"):
+            clock = j["schedule"]
+            when = ", ".join(f"{k}={clock[k]}" for k in ("every", "at") if k in clock)
+            print(f"  {'':18s} schedule: {when} (operonx serve, port {clock['port']})")
         print(f"  {'':18s} {_sinks(j)}")
     return 0
 

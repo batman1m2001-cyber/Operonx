@@ -118,7 +118,7 @@ The most specific setting wins:
 | Level | Where | |
 |---|---|---|
 | 1 | `[tracing.services.<name>]` / `[tracing.jobs.<name>]` | the operator, for one service or job |
-| 2 | `Service(trace=...)` / `Job(trace=...)`, or `trace =` on a `[[serve]]` block | the code, for one service or job |
+| 2 | `Service(trace=...)` / `Job(trace=...)`, or `trace =` on a (deprecated) `[[serve]]` block | the code, for one service or job |
 | 3 | `[tracing] sinks` | the operator, for the project |
 | 4 | `Application(trace=...)` (or `[project] trace`) | the code, for the project |
 | 5 | the built-in default | a job records locally; a service is not traced |

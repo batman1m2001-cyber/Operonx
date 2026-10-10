@@ -93,6 +93,7 @@ class Application:
             self.manifest = manifest_from(
                 manifest,
                 services=services,
+                jobs=jobs,
                 on_startup=on_startup,
                 root=base,
                 src=src,
@@ -189,6 +190,7 @@ class Application:
         from .serve.app import serve_manifest
 
         self.bootstrap()
+        self.jobs  # settled (tracing, record folder) before a clock runs one
         serve_manifest(self.manifest, only=list(only) if only else None, **bind)
 
     def asgi(
@@ -205,6 +207,7 @@ class Application:
         from .serve.app import build_app
 
         self.bootstrap()
+        self.jobs  # settled (tracing, record folder) before a clock runs one
         specs = [s for s in self.services if s.kind != "asgi" or s.app]
         if only:
             specs = [s for s in specs if s.name in set(only)]

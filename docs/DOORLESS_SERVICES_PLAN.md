@@ -1,6 +1,6 @@
 # Doorless services: serve a graph by its signature
 
-**Status (2026-10-10): PLANNED.** Nothing implemented yet.
+**Status (2026-10-10): S1–S3 done** (operonx 1.19.0, see §6). S4–S5 in progress.
 
 **Asked for:** understand ingress/egress, the Application, services and jobs, and reduce the design
 where it can be reduced. The walk-through page with real samples:
@@ -53,7 +53,7 @@ S3 removes something, and only educa-reminder-callbot uses it.
 
 | # | Decision | Choice | Why |
 |---|---|---|---|
-| **D1** | Can a graph without doors be served? | **Yes**, on the one-shot doors: `http`, `webhook`, `schedule`. A stream door (`websocket`, any `STREAM_KINDS`) still requires doors: refused at declaration with a message that says so. | A stream needs items over the run's lifetime; a request does not. |
+| **D1** | Can a graph without doors be served? | **Yes**, on the one-shot doors: `http`, `webhook`, `schedule`. On a stream door (`websocket`, any `STREAM_KINDS`) a doorless graph keeps today's behaviour (one run per connection, items unread) and logs a warning when the service is built; refused from 2.0. *(Changed in S1: refusing broke an existing test that serves a doorless graph on a websocket, so it waits for the major.)* | A stream needs items over the run's lifetime; a request does not. |
 | **D2** | How is "has doors" decided? | One function, `has_doors(graph)`, moved out of `Job.has_doors()` into `operonx/app/doors.py`. A graph with any `@op(door="ingress")` op anywhere has doors. Jobs and services both call it. | One rule for both. A project's own door op (the callbot's `receive_audio`, `op.door == "ingress"`) counts too. Today `Job.has_doors()` looks only for the library `ingress`, so a Job over a graph with its own door op binds the item to parameters instead of feeding it; S1 fixes that and tests it. |
 | **D3** | How does the body reach the parameters? | `bind_item(params, item, fixed, input=None)`, moved out of `Job.bind` into `operonx/app/doors.py`, the same rules: a dict fills parameters by name; anything else goes to the only free parameter; an unknown field is refused. | Same behaviour as a Job item; no second set of rules. |
 | **D4** | Query string and body together | The query fills parameters as today. The body fills the rest. A name in both is refused (`400`, naming it). A parameter with neither, and no default, is refused (`400`). | An explicit refusal beats a silent override. |
@@ -147,3 +147,85 @@ one playground request each succeeds.
 1. **Is educa-reminder-callbot still in use?** The same callbot lives on educa-reminder-agent's
    `refactor/operonx-studio` branch, declared in Python. If the standalone repo is retired, S3 needs
    no migration at all; if not, its `[[serve]]` moves to `app/main.py` before 2.0.
+
+## 6. Results
+
+### S1 (branch `feat/doorless-services`)
+
+- `operonx/app/doors.py`: `has_doors`, `bind_item`, `serve_inputs`, `plain`. `Job.has_doors` and
+  `Job.bind` call them.
+- `ServeRunner._run_one` binds the session's one item for a doorless engine, refuses a misfit
+  before any run (`HttpSession.refuse` → the endpoint answers `400`; `on_close` still runs), and
+  `serve_session(reply=True)` sends `plain(handle.result())` before closing the session.
+- The webhook endpoint calls `ServeRunner.precheck` before its `202`. Without `on_session` it is
+  the same check the run makes; with one, only the body's fields are checked.
+- `compile_graph` records the `@graph`'s defaults (`engine.inputs_defaults`). A parameter the
+  caller leaves out takes its default. Before this, a compiled graph's defaults were lost (every
+  parameter compiled as `None`).
+- `describe_service(...)["doors"]` is `true` or `false` for a graph object, `null` for
+  `module:attr` (describing imports nothing).
+- Guide pages 01, 02 and 05 lead with the doorless shape. The `http` and `chat` templates are
+  doorless, and their generated projects' tests pass.
+
+**Gate G1:**
+
+- `tests/internal/app/serve/test_doorless.py`, 26 tests: http 200 with outputs, defaults, query
+  plus body, a bare body; the four refusals with no run and no trace; 500 with the trace id; SSE
+  with one event; webhook refusals before the `202` and outputs at `?callback=`; schedule ticks
+  with and without a `tick` parameter; `on_session` plus body; a Job through a project's own door
+  op (fails on 1.18.1).
+- Two existing tests changed, neither a door graph's:
+  - `test_http_replies_carry_the_trace_id` posted a body to a graph with no parameters, which is
+    now a 400; it posts none.
+  - `test_describe_is_plain_data…` gets the new `doors` key.
+- Latency (`scripts/bench_doorless.py`, 1,000 requests each, interleaved, TestClient, tracing
+  off):
+
+  | run | door p50 / p95 | doorless p50 / p95 |
+  |---|---|---|
+  | 1 | 4.91 / 5.79 ms | 4.24 / 4.96 ms |
+  | 2 | 5.06 / 5.93 ms | 4.32 / 5.05 ms |
+
+  Doorless is about 14% faster at p50: it has two fewer ops.
+
+### S2
+
+- `Job(schedule=schedule(...))`. The application turns each scheduled job into a `schedule` door
+  named after the job (`declare.job_clock`, `options["job"]`), so it is grouped onto its port,
+  listed and served like any door. `build_app` gives it a `JobClock` (`serve/triggers.py`)
+  instead of a `ServeRunner`.
+  - `JobClock` reuses `ScheduleTransport`, so the rules are the same: skip-if-running, the
+    `skipped` count, `queue=` single-replica firing.
+  - Each tick calls `job.run(trigger={"by": "schedule", "slot", "at"})`. The trigger lands in
+    `run.json`.
+  - A failed or raising run is logged and counted (`failed`); the clock goes on.
+- `describe_job(...)["schedule"]`, `describe_service(...)["job"]`; `serve --list` and
+  `run --list` show both.
+- **Gate G2:** `tests/internal/app/jobs/test_job_schedule.py`, 9 tests:
+  - per-item records per tick with the trigger in `run.json`;
+  - a fresh run id per tick;
+  - skipped ticks counted during a slow run;
+  - failed runs and a raising `items` keep the clock going;
+  - the clock beside an http service on one port;
+  - an on-demand run without a trigger;
+  - describe;
+  - two jobs at the same time on one port.
+
+  Also checked by hand: `operonx serve` with `every=1` on a scratch project wrote 3 runs in
+  4.5 s, each `ok` with its trigger.
+
+### S3
+
+- Parsing `[[serve]]` warns once per process (`manifest._warn_serve_blocks`). The warning is a
+  `DeprecationWarning` and is also logged at WARNING, because Python hides the warning outside
+  `__main__`. It names the file and the replacement.
+- `docs/guide/08-deployment.md`:
+  - the TOML example is replaced by the deprecation note;
+  - the variants example is now Python.
+
+  The other `docs/guide` mentions say "deprecated". `operonx/guide` never showed `[[serve]]`.
+- **Gate G3:** `tests/internal/app/test_serve_deprecation.py`:
+  - two `[[serve]]` manifests warn once;
+  - a manifest with `[project]`, `[[graph]]` and `[tracing]` does not warn;
+  - `[[serve]]` still loads.
+

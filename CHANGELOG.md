@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.0] - 2026-10-10
+
+### Added
+
+- **A graph without doors is served by its signature** (`docs/DOORLESS_SERVICES_PLAN.md`). On
+  `http`, `webhook` and `schedule`, a graph with no `ingress` op takes the request's JSON body
+  and query string as its parameters, and answers with its outputs: what `Operon(g).run(...)`
+  returns, without the `$` keys. The `ingress → read_request → … → egress` wrapper a service
+  needed goes away:
+
+  ```python
+  @graph
+  def chat_flow(question, k=3):
+      a = answer(question=question, k=k)
+      START >> a >> END
+
+  Service("chat", http("POST", "/chat", port=8000), graph=chat_flow)
+  # POST /chat {"question": "hi"}  ->  200 {"answer": ...}
+  ```
+
+  - A parameter left out takes the `@graph`'s default. A body that is not an object goes to the
+    one required parameter.
+  - Refused with `400 {"error", "endpoint", "field"}`, and no run started:
+    - a field that is not a parameter;
+    - a required parameter nobody gave;
+    - a name in both the query and the body.
+
+    A webhook refuses these before its `202`.
+  - A failing run answers `500` with its trace id, as before.
+  - SSE readers get one event: the outputs.
+  - A queued webhook's `?callback=` gets the outputs.
+  - A schedule passes `tick` and `at` only to a graph that has those parameters.
+  - `on_session` inputs and the body fill the parameters together.
+  - The door's own query names (`trace_id`, `callback`, `thread_id`, `run_id`, `after_seq`) never
+    reach the graph.
+  - A graph with doors is served exactly as before.
+  - Latency: over 1,000 requests, p50 was 4.24 ms doorless vs 4.91 ms with doors
+    (`scripts/bench_doorless.py`).
+- **`Job(schedule=schedule(at="07:00", port=...))` runs a job on a clock.** Before, a scheduled
+  sweep over many items had to loop by hand with `invoke` inside one op: no per-item records, no
+  concurrency. Now:
+  - `operonx serve` runs the job's clock beside the services on that port;
+  - each tick is a fresh run, and `run.json` records
+    `"trigger": {"by": "schedule", "slot", "at"}`;
+  - a tick that lands during a run is skipped and counted;
+  - a failed run does not stop the clock;
+  - `queue=` fires each tick on one replica;
+  - `operonx run <job>` still runs it on demand.
+
+  `--list` shows the clock under its port and the schedule under the job.
+  `Job.run(trigger=...)` records what started a run.
+- **`operonx.app.doors`**: `has_doors(graph)`, `bind_item(...)`, `serve_inputs(...)` and `plain(...)`.
+  These are the one set of rules jobs and services both use.
+- **`describe_service(...)["doors"]`**: `true` or `false` for a service whose graph is an object,
+  `null` for one named `module:attr`. It shows which shape a service has.
+
+### Deprecated
+
+- **`[[serve]]` in `operonx.toml`; it will be removed in 2.0.** Services are declared in one place:
+  `Service(...)` in the application that `[project] app` points at. Parsing a `[[serve]]` block
+  warns once per process, as a `DeprecationWarning` and in the log, naming the file and the
+  replacement. `[project]`, `[resources]`, `[tracing]`, `[studio]` and `[[graph]]` stay.
+
+### Changed
+
+- **`operonx init --template http` and `chat` generate doorless graphs.** The guide's composition
+  page leads with the doorless shape and keeps doors under "Doors: for streams".
+- **A doorless graph on a `websocket` listener logs a warning.** It still runs as before: once per
+  connection, reading none of its items. It will be refused from 2.0.
+
+### Fixed
+
+- **A Job over a graph with its own door op feeds the item through that door.** `Job.has_doors()`
+  recognised only the library `ingress`. A graph whose ingress was a project's own
+  `@op(door="ingress")` op (a call's `receive_audio`) had the item bound to its parameters
+  instead. Any op with `door="ingress"` now counts.
+
 ## [1.18.1] - 2026-10-09
 
 ### Added
@@ -3292,7 +3369,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.0...HEAD
+[1.19.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.18.1...v1.19.0
 [1.17.5]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.4...v1.17.5
 [1.17.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.3...v1.17.4
 [1.17.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.17.2...v1.17.3

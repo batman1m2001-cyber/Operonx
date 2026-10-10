@@ -21,6 +21,7 @@ from operonx.app.declare import ref_name
 from operonx.app.manifest import (
     _ENTRY_RE,
     CODEC_KINDS,
+    STREAM_KINDS,
     Manifest,
     ManifestError,
     ServeSpec,
@@ -88,9 +89,13 @@ def compile_graph(
             f"{type(graph_fn).__name__}, which is not a @graph"
         )
     try:
-        params = {name: None for name in inspect.signature(graph_fn).parameters}
+        signature = inspect.signature(graph_fn).parameters
     except (TypeError, ValueError):
-        params = {}
+        signature = {}
+    params = {name: None for name in signature}
+    defaults = {
+        name: p.default for name, p in signature.items() if p.default is not inspect.Parameter.empty
+    }
     unknown = set(bound) - set(params)
     if unknown:
         raise TypeError(
@@ -118,7 +123,27 @@ def compile_graph(
     # What a door's RunRequest must carry: the graph's signature is the
     # contract, checked at the gate (`ServeRunner._inputs_fit`).
     engine.inputs_expected = runtime
+    # What a doorless door fills a parameter with when the caller leaves it
+    # out: the @graph's own default (`operonx.app.doors.serve_inputs`).
+    engine.inputs_defaults = {k: v for k, v in defaults.items() if k in runtime}
     return engine
+
+
+def _warn_doorless_stream(spec: ServeSpec, engines: Dict[str, Any]) -> None:
+    """A stream door's graph should read its items through an ingress door:
+    a stream has many items over the run's lifetime, and a graph's
+    parameters take one set. Such a graph runs as it always has — once per
+    connection, reading nothing — with a warning; refused from 2.0."""
+    from operonx.app.doors import has_doors
+
+    for key, engine in engines.items():
+        if not has_doors(engine):
+            LOGGER.warning(
+                f"[serve:{key}] a {spec.kind} listener whose graph {ref_name(spec.graph)} has "
+                "no ingress op: it runs once per connection and reads none of its items. "
+                "Read them with `ingress()` and answer with `egress()`; a graph without "
+                "doors belongs on http, webhook or schedule. Refused from operonx 2.0."
+            )
 
 
 def _resolve_bind(bind: Dict[str, Any], where: str) -> Dict[str, Any]:
@@ -230,7 +255,7 @@ def build_app(
     check_sinks("serve", specs)
     engines = dict(engines or {})
     routes: List[Any] = []
-    runners: List[ServeRunner] = []
+    runners: List[Any] = []  # a ServeRunner per door, a JobClock per scheduled job
 
     for spec in specs:
         if spec.kind == "asgi":
@@ -241,6 +266,13 @@ def build_app(
                 Mount(spec.path, app=resolve_ref(spec.app, field=f"[[serve]] {spec.name!r} app"))
             )
             LOGGER.info(f"[serve:{spec.name}] mounted {ref_name(spec.app)} at {spec.path}")
+            continue
+
+        if spec.options.get("job") is not None:
+            # a scheduled job: its ticks run the job, not a graph
+            from .triggers import JobClock
+
+            runners.append(JobClock(spec))
             continue
 
         if spec.kind in CODEC_KINDS:
@@ -277,9 +309,12 @@ def build_app(
             # this app simply carries the lifespan.
             transport = resolve_transport(spec.kind)(spec)
 
+        if spec.kind in STREAM_KINDS:
+            _warn_doorless_stream(spec, built)
         runner = ServeRunner(engine, spec, transport=transport, variants=variants)
         if runner._on_session is None:
             runner._on_session = _default_on_session(spec)
+        transport.precheck = runner.precheck
         # The websocket route needs to ask the same question the runner
         # would, one step earlier — before the handshake is answered.
         transport.gate = runner._request_for
@@ -405,6 +440,8 @@ async def _stream_reply(
     try:
         first = await frames.__anext__()
     except StopAsyncIteration:
+        if session.refusal is not None:
+            return JSONResponse(session.refusal[1], status_code=session.refusal[0])
         return _no_output(spec, session.trace_id, JSONResponse)
 
     async def body():
@@ -468,6 +505,8 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
         session = await transport.handle(payload, meta=meta)
         headers = _trace_headers(session.trace_id)
 
+        if session.refusal is not None:
+            return JSONResponse(session.refusal[1], status_code=session.refusal[0])
         if not session.replies:
             return _no_output(spec, session.trace_id, JSONResponse)
         return JSONResponse(session.reply, headers=headers)
@@ -482,8 +521,18 @@ def _webhook_endpoint(spec: ServeSpec, transport: Any, JSONResponse):
             return refusal
         from .triggers import Refused
 
+        meta = _meta_from_request(request)
+        # a doorless graph refuses a body that does not fit before the 202
+        precheck = getattr(transport, "precheck", None)
+        problem = precheck(payload, meta) if precheck is not None else None
+        if problem is not None:
+            LOGGER.info(f"[serve:{spec.name}] refused a request: {problem}")
+            return JSONResponse(
+                {"error": str(problem), "endpoint": spec.name, "field": problem.field},
+                status_code=400,
+            )
         try:
-            run_id = await transport.submit(payload, meta=_meta_from_request(request))
+            run_id = await transport.submit(payload, meta=meta)
         except Refused as no:
             return JSONResponse(no.body, status_code=no.status)
         if run_id is None:

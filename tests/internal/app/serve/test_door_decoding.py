@@ -157,7 +157,7 @@ def test_http_replies_carry_the_trace_id():
     assert ok.headers["x-operonx-trace-id"] == "abc123"
 
     with TestClient(build_app((_http(),), engines={"h": FAILING})) as client:
-        failed = client.post("/go", json={"a": 1})
+        failed = client.post("/go")  # the graph takes nothing: a body would be a 400
     assert failed.status_code == 500
     assert failed.headers["x-operonx-trace-id"]
     # In the body too: a client that logs only the body can still find the run.

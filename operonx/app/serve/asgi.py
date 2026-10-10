@@ -119,8 +119,15 @@ class HttpSession(BoundedSession):
         # A run is never paced by a reader: one that leaves makes items
         # "not delivered" (`gone`) until another follows, not the run wait.
         self.gone = False
+        #: ``(status, body)`` when the door refused the request without a
+        #: run (a doorless graph's body that does not fit, `refuse`).
+        self.refusal: Optional[Tuple[int, Dict[str, Any]]] = None
         self.feed_nowait(payload)
         self.end_input()
+
+    def refuse(self, status: int, body: Dict[str, Any]) -> None:
+        """The request is answered with *status* and *body*; no run."""
+        self.refusal = (status, body)
 
     async def _send(self, item: Any) -> bool:
         self.replies.append(item)

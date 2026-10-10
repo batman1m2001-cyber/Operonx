@@ -5,18 +5,12 @@ from operonx import op
 
 
 @op
-def read_text(body: dict) -> dict:
-    """The request body's `text`, with its whitespace collapsed."""
-    return {"text": " ".join(str(body.get("text", "")).split())}
+def clean(text: str) -> dict:
+    """The text with its whitespace collapsed."""
+    return {"text": " ".join(str(text).split())}
 
 
 @op
 def measure(text: str) -> dict:
     words = text.split()
-    return {
-        "result": {
-            "words": len(words),
-            "chars": len(text),
-            "longest": max(words, key=len, default=""),
-        }
-    }
+    return {"words": len(words), "chars": len(text), "longest": max(words, key=len, default="")}

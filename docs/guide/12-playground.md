@@ -62,7 +62,7 @@ class TelcoCodec(Codec):
 Service("call", websocket("/ws/call"), graph=call_graph, playground=TelcoCodec)
 ```
 
-(`playground = "module:attr"` in a `[[serve]]` block does the same.) A
+(`playground = "module:attr"` in a deprecated `[[serve]]` block does the same.) A
 door with no codec offers no toy. A session hook can tell a playground
 session apart by `session.meta["playground"]`.
 
@@ -116,7 +116,7 @@ real client's session can keep the same, when its service opts in:
 Service("summary", http("/summary"), graph=summary_graph, replay=True)
 ```
 
-(or `replay = true` in a `[[serve]]` block). Each run of that door then
+(or `replay = true` in a deprecated `[[serve]]` block). Each run of that door then
 carries what the client sent, in order and stamped (`replay_script`), and
 the connection's query (`replay_query`). On Monday a request crashes; on
 Tuesday you fix the code and replay that very request in the playground.

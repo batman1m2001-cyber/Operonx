@@ -117,30 +117,21 @@ from scoring._text import word_count
 
 
 @op
-def score(call: dict) -> dict:
-    words = word_count(call["text"])
-    return {
-        "result": {
-            "id": call["id"],
-            "words": words,
-            "verdict": "engaged" if words >= 5 else "brief",
-        }
-    }
+def score(id: str, text: str) -> dict:
+    words = word_count(text)
+    return {"id": id, "words": words, "verdict": "engaged" if words >= 5 else "brief"}
 ```
 
 ```python file=src/scoring/graph.py
 from operonx import END, START, graph
-from operonx.app.serve import egress, ingress
 
 from scoring.ops import score
 
 
 @graph
-def score_flow():
-    src = ingress()
-    s = score(call=src["item"])
-    out = egress(item=s["result"])
-    START >> src >> s >> out >> END
+def score_flow(id, text):
+    s = score(id=id, text=text)
+    START >> s >> END
 ```
 
 ```python file=app/__init__.py
@@ -189,7 +180,7 @@ from scoring.ops import score
 
 
 def test_score_counts_words():
-    assert score(call={"id": "a", "text": "one two"})()["result"]["words"] == 2
+    assert score(id="a", text="one two")()["words"] == 2
 
 
 def test_the_flow_scores_every_call():

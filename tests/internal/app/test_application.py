@@ -137,6 +137,8 @@ def test_describe_is_plain_data_and_imports_nothing(project):
         "port": 8123,
         "session": "per_request",
         "graph": f"{name}:score_flow",
+        "job": None,
+        "doors": None,  # named as module:attr — describing imports nothing
         "variants": [],
         "host": "0.0.0.0",
         "workers": 1,

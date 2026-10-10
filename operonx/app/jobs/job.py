@@ -128,6 +128,11 @@ class Job:
             Default: the project's — ``[jobs] dir`` in operonx.toml, else
             ``.operonx/jobs`` under the project root.
         description: One line, for ``--list`` and the studio.
+        schedule: ``schedule(every="1h" | at="07:00", port=...)``: the job
+            also runs on that clock, inside ``operonx serve`` on that port.
+            Each tick is a fresh run (no resume) recording what triggered
+            it; a tick while the last run is going is skipped and counted.
+            ``operonx run <job>`` still runs it on demand.
     """
 
     #: What a run of this job carries as its origin (an `Eval` says "eval").
@@ -162,9 +167,15 @@ class Job:
         on_item: Optional[Callable[[Any], Any]] = None,
         description: str = "",
         fail_run: Optional[bool] = None,
+        schedule: Any = None,
     ):
         if not name or not isinstance(name, str):
             raise ValueError("a job needs a name")
+        if schedule is not None and getattr(schedule, "kind", None) != "schedule":
+            raise TypeError(
+                f"job {name!r}: schedule= is a schedule(every=... | at=..., port=...), "
+                f"not {type(schedule).__name__}"
+            )
         if fail_run is not None:
             self.items_fail_run = fail_run
         self.name = name
@@ -218,6 +229,9 @@ class Job:
         #: is the project's: see :func:`default_record_dir`.
         self.record_dir: Optional[Path] = Path(record_dir) if record_dir is not None else None
         self.on_item = on_item
+        #: When the job runs by itself: a ``schedule()`` listener. ``operonx
+        #: serve`` runs its clock in the server on that port.
+        self.schedule = schedule
         self._engine: Any = None
         self._reducer: Any = None
         self._doors: Optional[bool] = None
@@ -258,51 +272,22 @@ class Job:
         return self._reducer
 
     def has_doors(self) -> bool:
-        """True when the graph reads items through ``ingress`` — the serving
-        shape. Checked once, anywhere in the graph."""
+        """True when the graph reads items through an ingress door — the
+        serving shape (:func:`operonx.app.doors.has_doors`)."""
         if self._doors is None:
-            from operonx.app.serve.ops import ingress
+            from operonx.app.doors import has_doors
 
-            target = getattr(ingress, "__wrapped__", ingress)
-
-            def walk(g: Any) -> bool:
-                for op in (getattr(g, "_ops", None) or {}).values():
-                    if getattr(op, "core", None) is target or walk(op):
-                        return True
-                return False
-
-            self._doors = walk(self.engine().graph)
+            self._doors = has_doors(self.engine())
         return self._doors
 
     def bind(self, item: Any) -> Dict[str, Any]:
-        """The run inputs for one item of a graph without doors."""
-        inputs = dict(self.inputs)
-        params = list(self.engine().graph.inputs)
-        if self.input is not None:
-            if self.input not in params:
-                raise ValueError(
-                    f"input={self.input!r}, but the graph takes {params or 'no parameters'}"
-                )
-            inputs[self.input] = item
-            return inputs
-        if isinstance(item, Mapping):
-            unknown = [k for k in item if k not in params]
-            if unknown:
-                raise ValueError(
-                    f"the item has {unknown}, which the graph does not take "
-                    f'(it takes {params or "nothing"}); pass input="<param>" to hand it '
-                    "the whole item"
-                )
-            inputs.update(item)
-            return inputs
-        free = [p for p in params if p not in self.inputs]
-        if len(free) != 1:
-            raise ValueError(
-                f"a {type(item).__name__} item needs one graph parameter to go to; "
-                f'the graph has {free or "none"} free — pass input="<param>"'
-            )
-        inputs[free[0]] = item
-        return inputs
+        """The run inputs for one item of a graph without doors
+        (:func:`operonx.app.doors.bind_item`)."""
+        from operonx.app.doors import bind_item
+
+        return bind_item(
+            list(self.engine().graph.inputs), item, fixed=self.inputs, input=self.input
+        )
 
     # -- identity ----------------------------------------------------------
 
@@ -338,23 +323,28 @@ class Job:
         resume: bool = False,
         record_dir: Union[str, Path, None] = None,
         on_item: Optional[Callable[[Any], Any]] = None,
+        trigger: Optional[Mapping[str, Any]] = None,
     ) -> JobRun:
         """Run the job once and return its record. *record_dir* overrides
         where it is written (for this run, and every step's); *on_item* is
-        called with each item's ``ItemResult`` as it is recorded."""
-        from .runner import run_job, run_steps
+        called with each item's ``ItemResult`` as it is recorded; *trigger*
+        says what started it (a schedule's tick), kept in the record."""
+        from .runner import TRIGGER, run_job, run_steps
 
         kept = (self.record_dir, self.on_item)
         if record_dir is not None:
             self.record_dir = Path(record_dir)
         if on_item is not None:
             self.on_item = on_item
+        token = TRIGGER.set(dict(trigger)) if trigger else None
         try:
             if self.steps is not None:
                 return await run_steps(self, resume=resume, record_dir=record_dir)
             return await run_job(self, resume=resume)
         finally:
             self.record_dir, self.on_item = kept
+            if token is not None:
+                TRIGGER.reset(token)
 
     def run_sync(self, **kwargs: Any) -> JobRun:
         """`run()` from synchronous code — a script, a cron entry."""
@@ -394,13 +384,19 @@ class Job:
                 return ref_name(value)
             return type(value).__name__
 
+        clock = None
+        if self.schedule is not None:
+            clock = {**self.schedule.options, "port": self.schedule.port}
         if self.steps is not None:
-            return {
+            out = {
                 "kind": "steps",
                 "steps": [s.name for s in self.steps],
                 "description": self.description,
             }
-        return {
+            if clock:
+                out["schedule"] = clock
+            return out
+        out = {
             "kind": "job",
             "graph": self.graph
             if isinstance(self.graph, str)
@@ -422,6 +418,9 @@ class Job:
             "preflight": list(self.preflight) or None,
             "description": self.description,
         }
+        if clock:
+            out["schedule"] = clock
+        return out
 
     def __copy__(self) -> "Job":
         """A shallow copy whose own bound methods (an `Eval`'s ``items``)
