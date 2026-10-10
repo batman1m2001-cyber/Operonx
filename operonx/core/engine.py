@@ -1733,20 +1733,27 @@ class Operon:
 
     def input_schema(self) -> Dict[str, Any]:
         """Return JSON Schema describing the workflow's expected inputs."""
-        return self._params_to_schema(self.graph.inputs or {}, f"{self.name}_input")
+        return self._params_to_schema(
+            self.graph.inputs or {}, f"{self.name}_input", getattr(self, "inputs_defaults", None) or {}
+        )
 
     def output_schema(self) -> Dict[str, Any]:
         """Return JSON Schema describing the workflow's outputs."""
         return self._params_to_schema(self.graph.outputs or {}, f"{self.name}_output")
 
     @staticmethod
-    def _params_to_schema(params: dict, title: str) -> Dict[str, Any]:
-        """Convert a dict of Param objects to a JSON Schema dict."""
+    def _params_to_schema(params: dict, title: str, defaults: Optional[dict] = None) -> Dict[str, Any]:
+        """Convert a dict of Param objects to a JSON Schema dict. ``defaults``
+        are the ``@graph`` signature's (``inputs_defaults``), which a
+        runtime parameter's ``Param`` does not carry."""
+        defaults = defaults or {}
         properties = {}
         required = []
         for name, param in params.items():
             prop: Dict[str, Any] = {}
-            if param.annotation is not None:
+            # `Param.type`: `Any` when nothing says otherwise. (This read
+            # `param.annotation`, which `Param` never had: every call raised.)
+            if param.type is not None and param.type is not Any:
                 type_map = {
                     int: "integer",
                     float: "number",
@@ -1755,11 +1762,12 @@ class Operon:
                     list: "array",
                     dict: "object",
                 }
-                prop["type"] = type_map.get(param.annotation, "string")
+                prop["type"] = type_map.get(param.type, "string")
             if param.description:
                 prop["description"] = param.description
-            if param.default is not None:
-                prop["default"] = param.default
+            default = defaults.get(name, param.default)
+            if name in defaults or default is not None:
+                prop["default"] = default
             else:
                 required.append(name)
             properties[name] = prop
