@@ -103,6 +103,9 @@ from operonx.providers.ops import (
 12. **Models and stores are `resources.yaml` keys**; call
     `operonx.bootstrap()` (or `Application.bootstrap()`) before building an
     engine that uses them.
+13. **A served graph's parameters are the request; its outputs are the
+    reply.** No `ingress`/`egress` and no op that unpacks a request dict:
+    a misfit is a `400` before any run. Doors are for streams only (page 2).
 
 ## Where this guide lives
 

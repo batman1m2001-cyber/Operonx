@@ -1,14 +1,11 @@
 """The greeting feature's wiring: no logic here, only ops and edges."""
 
 from operonx import END, START, graph
-from operonx.app.serve import egress, ingress
 
 from greeting.ops import greet
 
 
 @graph
-def greet_flow():
-    src = ingress()  # one item per person, from whoever runs the graph
-    g = greet(person=src["item"])
-    out = egress(item=g["result"])  # the item handed back
-    START >> src >> g >> out >> END
+def greet_flow(id, full_name=""):  # a job item or a request body fills these
+    g = greet(id=id, full_name=full_name)
+    START >> g >> END

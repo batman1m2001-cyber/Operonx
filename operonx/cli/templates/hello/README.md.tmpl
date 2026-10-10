@@ -3,7 +3,9 @@
 {{summary}} Built on [operonx](https://pypi.org/project/operonx/).
 
 `src/greeting/` is the feature: `ops.py` holds the logic, `graph.py` wires
-it. `app/main.py` declares what runs it: the `greet_people` job over
+it. The graph's parameters (`id`, `full_name`) are what it is given — a line of
+the dataset, or a request's JSON body — and its outputs are the answer.
+`app/main.py` declares what runs it: the `greet_people` job over
 `datasets/people.jsonl`, and the `greet` HTTP service.
 
 ## Run
@@ -19,7 +21,8 @@ it. `app/main.py` declares what runs it: the `greet_people` job over
 ```bash
 {{run}}operonx serve --list       # what would listen, and where
 {{run}}operonx serve              # POST /greet on :8000 (PORT overrides)
-curl -s localhost:8000/greet -d '{"id": "x", "name": "grace"}'
+curl -s localhost:8000/greet -d '{"id": "x", "full_name": "grace"}'   # {"id": "x", "greeting": "Hello, Grace!"}
+curl -s localhost:8000/greet -d '{"id": "x", "nme": "grace"}'    # 400: "nme" is not a parameter
 ```
 
 ## Grow it

@@ -464,7 +464,12 @@ asyncio.run(main())
   mutable object.
 - **Inputs and outputs are traced as JSON.** A dict with tuple keys breaks
   the trace; use string keys.
-- **HTTP doors reply after the run ends**; stream with a websocket door.
+- **An http service replies when the run ends.** A graph without doors
+  answers once, with its outputs; to send while the run goes on, give the
+  graph doors and read it as server-sent events, or serve it on a websocket.
+- **A `@graph` parameter cannot be called `name`**: `name=` names the graph
+  itself. A request or item field called `name` needs another parameter
+  name (`full_name`), or `input=` to take the whole body.
 - **A keyword your function takes is its input.** `@op def label(id, name)`
   called `label(id=7, name="x")` gets both, though `id` and `name` are also
   op settings. To give such a setting, `label.configure(name="labeller")(id=7,

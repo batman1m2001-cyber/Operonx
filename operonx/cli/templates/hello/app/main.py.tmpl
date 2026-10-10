@@ -34,7 +34,7 @@ APP = Application(
             "greet",
             http("POST", "/greet", port=env("PORT", 8000)),
             graph=greet_flow,
-            description="POST {id, name}, get {id, greeting}.",
+            description="POST {id, full_name}, get {id, greeting}.",
         )
     ],
     jobs=[greet_people],

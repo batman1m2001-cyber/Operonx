@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.19.3] - 2026-10-10
+
+### Changed
+
+- **`operonx init` writes the doorless design into what it generates.**
+  - `AGENTS.md` has a "Serving a graph" section:
+    - the signature is the request;
+    - misfits are a `400`;
+    - the reply is the outputs of the ops wired to `END`;
+    - checks go in the first op;
+    - `input=` is for foreign payloads;
+    - doors are for streams only;
+    - a sweep is a `Job(schedule=)`.
+  - The ladder names `Job(schedule=)`.
+  - The `hello` template is doorless: `greet_flow(id, full_name)`, with a test that the service
+    answers and refuses an unknown field.
+  - The `chat` and `hello` READMEs say where the body goes.
+- **Guide:**
+  - rule 13 in the README: a served graph's parameters are the request;
+  - the "http replies when the run ends" gotcha is rewritten for both shapes;
+  - "service hooks" replaces "door hooks".
+
+### Documented
+
+- **A `@graph` parameter cannot be called `name`**: `name=` names the graph (guide page 4).
+
 ## [1.19.2] - 2026-10-10
 
 ### Fixed
@@ -3398,7 +3424,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.2...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.3...HEAD
+[1.19.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.2...v1.19.3
 [1.19.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.1...v1.19.2
 [1.19.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.0...v1.19.1
 [1.19.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.18.1...v1.19.0

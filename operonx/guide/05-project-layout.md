@@ -34,7 +34,7 @@ scorer/
 - **Imports go one way:** `app/` → `src/<feature>/graph.py` → `ops.py` →
   `_helpers.py`. Nothing in `src/` imports `app/`.
 - **`app/main.py` is the map of the product:** every service and job,
-  with the graph each runs. Door hooks (`on_session`) live beside it.
+  with the graph each runs. Service hooks (`on_session`) live beside it.
 - **Resources by key.** Ops reach models and stores through
   `resources.yaml` keys (`LLMOp.of(resource="assistant")`), never by
   building clients. Secrets are `${VAR}` there and live in `.env`.
@@ -214,7 +214,7 @@ operonx run score_calls
   it ends.
 - **An eval** is a `datasets/<name>.jsonl` and an `Eval(...)` (a kind of
   job) in `app/main.py`; `operonx run <eval>` gates CI.
-- **Door hooks** (`on_session`, `on_close`) go in `app/`, beside `main.py`.
+- **Service hooks** (`on_session`, `on_close`) go in `app/`, beside `main.py`.
 - **While developing:** `operonx serve --reload` restarts on a change;
   `--host`/`--port` bind elsewhere than declared. Every listener answers
   `GET /healthz`. `operonx init --editable ../Operon` makes a project use an

@@ -4,7 +4,9 @@
 
 `src/chat/` is the feature: `ops.py` holds the logic, `graph.py` wires it
 around an `LLMOp` that calls the `llm:assistant` model from
-`resources.yaml`. `app/main.py` declares the `chat` service that runs it.
+`resources.yaml`. The graph's parameter (`question`) is what a caller sends
+in the JSON body, and its outputs (`answer`, `error`) are the reply.
+`app/main.py` declares the `chat` service that runs it.
 
 ## Run
 
