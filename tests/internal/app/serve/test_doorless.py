@@ -163,6 +163,7 @@ def test_a_request_that_does_not_fit_is_a_400_and_mints_no_run(url, body, field)
         reply = client.post(url, json=body)
     assert reply.status_code == 400
     assert reply.json()["field"] == field and reply.json()["endpoint"] == "chat"
+    assert "input=" not in reply.json()["error"]  # a job's advice, not a caller's
     assert "x-operonx-trace-id" not in reply.headers  # no run, no trace
     assert SEEN == []
 
@@ -231,6 +232,34 @@ def test_describe_says_which_shape_a_service_has():
     assert describe_service(_chat())["doors"] is False
     door = Service("door", http("POST", "/door", port=8906), graph=door_flow)
     assert describe_service(door)["doors"] is True
+
+
+@op
+def read_mail(payload: dict) -> dict:
+    SEEN.append(payload)
+    return {"id": payload["ID"]}
+
+
+@graph
+def on_mail(payload):
+    r = read_mail(payload=payload)
+    START >> r >> END
+
+
+def test_input_hands_the_whole_body_to_one_parameter():
+    service = Service("mail", http("POST", "/mail", port=8911), graph=on_mail, input="payload")
+    with TestClient(_app(service)) as client:
+        body = {"ID": "m1", "From": "a@b.c", "Subject": "hi"}  # fields the graph does not declare
+        assert client.post("/mail", json=body).json() == {"id": "m1"}
+        assert client.post("/mail?payload=x", json=body).json()["field"] == "payload"
+    assert SEEN == [body]
+
+
+def test_input_on_a_webhook_skips_the_field_check_before_the_202():
+    service = Service("mail", webhook("/mail", port=8912), graph=on_mail, input="payload")
+    with TestClient(_app(service)) as client:
+        assert client.post("/mail", json={"ID": "m2", "Extra": 1}).status_code == 202
+        assert _wait(lambda: SEEN == [{"ID": "m2", "Extra": 1}])
 
 
 # ── webhook ──────────────────────────────────────────────────────────────

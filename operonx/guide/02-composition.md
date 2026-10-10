@@ -296,6 +296,9 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   in both the query and the body. A body that is not an object goes to the
   graph's one required parameter. A run that fails answers `500` with its
   `trace_id`, never the error text.
+- `input="payload"` hands the whole body to that one parameter instead: for a
+  payload someone else shapes (a mail server's webhook), whose fields the
+  graph does not declare.
 - With doors, the body is the one ingress item (an empty body is `None`)
   and the reply is the egress item(s).
 - `websocket(path, port=...)` needs `max_inflight=N` and a graph with
