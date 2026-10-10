@@ -576,6 +576,7 @@ class Bridge:
     # -- sessions ----------------------------------------------------------
 
     async def open(self, msg: Dict[str, Any]) -> None:
+        from .doors import BindError
         from .serve.runner import serve_session
 
         sid = str(msg.get("sid") or uuid.uuid4().hex[:12])
@@ -676,14 +677,22 @@ class Bridge:
             # the run's tasks inherit this: its failing resources fail here only
             _FAILING.set(frozenset(session.conditions.get("fail") or ()))
             watcher = asyncio.ensure_future(watch())
+            engine = runner._engine_for(request)
+            # a graph without doors takes the toy's first message as its
+            # parameters and answers with its outputs, as the door does
+            doorless = runner._doorless(engine)
             try:
+                bound = await runner._bind(engine, request, session) if doorless else request
                 handle = await serve_session(
-                    runner._engine_for(request),
+                    engine,
                     session,
-                    request,
+                    bound,
                     metadata=metadata,
                     on_start=lambda h: follow.__setitem__("trace", getattr(h, "trace", None)),
+                    reply=doorless,
                 )
+            except BindError as exc:  # the message does not fit: no run, as at the door
+                error = f"refused: {exc}"
             except Exception as exc:  # noqa: BLE001 — reported as the session's end
                 error = f"{type(exc).__name__}: {exc}"
             finally:
