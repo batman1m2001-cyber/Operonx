@@ -18,6 +18,7 @@ from operonx.app.declare import ref_name
 from operonx.app.doors import RESERVED_QUERY, BindError, has_doors, plain, serve_inputs
 from operonx.app.manifest import STREAM_KINDS, ServeSpec
 from operonx.core.loggings import LOGGER
+from operonx.core.ops.graph.task_scheduler import FINAL_TIMEOUT_S
 from operonx.core.workflow_trace import unhandled
 
 from .protocol import SESSION_KEY, RunRequest, Session
@@ -113,6 +114,11 @@ async def serve_session(
                 await asyncio.wait_for(_drain(handle), timeout)
             except asyncio.TimeoutError:
                 handle.cancel()
+                # the cancelled run still runs its op after END: let it, and
+                # close the session after it (bounded), not under it
+                ending = getattr(handle, "_scheduler_task", None)
+                if ending is not None and not ending.done():
+                    await asyncio.wait({ending}, timeout=FINAL_TIMEOUT_S + 5)
                 raise RunTimeout(
                     f"run exceeded {timeout:g}s", trace_id=getattr(trace, "trace_id", None)
                 ) from None
@@ -177,13 +183,13 @@ class ServeRunner:
 
     def _request_for(self, session: Session) -> Optional[RunRequest]:
         # A transport that can refuse before completing its handshake asks
-        # this early and stores the answer, so the hook runs exactly once
-        # per connection however the transport is shaped.
+        # this early and stores the answer, so the decision is made exactly
+        # once per connection however the transport is shaped.
         decided = getattr(session, "run_request", None)
         if decided is not None:
             return decided
         if self._on_session is None:
-            return RunRequest()
+            return self._bound_request(session)
         try:
             request = self._on_session(session)
         except Exception as exc:  # noqa: BLE001
@@ -216,6 +222,68 @@ class ServeRunner:
         elif not self._inputs_fit(request):
             return None
         return request
+
+    def _bound_request(self, session: Session) -> Optional[RunRequest]:
+        """No hook: the connection's query fills the graph's parameters.
+
+        The rules for a query, on every door (callbot plan O1): a value of
+        ``""`` is absent — the default applies, or a required parameter is
+        refused; a key the graph does not take is ignored (a caller adding
+        one must not break the door); the last of a repeated key wins.
+        ``?variant=`` picks the engine first, since variants may take
+        different parameters. A graph with doors — a stream — is bound here,
+        before its handshake is answered; a doorless one is bound with its
+        body when the run starts (`_bind`). ``None`` refuses, and the reason
+        is kept on the session (``refusal``) for the transport to say.
+        """
+        meta = getattr(session, "meta", None) or {}
+        query = {str(k): v for k, v in (meta.get("query") or {}).items()}
+        variant = None
+        if self.variants:
+            variant = query.get("variant") or next(iter(self.variants))
+            if variant not in self.variants:
+                return self._turn_away(
+                    session,
+                    BindError(
+                        f"unknown variant {variant!r}; declared: {sorted(self.variants)}",
+                        field="variant",
+                    ),
+                )
+        engine = self.variants[variant] if self.variants else self.engine
+        params = self._params(engine)
+        given = {k: v for k, v in query.items() if k in params and v != ""}
+        request = RunRequest(
+            inputs=given,
+            variant=variant,
+            # a webhook mints the run id it answered with (`meta["trace_id"]`)
+            trace_id=query.get("trace_id") or meta.get("trace_id"),
+        )
+        if not self._doorless(engine):
+            try:
+                request.inputs = serve_inputs(
+                    params, given, None, defaults=getattr(engine, "inputs_defaults", None)
+                )
+            except BindError as exc:
+                return self._turn_away(session, exc)
+            self._declared_trace_id(request)
+        return request
+
+    def _turn_away(self, session: Session, exc: BindError) -> None:
+        """Refuse a connection at the door, saying why where it can be read:
+        the log, and ``session.refusal`` (the playground shows it)."""
+        LOGGER.warning(f"[serve:{self.spec.name}] refused a connection: {exc}")
+        try:
+            session.refusal_reason = {"error": str(exc), "field": exc.field}
+        except AttributeError:  # a slotted project session: the log says it
+            pass
+        return None
+
+    def _declared_trace_id(self, request: RunRequest) -> None:
+        """``Service(trace_id="<param>")``: that parameter's value is the
+        run's id, over a ``?trace_id=`` (the studio finds a call by it)."""
+        field = self.spec.options.get("trace_id")
+        if field and request.inputs.get(field) not in (None, ""):
+            request.trace_id = str(request.inputs[field])
 
     def _inputs_fit(self, request: RunRequest) -> bool:
         """The graph's runtime parameters are the door's contract: a
@@ -344,6 +412,10 @@ class ServeRunner:
     async def _run_one(self, session: Session) -> None:
         request = self._request_for(session)
         if request is None:
+            why = getattr(session, "refusal_reason", None)
+            refuse = getattr(session, "refuse", None)
+            if why and refuse is not None:  # an http door answers 400, naming the field
+                refuse(400, {**why, "endpoint": self.spec.name})
             await session.close()
             return
         handle = None
@@ -358,6 +430,7 @@ class ServeRunner:
             except BindError as exc:
                 await self._refuse(session, exc)
                 return
+            self._declared_trace_id(request)
         try:
             handle = await serve_session(
                 engine,
@@ -380,6 +453,20 @@ class ServeRunner:
             if failed:
                 await self._report_failure(session)
             await self._close_one(session, handle)
+            await self._finish(session, failed)
+
+    async def _finish(self, session: Session, failed: bool) -> None:
+        """The run is over (its op after END included): a transport that
+        holds a connection open closes it — a websocket with ``1000``, or
+        ``1011`` when the run failed. Before, only the peer ever closed one,
+        and a peer that kept sending after the run hung the socket's reader."""
+        finish = getattr(session, "finish", None)
+        if finish is None:
+            return
+        try:
+            await finish(1011 if failed else 1000)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.error(f"[serve:{self.spec.name}] finish failed: {type(exc).__name__}: {exc}")
 
     async def _report_failure(self, session: Session) -> None:
         """Let the session tell its peer the run failed (`run_failed`).

@@ -304,7 +304,25 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
 - `websocket(path, port=...)` needs `max_inflight=N` and a graph with
   doors: every frame is an item, every egress item is sent at once. Text frames are JSON, decoded
   the same way as an HTTP body (bytes frames stay bytes); a frame that is
-  not JSON gets `{"error": ...}` back and never reaches the graph.
+  not JSON gets `{"error": ...}` back and never reaches the graph. The
+  handshake's query fills the graph's parameters, before the socket is
+  accepted: a missing required parameter is refused (HTTP 403, no run).
+  When the run ends the door closes the socket (`1000`, or `1011` if the
+  run failed).
+- On every door, a query value of `""` is absent (the default applies, or
+  a required parameter is refused), a query key the graph does not take is
+  ignored, and the last of a repeated key wins. A parameter may not be
+  named `trace_id`, `callback`, `thread_id`, `run_id`, `after_seq` or
+  `variant`: the door reads those itself.
+- `trace_id="call_id"` makes that (required) parameter's value the run's
+  id, so the run is found by it.
+- `END >> op`, on its own line in the graph, runs `op` once after the
+  whole run, however it ended (success, an op's failure, a cancel): for
+  what a run opened and must close, such as a call's record or a counter.
+  It reads graph parameters, declared cells and `SCRATCH`, never another
+  op's output (that op may not have run); it can still talk to the client
+  (`current_session()`). One per root graph, no edges out, its outputs are
+  not the reply; bounded by its `timeout=` or 10 s.
 - `codec="text"` on `http`, `websocket` or `webhook` passes text through
   instead of decoding JSON. `codec="json"` is the default.
 - `webhook(path, port=...)`: for events nobody waits on (a new email, a
@@ -338,15 +356,15 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   (or `Last-Event-ID: N`) and gets the events after N, then the rest live.
   The events are kept 15 minutes after the run ends, on the replica that ran
   it (route reconnects to the same replica).
-- `on_session=fn` turns the request into the graph's inputs
-  (`RunRequest(inputs={...})`, or `None` to refuse); the body fills the
-  parameters it leaves. Without it the query string becomes the inputs
-  (`trace_id`, `callback`, `thread_id` are the door's own and are not).
 - `variants={"formal": {"style": formal}, "casual": {"style": casual}}`
   compiles the door's module-level `@graph` once per variant, each with
-  those parameters fixed; `on_session` picks one with
-  `RunRequest(variant=...)`. A graph factory is refused (see 05).
-- Also: `replay=True` (keep requests for replay), `key_ops=[...]`.
+  those parameters fixed; `?variant=casual` picks one (the first declared
+  when absent; an unknown one is refused). A graph factory is refused (see 05).
+- Also: `replay=True` (keep requests for replay), `key_ops=[...]` (ops the
+  dashboard pins first; a name the graph has no op for is refused).
+- `on_session`, `on_close` and `session` are deprecated (removed in 2.0):
+  the graph's parameters are the connection's data, its first op opens
+  what a run needs, and `END >> op` closes it.
 
 ## Application and `operonx.toml`
 

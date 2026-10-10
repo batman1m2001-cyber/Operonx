@@ -117,6 +117,8 @@ class GraphOp(BaseOp):
         "_back_edges",
         "_exit_edges",
         "_rewritten_from",
+        # `END >> op`: the op the runtime calls once after the run (root only)
+        "_finals",
     ]
 
     type: OpType = "graph"
@@ -141,6 +143,7 @@ class GraphOp(BaseOp):
         self._edges = {}
         self.entries = []
         self.exits = []
+        self._finals: List[str] = []
         self.prevs = defaultdict(list)
         self.nexts = defaultdict(list)
         self.concurrency = concurrency
@@ -355,6 +358,13 @@ class GraphOp(BaseOp):
         for child in self._ops.values():
             if hasattr(child, "build"):
                 child.build()
+            if getattr(child, "_finals", None):
+                raise TypeError(
+                    f"graph {child.name!r} runs {child._finals[0]!r} after END, and is used "
+                    f"inside graph {self.name!r}. An op after END runs once after a whole run; "
+                    "a subgraph runs per call. Move it to the root graph."
+                )
+        self._check_finals()
 
         self._setup_schema()
         self._setup_endpoints()
@@ -715,11 +725,14 @@ class GraphOp(BaseOp):
         """Discover entry/exit ops from the graph topology."""
         LOGGER.debug("Graph [highlight]%s[/highlight]: setting up endpoints...", self.name)
 
+        # The op after END is called by the runtime, never by an edge: it is
+        # neither where the run starts nor what it answers with.
+        finals = set(self._finals)
         if not self.entries:
-            self.entries = [name for name in self._ops if not self.prevs[name]]
+            self.entries = [n for n in self._ops if not self.prevs[n] and n not in finals]
 
         if not self.exits:
-            self.exits = [name for name in self._ops if not self.nexts[name]]
+            self.exits = [n for n in self._ops if not self.nexts[n] and n not in finals]
 
         if not self.entries:
             LOGGER.error(
@@ -1151,7 +1164,28 @@ class GraphOp(BaseOp):
                 "max_stream_concurrent": self.concurrency,
             }
         )
+        if self._finals:
+            # only when there is one: a graph without keeps its fingerprint
+            base["finals"] = list(self._finals)
         return base
+
+    def _check_finals(self) -> None:
+        """The op after END sends nothing on: no edge out of it, no write to
+        a declared cell. Its outputs reach no one."""
+        for name in self._finals:
+            op = self._ops[name]
+            if self.nexts.get(name) or self.prevs.get(name) or op.start or op.end:
+                raise TypeError(
+                    f"op {name!r} runs after END, so it has no edges: the runtime calls it "
+                    "once after the run. Remove its other edges."
+                )
+            for out, param in (op.outputs or {}).items():
+                ref = getattr(param, "value", None)
+                if getattr(ref, "raw_source", None) is self:
+                    raise TypeError(
+                        f"op {name!r} runs after END and writes PARENT[{ref.var!r}]: "
+                        "nothing reads a cell after the run. Do the work inside the op."
+                    )
 
     def validate(self) -> ValidationResult:
         """Run all validations and return result."""

@@ -500,9 +500,15 @@ class Bridge:
                 codec, codec_err = None, f"{type(exc).__name__}: {exc}"
             try:
                 graph_fn = resolve_ref(spec.graph, field=f"[[serve]] {spec.name!r} graph")
-                params = list(inspect.signature(graph_fn).parameters)
+                signature = inspect.signature(graph_fn).parameters
+                params = list(signature)
+                defaults = {
+                    n: _jsonable(p.default)
+                    for n, p in signature.items()
+                    if p.default is not inspect.Parameter.empty
+                }
             except Exception:  # noqa: BLE001
-                params = []
+                params, defaults = [], {}
             doors.append(
                 {
                     "service": spec.name,
@@ -510,6 +516,10 @@ class Bridge:
                     "session": spec.session,
                     "path": spec.path,
                     "inputs": params,
+                    # what the connection form shows: each parameter, its
+                    # default, and which ones a session must fill
+                    "defaults": defaults,
+                    "required": [n for n in params if n not in defaults],
                     "variants": list(spec.variants),
                     "custom_hook": bool(spec.on_session),
                     "toys": list(codec.toys) if codec else [],
@@ -533,7 +543,7 @@ class Bridge:
         runner = self._runners.get(cache_key)
         if runner is not None:
             return runner
-        from .serve.app import _default_on_session, engines_for
+        from .serve.app import engines_for
         from .serve.memory import MemoryTransport
         from .serve.runner import ServeRunner
 
@@ -558,8 +568,6 @@ class Bridge:
         else:
             engine, variants = built[spec.name], None
         runner = ServeRunner(engine, spec, transport=MemoryTransport(), variants=variants)
-        if runner._on_session is None:
-            runner._on_session = _default_on_session(spec)
         # the application's startup hooks, then this service's — once each,
         # as a served worker would run them before accepting
         for hook_ref in (*self.app.manifest.on_startup, *spec.on_startup):
@@ -587,8 +595,11 @@ class Bridge:
         if codec is None:
             self.emit({"t": "refused", "sid": sid, "reason": f"{service} has no playground codec"})
             return
+        query = {str(k): str(v) for k, v in (msg.get("query") or {}).items()}
+        if msg.get("variant") and "variant" not in query:
+            query["variant"] = str(msg["variant"])  # the studio sends it beside the query
         meta = {
-            "query": {str(k): str(v) for k, v in (msg.get("query") or {}).items()},
+            "query": query,
             "headers": {},
             "path": spec.path,
             "client": "playground",
@@ -597,18 +608,26 @@ class Bridge:
         session = PlaySession(sid, meta, self.emit, codec, spec.max_inflight)
         request = runner._request_for(session)
         if request is None:
-            self.emit(
-                {
-                    "t": "refused",
-                    "sid": sid,
-                    "reason": "the service's on_session refused the session (see the bridge log)",
-                }
-            )
+            why = getattr(session, "refusal_reason", None)
+            refused = {
+                "t": "refused",
+                "sid": sid,
+                "reason": why["error"]
+                if why
+                else "the service's on_session refused the session (see the bridge log)",
+            }
+            if why and why.get("field"):
+                refused["field"] = why["field"]
+            self.emit(refused)
             return
         if not isinstance(
             request, RunRequest
         ):  # pragma: no cover — the gate returns RunRequest|None
             return
+        # a replay is a run of its own, though it resends the recorded query
+        # (a call id that is also its trace id)
+        if msg.get("replay_of"):
+            request.trace_id = str(uuid.uuid4())
         request.trace_id = request.trace_id or str(uuid.uuid4())
         session.conditions = _conditions(msg.get("conditions"))
         if session.conditions.get("fail"):

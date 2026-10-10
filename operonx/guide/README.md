@@ -63,7 +63,7 @@ from operonx import OpFailed, Retry, Timeout  # failure policies (page 6)
 from operonx import TaskFailed, TaskFinished, TaskStarted, child, run_context  # page 8
 from operonx.app import Application, Eval, Service, asgi, env, http, schedule, webhook, websocket
 from operonx.app.jobs import Job
-from operonx.app.serve import RunRequest, egress, ingress
+from operonx.app.serve import current_session, egress, ingress
 from operonx.core.ops import if_
 from operonx.providers.ops import (
     EmbeddingOp,

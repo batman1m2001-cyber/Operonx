@@ -12,9 +12,9 @@ operonx play --root path/to/project        # or: python -m operonx.app.play --ro
 ```
 
 Nothing here is a second way to run a service. A playground session goes
-through the same gate as production — the service's own `on_session`
-hook, its variants, its input contract — the same door ops and the same
-graph. Only the origin differs: `origin=playground`, filed apart and
+through the same gate as production — the query bound to the graph's
+parameters, its variants, its refusals (named: `{"t": "refused", "reason",
+"field"}`) — the same door ops and the same graph. Only the origin differs: `origin=playground`, filed apart and
 kept 7 days ([Runs](11-runs.md#retention)).
 
 ## The protocol

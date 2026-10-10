@@ -166,13 +166,24 @@ class BoundedSession:
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_inflight or 0)
         self._closed = asyncio.Event()
         self.overflowed = 0
+        #: Items the peer sent after the run was over, dropped (see `feed`).
+        self.after_close = 0
+        self._finished = False
         #: The trace id of the run this session minted, set by the serve
         #: runner as the run starts — so a transport can hand it to its
         #: peer (an HTTP reply's ``x-operonx-trace-id`` header).
         self.trace_id: Optional[str] = None
 
     async def feed(self, item: Any) -> None:
-        """Push one inbound item, waiting when the bound is reached."""
+        """Push one inbound item, waiting when the bound is reached.
+
+        Once the run is over (`close`) nothing reads the queue again: an
+        item is dropped and counted (``after_close``) instead of waiting
+        forever — a peer that kept sending after the run used to park the
+        socket's reader on a full queue for good."""
+        if self._finished:
+            self.after_close += 1
+            return
         await self._queue.put(item)
 
     def feed_nowait(self, item: Any) -> bool:
@@ -247,8 +258,15 @@ class BoundedSession:
         """
 
     async def close(self) -> None:
+        """The run is over: no more input, and what is still queued will
+        never be read — dropped, so a reader parked on a full queue wakes."""
         if not self._closed.is_set():
             self.end_input()
+        self._finished = True
+        while not self._queue.empty():
+            item = self._queue.get_nowait()
+            if item is not _EOF:
+                self.after_close += 1
 
 
 class _Eof:

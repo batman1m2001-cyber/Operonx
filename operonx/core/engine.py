@@ -1734,7 +1734,9 @@ class Operon:
     def input_schema(self) -> Dict[str, Any]:
         """Return JSON Schema describing the workflow's expected inputs."""
         return self._params_to_schema(
-            self.graph.inputs or {}, f"{self.name}_input", getattr(self, "inputs_defaults", None) or {}
+            self.graph.inputs or {},
+            f"{self.name}_input",
+            getattr(self, "inputs_defaults", None) or {},
         )
 
     def output_schema(self) -> Dict[str, Any]:
@@ -1742,7 +1744,9 @@ class Operon:
         return self._params_to_schema(self.graph.outputs or {}, f"{self.name}_output")
 
     @staticmethod
-    def _params_to_schema(params: dict, title: str, defaults: Optional[dict] = None) -> Dict[str, Any]:
+    def _params_to_schema(
+        params: dict, title: str, defaults: Optional[dict] = None
+    ) -> Dict[str, Any]:
         """Convert a dict of Param objects to a JSON Schema dict. ``defaults``
         are the ``@graph`` signature's (``inputs_defaults``), which a
         runtime parameter's ``Param`` does not carry."""
