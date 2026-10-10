@@ -359,16 +359,19 @@ def manifest_from(
     resources: Optional[str],
     description: str,
     trace: Optional[Sequence[Any]] = None,
+    jobs: Sequence[Any] = (),
 ) -> Any:
     """The :class:`Manifest` a Python declaration amounts to — the same
     record ``operonx.toml`` parses to, so nothing downstream knows which
-    way the application came."""
+    way the application came. A scheduled job adds its clock
+    (:func:`job_clock`), served beside the services on its port."""
     from .manifest import Manifest, _reject_duplicates, with_default_trace
 
     specs = tuple(services)
     for spec in specs:
         if not isinstance(spec, ServeSpec):
             raise ManifestError(f"services= takes Service(...) entries, got {type(spec).__name__}")
+    specs += tuple(job_clock(j) for j in jobs if getattr(j, "schedule", None) is not None)
     _reject_duplicates(specs, f"Application({name!r})")
     overlay = resources if resources and (root / resources).is_file() else None
     project: Dict[str, Any] = {"name": name, "description": description}
@@ -388,6 +391,20 @@ def manifest_from(
     )
 
 
+def _doors_of(s: ServeSpec) -> Optional[bool]:
+    """Whether the service's graph has an ingress door; ``None`` for an
+    asgi app, or a graph named as ``module:attr`` (describing imports
+    nothing)."""
+    if not s.graph or isinstance(s.graph, str):
+        return None
+    from operonx.app.doors import has_doors
+
+    try:
+        return has_doors(s.graph)
+    except Exception:  # noqa: BLE001 — a description never fails on its graph
+        return None
+
+
 def describe_service(s: ServeSpec) -> Dict[str, Any]:
     return {
         "name": s.name,
@@ -397,6 +414,11 @@ def describe_service(s: ServeSpec) -> Dict[str, Any]:
         "port": s.port,
         "session": s.session,
         "graph": ref_name(s.graph) if s.graph else None,
+        # a scheduled job's clock: the job its ticks run
+        "job": s.options["job"].name if s.options.get("job") is not None else None,
+        # with doors, items come through `ingress` and `egress` answers;
+        # without, the caller's data fills the graph's parameters
+        "doors": _doors_of(s),
         "variants": list(s.variants),
         "workers": s.workers,
         "on_startup": [ref_name(h) for h in s.on_startup],
@@ -441,7 +463,29 @@ def describe_job(job: Any, manifest: Any = None) -> Dict[str, Any]:
         "description": d.get("description") or "",
         "sinks": sinks,
         "sinks_from": source,
+        **({"schedule": d["schedule"]} if d.get("schedule") else {}),
     }
+
+
+def job_clock(job: Any) -> ServeSpec:
+    """A scheduled job as the endpoint that runs its clock: a ``schedule``
+    door named after the job, on the schedule's port, whose ticks run the
+    job instead of a graph (``options["job"]``). Served, listed and grouped
+    onto its port like any other door."""
+    listener = job.schedule
+    return ServeSpec(
+        name=job.name,
+        kind="schedule",
+        # no route; named per job so two jobs on one clock time do not collide
+        path=f"/__schedule__/job/{job.name}",
+        method=listener.method,
+        host=listener.host,
+        port=int(listener.port),
+        session="per_request",
+        description=job.description or f"runs job {job.name!r} on its schedule",
+        options={**listener.options, "job": job},
+        workers=listener.workers,
+    )
 
 
 def _app_tracing(manifest: Any) -> tuple:

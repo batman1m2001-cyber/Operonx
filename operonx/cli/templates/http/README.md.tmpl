@@ -3,8 +3,9 @@
 {{summary}} Built on [operonx](https://pypi.org/project/operonx/).
 
 `src/textstats/` is the feature: `ops.py` holds the logic, `graph.py` wires
-it between the http door's `ingress()` and `egress()`. `app/main.py`
-declares the `stats` service that runs it.
+it. The graph's parameter (`text`) is what a caller sends in the JSON body,
+and its outputs are the reply. `app/main.py` declares the `stats` service
+that runs it.
 
 ## Run
 

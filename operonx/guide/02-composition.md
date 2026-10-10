@@ -93,27 +93,21 @@ asyncio.run(main())
 - A failure inside it raises `OpFailed` in the caller. It fails the caller's run only if the
   caller lets it through.
 
-## Doors: one graph for jobs and services
+## One graph for jobs and services
 
-Jobs and services feed a graph through **doors**: `ingress()` yields each
-incoming item, `egress(item=...)` sends a result out. Write the graph once;
-every rung above runs it unchanged.
+A graph's **parameters are what the caller sends**; its **outputs are what
+the caller gets back**. A job fills the parameters from each item, a
+service from the request — write the graph once and every rung above runs
+it unchanged.
 
 ```python file=scorer.py
 from operonx import END, START, graph, op
-from operonx.app.serve import egress, ingress
 
 
 @op
-def score(call: dict) -> dict:
-    words = len(call["text"].split())
-    return {
-        "result": {
-            "id": call["id"],
-            "words": words,
-            "verdict": "engaged" if words >= 5 else "brief",
-        }
-    }
+def score(id: str, text: str) -> dict:
+    words = len(text.split())
+    return {"id": id, "words": words, "verdict": "engaged" if words >= 5 else "brief"}
 
 
 @op
@@ -123,22 +117,49 @@ def tally(results: list) -> dict:
 
 
 @graph
-def score_flow():
-    src = ingress()  # one item per call, from whoever runs the graph
-    s = score(call=src["item"])
-    out = egress(item=s["result"])  # the item handed back
-    START >> src >> s >> out >> END
+def score_flow(id, text):  # one call in: {"id", "text"}; out: {id, words, verdict}
+    s = score(id=id, text=text)
+    START >> s >> END
 
 
 @graph
-def report_flow(results):  # no doors: a job's `reduce`, run once over every result
+def report_flow(results):  # a job's `reduce`, run once over every result
     t = tally(results=results)
     START >> t >> END
 ```
 
+The result of a run is what `Operon(g).run(...)` returns, without the `$`
+keys. A graph that should answer with a flat object has its last op return
+those fields at the top level, as `score` does.
+
+### Doors: for streams
+
+A run that handles many items over its life — a phone call, a chat socket —
+reads them through **doors**: `ingress()` yields each item the client
+sends, `egress(item=...)` sends one back, as many times as it likes.
+
+```python file=echo.py
+from operonx import END, START, graph, op
+from operonx.app.serve import egress, ingress
+
+
+@op
+def shout(text: str) -> dict:
+    return {"reply": text.upper()}
+
+
+@graph
+def echo_flow():
+    src = ingress()  # one item per frame the client sends
+    s = shout(text=src["item"])
+    out = egress(item=s["reply"])  # one frame back per item
+    START >> src >> s >> out >> END
+```
+
 `ingress()` is transient (each item is freed once used), so never
-`.collect()` it; a job that needs every result at once gives them to a
-`reduce` graph.
+`.collect()` it. A `websocket` door needs this shape; `http`, `webhook`,
+`schedule` and jobs take either. A graph with doors gets the item through
+`ingress` and answers with what `egress` sent.
 
 ## Job — one run per item
 
@@ -166,11 +187,11 @@ asyncio.run(main())
 - `items`: a list, a function that yields them (called on every run: your
   own loader, a database query), or a `.jsonl` path. Nothing else: a CSV or
   a folder is a two-line generator.
-- Binding: a graph with doors takes the item through `ingress`. Otherwise a
-  dict item fills the graph's parameters by name (a field the graph does
-  not take is an error), `input="case"` hands the whole item to one
-  parameter, and anything else goes to the graph's only free parameter.
-  `inputs={...}` are fixed inputs for every item.
+- Binding: a dict item fills the graph's parameters by name (a field the
+  graph does not take is an error), `input="case"` hands the whole item to
+  one parameter, and anything else goes to the graph's only free parameter.
+  `inputs={...}` are fixed inputs for every item. A graph with doors takes
+  the item through `ingress` instead.
 - Every result is kept in the record (`run.results`, `results.jsonl`).
   `output="out/x.jsonl"` or `output=fn(key, result)` also exports each
   success as it finishes.
@@ -213,25 +234,72 @@ asyncio.run(main())
 
 Each step keeps its own record; `--resume` reaches every step. Anything
 more (a condition, a loop over days) is a Python function calling
-`job.run()`. On a clock, cron or CI runs `operonx run nightly`; it exits
-non-zero when a step failed.
+`job.run()`. From cron or CI, `operonx run nightly` exits non-zero when a
+step failed.
+
+## A job on a clock
+
+`schedule=` runs a job (or a job of steps) by itself, inside `operonx serve`
+on the schedule's port, beside that port's services:
+
+```python
+from operonx.app import Application, schedule
+from operonx.app.jobs import Job
+
+from scorer import score_flow
+
+CALLS = [{"id": "c1", "text": "yes I can talk now"}]
+
+APP = Application(
+    "scorer",
+    jobs=[Job("morning", graph=score_flow, items=CALLS, key="id", schedule=schedule(at="07:00"))],
+)
+job = next(j for j in APP.describe()["jobs"] if j["name"] == "morning")
+assert job["schedule"] == {"at": "07:00", "port": 8000}
+assert APP.run_sync("morning").status == "ok"  # on demand too: `operonx run morning`
+```
+
+Each tick is a fresh run with per-item records, and its `run.json` says
+`"trigger": {"by": "schedule", "slot", "at"}`. A tick that lands while the
+last run is still going is skipped and counted; a failed run does not stop
+the clock. With `queue=` on the listener, each tick fires on one replica.
+A graph that should run per tick with no items is a `Service` on
+`schedule(...)` instead.
 
 ## Service — behind HTTP or a websocket
 
 ```python
-from operonx.app import Service, http
+from starlette.testclient import TestClient
 
+from operonx.app import Application, Service, http, websocket
+
+from echo import echo_flow
 from scorer import score_flow
 
 score_service = Service("score", http("POST", "/score", port=8017), graph=score_flow)
+echo_service = Service("echo", websocket("/echo", port=8017), graph=echo_flow, max_inflight=8)
+
+with TestClient(Application("demo", services=[score_service, echo_service]).asgi()) as client:
+    reply = client.post("/score", json={"id": "c1", "text": "busy"})
+    assert reply.json() == {"id": "c1", "words": 1, "verdict": "brief"}
+    assert client.post("/score", json={"id": "c1"}).status_code == 400  # `text` is missing
+    with client.websocket_connect("/echo") as ws:
+        ws.send_json("hi")
+        assert ws.receive_text() == "HI"  # a str item goes out as a text frame
 ```
 
-- `http(...)`: the JSON body is the one ingress item; the reply is the
-  egress item(s), sent when the run ends, with the run's
-  `x-operonx-trace-id` header. A body that is not JSON is answered `400`
-  and starts no run; an empty body is the item `None`.
-- `websocket(path, port=...)` needs `max_inflight=N`: every frame is an
-  item, every egress item is sent at once. Text frames are JSON, decoded
+- `http(...)`: the JSON body and the query string fill the graph's
+  parameters; the reply is the run's outputs, with its `x-operonx-trace-id`
+  header. A parameter left out takes the `@graph`'s default. Refused with
+  `400 {"error", "endpoint", "field"}` and no run: a body that is not JSON,
+  a field that is not a parameter, a required parameter nobody gave, a name
+  in both the query and the body. A body that is not an object goes to the
+  graph's one required parameter. A run that fails answers `500` with its
+  `trace_id`, never the error text.
+- With doors, the body is the one ingress item (an empty body is `None`)
+  and the reply is the egress item(s).
+- `websocket(path, port=...)` needs `max_inflight=N` and a graph with
+  doors: every frame is an item, every egress item is sent at once. Text frames are JSON, decoded
   the same way as an HTTP body (bytes frames stay bytes); a frame that is
   not JSON gets `{"error": ...}` back and never reaches the graph.
 - `codec="text"` on `http`, `websocket` or `webhook` passes text through
@@ -241,8 +309,9 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
   at once and the run goes on in the background, traced. `max_inflight=N`
   answers `429` beyond N pending runs.
 - `schedule(every="5m")` or `schedule(at="08:00", port=...)`: a clock that
-  starts a run per tick, inside the server on that port; the ingress item is
-  `{"tick": n, "at": ...}`. A tick that lands while the last run is still
+  starts a run per tick, inside the server on that port. A graph with
+  parameters named `tick` or `at` gets them (`n`, the ISO time); with doors,
+  the ingress item is `{"tick": n, "at": ...}`. A tick that lands while the last run is still
   going is skipped and counted; a failing run does not stop the clock.
 - `queue="runs.db"` (or `queue={url="postgresql://…"}` in `operonx.toml`)
   on a webhook or schedule makes it durable: a webhook writes the event to
@@ -267,8 +336,9 @@ score_service = Service("score", http("POST", "/score", port=8017), graph=score_
   The events are kept 15 minutes after the run ends, on the replica that ran
   it (route reconnects to the same replica).
 - `on_session=fn` turns the request into the graph's inputs
-  (`RunRequest(inputs={...})`, or `None` to refuse). Without it the query
-  string becomes the inputs.
+  (`RunRequest(inputs={...})`, or `None` to refuse); the body fills the
+  parameters it leaves. Without it the query string becomes the inputs
+  (`trace_id`, `callback`, `thread_id` are the door's own and are not).
 - `variants={"formal": {"style": formal}, "casual": {"style": casual}}`
   compiles the door's module-level `@graph` once per variant, each with
   those parameters fixed; `on_session` picks one with

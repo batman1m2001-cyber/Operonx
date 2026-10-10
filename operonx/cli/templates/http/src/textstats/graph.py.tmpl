@@ -1,15 +1,12 @@
 """The textstats feature's wiring: no logic here, only ops and edges."""
 
 from operonx import END, START, graph
-from operonx.app.serve import egress, ingress
 
-from textstats.ops import measure, read_text
+from textstats.ops import clean, measure
 
 
 @graph
-def stats_flow():
-    src = ingress()  # an http door: the JSON body is the one item
-    t = read_text(body=src["item"])
-    m = measure(text=t["text"])
-    out = egress(item=m["result"])  # the reply, sent when the run ends
-    START >> src >> t >> m >> out >> END
+def stats_flow(text):  # served: the JSON body's `text`; the reply is measure's outputs
+    c = clean(text=text)
+    m = measure(text=c["text"])
+    START >> c >> m >> END

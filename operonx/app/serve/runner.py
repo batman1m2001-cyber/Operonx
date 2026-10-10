@@ -9,11 +9,14 @@ project has to write it again. The callbot's version of it is 437 lines.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
+from collections.abc import Mapping
 from typing import Any, Callable, Dict, Optional
 
 from operonx.app.declare import ref_name
-from operonx.app.manifest import ServeSpec
+from operonx.app.doors import RESERVED_QUERY, BindError, has_doors, plain, serve_inputs
+from operonx.app.manifest import STREAM_KINDS, ServeSpec
 from operonx.core.loggings import LOGGER
 from operonx.core.workflow_trace import unhandled
 
@@ -47,6 +50,7 @@ async def serve_session(
     metadata: Optional[Dict[str, Any]] = None,
     timeout: Optional[float] = None,
     on_start: Optional[Callable[[Any], None]] = None,
+    reply: bool = False,
 ) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
@@ -75,6 +79,11 @@ async def serve_session(
     while it happens (the playground watches ``handle.trace`` grow, so
     a canvas can light each op as it finishes). A callback that raises
     is logged; it never stops the run.
+
+    ``reply=True`` is the doorless shape: when the run ends without an
+    unhandled error, its outputs (without the ``$`` keys) are sent to the
+    session as its one reply, before the session is closed. A failed run
+    sends nothing.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
@@ -107,6 +116,8 @@ async def serve_session(
                 raise RunTimeout(
                     f"run exceeded {timeout:g}s", trace_id=getattr(trace, "trace_id", None)
                 ) from None
+        if reply and not unhandled(handle.errors):
+            await session.send(plain(await handle.result()))
     finally:
         # A transport whose `close` raises must not turn a completed run
         # into a failed one. Closing is teardown; its failure is reported
@@ -213,11 +224,15 @@ class ServeRunner:
         The default hook (the query string as inputs) is not held to it."""
         if self.spec.on_session is None:
             return True
-        expected = getattr(self._engine_for(request), "inputs_expected", None)
+        engine = self._engine_for(request)
+        expected = getattr(engine, "inputs_expected", None)
         if expected is None or set(request.inputs) == set(expected):
             return True
-        missing = sorted(set(expected) - set(request.inputs))
+        # Doorless: the body fills what the hook leaves; checked as it binds.
+        missing = [] if self._doorless(engine) else sorted(set(expected) - set(request.inputs))
         extra = sorted(set(request.inputs) - set(expected))
+        if not missing and not extra:
+            return True
         LOGGER.error(
             f"[serve:{self.spec.name}] on_session built inputs {sorted(request.inputs)}; "
             f"the graph takes {sorted(expected)}"
@@ -247,6 +262,84 @@ class ServeRunner:
             )
         return engine
 
+    def _doorless(self, engine: Any) -> bool:
+        """Served by its signature: no ingress door, on a one-shot door. A
+        stream door's graph without doors runs as before (its items unread)."""
+        return engine is not None and self.spec.kind not in STREAM_KINDS and not has_doors(engine)
+
+    @staticmethod
+    def _params(engine: Any) -> list:
+        expected = getattr(engine, "inputs_expected", None)
+        return list(expected) if expected is not None else list(engine.graph.inputs)
+
+    def _serve_inputs(
+        self, engine: Any, given: Mapping[str, Any], item: Any, tick: bool = False
+    ) -> Dict[str, Any]:
+        return serve_inputs(
+            self._params(engine),
+            given,
+            item,
+            defaults=getattr(engine, "inputs_defaults", None),
+            tick=tick,
+            # the default hook hands over the whole query; a project's hook
+            # builds exactly what it means
+            reserved=RESERVED_QUERY if self.spec.on_session is None else (),
+        )
+
+    async def _bind(self, engine: Any, request: RunRequest, session: Session) -> RunRequest:
+        """A doorless run's inputs: the hook's (or the query's), plus the
+        session's one item — its body, or a schedule's tick."""
+        item = None
+        async for item in session.recv():
+            break
+        meta = getattr(session, "meta", None) or {}
+        tick = meta.get("trigger") == "schedule"
+        return dataclasses.replace(
+            request, inputs=self._serve_inputs(engine, request.inputs, item, tick=tick)
+        )
+
+    def precheck(
+        self, payload: Any, meta: Optional[Mapping[str, Any]] = None
+    ) -> Optional[BindError]:
+        """Whether a request fits a doorless graph, decided before the door
+        answers (a webhook's ``202``) and before any run. ``None`` when it
+        fits, or the graph has doors.
+
+        Without an ``on_session`` hook this is the check the run makes.
+        With one, the hook's inputs are not known yet, so only the body's
+        fields are checked against the graph's parameters."""
+        engines = list(self.variants.values()) or [self.engine]
+        if not all(self._doorless(e) for e in engines):
+            return None
+        try:
+            if self.spec.on_session is None and not self.variants:
+                query = dict((meta or {}).get("query") or {})
+                self._serve_inputs(self.engine, query, payload)
+            elif isinstance(payload, Mapping):
+                params = {p for e in engines for p in self._params(e)}
+                unknown = [k for k in payload if k not in params]
+                if unknown:
+                    raise BindError(
+                        f"{unknown[0]!r} is not a parameter of the graph "
+                        f"(it takes {sorted(params) or 'nothing'})",
+                        field=str(unknown[0]),
+                    )
+        except BindError as exc:
+            return exc
+        return None
+
+    async def _refuse(self, session: Session, exc: BindError) -> None:
+        """A doorless request that does not fit: no run. The session is told
+        (an http door answers ``400``), and the hooks that opened something
+        close it."""
+        LOGGER.info(f"[serve:{self.spec.name}] refused a request: {exc}")
+        refuse = getattr(session, "refuse", None)
+        if refuse is not None:
+            refuse(400, {"error": str(exc), "endpoint": self.spec.name, "field": exc.field})
+        await self._report_failure(session)
+        await session.close()
+        await self._close_one(session, None)
+
     async def _run_one(self, session: Session) -> None:
         request = self._request_for(session)
         if request is None:
@@ -254,15 +347,24 @@ class ServeRunner:
             return
         handle = None
         failed = False
+        engine = self._engine_for(request)
+        doorless = self._doorless(engine)
         metadata = self._origin(request)
         served = self._recorded(session, metadata) if self.spec.options.get("replay") else session
+        if doorless:
+            try:
+                request = await self._bind(engine, request, served)
+            except BindError as exc:
+                await self._refuse(session, exc)
+                return
         try:
             handle = await serve_session(
-                self._engine_for(request),
+                engine,
                 served,
                 request,
                 metadata=metadata,
                 on_start=lambda h: _note_trace_id(session, h),
+                reply=doorless,
             )
             failed = bool(unhandled(handle.errors))
         except Exception as exc:  # noqa: BLE001

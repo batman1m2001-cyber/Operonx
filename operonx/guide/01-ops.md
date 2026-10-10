@@ -385,6 +385,8 @@ asyncio.run(main())
 
 ## Doors — how a served graph meets its caller
 
-`ingress()` yields each item a client sends; `egress(item=...)` sends one
-back. A graph with doors runs unchanged as a web service and as a job; see
-[composition](02-composition.md).
+A served graph's parameters are what the caller sends and its outputs are
+the reply — no door needed. A run that handles many items (a call, a
+socket) reads them with `ingress()`, which yields each item a client sends,
+and answers with `egress(item=...)`. Either shape runs unchanged as a web
+service and as a job; see [composition](02-composition.md).

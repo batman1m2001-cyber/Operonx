@@ -19,10 +19,12 @@ import asyncio
 import inspect
 import json
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from operonx.app.doors import plain as _plain
 from operonx.app.serve.protocol import RunRequest
 from operonx.app.serve.runner import RunTimeout, serve_session
 from operonx.core.loggings import LOGGER
@@ -54,6 +56,20 @@ __all__ = ["preflight_error", "run_job", "run_steps"]
 
 #: The outcomes ``retry`` repeats and ``on_error="stop"`` stops on.
 _RETRIABLE = (ITEM_FAILED, ITEM_TIMEOUT)
+
+#: What started the run, when it was not a person (``Job.run(trigger=...)``):
+#: a schedule's ``{"by": "schedule", "slot": ..., "at": ...}``. Kept in the
+#: run's record (``run.json`` ``trigger``), and passed to its steps.
+TRIGGER: ContextVar[Optional[Dict[str, Any]]] = ContextVar("operonx_job_trigger", default=None)
+
+
+def _run_meta(job: "Job") -> Dict[str, Any]:
+    """What a run's record says about it: the job, and what triggered it."""
+    meta = job.describe()
+    trigger = TRIGGER.get()
+    if trigger:
+        meta["trigger"] = dict(trigger)
+    return meta
 
 
 def _first_error(trace: Any, handle: Any = None) -> Optional[str]:
@@ -126,13 +142,6 @@ async def _settle(handle: Any) -> None:
         await handle.collect()
     except Exception:  # noqa: BLE001
         pass  # the record reads the trace, not this
-
-
-def _plain(out: Any) -> Any:
-    """A doorless run's outputs without the engine's ``$`` keys."""
-    if isinstance(out, dict):
-        return {k: v for k, v in out.items() if not str(k).startswith("$")}
-    return out
 
 
 async def _attempt(job: "Job", engine: Any, raw: Any, key: str, run_id: str) -> ItemResult:
@@ -286,7 +295,7 @@ async def run_job(job: "Job", *, resume: bool = False) -> JobRun:
     unreachable = preflight_error(job.preflight)
     if unreachable:
         LOGGER.error(f"[job:{job.name}] {unreachable}")
-        return RunRecord(root, job.name, meta=job.describe()).finish(RUN_FAILED, error=unreachable)
+        return RunRecord(root, job.name, meta=_run_meta(job)).finish(RUN_FAILED, error=unreachable)
 
     previous = last_run(root, job.name) if resume else None
     if resume and previous is None:
@@ -302,7 +311,7 @@ async def run_job(job: "Job", *, resume: bool = False) -> JobRun:
     record = RunRecord(
         root,
         job.name,
-        meta=job.describe(),
+        meta=_run_meta(job),
         resume_from=previous.run_id if previous else None,
         keep_results=job.keep_results,
     )
@@ -440,7 +449,7 @@ async def run_steps(job: "Job", *, resume: bool = False, record_dir: Any = None)
     step's own run id — and each step keeps its own record as usual."""
     from ..origin import in_runbook
 
-    record = RunRecord(job.records(), job.name, meta=job.describe())
+    record = RunRecord(job.records(), job.name, meta=_run_meta(job))
     steps = []
     stopped = False
     with in_runbook(job.name, record.run_id):

@@ -16,8 +16,10 @@ services and jobs.
 ## The ladder
 
 - **op**: `@op` in `ops.py`. One step of logic; it returns a dict literal.
-- **graph**: `@graph` in `graph.py`. Wires ops with `>>`. `ingress()` and
-  `egress()` are its doors: items in, items out.
+- **graph**: `@graph` in `graph.py`. Wires ops with `>>`. Its parameters
+  are what a caller (a request body, a job item) sends; the outputs of the
+  ops wired to `END` are the answer. Only a stream (a websocket) needs
+  doors: `ingress()` yields each item, `egress()` sends one back.
 - **Job**: runs a graph once per item of its `items` (a list, a function
   that yields them, or a `.jsonl` file) and keeps every result in its
   record. `reduce=` runs one graph over all the results; `steps=[...]`
@@ -27,7 +29,7 @@ services and jobs.
 - **Application**: `APP` in `app/main.py`. Declare every service and job
   there.
 - **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`. Never
-  put `[[serve]]` blocks in it.
+  put `[[serve]]` blocks in it (deprecated; removed in operonx 2.0).
 
 ## Never define a `@graph` inside a function
 
