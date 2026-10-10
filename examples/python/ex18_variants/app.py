@@ -1,11 +1,11 @@
 """The application: one door, two compiled greeters.
 
 `operonx.toml` points here with `[project] app = "app:APP"`; this is where
-a reader sees which graph runs behind which door, what the door binds per
-variant, and who picks the variant.
+a reader sees which graph runs behind which door and what the door binds
+per variant. The request picks the variant: `?variant=`.
 """
 
-from greet import door, styles
+from greet import styles
 from greet.graph import greet
 
 from operonx.app import Application, Service, env, http
@@ -21,9 +21,9 @@ APP = Application(
                 "formal": dict(style=styles.formal, sign_off="Regards"),
                 "casual": dict(style=styles.casual, sign_off="Cheers"),
             },
-            on_session=door.open,  # ?style=formal|casual -> RunRequest(variant=…)
-            description="POST /greet?style=formal|casual with a JSON name; the reply is that style's greeting.",
+            # ?variant=formal|casual picks one (formal when absent)
+            description="POST /greet?variant=formal|casual with a JSON name; the reply is that style's greeting.",
         ),
     ],
-    description="One HTTP door, two compiled greeters: the session picks the variant.",
+    description="One HTTP door, two compiled greeters: ?variant= picks one.",
 )

@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
+from operonx.core.loggings import LOGGER
+
 from .manifest import (
     SESSION_MODES,
     STREAM_KINDS,
@@ -195,6 +197,7 @@ def Service(  # noqa: N802 — reads as a declaration
     playground: Any = None,
     replay: bool = False,
     input: Optional[str] = None,  # noqa: A002 — the graph parameter's name
+    trace_id: Optional[str] = None,
     **options: Any,
 ) -> ServeSpec:
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
@@ -225,6 +228,19 @@ def Service(  # noqa: N802 — reads as a declaration
     as that one parameter, instead of filling parameters by the body's
     fields: for a payload someone else shapes (a mail server's webhook).
 
+    ``trace_id="call_id"`` makes that graph parameter's value the run's
+    id, so a run is found by it (the studio's Runs search); it must be a
+    parameter without a default.
+
+    The connection fills the graph's parameters (its query string, and a
+    one-shot door's body): a ``""`` value is absent, a key the graph does
+    not take is ignored, a missing required parameter is refused before
+    any run — a websocket before its handshake. ``?variant=`` picks one of
+    ``variants`` (the first when absent). ``on_session``, ``on_close`` and
+    ``session`` are deprecated (removed in 2.0): the graph's parameters
+    are the connection's data, its first op opens what a run needs, and
+    ``END >> op`` closes it however the run ended.
+
     ``replay=True`` records what clients send this door — text and JSON as
     they are, audio and bytes only counted — on each run, so a real session
     can be replayed in the playground later. Off by default: a script holds
@@ -232,6 +248,7 @@ def Service(  # noqa: N802 — reads as a declaration
     """
     label = f"Service({name!r})"
     _refuse_moved(options, label)
+    _warn_hooks(label, on_session=on_session, on_close=on_close, session=session)
     kind = listener.kind
     if kind == "asgi":
         if app is None:
@@ -281,6 +298,10 @@ def Service(  # noqa: N802 — reads as a declaration
         if not (isinstance(input, str) and input):
             raise ManifestError(f"{label}: input= is the name of a graph parameter")
         opts["input"] = input
+    if trace_id is not None:
+        if not (isinstance(trace_id, str) and trace_id):
+            raise ManifestError(f"{label}: trace_id= is the name of a graph parameter")
+        opts["trace_id"] = trace_id
 
     return ServeSpec(
         name=name,
@@ -304,6 +325,32 @@ def Service(  # noqa: N802 — reads as a declaration
         trace_own=tuple(trace) if trace is not None else None,
         trace_from="service" if trace is not None else "default",
     )
+
+
+_WARNED_HOOKS: set = set()
+
+_HOOK_MOVES = {
+    "on_session": "the graph's parameters are the connection's data (its query, bound and "
+    "refused by the door), and its first op opens what a run needs",
+    "on_close": "`END >> op` in the graph runs once however the run ended",
+    "session": "a websocket is one run per connection, an http door one per request",
+}
+
+
+def _warn_hooks(label: str, **given: Any) -> None:
+    """``on_session``, ``on_close`` and ``session``: deprecated, removed in
+    2.0. Warned once per name per process; they still work until then."""
+    import warnings
+
+    for name, value in given.items():
+        if value is None or name in _WARNED_HOOKS:
+            continue
+        _WARNED_HOOKS.add(name)
+        message = (
+            f"{label}: {name}= is deprecated and removed in operonx 2.0 — {_HOOK_MOVES[name]}."
+        )
+        warnings.warn(message, DeprecationWarning, stacklevel=3)
+        LOGGER.warning(message)
 
 
 def _refuse_moved(options: Mapping[str, Any], label: str) -> None:

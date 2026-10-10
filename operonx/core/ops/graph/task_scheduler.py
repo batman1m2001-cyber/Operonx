@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple
 
 from operonx.core.loggings import LOGGER
 from operonx.core.ops._events import EOF, SELF_CTX, Failure, Frame, Interrupt
-from operonx.core.policy import fail_fast
+from operonx.core.policy import _FailFast, fail_fast
 from operonx.core.states._scratch_var import _reset_state, _set_state
 from operonx.core.states.ref import Ref
 
@@ -154,6 +154,25 @@ def _mints_contexts(op) -> bool:
         return True
     children = getattr(op, "_ops", None)
     return bool(children) and any(_mints_contexts(c) for c in children.values())
+
+
+#: How long the op after END may run when it declares no ``timeout=``.
+FINAL_TIMEOUT_S = 10.0
+
+
+async def _drive_final(op, state, context_id: tuple) -> None:
+    """Run the op after END to its end. Its failure — recorded by the op
+    itself, or a fail-fast carrier — is the op's own: marked handled."""
+    try:
+        async for _item in op.run(state, context_id):
+            pass
+    except (Exception, _FailFast) as exc:
+        LOGGER.error("op %r after END failed: %s: %s", op.name, type(exc).__name__, exc)
+    key = getattr(op, "full_name", None) or op.name
+    record = state._op_errors.get(key)
+    if record is not None and not record.get("handled"):
+        state._op_errors[key] = {**record, "handled": True}
+        LOGGER.error("op %r after END failed: %s", op.name, record.get("message", "")[-300:])
 
 
 class Scheduler:
@@ -399,9 +418,21 @@ class Scheduler:
         # A loop is not re-run from here: a synthetic loop is one iteration
         # per call, and the scheduler that owns the loop op dispatches the
         # next one from its EOF (see `_on_eof`).
-        outputs, item_ctxs, root_interrupted = await self._run_once(
-            state, context_id, effective_queue
-        )
+        #
+        # `END >> op` runs here, at the top level only — after `_run_once`
+        # returned or raised (cancelled, fail-fast), before the sentinel
+        # that ends the stream: a served session is closed only after it.
+        finals = top_level_stream and bool(getattr(g, "_finals", None))
+        try:
+            outputs, item_ctxs, root_interrupted = await self._run_once(
+                state, context_id, effective_queue
+            )
+        except BaseException:
+            if finals:
+                await self._run_finals(state, context_id)
+            raise
+        if finals:
+            await self._run_finals(state, context_id)
 
         # Signal completion to ExecutionHandle (top level only — nested
         # schedulers must not send the None sentinel since the top level's
@@ -413,6 +444,44 @@ class Scheduler:
             state._stream_output_queue = None
 
         return outputs, item_ctxs, root_interrupted
+
+    async def _run_finals(self, state, context_id: tuple) -> None:
+        """The op after END: once, however the run ended.
+
+        Shielded: a cancel that arrives while it runs (``stream()`` cancels
+        again in its ``finally``) is absorbed, and the op is bounded by its
+        own ``timeout=`` or :data:`FINAL_TIMEOUT_S` instead. Its failure is
+        recorded as handled and logged — the run's status and answer stay
+        what the run made. Skipped when a journalled run parked or drained:
+        that run is not over.
+        """
+        durable = getattr(state, "_durable", None)
+        if durable is not None and getattr(durable, "stopping", None) is not None:
+            return
+        g = self.graph
+        loop = asyncio.get_running_loop()
+        token = _set_state(state)
+        try:
+            for name in g._finals:
+                op = g._ops[name]
+                policy = getattr(op, "_policy", None)
+                limit = getattr(getattr(policy, "timeout", None), "run", None) or FINAL_TIMEOUT_S
+                task = loop.create_task(_drive_final(op, state, context_id))
+                deadline = loop.time() + limit
+                while not task.done():
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        task.cancel()
+                        LOGGER.error("op %r after END ran past %.0fs; cancelled", name, limit)
+                        break
+                    try:
+                        await asyncio.wait_for(asyncio.shield(task), remaining)
+                    except asyncio.TimeoutError:
+                        continue
+                    except asyncio.CancelledError:
+                        continue  # the run is being cancelled; the op after END still runs
+        finally:
+            _reset_state(token)
 
     async def _run_once(
         self,

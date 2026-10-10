@@ -313,6 +313,18 @@ class WebSocketSession(BoundedSession):
                 {"error": "the graph failed before it sent anything", "trace_id": self.trace_id}
             )
 
+    async def finish(self, code: int = 1000) -> None:
+        """Close the socket from this side, once the run (and its op after
+        END) is over: ``1000``, or ``1011`` when the run failed. A peer that
+        already left needs nothing; the attempt is quiet."""
+        try:
+            from starlette.websockets import WebSocketState
+
+            if self.websocket.application_state == WebSocketState.CONNECTED:
+                await self.websocket.close(code=code)
+        except Exception as exc:  # noqa: BLE001 — the peer may be gone; that is ordinary
+            LOGGER.debug(f"[serve] websocket close: {type(exc).__name__}: {exc}")
+
     async def _tell(self, notice: Dict[str, Any]) -> None:
         """A frame from the door itself, not the run: not counted in `sent`."""
         try:

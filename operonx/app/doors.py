@@ -16,6 +16,7 @@ on Tuesday is read the same way. Design: ``docs/DOORLESS_SERVICES_PLAN.md``.
 
 from __future__ import annotations
 
+import copy
 import inspect
 from collections.abc import Mapping
 from typing import Any, Dict, Iterable, Optional, Sequence
@@ -211,7 +212,8 @@ def serve_inputs(
         inputs = bind_item(params, item, fixed=given, defaults=defaults)
     for name in params:
         if name not in inputs and name in defaults:
-            inputs[name] = defaults[name]
+            # a copy per request: one caller's run must not change the next one's default
+            inputs[name] = copy.deepcopy(defaults[name])
     missing = [p for p in params if p not in inputs]
     if missing:
         raise BindError(f"missing required parameter {missing[0]!r}", field=missing[0])

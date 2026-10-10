@@ -47,6 +47,49 @@ class SoftEdge:
         return self.op.__rshift__(other)
 
 
+class _AfterEnd:
+    """What ``END >> op`` evaluates to: nothing chains on from the end op.
+
+    The op after END runs once, after the whole run; an edge out of it
+    would name work that runs after the run, which is the end op's own
+    body. Put the steps inside it.
+    """
+
+    __slots__ = ["op"]
+
+    def __init__(self, op):
+        self.op = op
+
+    def _refuse(self, other):
+        raise TypeError(
+            f"`END >> {self.op.name} >> ...`: nothing runs after the op after END. "
+            f"Put those steps inside {self.op.name} (or make it a subgraph call)."
+        )
+
+    __rshift__ = __gt__ = _refuse
+
+
+class _IntoEnd:
+    """What ``a >> END`` evaluates to. ``a >> END >> op`` would read as
+    "op runs after a", which it does not: the op after END runs after the
+    whole run. Refused, so the line says what it means."""
+
+    __slots__ = ["source"]
+
+    def __init__(self, source):
+        self.source = source
+
+    def _refuse(self, other):
+        name = getattr(other, "name", "op")
+        raise TypeError(
+            f"`{self.source} >> END >> {name}` reads as '{name} runs after {self.source}', "
+            f"but an op after END runs once after the whole run, however it ended. "
+            f"Write it as its own line: `END >> {name}`."
+        )
+
+    __rshift__ = __gt__ = _refuse
+
+
 class DummyOp(BaseOp):
     """Sentinel op used as START, END, and PARENT markers."""
 
@@ -186,7 +229,33 @@ class DummyOp(BaseOp):
                     for name in self._start_targets(other):
                         current_graph.add_edge(self.name, name)
                     return other
+        if self == END:
+            return self._end_op(other)
         return super().__rshift__(other)
+
+    def _end_op(self, other):
+        """``END >> op``: *op* runs once, after every other op of the run has
+        finished, however the run ended — the runtime calls it, nothing
+        flows into it. One per root graph (``Scheduler.run``)."""
+        if isinstance(other, list):
+            raise TypeError(
+                "`END >> [a, b]`: one op runs after END. Put both steps inside one op "
+                "(or a subgraph call)."
+            )
+        if getattr(other, "type", None) == "branch":
+            raise TypeError("`END >> if_(...)`: the op after END is one op; branch inside it.")
+        current_graph = get_current()
+        if not (current_graph and hasattr(current_graph, "_finals")):
+            raise TypeError("`END >> op` is written inside a @graph body.")
+        if current_graph._finals:
+            raise TypeError(
+                f"graph {current_graph.name!r} already runs {current_graph._finals[0]!r} after "
+                f"END; one op runs there. Put {other.name!r}'s work inside it."
+            )
+        if other.name not in current_graph._ops:
+            raise ValueError(f"op {other.name!r} is not in graph {current_graph.name!r}")
+        current_graph._finals.append(other.name)
+        return _AfterEnd(other)
 
     def _start_targets(self, other) -> list:
         """The ops ``START >> other`` makes entries.
@@ -217,9 +286,11 @@ class DummyOp(BaseOp):
                     for item in other:
                         _set_wildcard_outputs(item)
                         current_graph.add_edge(item.name, self.name)
+                    return _IntoEnd(", ".join(getattr(i, "name", "?") for i in other))
                 elif hasattr(other, "name"):
                     _set_wildcard_outputs(other)
                     current_graph.add_edge(other.name, self.name)
+                    return _IntoEnd(other.name)
                 return self
 
         return self
@@ -240,6 +311,11 @@ class DummyOp(BaseOp):
         return self
 
     def __gt__(self, other):
+        if self == END:
+            raise TypeError(
+                "`END > op`: the op after END is not reached by an edge, soft or hard — "
+                "the runtime calls it. Write `END >> op`."
+            )
         if self == START:
             current_graph = get_current()
             if current_graph and hasattr(current_graph, "add_edge"):

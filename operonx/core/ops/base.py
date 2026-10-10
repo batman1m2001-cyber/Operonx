@@ -613,6 +613,11 @@ class BaseOp(ABC):
                         add_edge(self.name, predicate.name, edge_type)
                 else:
                     add_edge(self.name, other.name, edge_type)
+            if getattr(other, "name", None) == "__END__":
+                # `a >> END >> op` would read as "op after a"; the marker refuses it
+                from operonx.core.ops._edges import _IntoEnd
+
+                return _IntoEnd(self.name)
             return other
         return NotImplemented
 

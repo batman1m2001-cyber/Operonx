@@ -14,10 +14,12 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx.app.declare import ref_name
+from operonx.app.doors import RESERVED_QUERY
 from operonx.app.manifest import (
     _ENTRY_RE,
     CODEC_KINDS,
@@ -183,16 +185,70 @@ def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
 def engines_for(spec: ServeSpec, have: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Every engine a door needs, keyed the way `build_app` keeps them:
     the spec's name, or ``name/variant`` for each declared variant.
-    Engines already in ``have`` are reused."""
+    Engines already in ``have`` are reused. Checked as they are built:
+    no parameter takes a name the door reads itself, and ``key_ops``
+    names ops the graph has."""
     have = have or {}
     if not spec.variants:
         key = spec.name
-        return {key: have.get(key) or engine_for(spec)}
-    out = {}
-    for variant in spec.variants:
-        key = f"{spec.name}/{variant}"
-        out[key] = have.get(key) or engine_for(spec, variant)
+        out = {key: have.get(key) or engine_for(spec)}
+    else:
+        out = {}
+        for variant in spec.variants:
+            key = f"{spec.name}/{variant}"
+            out[key] = have.get(key) or engine_for(spec, variant)
+    for key, engine in out.items():
+        _check_served_engine(spec, key, engine)
     return out
+
+
+#: Names a door reads from the query itself, so no served graph's
+#: parameter may take one: it would silently never bind on some door.
+RESERVED_PARAMS = (*RESERVED_QUERY, "variant")
+
+
+def _check_served_engine(spec: ServeSpec, key: str, engine: Any) -> None:
+    params = list(getattr(engine, "inputs_expected", None) or ())
+    taken = [p for p in params if p in RESERVED_PARAMS]
+    if taken:
+        raise ManifestError(
+            f"[serve:{key}] graph {ref_name(spec.graph)} has a parameter named "
+            f"{taken[0]!r}, which a door reads itself ({', '.join(RESERVED_PARAMS)}). "
+            "Rename the parameter."
+        )
+    field = spec.options.get("trace_id")
+    if field and field not in params:
+        raise ManifestError(
+            f"[serve:{key}] trace_id={field!r}, but graph {ref_name(spec.graph)} takes "
+            f"{params or 'no parameters'}"
+        )
+    if field and field in (getattr(engine, "inputs_defaults", None) or {}):
+        raise ManifestError(
+            f"[serve:{key}] trace_id={field!r} names a parameter with a default; a run id "
+            "comes from every caller, so the parameter must be required"
+        )
+    key_ops = list(spec.options.get("key_ops") or ())
+    if key_ops:
+        names = _op_names(engine.graph)
+        unknown = [k for k in key_ops if k not in names]
+        if unknown:
+            raise ManifestError(
+                f"[serve:{key}] key_ops names {unknown}, which graph "
+                f"{ref_name(spec.graph)} has no op called; its ops are {sorted(names)}"
+            )
+
+
+def _op_names(graph: Any) -> set:
+    """Every op name in *graph*, nested graphs and loops included."""
+    names: set = set()
+    stack = [graph]
+    while stack:
+        g = stack.pop()
+        for name, child in (getattr(g, "_ops", None) or {}).items():
+            names.add(name)
+            if getattr(child, "_ops", None):
+                stack.append(child)
+    return names
 
 
 def _meta_from_request(request: Any) -> Dict[str, Any]:
@@ -205,11 +261,10 @@ def _meta_from_request(request: Any) -> Dict[str, Any]:
 
 
 def _default_on_session(spec: ServeSpec):
-    """No hook declared: the connection's query string becomes the inputs.
-
-    Enough for a graph whose parameters are scalars, and honest about its
-    limits — anything that has to validate, reject, or look a customer up
-    declares `on_session` and does it in project code.
+    """The query string as a run's inputs, unchecked. No longer used by the
+    serve layer — with no hook, `ServeRunner._bound_request` binds the
+    query to the graph's parameters — and kept for callers that built a
+    runner by hand. Removed in 2.0 with ``on_session``.
     """
 
     def build(session: Any) -> RunRequest:
@@ -312,8 +367,6 @@ def build_app(
         if spec.kind in STREAM_KINDS:
             _warn_doorless_stream(spec, built)
         runner = ServeRunner(engine, spec, transport=transport, variants=variants)
-        if runner._on_session is None:
-            runner._on_session = _default_on_session(spec)
         transport.precheck = runner.precheck
         # The websocket route needs to ask the same question the runner
         # would, one step earlier — before the handshake is answered.
@@ -522,6 +575,15 @@ def _webhook_endpoint(spec: ServeSpec, transport: Any, JSONResponse):
         from .triggers import Refused
 
         meta = _meta_from_request(request)
+        declared = spec.options.get("trace_id")
+        if declared:
+            # the run id comes from the declared field, over any ?trace_id=
+            query = {k: v for k, v in meta["query"].items() if k != "trace_id"}
+            value = payload.get(declared) if isinstance(payload, Mapping) else None
+            value = value if value not in (None, "") else query.get(declared)
+            meta = {**meta, "query": query}
+            if value not in (None, ""):
+                meta["trace_id"] = str(value)
         # a doorless graph refuses a body that does not fit before the 202
         precheck = getattr(transport, "precheck", None)
         problem = precheck(payload, meta) if precheck is not None else None

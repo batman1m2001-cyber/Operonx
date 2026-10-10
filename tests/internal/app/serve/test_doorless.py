@@ -155,7 +155,6 @@ def test_reserved_query_names_never_reach_the_graph():
         ("/chat", {"question": "hi", "topic": "x"}, "topic"),  # not a parameter
         ("/chat", {"k": 1}, "question"),  # required, given by nobody
         ("/chat?question=a", {"question": "b"}, "question"),  # given twice
-        ("/chat?topic=x", {"question": "hi"}, "topic"),  # an unknown query name
     ],
 )
 def test_a_request_that_does_not_fit_is_a_400_and_mints_no_run(url, body, field):
@@ -166,6 +165,17 @@ def test_a_request_that_does_not_fit_is_a_400_and_mints_no_run(url, body, field)
     assert "input=" not in reply.json()["error"]  # a job's advice, not a caller's
     assert "x-operonx-trace-id" not in reply.headers  # no run, no trace
     assert SEEN == []
+
+
+@pytest.mark.parametrize("url", ["/chat?topic=x", "/chat?question="])
+def test_the_query_ignores_what_the_graph_does_not_take_and_empty_values(url):
+    """A query key the graph does not take is ignored, and ``""`` is absent:
+    a caller adding a key must not break the door (callbot plan O1a). The
+    body keeps its rules: an unknown field is still refused (above)."""
+    with TestClient(_app(_chat())) as client:
+        reply = client.post(url, json={"question": "hi"})
+    assert reply.status_code == 200
+    assert SEEN == [("hi", 3)]
 
 
 def test_a_failing_run_is_a_500_with_its_trace_id_and_no_detail():

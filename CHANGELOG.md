@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-10-11
+
+A Service is a socket and a graph. The connection's data is the graph's
+parameters on every door, a stream included; what a run opens is its first
+op, and what it must close however it ended is `END >> op`. Design: the
+callbot's `docs/CALL_SERVICE_SIMPLIFY_PLAN.md` (revision 2).
+
+### Added
+
+- **`END >> op`.** Written on its own line in a root graph, `op` runs once
+  after every other op of the run has finished, however the run ended —
+  success, an op's failure (`errors="record"` or `"raise"`), a cancel or a
+  timeout. It reads graph parameters, declared cells and `SCRATCH` (never
+  another op's output: that op may not have run), can still talk to the
+  client through `current_session()`, and is traced like any op. One per
+  root graph, no edges in or out, no cell writes, not part of the reply;
+  shielded from cancellation and bounded by its own `timeout=` or 10 s; its
+  failure is recorded as handled and does not change the run's status.
+  `a >> END >> op`, `END >> [a, b]`, `END > op`, a second one, and a
+  subgraph that has one are build errors.
+- **A websocket's handshake query fills the graph's parameters**, before the
+  socket is accepted: a missing required parameter is refused (HTTP 403, no
+  run), with the parameter named in the log and in the playground.
+- **`Service(trace_id="call_id")`**: that required parameter's value is the
+  run's id (the studio finds a run by it); a webhook answers its `202` with
+  it.
+- **`?variant=`** picks one of a door's `variants` without a hook (the first
+  declared when absent; an unknown one is refused, `400` on http).
+- **The door closes the websocket when the run is over** (`1000`, or `1011`
+  when it failed). It used to wait for the peer, and a peer that kept
+  sending after the run parked the socket's reader on a full queue forever:
+  what arrives after the run is now dropped and counted (`after_close`).
+- The playground's `describe` lists each parameter's default and which are
+  required; a refusal says why (`reason`, `field`); a replay gets a fresh
+  trace id.
+
+### Changed
+
+- **Query rules, every door:** a value of `""` is absent (the default
+  applies, or a required parameter is refused); a key the graph does not
+  take is **ignored** (an http door refused it: a caller adding a key must
+  not break a door); the last of a repeated key wins. Body fields keep their
+  rules (an unknown one is refused).
+- **Checked when an app is built:** a served graph's parameter named
+  `trace_id`, `callback`, `thread_id`, `run_id`, `after_seq` or `variant`
+  (the door reads those itself), a `trace_id=` that is not a required
+  parameter, and a `key_ops` name the graph has no op for — each a
+  `ManifestError`.
+- A served `@graph`'s mutable default is copied per request.
+- A run that times out runs its `END >> op` before its session is closed.
+
+### Deprecated
+
+- **`Service(on_session=, on_close=, session=)`**, warned once each, removed
+  in 2.0. While a hook is declared it works as before. `RunRequest` stays
+  (jobs use it); returning one from a hook is what goes.
+
 ### Fixed
 
 - **`Operon.input_schema()` no longer raises.** It read `param.annotation`,
@@ -3431,7 +3488,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.3...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.0...HEAD
+[1.20.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.3...v1.20.0
 [1.19.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.2...v1.19.3
 [1.19.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.1...v1.19.2
 [1.19.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.0...v1.19.1

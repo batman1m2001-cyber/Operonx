@@ -13,9 +13,8 @@ APP = Application(
     "callbot",
     services=[
         Service("call", websocket("/ws/call", port=env("WS_PORT", 9922), workers=4),
-                graph=ws_callbot_pipeline,             # (script_data, agent_type)
-                session="per_connection", max_inflight=4000,
-                on_session=open_call, on_close=close_call,
+                graph=ws_callbot_pipeline,             # (call_id, customer_id, …): the query
+                trace_id="call_id", max_inflight=4000,
                 on_startup=[startup.warmup]),          # in each call worker, nowhere else
         Service("admin", asgi("/", port=env("HTTP_PORT", 9923)), app=admin.app),
     ],
@@ -37,11 +36,13 @@ app  = "app.main:APP"
 `operonx serve`, `operonx run` and the studio find the file, then read
 the object.
 
-- **The graph's signature is the door's contract.** What `on_session`
-  builds (`RunRequest.inputs`) must be exactly the graph's runtime
-  parameters; anything else is refused at the door, naming what is
-  missing and what is not a parameter. There is no second list to keep
-  in step.
+- **The graph's signature is the door's contract.** The connection's
+  query (and a one-shot door's body) fills the graph's parameters; a
+  missing required one is refused at the door, before a websocket's
+  handshake, naming the parameter. There is no second list to keep in
+  step. What a run opens (a call's per-call objects, a counter) is its
+  first op; what it must close however it ended (the call's record) is
+  `END >> op`. `on_session` / `on_close` are deprecated (removed in 2.0).
 - **A door op says what it is.** `@op(door="ingress")` /
   `@op(door="egress")` on an op that reads or writes the session; the
   built-in `ingress()` / `egress()` declare it the same way. The studio
@@ -111,7 +112,6 @@ Service(
     websocket("/ws/call", port=9922),
     graph=call_flow,                       # a module-level @graph
     max_inflight=4000,
-    on_session=open_call,
     variants={
         "educa_hr": {"turn": educa_hr_turn, "config": "agents/educa_hr/prompts.yaml"},
         "ahamove": {"turn": ahamove_turn, "config": "agents/ahamove/prompts.yaml"},
@@ -121,16 +121,13 @@ Service(
 
 Each variant fixes some of the `@graph`'s parameters at build time. A bound
 value that reads as `module:attr` is loaded, anything else is a literal. `operonx serve` compiles one engine
-per variant at boot, and `on_session` picks one per session:
+per variant at boot, and the connection picks one with `?variant=`
+(`/ws/call?variant=educa_hr&…`), before its parameters are bound: variants
+may take different ones.
 
-```python
-def open_call(session):
-    return RunRequest(variant=session.meta["query"]["agent_type"])
-```
-
-A door with variants has no default. A session that names none, or a
-name the door does not declare, is refused at the door with the declared
-names in the log — no run is minted. `Application.graphs` lists one
+A session that names no variant gets the first one declared. A name the
+door does not declare is refused at the door, with the declared names in
+the log — no run is minted. `Application.graphs` lists one
 graph per variant (`build[educa_hr]`, `build[ahamove]`) under the one
 service, each compilable on its own. Worked example:
 `examples/python/ex18_variants` (declared in Python, `app.py`).

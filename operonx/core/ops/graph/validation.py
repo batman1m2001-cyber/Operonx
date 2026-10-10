@@ -166,7 +166,10 @@ def validate_graph(
     result = ValidationResult(graph_name=name)
     result.issues.extend(_validate_branch_targets(ops, descendant_names, sibling_names))
     result.issues.extend(_validate_cycles(ops, edges))
-    result.issues.extend(_validate_reachability(ops, nexts, prevs, entries, exits))
+    # the op after END has no edges on purpose: the runtime calls it
+    finals = set(getattr(graph, "_finals", None) or ())
+    wired = {n: o for n, o in ops.items() if n not in finals} if finals else ops
+    result.issues.extend(_validate_reachability(wired, nexts, prevs, entries, exits))
     result.issues.extend(_validate_refs(ops, name, ancestor_names, descendant_names, sibling_names))
     result.issues.extend(_validate_output_keys(ops))
     if graph is not None:
@@ -595,9 +598,27 @@ def _validate_ordered_reads(
             ancestors_cache[name] = reachable([name], prevs)
         return ancestors_cache[name]
 
+    finals = set(getattr(graph, "_finals", None) or ())
+
     def check(reader: str, producer_op, var: str, how: str):
         producer = owner.get(id(producer_op))
-        if producer is None or producer == reader or producer in ancestors(reader):
+        if producer is None or producer == reader:
+            return None
+        if reader in finals:
+            return ValidationIssue(
+                level=ValidationLevel.ERROR,
+                category="Read after END",
+                message=(
+                    f"op '{reader}' runs after END and {how} '{producer}'['{var}']. An op "
+                    f"after END runs however the run ended — '{producer}' may never have "
+                    f"run. It reads graph parameters, declared cells (PARENT[...]) and "
+                    f"SCRATCH[...]: share the value through a declared cell, "
+                    f"PARENT.declare({var}=None), {producer}['{var}'] >> PARENT['{var}']."
+                ),
+                op_name=reader,
+                target_name=producer,
+            )
+        if producer in ancestors(reader):
             return None
         return ValidationIssue(
             level=ValidationLevel.ERROR,
