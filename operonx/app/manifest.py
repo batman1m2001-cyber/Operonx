@@ -22,7 +22,10 @@ question people ask first:
 
 Shape
 -----
-``[[serve]]`` names the graph it runs by entry point, directly::
+``[[serve]]`` is **deprecated** since 1.19 and removed in 2.0: services
+are declared in Python (``Service(...)`` in the application, which
+``[project] app`` points at), and parsing a block warns once per process.
+Until then it names the graph it runs by entry point, directly::
 
     [[serve]]
     kind         = "websocket"
@@ -45,6 +48,7 @@ always.
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,6 +58,7 @@ try:  # Python 3.11+
 except ModuleNotFoundError:  # 3.10
     import tomli as _toml  # type: ignore[no-redef]
 
+from operonx.core.loggings import LOGGER
 from operonx.core.registry.storage.yaml import _interpolate_env_vars
 
 __all__ = [
@@ -374,6 +379,8 @@ class Manifest:
         serves = tuple(
             _serve_spec(block, where, i) for i, block in enumerate(_as_list(raw.get("serve")))
         )
+        if serves:
+            _warn_serve_blocks(where)
         _reject_duplicates(serves, where)
         from .tracing import check_names, parse_tracing, settle_serves
 
@@ -688,6 +695,30 @@ def _default_session(kind: str) -> str:
     everything else answers one caller at a time.
     """
     return "per_connection" if kind in STREAM_KINDS else "per_request"
+
+
+#: Whether this process has said `[[serve]]` is deprecated (it says it once).
+_SERVE_WARNED = False
+
+
+def _warn_serve_blocks(where: str) -> None:
+    """``[[serve]]`` is deprecated since 1.19 and removed in 2.0: services
+    are declared once, in Python (``Service(...)`` in the application).
+    Said once per process — as a ``DeprecationWarning`` and in the log,
+    because Python hides the warning outside ``__main__`` and tests, and
+    the person who must act on it reads the server's log."""
+    global _SERVE_WARNED
+    if _SERVE_WARNED:
+        return
+    _SERVE_WARNED = True
+    message = (
+        f"{where}: [[serve]] is deprecated and will be removed in operonx 2.0. Declare each "
+        "service in Python — Application(..., services=[Service(name, http(...), graph=...)]) "
+        'in app/main.py — and point operonx.toml at it with [project] app = "app.main:APP". '
+        "[project], [resources], [tracing], [studio] and [[graph]] stay."
+    )
+    warnings.warn(message, DeprecationWarning, stacklevel=3)
+    LOGGER.warning(f"[manifest] {message}")
 
 
 def _reject_duplicates(serves: Tuple[ServeSpec, ...], where: str) -> None:

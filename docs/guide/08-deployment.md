@@ -54,30 +54,13 @@ the object.
   not warmed again for the admin port. `on_startup=` on the
   `Application` runs for every listener.
 
-The same declarations in TOML keep working, with `module:attr` strings
-where Python has objects:
+`[[serve]]` blocks in `operonx.toml` are **deprecated** (1.19) and removed
+in 2.0: loading one warns once, naming the file. Move each block to a
+`Service(...)` in `app/main.py` and set `[project] app`. `[project]`,
+`[resources]`, `[tracing]`, `[studio]` and `[[graph]]` stay in the file.
 
-```toml
-[project]
-name = "callbot"
-
-[[serve]]
-name    = "call"
-kind    = "websocket"
-path    = "/ws/call"
-port    = "${WS_PORT:9922}"
-graph   = "graphs.call.graph:ws_callbot_pipeline"
-session = "per_connection"
-max_inflight = 4000
-on_session   = "app.serve.call_session:open_call"
-
-[[serve]]
-name  = "admin"
-kind  = "asgi"
-path  = "/"
-port  = 9923
-app   = "app.serve.admin:app"
-```
+A scheduled job runs inside the server too: `Job(..., schedule=schedule(at="07:00",
+port=...))` puts its clock on that port (see [Jobs and runbooks](10-jobs.md)).
 
 ```bash
 pip install "operonx[serve]"
@@ -100,10 +83,12 @@ app.run_sync("nightly")              # a job or runbook, with its record
 app.describe()                       # graphs, services, jobs — plain data
 ```
 
-`ingress` and `egress` are the two door ops a served graph uses; they
-read the session the transport minted, so the same graph is served on
-one day and run over a file by a job on the next. See
-[Jobs and runbooks](10-jobs.md).
+A request–reply graph needs no door ops: on `http`, `webhook` and
+`schedule` its parameters are filled from the body and query, and its
+outputs are the reply. `ingress` and `egress` are the door ops of a graph
+that handles many items in one run (a call on a websocket); they read the
+session the transport minted, so the same graph is served on one day and
+run over a file by a job on the next. See [Jobs and runbooks](10-jobs.md).
 
 Every door reads what its caller sends the same way. An HTTP body, a
 webhook body and a websocket text frame are JSON by default, so one graph
@@ -118,23 +103,24 @@ webhook replies carry the run's `x-operonx-trace-id` header.
 
 A door whose graph differs by caller — one turn graph per agent, one
 pipeline per tenant tier — declares the variants instead of threading a
-"which am I" input through every op or listing one `[[serve]]` per kind:
+"which am I" input through every op or declaring one service per kind:
 
-```toml
-[[serve]]
-name  = "call"
-kind  = "websocket"
-path  = "/ws/call"
-graph = "call.graph:build"                 # a plain function, not a @graph
-on_session = "app.door:open_call"
-[serve.variants]
-educa_hr  = { turn = "agents.educa_hr.graph:turn", config = "agents/educa_hr/prompts.yaml" }
-ahamove   = { turn = "agents.graph:turn",          config = "agents/ahamove/prompts.yaml" }
+```python
+Service(
+    "call",
+    websocket("/ws/call", port=9922),
+    graph=call_flow,                       # a module-level @graph
+    max_inflight=4000,
+    on_session=open_call,
+    variants={
+        "educa_hr": {"turn": educa_hr_turn, "config": "agents/educa_hr/prompts.yaml"},
+        "ahamove": {"turn": ahamove_turn, "config": "agents/ahamove/prompts.yaml"},
+    },
+)
 ```
 
-`graph` names a **factory**: a function that takes the bound parameters
-and returns a `@graph`. A bound value that reads as `module:attr` is
-loaded, anything else is a literal. `operonx serve` compiles one engine
+Each variant fixes some of the `@graph`'s parameters at build time. A bound
+value that reads as `module:attr` is loaded, anything else is a literal. `operonx serve` compiles one engine
 per variant at boot, and `on_session` picks one per session:
 
 ```python
