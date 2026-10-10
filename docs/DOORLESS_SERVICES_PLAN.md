@@ -1,6 +1,7 @@
 # Doorless services: serve a graph by its signature
 
-**Status (2026-10-10): S1–S3 done** (operonx 1.19.0, see §6). S4–S5 in progress.
+**Status (2026-10-10): DONE.** S1–S3 shipped in operonx 1.19.0. Two fixes the projects turned up
+shipped in 1.19.1 and 1.19.2. Every project is migrated and the studio check passed (§6).
 
 **Asked for:** understand ingress/egress, the Application, services and jobs, and reduce the design
 where it can be reduced. The walk-through page with real samples:
@@ -142,11 +143,13 @@ still drives the door (it goes through the same transport).
 **Gate G5:** the tcb-wepro and mr-finance services open in the studio with entry and exit shown, and
 one playground request each succeeds.
 
-## 5. Open question
+## 5. Open question (resolved)
 
-1. **Is educa-reminder-callbot still in use?** The same callbot lives on educa-reminder-agent's
-   `refactor/operonx-studio` branch, declared in Python. If the standalone repo is retired, S3 needs
-   no migration at all; if not, its `[[serve]]` moves to `app/main.py` before 2.0.
+1. **Is educa-reminder-callbot still in use?** Resolved by migrating it anyway, since the move is
+   harmless either way. Its `[[serve]]` blocks are now an `Application` in `app/main.py`; this repo
+   has no remote, so the commit is local only. Its pipeline no longer imports on current operonx
+   (`_current_op_ctx` was removed from `workflow_trace`). The old manifest fails the same way, so
+   the repo is stale: the live callbot is educa-reminder-agent's `refactor/operonx-studio`.
 
 ## 6. Results
 
@@ -228,4 +231,37 @@ one playground request each succeeds.
   - two `[[serve]]` manifests warn once;
   - a manifest with `[project]`, `[[graph]]` and `[tracing]` does not warn;
   - `[[serve]]` still loads.
+
+### Found by the projects: 1.19.1 and 1.19.2
+
+- **1.19.1 (#138):**
+  - `Service(input="payload")` hands the whole body to one parameter, like `Job(input=)`.
+    meeting-prep needs it: Mailpit's webhook sends fields the graph doesn't declare.
+  - The 400 for an unknown field now speaks to an HTTP caller. Before, it gave the Job advice
+    `pass input=`.
+- **1.19.2 (#139):** the studio playground ran a doorless service with no inputs. `PlayHost.open`
+  now binds the toy's first message and replies with the outputs, as the door does.
+
+### S4
+
+| Project | What changed | Checked |
+|---|---|---|
+| tcb-wepro (#6, #7) | `chat_flow(question)`: clean → LLMOp → reply. `read_question` and the doors are gone. | 4 tests; a live `POST /chat` on OpenRouter answered |
+| mr-finance (#9, #10) | The 8 `*_api` wrappers and `read_request` ops are gone; each flow's first op checks its parameters. `propose_flow` is new. The 07:00 sweep is `Job("policy_sweep", schedule=schedule(at="07:00"))`; `sweep_flow` and the `sweep_all` invoke loop are gone. Replies carry one key per service (`dashboard`, `read`, …), and the UI reads it. | 62 tests including the demo; ruff; Playwright at 1440×900 and 390×844 over every tab, the statement upload, chat, the risk test to its result, a scenario sent and approved: no console errors, no failed `/api/` calls |
+| meeting-prep-operonx (#10, #11) | `approve` without egress; `on_mail(item)` with `Service(input="item")`; `sweep` without its unused tick; `golden_case(email)` with `Eval(input="email")`. | 147 tests; golden 19/19 (main also 19/19); real Mailpit → webhook 202 → brief → `[Approve?]` email; stack brought down after |
+| educa-reminder-agent `refactor/operonx-studio` (48e2c44, pushed to that branch only) | `call_summary_api(request)` is one op with `Service(input="request")`. The reply is unchanged: `{status, count, calls}`. The call keeps its door ops. | 287 unit tests passed; the same 2 failures as before the change, on 1.17.1 and on 1.19.1; a new test that a field the telco adds is accepted |
+| educa-reminder-callbot (local `feat/serve-migration`) | `[[serve]]` → `app/main.py` | `serve --list` is identical with no warning (see §5 for the import breakage that predates this) |
+| qc-snatcher | nothing | — |
+
+### S5
+
+- **Canvas:** a doorless service draws as `START → ops → END`, so the entry and exit are there with
+  no studio change. `describe_service` carries `doors: false`, and a scheduled job's clock shows
+  `job`.
+- **Gate G5:** a separate studio (port 8767, its own state dir) opened tcb-wepro and mr-finance.
+  One playground request each succeeded after 1.19.2:
+  - `chat` answered "Techcombank được thành lập vào năm 1993." through OpenRouter;
+  - `dashboard` returned C01's dashboard.
+
+  Before 1.19.2 both failed for lack of inputs, which is the bug 1.19.2 fixes.
 
