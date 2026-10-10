@@ -65,6 +65,12 @@ def main(argv=None) -> int:
             print(f"  {host}:{port}{workers}")
             for s in specs:
                 d = described[s.name]
+                if d.get("job"):
+                    when = ", ".join(
+                        f"{k}={s.options[k]}" for k in ("every", "at") if k in s.options
+                    )
+                    print(f"    {s.name:14s} {s.kind:10s} {when:16s} -> job {d['job']}")
+                    continue
                 target = d["app"] if s.kind == "asgi" else d["graph"]
                 bound = f" max_inflight={s.max_inflight}" if s.max_inflight else ""
                 print(

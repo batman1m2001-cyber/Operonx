@@ -471,3 +471,66 @@ class ScheduleTransport:
 
     async def close(self) -> None:
         self._stop.set()
+
+
+class JobClock:
+    """A scheduled job's clock (``Job(schedule=schedule(...))``): each tick
+    runs the job once, with what triggered it in the run's record.
+
+    The clock is the schedule door's own: a tick that lands while the last
+    run is still going is skipped and counted (``skipped``), and with
+    ``queue=`` each tick fires on one replica. A run that fails — or raises
+    — is logged and counted (``failed``); the next tick comes anyway. Each
+    run is fresh: a scheduled job never resumes.
+    """
+
+    def __init__(self, spec: Any):
+        self.spec = spec
+        self.job = spec.options["job"]
+        self.transport = ScheduleTransport(spec)
+        self.runs: List[Any] = []  # the records of the runs it started, newest last
+        self.failed = 0
+        self._tasks: Set[asyncio.Task] = set()
+
+    @property
+    def skipped(self) -> int:
+        return self.transport.skipped
+
+    async def _fire(self, session: HttpSession) -> None:
+        meta = session.meta or {}
+        trigger = {"by": "schedule", "slot": meta.get("slot"), "at": meta.get("at")}
+        try:
+            run = await self.job.run(trigger=trigger)
+            self.runs.append(run)
+            if getattr(run, "status", None) != "ok":
+                self.failed += 1
+                LOGGER.error(
+                    f"[job:{self.job.name}] scheduled run {run.run_id} ended {run.status}; "
+                    "the clock goes on"
+                )
+        except Exception as exc:  # noqa: BLE001 — one bad run never stops the clock
+            self.failed += 1
+            LOGGER.error(
+                f"[job:{self.job.name}] scheduled run raised {type(exc).__name__}: {exc}; "
+                "the clock goes on"
+            )
+        finally:
+            await session.close()  # the tick is over: the next one may run
+
+    async def run(self) -> None:
+        LOGGER.info(
+            f"[serve:{self.spec.name}] schedule "
+            + ", ".join(f"{k}={v}" for k, v in self.spec.options.items() if k in ("every", "at"))
+            + f" -> job {self.job.name!r}"
+        )
+        try:
+            async for session in self.transport.sessions():
+                task = asyncio.ensure_future(self._fire(session))
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
+        finally:
+            if self._tasks:
+                await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+    async def close(self) -> None:
+        await self.transport.close()
