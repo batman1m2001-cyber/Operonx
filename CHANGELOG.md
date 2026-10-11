@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-10-11
+
+### Added
+
+- **A run keeps what it was asked and what it answered.**
+  - `handle.trace.inputs` holds the graph's parameters.
+  - `handle.trace.output` holds the root graph's declared cells as they
+    stood when the run ended.
+  - A graph with doors and no parameters (or no declared cells) is asked
+    through its ingress and answers through its egress. Its first items
+    (up to 20) are its input and output; the ingress keeps them on the
+    trace, since it records no item of its own.
+- **Every run store keeps a preview of both with the run's summary**
+  (`RunSummary.input` / `.output`). Each is compact JSON of at most 4,000
+  characters, with media described (`[audio/wav 2.4 s]`).
+  - ClickHouse: schema version 5 adds the two columns.
+  - SQLite and Postgres: an index made before them gains them on open.
+- **Langfuse:** the trace gets the run's input and output. A Langfuse
+  run source lists them.
+
 ## [1.21.1] - 2026-10-11
 
 ### Fixed
@@ -3542,7 +3562,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.0...HEAD
+[1.22.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.1...v1.22.0
 [1.21.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.0...v1.21.1
 [1.21.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.1...v1.21.0
 [1.20.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.0...v1.20.1

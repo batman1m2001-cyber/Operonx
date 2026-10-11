@@ -307,6 +307,10 @@ class WorkflowTrace:
                        no node shows: a subgraph whose child raised, a loop
                        stopped at its cap, a structured ``LLMOp`` step that
                        returned ``error``.
+        inputs:        The run's inputs (the graph's parameters), as the
+                       root graph records them.
+        output:        What the run answered with: the root graph's
+                       declared cells (``PARENT[...]``) when it ended.
     """
 
     trace_id: str
@@ -320,6 +324,11 @@ class WorkflowTrace:
     # their cheap monotonic clock and a consumer still gets real dates.
     wall_started_at: float = 0.0
     errors: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    inputs: Dict[str, Any] = field(default_factory=dict)
+    output: Dict[str, Any] = field(default_factory=dict)
+    # The first items an ingress door received (it is transient, so no
+    # record keeps them): a graph with no parameters was asked these.
+    ingress_items: List[Any] = field(default_factory=list, repr=False, compare=False)
     # Engine-internal listeners, not data. `record()` calls the first with
     # each execution as it lands (live trace consumers); `emit_task()` the
     # second with each `runtime.Task*` event (`stream(mode="tasks")`). Both

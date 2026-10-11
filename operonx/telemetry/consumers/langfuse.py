@@ -293,6 +293,12 @@ class LangfuseConsumer(Consumer):
         ext = lambda nid: f"{run}/{nid}"  # noqa: E731 — one-line id scoping
 
         batch: List[Dict[str, Any]] = [self._trace_create(trace, wf_name)]
+        # the trace's own input and output: what the run was asked and answered
+        for key, value in (("input", trace.inputs), ("output", trace.output)):
+            if value:
+                batch[0]["body"][key] = self.offload_media(
+                    self.sanitize(value), media_dir, cfg["media_threshold"]
+                )
         for node in build_tree(trace).values():
             body: Dict[str, Any] = {
                 "id": ext(node["id"]),

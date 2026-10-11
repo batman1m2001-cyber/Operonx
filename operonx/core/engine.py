@@ -944,6 +944,55 @@ class Operon:
             inputs=inputs,
         )
 
+    def _run_output(self, state: Any) -> Dict[str, Any]:
+        """What a run answered with, for its record: the root graph's
+        declared cells (``PARENT[...]``) as they stand when it ends — the
+        last value of each. Unset cells are left out."""
+        names = sorted({v for vars_ in self.graph._out_vars.values() for v in vars_.values()})
+        if not names:
+            return {}
+        root = state.schema.name
+        out: Dict[str, Any] = {}
+        for name in names:
+            try:
+                value = state[root, name]
+            except Exception:  # a cell the schema does not hold at the root
+                continue
+            if value is not None:
+                out[name] = value
+        return self.graph._filter_for_trace(out)
+
+    #: The most items a run's record keeps from its doors.
+    _DOOR_ITEMS = 20
+
+    def _door_io(self, trace: Any) -> None:
+        """A graph with doors and no parameters (or no declared cells) is
+        asked through its ingress and answers through its egress: the items
+        carried are the run's input and output (at most ``_DOOR_ITEMS``; one
+        item is itself)."""
+        doors = {
+            f"{self.graph.name}.{name}": op.door
+            for name, op in self.graph._ops.items()
+            if getattr(op, "door", None)
+        }
+        if not doors:
+            return
+        # an ingress is transient (no record keeps its items): it keeps the
+        # first ones on the trace itself (operonx.app.serve.ops.ingress)
+        got: Dict[str, List[Any]] = {"ingress": list(trace.ingress_items), "egress": []}
+        for node in trace.nodes:
+            if doors.get(node.op_full_name) == "egress" and isinstance(node.inputs, dict):
+                if "item" in node.inputs:
+                    got["egress"].append(node.inputs["item"])
+        def pack(items: List[Any]) -> Any:
+            if len(items) == 1:
+                return items[0]
+            return items[: self._DOOR_ITEMS]
+        if not trace.inputs and got["ingress"]:
+            trace.inputs = self.graph._filter_for_trace({"item": pack(got["ingress"])})
+        if not trace.output and got["egress"]:
+            trace.output = {"item": pack(got["egress"])}
+
     @property
     def fingerprint(self) -> str:
         """The compiled graph's structural fingerprint (what :meth:`resume`
@@ -1065,6 +1114,7 @@ class Operon:
             scratch=None,
             checkpointer=checkpointer,
             context=context,
+            inputs=header.inputs,
         )
 
     def runs(self, status: Optional[str] = None) -> List[Any]:
@@ -1187,6 +1237,8 @@ class Operon:
             # The run's own failure records — the dict `handle.errors`
             # copies — so a consumer sees what no node shows.
             errors=state._op_errors,
+            # what the run was asked, as the root graph records its values
+            inputs=self.graph._filter_for_trace(dict(inputs or {})),
         )
 
         if nest is not None:
@@ -1256,6 +1308,9 @@ class Operon:
             finally:
                 _v3_trace_var.reset(v3_token)
                 _wf_trace.ended_at = perf_counter()
+                _wf_trace.output = self._run_output(state)
+                if not _wf_trace.inputs or not _wf_trace.output:
+                    self._door_io(_wf_trace)
                 if nest is not None:
                     _close_nested(nest, self.graph, state, _wf_trace, outcome)
                 if recorder is not None:

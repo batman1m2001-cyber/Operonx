@@ -47,6 +47,8 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "ops",
     "errors",
     "first_error",
+    "input",
+    "output",
     "cost_usd",
     "unpriced",
     "llm_calls",
@@ -71,7 +73,7 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "location",
 )
 _TEXT = {
-    "trace_id", "workflow", "origin", "name", "status", "first_error", "version",
+    "trace_id", "workflow", "origin", "name", "status", "first_error", "input", "output", "version",
     "service", "transport", "variant", "job", "job_run", "key", "runbook",
     "runbook_run", "project", "session_id", "user_id", "request_id", "metadata",
     "location",
@@ -143,6 +145,13 @@ class SqlIndex:
         with self._tx() as cur:
             for sql in statements:
                 cur.execute(sql)
+            # a table made before a column existed gets it (`input`,
+            # `output`); both dialects read the table's columns this way
+            cur.execute(f"SELECT * FROM {self.runs} WHERE 1 = 0")
+            have = {d[0].lower() for d in cur.description or ()}
+            for col in SUMMARY_COLUMNS:
+                if col not in have:
+                    cur.execute(f"ALTER TABLE {self.runs} ADD COLUMN {col} {_coltype(col, self.real_type)}")
 
     # -- write ---------------------------------------------------------------
 
