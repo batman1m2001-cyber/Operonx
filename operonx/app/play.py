@@ -438,12 +438,41 @@ class PlaySession(BoundedSession):
             self.script.append(script_entry(message))
 
 
-def _op_event(node: Any) -> Dict[str, Any]:
-    """One finished op execution, as the playground's ``ops`` event carries it."""
+#: An op's words a playground ``ops`` event carries, at most this long.
+_SAID_LIMIT = 500
+
+
+def _said(node: Any) -> Optional[str]:
+    """What the user said, when this execution heard it: an output named
+    ``transcript`` (the rule the studio's review reads a run by), as the
+    exporters see it (redaction applied). A recorded placeholder
+    (``<audio …>``) is nobody's words."""
+    try:
+        _ins, outs = node.exported()
+    except Exception:  # noqa: BLE001 — a record that cannot be read says nothing
+        return None
+    said = outs.get("transcript") if isinstance(outs, dict) else None
+    if not isinstance(said, str):
+        return None
+    said = said.strip()
+    if not said or (said.startswith("<") and said.endswith(">")):
+        return None
+    return said[:_SAID_LIMIT]
+
+
+def _op_event(node: Any, trace: Any = None) -> Dict[str, Any]:
+    """One finished op execution, as the playground's ``ops`` event carries
+    it: op, status, ms; ``at`` (wall clock, seconds) when it ended, and
+    ``said`` when it heard the user (:func:`_said`)."""
     start, end = getattr(node, "start_time", None), getattr(node, "end_time", None)
     out: Dict[str, Any] = {"op": node.op_name, "status": getattr(node, "status", None) or "ok"}
     if start is not None and end is not None:
         out["ms"] = round((end - start) * 1000, 2)
+        if trace is not None and getattr(trace, "wall_started_at", 0):
+            out["at"] = round(trace.wall_of(end), 3)
+    said = _said(node)
+    if said:
+        out["said"] = said
     return out
 
 
@@ -683,7 +712,7 @@ class Bridge:
                             "t": "ops",
                             "sid": sid,
                             "trace_id": request.trace_id,
-                            "ops": [_op_event(n) for n in batch],
+                            "ops": [_op_event(n, trace) for n in batch],
                         }
                     )
                     continue

@@ -103,6 +103,26 @@ class Upper(Codec):
         return {"kind": "text", "text": str(item).upper()}
 
 
+@op(bound="sync")
+def hear(text: str = "") -> dict:
+    # an op that heard the user: its `transcript` is what they said
+    return {"transcript": f"  heard {text}  ", "noise": 0.1}
+
+
+@op(bound="sync")
+def placeholder(text: str = "") -> dict:
+    return {"transcript": "<audio 8000 Hz>"}
+
+
+@graph
+def hear_flow():
+    src = ingress()
+    h = hear(text=src["item"])
+    p = placeholder(text=h["transcript"])
+    out = egress(item=h["transcript"])
+    START >> src >> h >> p >> out >> END
+
+
 from operonx.app import Application, Job, Listener, Service, http, websocket
 
 APP = Application(
@@ -117,6 +137,7 @@ APP = Application(
         Service("raw", Listener("memory", "/raw"), graph=score_flow, max_inflight=4),
         Service("custom", Listener("memory", "/custom"), graph=score_flow, max_inflight=4,
                 playground=Upper),
+        Service("hear", websocket("/hear", port=8124), graph=hear_flow, max_inflight=4),
     ],
     jobs=[Job("nightly", graph=score_flow, items=[{"call_id": "j1", "text": "a b"}],
               key="call_id")],
@@ -579,3 +600,29 @@ def test_a_session_whose_only_failure_is_a_record_is_an_error():
     assert _status(trace) == ("error", "ex: ParserError: Parse error (json): x")
     trace.errors = {}
     assert _status(trace) == ("ok", None)
+
+
+def test_an_op_that_heard_the_user_says_so_in_its_ops_event(project):
+    """A voice toy writes down what the caller said as it is heard: the ops
+    event of an execution whose output ``transcript`` is text carries it
+    (stripped) as ``said``, and every event carries its wall-clock end; a
+    recorded placeholder is not words."""
+    import time
+
+    name, root = project
+    bridge, events = _bridge(root)
+    t0 = time.time()
+
+    async def go():
+        await bridge.handle({"op": "open", "sid": "h1", "service": "hear"})
+        await bridge.handle({"op": "send", "sid": "h1", "msg": {"kind": "text", "text": "hello"}})
+        await _until(events, lambda e: e["t"] == "out")
+        await bridge.handle({"op": "end", "sid": "h1"})
+        return await _until(events, lambda e: e["t"] == "ended")
+
+    asyncio.run(go())
+    ops = [o for e in events if e["t"] == "ops" for o in e["ops"]]
+    by = {o["op"]: o for o in ops}
+    assert by["h"]["said"] == "heard hello"
+    assert "said" not in by["p"] and "said" not in by["out"]
+    assert all(t0 - 1 <= o["at"] <= time.time() + 1 for o in ops if "ms" in o)
