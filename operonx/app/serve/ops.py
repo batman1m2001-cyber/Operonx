@@ -20,10 +20,14 @@ from typing import Any
 
 from operonx.core.loggings import LOGGER
 from operonx.core.ops import op
+from operonx.core.workflow_trace import _current_trace
 
 from .protocol import current_session
 
 __all__ = ["ingress", "egress"]
+
+#: How many of a session's first items its run's record keeps.
+_KEEP_ITEMS = 20
 
 
 @op(bound="io", transient=True, door="ingress")
@@ -51,10 +55,16 @@ async def ingress(items=None):
             yield {"item": item}
         return
 
+    # the first items are the run's input on its record (a graph with no
+    # parameters is asked these); the rest are released as they go
+    trace = _current_trace.get()
+    keep = trace.ingress_items if trace is not None else None
     count = 0
     try:
         async for item in session.recv():
             count += 1
+            if keep is not None and count <= _KEEP_ITEMS:
+                keep.append(item)
             yield {"item": item}
     finally:
         LOGGER.debug(f"[serve] ingress ended after {count} item(s)")

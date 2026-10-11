@@ -135,6 +135,8 @@ CREATE TABLE IF NOT EXISTS {db}.runs (
   ops UInt32,
   errors UInt32,
   first_error Nullable(String),
+  input Nullable(String) CODEC(ZSTD(3)),
+  output Nullable(String) CODEC(ZSTD(3)),
   cost_usd Nullable(Float64),
   unpriced UInt32,
   llm_calls UInt32,
@@ -377,6 +379,14 @@ MIGRATIONS: List[Tuple[int, str, List[str]]] = [
             "ALTER TABLE {db}.nodes ADD COLUMN IF NOT EXISTS inputs_from String DEFAULT ''",
         ],
     ),
+    (
+        5,
+        "runs: input, output",
+        [
+            "ALTER TABLE {db}.runs ADD COLUMN IF NOT EXISTS input Nullable(String) CODEC(ZSTD(3)) AFTER first_error",
+            "ALTER TABLE {db}.runs ADD COLUMN IF NOT EXISTS output Nullable(String) CODEC(ZSTD(3)) AFTER input",
+        ],
+    ),
 ]
 
 
@@ -495,7 +505,7 @@ def run_row(summary: RunSummary, meta: Dict[str, Any], expires: int) -> List[Any
             out.append(expires)
         elif col == "version_dirty":
             out.append(None if summary.version_dirty is None else bool(summary.version_dirty))
-        elif col in ("first_error", "cost_usd"):
+        elif col in ("first_error", "input", "output", "cost_usd"):
             out.append(getattr(summary, col))
         else:
             value = getattr(summary, col)

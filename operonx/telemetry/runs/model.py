@@ -80,6 +80,10 @@ class RunSummary:
     ops: int = 0
     errors: int = 0
     first_error: Optional[str] = None
+    # what the run was asked and what it answered, as compact JSON (at most
+    # PREVIEW_LIMIT characters; media as a short description)
+    input: Optional[str] = None
+    output: Optional[str] = None
     #: Sum of every priced call's ``cost_usd``; ``None`` when nothing in
     #: the run reported a price at all.
     cost_usd: Optional[float] = None
@@ -395,6 +399,8 @@ def summarize(
     elif first_start is not None and last_end is not None:
         s.duration_ms = (last_end - first_start) * 1000.0
     s.started_at = float(meta.get("wall_started_at") or first_wall or 0.0)
+    s.input = meta.get("input") or None
+    s.output = meta.get("output") or None
     s.metadata = md
     for key in _NAMED:
         value = md.get(key)
@@ -502,6 +508,44 @@ def resolve_inputs(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
+#: The longest run input or output preview kept with a run's summary.
+PREVIEW_LIMIT = 4000
+
+
+def _describe(value: Any) -> Any:
+    """A value made JSON for a preview: media as a short description (it
+    is in the run's rows in full), bytes as their size."""
+    if isinstance(value, dict):
+        if "$media" in value:
+            parts = [str(value.get("mime") or "media")]
+            if value.get("duration_s"):
+                parts.append(f"{float(value['duration_s']):.1f} s")
+            elif value.get("size"):
+                parts.append(f"{int(value['size'])} bytes")
+            return f"[{' '.join(parts)}]"
+        return {str(k): _describe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_describe(v) for v in value]
+    if isinstance(value, (bytes, bytearray)):
+        return f"[{len(value)} bytes]"
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    mime = getattr(value, "mime", None)
+    if mime is not None:  # an operonx Media object
+        duration = getattr(value, "duration_s", None)
+        return f"[{mime}{f' {float(duration):.1f} s' if duration else ''}]"
+    return repr(value)
+
+
+def run_preview(value: Any, limit: int = PREVIEW_LIMIT) -> Optional[str]:
+    """A run's inputs or output as compact JSON for its summary, cut at
+    *limit* characters (ending in ``…``); ``None`` when there is nothing."""
+    if not value:
+        return None
+    text = json.dumps(_describe(value), ensure_ascii=False, separators=(", ", ": "), default=str)
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def meta_of_trace(trace: Any, running: bool = False) -> Dict[str, Any]:
     """A trace's ``meta.json``: what LocalConsumer writes, and what a live
     trace is read as. ``status`` is ``"error"`` when a node failed or the
@@ -519,4 +563,6 @@ def meta_of_trace(trace: Any, running: bool = False) -> Dict[str, Any]:
         "metadata": trace.metadata,
         "status": "running" if running else trace.status,
         "errors": dict(trace.errors),
+        "input": run_preview(getattr(trace, "inputs", None)),
+        "output": None if running else run_preview(getattr(trace, "output", None)),
     }

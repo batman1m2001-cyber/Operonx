@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 from .base import RunStore
-from .model import OpRollup, Page, RunFilter, RunRecord, RunSummary, summarize
+from .model import OpRollup, Page, RunFilter, RunRecord, RunSummary, run_preview, summarize
 
 __all__ = ["LangfuseRunStore", "records_of_langfuse_trace"]
 
@@ -110,6 +110,9 @@ class LangfuseRunStore(RunStore):
             "workflow_name": t.get("name") or "",
             "wall_started_at": _epoch(t.get("timestamp")),
             "metadata": md,
+            # a Langfuse trace carries its own input and output
+            "input": run_preview(t.get("input")),
+            "output": run_preview(t.get("output")),
         }
         if t.get("latency") is not None:
             meta["duration_ms"] = float(t["latency"]) * 1000.0
@@ -159,6 +162,8 @@ class LangfuseRunStore(RunStore):
             "workflow_name": detail.get("name") or "",
             "wall_started_at": listing.started_at,
             "metadata": listing.metadata,
+            "input": listing.input,
+            "output": listing.output,
         }
         summary, _ = summarize(trace_id, rows, meta, location=None)
         return RunRecord(summary=summary, nodes=rows, meta=meta)
