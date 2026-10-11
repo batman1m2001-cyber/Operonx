@@ -84,7 +84,8 @@ __all__ = ["LangfuseConsumer", "build_tree"]
 
 
 def _idx(ctx: Tuple[str, ...]) -> str:
-    return ctx[-1].strip("[]") if len(ctx) > 1 else ""
+    # "[3]", or "[audio_in:3]" for a stream that meets a sibling: "3"
+    return ctx[-1].strip("[]").rpartition(":")[2] if len(ctx) > 1 else ""
 
 
 def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
@@ -169,7 +170,7 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
                 "kind": "stand-in",
                 "parent": None,
                 "rule": "stand-in",
-                "name": f"{stream or 'stream'} [{ctx[1].strip('[]')}]",
+                "name": f"{stream or 'stream'} [{_idx(ctx[:2])}]",
                 "start": r.start_time,
                 "end": r.end_time,
                 "record": None,

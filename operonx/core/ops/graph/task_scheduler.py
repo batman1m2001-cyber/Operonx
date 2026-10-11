@@ -50,8 +50,9 @@ def _last_item_segment(ctx: tuple) -> int:
 
 
 def _item_index(seg) -> int:
+    """``"[3]"`` -> 3; ``"[rare:3]"`` (a stream that meets a sibling) -> 3."""
     try:
-        return int(seg[1:-1])
+        return int(seg[1:-1].rpartition(":")[2])
     except (TypeError, ValueError):
         return 0
 
@@ -160,19 +161,24 @@ def _mints_contexts(op) -> bool:
 FINAL_TIMEOUT_S = 10.0
 
 
-async def _drive_final(op, state, context_id: tuple) -> None:
-    """Run the op after END to its end. Its failure — recorded by the op
-    itself, or a fail-fast carrier — is the op's own: marked handled."""
+async def _drive_final(op, state, context_id: tuple) -> bool:
+    """Run an op after END to its end; True when it did not fail. Its
+    failure — recorded by the op itself, or a fail-fast carrier — is the
+    op's own: marked handled."""
+    ok = True
     try:
         async for _item in op.run(state, context_id):
             pass
     except (Exception, _FailFast) as exc:
+        ok = False
         LOGGER.error("op %r after END failed: %s: %s", op.name, type(exc).__name__, exc)
     key = getattr(op, "full_name", None) or op.name
     record = state._op_errors.get(key)
     if record is not None and not record.get("handled"):
+        ok = False
         state._op_errors[key] = {**record, "handled": True}
         LOGGER.error("op %r after END failed: %s", op.name, record.get("message", "")[-300:])
+    return ok
 
 
 class Scheduler:
@@ -338,7 +344,8 @@ class Scheduler:
         # Which generators' items an op runs in (not across a collect, which
         # hands one value back to the parent). An op outside an origin's
         # reach whose values come from a stream that does not enclose the
-        # origin — a sibling stream — never lands in the origin's parent
+        # origin — a sibling stream, even when both run inside the items of
+        # a third — never lands in the origin's parent
         # context: it arrives in contexts of its own. Waiting for it there
         # (as a join does) waits for that stream's end. Two streams merging
         # into one op — a call's speech and its prompts — is that shape: the
@@ -359,6 +366,21 @@ class Scheduler:
                     stack.append(link.dst)
             for name in seen:
                 streams_of.setdefault(name, set()).add(gen)
+        # Two generators run in the same context (the same enclosing streams)
+        # whose streams meet at an op would both number their items "[0]",
+        # "[1]", ... under it: the second stream's item lands in a context
+        # the first already opened and spent, and the op never sees it. Each
+        # such generator numbers its items with its name instead ("[rare:0]"),
+        # so every item has a context of its own, and an op in it reads the
+        # other stream as absent (a cell lookup walks up, never sideways).
+        # Set once here, at build; no graph without the shape changes.
+        for name in streams_of:
+            gens = list(streams_of[name])
+            for i, a in enumerate(gens):
+                for b in gens[i + 1 :]:
+                    if streams_of[a] - {a} == streams_of[b] - {b}:
+                        graph._ops[a]._item_prefix = f"{a}:"
+                        graph._ops[b]._item_prefix = f"{b}:"
         joins = set()
         siblings: Dict[str, list] = {}
         for origin in origins:
@@ -367,7 +389,7 @@ class Scheduler:
             for (src, dst), edge in graph._edges.items():
                 if edge.type != "error" and dst in reach and dst != origin and src not in reach:
                     outside = streams_of.get(src, set())
-                    if outside and not (outside & enclosing):
+                    if outside - enclosing:
                         siblings.setdefault(origin, []).append((src, dst, edge.soft))
                     else:
                         joins.add((src, dst))
@@ -479,14 +501,16 @@ class Scheduler:
         return outputs, item_ctxs, root_interrupted
 
     async def _run_finals(self, state, context_id: tuple) -> None:
-        """The op after END: once, however the run ended.
+        """The ops after END (``END >> a >> b``): once each, in order,
+        however the run ended.
 
-        Shielded: a cancel that arrives while it runs (``stream()`` cancels
-        again in its ``finally``) is absorbed, and the op is bounded by its
-        own ``timeout=`` or :data:`FINAL_TIMEOUT_S` instead. Its failure is
+        Shielded: a cancel that arrives while they run (``stream()`` cancels
+        again in its ``finally``) is absorbed, and each op is bounded by its
+        own ``timeout=`` or :data:`FINAL_TIMEOUT_S` instead. A failure is
         recorded as handled and logged — the run's status and answer stay
-        what the run made. Skipped when a journalled run parked or drained:
-        that run is not over.
+        what the run made — and stops the ops after it, which may read its
+        output. Skipped when a journalled run parked or drained: that run is
+        not over.
         """
         durable = getattr(state, "_durable", None)
         if durable is not None and getattr(durable, "stopping", None) is not None:
@@ -495,7 +519,7 @@ class Scheduler:
         loop = asyncio.get_running_loop()
         token = _set_state(state)
         try:
-            for name in g._finals:
+            for i, name in enumerate(g._finals):
                 op = g._ops[name]
                 policy = getattr(op, "_policy", None)
                 limit = getattr(getattr(policy, "timeout", None), "run", None) or FINAL_TIMEOUT_S
@@ -513,6 +537,11 @@ class Scheduler:
                         continue
                     except asyncio.CancelledError:
                         continue  # the run is being cancelled; the op after END still runs
+                if not task.done() or task.cancelled() or not task.result():
+                    rest = g._finals[i + 1 :]
+                    if rest:
+                        LOGGER.error("ops after END skipped, %r did not finish: %s", name, rest)
+                    break
         finally:
             _reset_state(token)
 

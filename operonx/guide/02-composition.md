@@ -321,8 +321,11 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   what a run opened and must close, such as a call's record or a counter.
   It reads graph parameters, declared cells and `SCRATCH`, never another
   op's output (that op may not have run); it can still talk to the client
-  (`current_session()`). One per root graph, no edges out, its outputs are
-  not the reply; bounded by its `timeout=` or 10 s.
+  (`current_session()`). `END >> a >> b` is a chain: `a`, then `b`, once
+  each; `b` may read `a`'s output, and a failing `a` stops `b`. One chain
+  per root graph, no edges, no fan-out (`END >> [a, b]`: make it a
+  subgraph call), its outputs are not the reply; each op is bounded by its
+  `timeout=` or 10 s.
 - `codec="text"` on `http`, `websocket` or `webhook` passes text through
   instead of decoding JSON. `codec="json"` is the default.
 - `webhook(path, port=...)`: for events nobody waits on (a new email, a
