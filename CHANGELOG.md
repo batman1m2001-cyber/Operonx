@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.1] - 2026-10-11
+
+### Fixed
+
+- **The trace tree (Langfuse, the studio's Tree view) names each stream's
+  items after that stream.** With 1.21's named items, a recorded stream fed
+  by a session-long op (a call's `bot_prompts`) had its items placed under
+  a stand-in named after the root transient stream: `bot_prompts [0]`
+  showed inside `audio_in [0]`. A level-1 yield with no parent above is now
+  top-level, and a stand-in takes the name in its item (`[audio_in:118]` →
+  `audio_in [118]`).
+
 ## [1.21.0] - 2026-10-11
 
 ### Added
@@ -3530,7 +3542,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.1...HEAD
+[1.21.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.0...v1.21.1
 [1.21.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.1...v1.21.0
 [1.20.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.3...v1.20.0

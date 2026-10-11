@@ -19,8 +19,9 @@ Parent of a record, first hit wins:
 4. the yield record at this ctx, then at each shorter prefix down to
    depth 2 — this is what catches an op whose edges stop at a GraphOp
    boundary.
-5. else a stand-in span for the unrecorded yield ``main.[i]``, named
-   after the root-level transient stream (``audio_in [357]``). Transient
+5. a level-1 yield found no parent above: the trace itself.
+6. else a stand-in span for the unrecorded yield ``main.[i]``, named
+   after the stream that minted it (``audio_in [357]``). Transient
    streams write no per-item record, so this is the only synthetic node
    a run needs besides graph containers.
 
@@ -86,6 +87,14 @@ __all__ = ["LangfuseConsumer", "build_tree"]
 def _idx(ctx: Tuple[str, ...]) -> str:
     # "[3]", or "[audio_in:3]" for a stream that meets a sibling: "3"
     return ctx[-1].strip("[]").rpartition(":")[2] if len(ctx) > 1 else ""
+
+
+def _stand_in_name(segment: str, stream: Optional[str]) -> str:
+    """``audio_in [357]``: the stream that minted the item — named in the
+    segment (``[audio_in:357]``) when two streams meet, else the root-level
+    transient stream."""
+    name, sep, idx = segment.strip("[]").rpartition(":")
+    return f"{name if sep else (stream or 'stream')} [{idx}]"
 
 
 def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
@@ -158,6 +167,10 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
                 return cands[-1].op_id, "same-ctx yield" if k == len(ctx) else "ctx prefix"
         if nested is not None:
             return top, "nested run"
+        if len(ctx) == floor + 1 and r.is_yield:
+            # the item's own yield record: its container, never inside a
+            # stand-in for itself (a stream fed by a session-long op)
+            return top, "level-1 yield"
         return f"stand-in:{format_ctx(ctx[:2])}", "stand-in"
 
     nodes: Dict[str, Dict[str, Any]] = {}
@@ -170,7 +183,7 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
                 "kind": "stand-in",
                 "parent": None,
                 "rule": "stand-in",
-                "name": f"{stream or 'stream'} [{_idx(ctx[:2])}]",
+                "name": _stand_in_name(ctx[1], stream),
                 "start": r.start_time,
                 "end": r.end_time,
                 "record": None,

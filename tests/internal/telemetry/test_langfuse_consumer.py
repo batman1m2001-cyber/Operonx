@@ -153,6 +153,55 @@ class TestTransientStream:
         assert summary["parent"] is None and summary["kind"] == "record"
 
 
+# ── a call's shape: a transient audio stream and a recorded prompt stream,
+# fed by a session-long op, meeting at one op (operonx 1.21 numbers their
+# items apart: [s:0], [b:0])
+
+
+@op
+def opener():
+    return {"greeting": "hi"}
+
+
+@op
+async def prompts(greeting: str):
+    for i in range(2):
+        await asyncio.sleep(0.002)
+        yield {"frame": f"{greeting}{i}"}
+
+
+@op(bound="sync")
+def merged(item: int = None, frame: str = None):
+    return {"kind": "audio" if item is not None else "prompt"}
+
+
+@graph
+def call_shape(n):
+    o = opener()
+    s = stream(n=n)
+    b = prompts(greeting=o["greeting"])
+    m = merged(item=s["item"], frame=b["frame"])
+    m["kind"] >> PARENT["kind"]
+    START >> o
+    o >> s >> m
+    o >> b >> m
+    m >> END
+
+
+class TestTwoStreamsMeeting:
+    @pytest.fixture(scope="class")
+    def tree(self):
+        return build_tree(_run(Operon(call_shape, params={"n": 2}), "call"))
+
+    def test_the_recorded_stream_is_top_level_under_its_own_name(self, tree):
+        tops = sorted(n["name"] for n in tree.values() if n["parent"] is None and n["name"].startswith("b"))
+        assert tops == ["b [0]", "b [1]"]
+
+    def test_the_transient_streams_stand_ins_carry_its_name(self, tree):
+        standins = sorted(n["name"] for n in tree.values() if n["kind"] == "stand-in")
+        assert standins == ["s [0]", "s [1]"]
+
+
 @op
 def inner_a(x: int):
     return {"y": x + 1}
