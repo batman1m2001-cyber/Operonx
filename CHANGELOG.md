@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.1] - 2026-10-11
+
+### Added
+
+- **A playground session says what the user said, as it is heard.** Each op
+  in a session's `ops` event now carries `at` (the wall clock when it
+  ended) and, when it heard the user, `said`: its output named
+  `transcript` (as the exporters see it, redacted, at most 500
+  characters). A voice toy can write the caller's words down during the
+  call and time the reply from them.
+
 ## [1.22.0] - 2026-10-11
 
 ### Added
@@ -3562,7 +3573,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.1...HEAD
+[1.22.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.0...v1.22.1
 [1.22.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.1...v1.22.0
 [1.21.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.0...v1.21.1
 [1.21.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.1...v1.21.0
