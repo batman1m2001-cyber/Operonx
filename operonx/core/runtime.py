@@ -428,7 +428,7 @@ class _Frame:
         """The ctx of the record a child opened now hangs under."""
         if self.item is None:
             return self.ctx
-        return self.ctx + (f"[{self.item}]",)
+        return self.ctx + (f"[{getattr(self.op, '_item_prefix', '')}{self.item}]",)
 
 
 #: The innermost frame of the code running now; ``None`` outside an op.

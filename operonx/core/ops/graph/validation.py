@@ -598,11 +598,39 @@ def _validate_ordered_reads(
             ancestors_cache[name] = reachable([name], prevs)
         return ancestors_cache[name]
 
-    finals = set(getattr(graph, "_finals", None) or ())
+    # the chain after END, in order: an op there reads the ops before it
+    chain = list(getattr(graph, "_finals", None) or ())
+    finals = set(chain)
 
     def check(reader: str, producer_op, var: str, how: str):
         producer = owner.get(id(producer_op))
         if producer is None or producer == reader:
+            return None
+        if reader in finals and producer in finals:
+            if chain.index(producer) > chain.index(reader):
+                return ValidationIssue(
+                    level=ValidationLevel.ERROR,
+                    category="Read after END",
+                    message=(
+                        f"op '{reader}' runs after END and {how} '{producer}'['{var}'], "
+                        f"which runs after it in the chain (END >> {' >> '.join(chain)}). "
+                        f"An op reads only the ops before it."
+                    ),
+                    op_name=reader,
+                    target_name=producer,
+                )
+            if getattr(ops.get(producer), "is_gen", False):
+                return ValidationIssue(
+                    level=ValidationLevel.ERROR,
+                    category="Read after END",
+                    message=(
+                        f"op '{reader}' runs after END and {how} '{producer}'['{var}'], "
+                        f"but '{producer}' is a generator: its values are per yield and "
+                        f"reach no one after END. Return the value instead of yielding it."
+                    ),
+                    op_name=reader,
+                    target_name=producer,
+                )
             return None
         if reader in finals:
             return ValidationIssue(
@@ -611,8 +639,9 @@ def _validate_ordered_reads(
                 message=(
                     f"op '{reader}' runs after END and {how} '{producer}'['{var}']. An op "
                     f"after END runs however the run ended — '{producer}' may never have "
-                    f"run. It reads graph parameters, declared cells (PARENT[...]) and "
-                    f"SCRATCH[...]: share the value through a declared cell, "
+                    f"run. It reads graph parameters, declared cells (PARENT[...]), "
+                    f"SCRATCH[...] and the ops before it after END: share the value "
+                    f"through a declared cell, "
                     f"PARENT.declare({var}=None), {producer}['{var}'] >> PARENT['{var}']."
                 ),
                 op_name=reader,

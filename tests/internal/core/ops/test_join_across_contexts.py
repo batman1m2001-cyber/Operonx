@@ -14,7 +14,7 @@ before a slow sibling finished, without its value.
 
 import asyncio
 
-from operonx import END, START, Operon, graph, op
+from operonx import END, START, Operon, graph, op, run_context
 
 
 @op
@@ -165,3 +165,100 @@ def test_two_streams_merge_into_one_op_item_by_item():
     asyncio.run(asyncio.wait_for(Operon(call_frames()).run(inputs={}), 10))
     assert MERGED[0] == "greeting"  # the prompt stream's item, without waiting for speech
     assert [m for m in MERGED if m.startswith("speech")] == ["speech9", "speech19", "speech29"]
+
+
+# ── two streams under one parent number their items apart ─────────────────
+#
+# Both generators run in the same context and both used to number their items
+# "[0]", "[1]", ... under it: the second stream's item landed in a context the
+# first had already opened and spent, and the merge never saw it. Each now
+# numbers its items with its name ("[rare:0]"). Two streams inside each item of
+# a third were also waited for as a join, and the merge never fired for one side.
+
+FIRED: list = []
+CTXS: list = []
+
+
+@op
+async def often(k: int = 0):
+    for i in range(3):
+        await asyncio.sleep(0.01)
+        yield {"x": f"o{k}.{i}"}
+
+
+@op
+async def rare(k: int = 0):
+    await asyncio.sleep(0.1)
+    yield {"y": f"r{k}"}
+
+
+@op
+async def outer(n: int = 0):
+    for i in range(2):
+        yield {"k": i}
+
+
+@op(bound="sync")
+def merge_two(a: str = None, b: str = None) -> dict:
+    FIRED.append((a, b))
+    CTXS.append(run_context().ctx)
+    return {}
+
+
+@graph
+def two_streams(n):
+    o = often(k=n)
+    r = rare(k=n)
+    m = merge_two(a=r["y"], b=o["x"])
+    START >> o >> m
+    START >> r >> m
+    m >> END
+
+
+@graph
+def two_streams_per_item(n):
+    s = outer(n=n)
+    o = often(k=s["k"])
+    r = rare(k=s["k"])
+    m = merge_two(a=r["y"], b=o["x"])
+    START >> s
+    s >> o >> m
+    s >> r >> m
+    m >> END
+
+
+@graph
+def one_stream(n):
+    o = often(k=n)
+    m = merge_two(b=o["x"])
+    START >> o >> m >> END
+
+
+def _fired(g):
+    FIRED.clear()
+    asyncio.run(asyncio.wait_for(Operon(g(n=None)).run(inputs={"n": 0}), 10))
+    return sorted(a or b for a, b in FIRED)
+
+
+def test_every_item_of_two_streams_reaches_the_merge():
+    assert _fired(two_streams) == ["o0.0", "o0.1", "o0.2", "r0"]
+
+
+def test_the_merge_reads_the_other_stream_as_absent():
+    _fired(two_streams)
+    assert all((a is None) != (b is None) for a, b in FIRED)
+
+
+def test_two_streams_inside_each_item_of_a_third():
+    assert _fired(two_streams_per_item) == [
+        "o0.0", "o0.1", "o0.2", "o1.0", "o1.1", "o1.2", "r0", "r1",
+    ]
+
+
+def test_items_are_numbered_by_their_stream_only_where_streams_meet():
+    CTXS.clear()
+    _fired(two_streams)
+    assert sorted(c[-1] for c in CTXS) == ["[o:0]", "[o:1]", "[o:2]", "[r:0]"]  # the ops' names in the graph
+    CTXS.clear()
+    _fired(one_stream)
+    assert sorted(c[-1] for c in CTXS) == ["[0]", "[1]", "[2]"]

@@ -48,11 +48,11 @@ class SoftEdge:
 
 
 class _AfterEnd:
-    """What ``END >> op`` evaluates to: nothing chains on from the end op.
+    """What ``END >> op`` evaluates to: ``>> next`` continues the chain.
 
-    The op after END runs once, after the whole run; an edge out of it
-    would name work that runs after the run, which is the end op's own
-    body. Put the steps inside it.
+    ``END >> a >> b`` runs ``a``, then ``b``, once each, after the whole run.
+    There are no edges: the runtime calls them in order, and a failing op
+    stops the ones after it (they may read its output).
     """
 
     __slots__ = ["op"]
@@ -60,13 +60,14 @@ class _AfterEnd:
     def __init__(self, op):
         self.op = op
 
-    def _refuse(self, other):
-        raise TypeError(
-            f"`END >> {self.op.name} >> ...`: nothing runs after the op after END. "
-            f"Put those steps inside {self.op.name} (or make it a subgraph call)."
-        )
+    def __rshift__(self, other):
+        return END._end_op(other, after=self.op)
 
-    __rshift__ = __gt__ = _refuse
+    def __gt__(self, other):
+        raise TypeError(
+            f"`END >> {self.op.name} > ...`: the ops after END run in order, one after "
+            f"the other: write `>>`."
+        )
 
 
 class _IntoEnd:
@@ -233,28 +234,34 @@ class DummyOp(BaseOp):
             return self._end_op(other)
         return super().__rshift__(other)
 
-    def _end_op(self, other):
+    def _end_op(self, other, after=None):
         """``END >> op``: *op* runs once, after every other op of the run has
         finished, however the run ended — the runtime calls it, nothing
-        flows into it. One per root graph (``Scheduler.run``)."""
+        flows into it. ``END >> a >> b``: a chain, run in order (``after``
+        is the op before *other*). One chain per root graph
+        (``Scheduler.run``)."""
         if isinstance(other, list):
             raise TypeError(
-                "`END >> [a, b]`: one op runs after END. Put both steps inside one op "
-                "(or a subgraph call)."
+                "`END >> [a, b]`: the ops after END are one chain, run in order: "
+                "`END >> a >> b`. To run steps side by side, make them a subgraph call."
             )
         if getattr(other, "type", None) == "branch":
-            raise TypeError("`END >> if_(...)`: the op after END is one op; branch inside it.")
+            raise TypeError("`END >> if_(...)`: an op after END is one op; branch inside it.")
         current_graph = get_current()
         if not (current_graph and hasattr(current_graph, "_finals")):
             raise TypeError("`END >> op` is written inside a @graph body.")
-        if current_graph._finals:
+        finals = current_graph._finals
+        if after is None and finals:
             raise TypeError(
-                f"graph {current_graph.name!r} already runs {current_graph._finals[0]!r} after "
-                f"END; one op runs there. Put {other.name!r}'s work inside it."
+                f"graph {current_graph.name!r} already runs {' >> '.join(finals)} after END; "
+                f"one chain runs there. Continue it: `END >> {' >> '.join(finals)} >> "
+                f"{other.name}`."
             )
         if other.name not in current_graph._ops:
             raise ValueError(f"op {other.name!r} is not in graph {current_graph.name!r}")
-        current_graph._finals.append(other.name)
+        if other.name in finals:
+            raise TypeError(f"op {other.name!r} is already in the chain after END; it runs once.")
+        finals.append(other.name)
         return _AfterEnd(other)
 
     def _start_targets(self, other) -> list:

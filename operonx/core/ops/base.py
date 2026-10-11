@@ -333,6 +333,10 @@ class BaseOp(ABC):
         "_cache_scope",
         "delay",
         "is_gen",
+        # "rare:" when this generator's stream meets a sibling stream under the
+        # same parent (set by the scheduler at build); its items are
+        # ``[rare:0]``, ``[rare:1]``, ... instead of ``[0]``, ``[1]``.
+        "_item_prefix",
         "_input_cache",
         "_metrics_idx",
         "_error_idx",
@@ -468,6 +472,7 @@ class BaseOp(ABC):
 
         self.core: Optional[Callable] = None
         self.is_gen: bool = False
+        self._item_prefix: str = ""
         self.contain_generation = contain_generation
         # Đăng ký vào graph cha
         self.parent = get_current()
@@ -1492,8 +1497,9 @@ class BaseOp(ABC):
                 _source = self._exec_with_policy(
                     _inputs, frame, state, _wf_trace, _v3_upstreams, ctx_for_end
                 )
+            prefix = self._item_prefix
             async for result in _source:
-                ctx = base_ctx + (f"[{idx}]",) if self.is_gen else context_id
+                ctx = base_ctx + (f"[{prefix}{idx}]",) if self.is_gen else context_id
                 # Interrupt is a scheduler control event, not a result dict.
                 # Forward it untouched — _pump puts it on the queue as-is.
                 if isinstance(result, Interrupt):

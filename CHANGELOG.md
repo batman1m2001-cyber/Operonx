@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-10-11
+
+### Added
+
+- **A chain after END: `END >> a >> b`.** `a` runs, then `b`, once each,
+  after the whole run, however it ended. `b` may read `a`'s output (an op
+  reads only the ops before it); a failing or timed-out op stops the ones
+  after it (logged, its failure handled as before). Each op is bounded by
+  its own `timeout=` or 10 s. Still refused: `END >> [a, b]` (make it a
+  subgraph call), `END >> a > b`, the same op twice, a second `END >>` line
+  (the message shows the chain to continue), and reading a generator's
+  output in the chain.
+
+### Fixed
+
+- **Two generators in the same context whose streams meet at an op no
+  longer lose items.** Both numbered their items `[0]`, `[1]`, ... under it:
+  the second stream's item landed in a context the first had already opened
+  and spent, and the op never saw it. Each such generator now numbers its
+  items with its name in the graph (`[rare:0]`); every other graph keeps
+  `[0]`. Langfuse and the studio label these items `rare [0]` as before.
+- **Two streams inside each item of a third merge item by item.** 1.20.1
+  counted a sibling stream as arrived only when the two shared no enclosing
+  stream; when both run inside a third (an outer generator), one side was
+  waited for as a join and never fired. Now any stream that does not enclose
+  the op's own counts as arrived.
+
 ## [1.20.1] - 2026-10-11
 
 ### Fixed
@@ -3503,7 +3530,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.0...HEAD
+[1.21.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.1...v1.21.0
 [1.20.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.20.0...v1.20.1
 [1.20.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.3...v1.20.0
 [1.19.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.19.2...v1.19.3

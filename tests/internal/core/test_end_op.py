@@ -7,10 +7,11 @@ traced like any other. The contract (callbot plan, O4):
 1. once, at the top level, after every other op has finished or been
    cancelled — on success, a recorded failure, fail-fast, cancellation;
 2. it reads graph parameters, declared cells and SCRATCH, never another
-   op's output;
+   op's output — except the ops before it in a chain (``END >> a >> b``);
 3. nothing flows out of it: no edges, no cell writes, not a reply key;
 4. shielded from cancellation, bounded by its own timeout (or 10 s);
-5. its failure is its own: recorded as handled, the run's status stands.
+5. its failure is its own: recorded as handled, the run's status stands;
+   in a chain it stops the ops after it.
 """
 
 from __future__ import annotations
@@ -268,7 +269,8 @@ def edge_out_of_it(n):
     b = closing()
     c = closing()
     START >> a >> END
-    END >> b >> c
+    END >> b
+    b >> c
 
 
 @graph
@@ -313,11 +315,11 @@ def outer(n):
 
 class TestWhatIsRefused:
     def test_a_list(self):
-        with pytest.raises(TypeError, match="one op runs after END"):
+        with pytest.raises(TypeError, match="one chain, run in order"):
             two_in_a_list(n=1)
 
     def test_a_second_one(self):
-        with pytest.raises(TypeError, match="already runs"):
+        with pytest.raises(TypeError, match=r"already runs b after END.*END >> b >> c"):
             two_after_end(n=1)
 
     def test_chained_after_an_op(self):
@@ -325,8 +327,8 @@ class TestWhatIsRefused:
             chained_after_an_op(n=1)
 
     def test_an_edge_out_of_it(self):
-        with pytest.raises(TypeError, match="nothing runs after"):
-            edge_out_of_it(n=1)
+        with pytest.raises(TypeError, match="has no edges"):
+            edge_out_of_it(n=1).build()
 
     def test_a_soft_edge(self):
         with pytest.raises(TypeError, match="END >> op"):
@@ -347,3 +349,170 @@ class TestWhatIsRefused:
     def test_inside_a_subgraph(self):
         with pytest.raises(TypeError, match="Move it to the root graph"):
             outer(n=1).build()
+
+
+# ── a chain after END: END >> a >> b, in order, once each ──────────────────
+
+
+@op
+async def record(total: int = 0) -> dict:
+    SEEN.append(("record", total))
+    return {"id": f"rec-{total}"}
+
+
+@op
+async def notify(rec: str = None) -> dict:
+    SEEN.append(("notify", rec))
+    return {}
+
+
+@op
+def broken_record(total: int = 0) -> dict:
+    raise RuntimeError("the store is down")
+
+
+@op(timeout=Timeout(run=0.1))
+async def hung_record(total: int = 0) -> dict:
+    await asyncio.sleep(5)
+    return {"id": "never"}
+
+
+@op
+async def records(total: int = 0):
+    yield {"id": "a"}
+
+
+@graph
+def chained(n):
+    PARENT.declare(total=0)
+    a = add_one(n=n)
+    a["n"] >> PARENT["total"]
+    r = record(total=PARENT["total"])
+    t = notify(rec=r["id"])
+    START >> a >> END
+    END >> r >> t
+
+
+@graph
+def chained_after_a_failure(n):
+    PARENT.declare(total=0)
+    a = boom(n=n)
+    r = record(total=PARENT["total"])
+    t = notify(rec=r["id"])
+    START >> a >> END
+    END >> r >> t
+
+
+@graph
+def chained_endless(n):
+    PARENT.declare(total=0)
+    f = forever(n=n)
+    r = record(total=PARENT["total"])
+    t = notify(rec=r["id"])
+    START >> f >> END
+    END >> r >> t
+
+
+@graph
+def chain_breaks(n):
+    a = add_one(n=n)
+    r = broken_record()
+    t = notify()
+    START >> a >> END
+    END >> r >> t
+
+
+@graph
+def chain_hangs(n):
+    a = add_one(n=n)
+    r = hung_record()
+    t = notify(rec=r["id"])
+    START >> a >> END
+    END >> r >> t
+
+
+@graph
+def reads_a_later_op(n):
+    a = add_one(n=n)
+    r = record()
+    t = notify(rec=r["id"])
+    START >> a >> END
+    END >> t >> r
+
+
+@graph
+def reads_a_generator(n):
+    a = add_one(n=n)
+    r = records()
+    t = notify(rec=r["id"])
+    START >> a >> END
+    END >> r >> t
+
+
+@graph
+def the_same_op_twice(n):
+    a = add_one(n=n)
+    r = record()
+    START >> a >> END
+    END >> r >> r
+
+
+@graph
+def soft_in_the_chain(n):
+    a = add_one(n=n)
+    r = record()
+    t = notify()
+    START >> a >> END
+    END >> r > t
+
+
+class TestTheChain:
+    async def test_in_order_and_a_later_op_reads_an_earlier_one(self):
+        await _run(chained(n=1))
+        assert SEEN == [("record", 2), ("notify", "rec-2")]
+
+    async def test_after_a_failed_run(self):
+        out = await _run(chained_after_a_failure(n=1))
+        assert SEEN == [("record", 0), ("notify", "rec-0")]
+        assert any(k.endswith(".a") for k in out["$errors"])
+
+    async def test_on_cancel(self):
+        handle = Operon(chained_endless(n=1)).start(inputs={})
+        await asyncio.sleep(0.1)
+        task = handle._scheduler_task
+        handle.cancel()
+        task.cancel()
+        await asyncio.wait({task}, timeout=5)
+        assert SEEN == [("record", 0), ("notify", "rec-0")]
+
+    async def test_a_failure_stops_the_ops_after_it(self):
+        out = await _run(chain_breaks(n=1))
+        assert SEEN == []
+        assert out["n"] == 2
+        errors = out.get("$errors") or {}
+        assert any(k.endswith(".r") for k in errors)
+        assert not any(k.endswith(".t") for k in errors)
+        assert unhandled(errors) == {}
+
+    async def test_a_timeout_stops_the_ops_after_it(self):
+        await _run(chain_hangs(n=1))
+        assert SEEN == []
+
+    def test_serialized_in_order(self):
+        assert chained(n=1).serialize()["finals"] == ["r", "t"]
+
+    def test_reading_a_later_op_is_refused(self):
+        with pytest.raises(Exception, match="runs after it in the chain"):
+            reads_a_later_op(n=1).build()
+
+    def test_reading_a_generator_is_refused(self):
+        with pytest.raises(Exception, match="is a generator"):
+            reads_a_generator(n=1).build()
+
+    def test_the_same_op_twice_is_refused(self):
+        with pytest.raises(TypeError, match="already in the chain"):
+            the_same_op_twice(n=1)
+
+    def test_a_soft_edge_in_the_chain_is_refused(self):
+        with pytest.raises(TypeError, match="write `>>`"):
+            soft_in_the_chain(n=1)
