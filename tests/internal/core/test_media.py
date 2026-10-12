@@ -107,3 +107,44 @@ class TestSubstitutePlaceholder:
     def test_missing_path_returns_false(self):
         io = {"audio": "<media:0>"}
         assert not substitute_placeholder(io, "inputs.nope", "x")
+
+
+class TestConsumedMediaInTheTrace:
+    """An op body gets a Media input's bytes; the trace records that input
+    as the Media it came from. A call's utterance, `audio/L16` at the op
+    that made it, was recorded untyped (`.bin`) at the STT op that heard it,
+    so the trace could not play it."""
+
+    def test_the_input_keeps_its_type_in_the_trace_only(self):
+        import asyncio
+
+        from operonx.core import END, START, GraphOp, Operon, op
+
+        seen = {}
+
+        @op
+        def make() -> dict:
+            return {"audio": Media(data=b"\x00\x01" * 8, mime_type="audio/L16;rate=16000;channels=1")}
+
+        @op
+        def hear(audio=None, label: str = "x") -> dict:
+            seen["type"] = type(audio)
+            return {"n": len(audio)}
+
+        with GraphOp(name="speech") as g:
+            m = make()
+            h = hear(audio=m["audio"])
+            START >> m >> h >> END
+
+        async def go():
+            handle = Operon(g).start(inputs={})
+            await handle.collect()
+            return handle.trace
+
+        trace = asyncio.run(go())
+        assert seen["type"] is bytes                      # the body: raw bytes
+        (rec,) = [n for n in trace.nodes if n.op_name == "h"]
+        audio = rec.exported()[0]["audio"]
+        assert isinstance(audio, Media)                   # the trace: typed
+        assert audio.mime_type.startswith("audio/L16") and audio.data == b"\x00\x01" * 8
+        assert rec.exported()[0]["label"] == "x"
