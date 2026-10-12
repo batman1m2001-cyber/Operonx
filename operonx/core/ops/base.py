@@ -278,6 +278,15 @@ def slow_op_ms() -> float:
     return _SLOW_OP_MS
 
 
+class _Inputs(dict):
+    """An execution's resolved inputs, with the ``Media`` wrappers
+    :meth:`BaseOp.get_inputs` took off them (``media``: name → wrapper) so
+    the trace can record those inputs typed. Behaves as the plain dict the
+    op body is called with."""
+
+    __slots__ = ("media",)
+
+
 class BaseOp(ABC):
     """Base class for all ops in a workflow.
 
@@ -831,7 +840,9 @@ class BaseOp(ABC):
 
         then the literal or declared default in place of ``None``,
         ``SCRATCH[...]`` resolved, and a top-level ``Media`` unwrapped so
-        the op body receives the raw value.
+        the op body receives the raw value. The wrappers it unwrapped ride
+        along (:class:`_Inputs`), so the trace records those inputs with
+        their type (``audio/L16``…), not as untyped bytes.
 
         The first call used to go through ``state[...]`` instead, and the
         two disagreed: only the first unwrapped ``Media``, and only later
@@ -849,6 +860,7 @@ class BaseOp(ABC):
         cells = state._cells
         pull_refs = state.schema._pull_refs
         result = {}
+        media = None
         for var_name, idx, fallback in cached[1]:
             if idx < 0:
                 # Not in this schema: nothing to read, only the literal.
@@ -881,11 +893,17 @@ class BaseOp(ABC):
             if isinstance(value, ScratchRef):
                 value = state._scratch.get(value.key)
             if isinstance(value, Media):
-                # The collector's raw state read keeps the wrapper; only the
-                # op body gets the raw value. Nested Media (inside a dict or
+                # Only the op body gets the raw value; the wrapper is kept
+                # beside it for the trace. Nested Media (inside a dict or
                 # list) is left alone — rare, and usually intentional.
+                if media is None:
+                    media = {}
+                media[var_name] = value
                 value = value.data
             result[var_name] = value
+        if media is not None:
+            result = _Inputs(result)
+            result.media = media
         return result
 
     def _build_input_cache(self, schema: Any) -> tuple:
@@ -934,7 +952,13 @@ class BaseOp(ABC):
         return inputs, outputs
 
     def _trace_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """The trace's copy of an execution's inputs: filtered, then normalized."""
+        """The trace's copy of an execution's inputs: filtered, then normalized.
+        An input :meth:`get_inputs` unwrapped from a ``Media`` is recorded as
+        that ``Media`` — the same bytes, with their type — while it still
+        holds those bytes."""
+        media = getattr(inputs, "media", None)
+        if media:
+            inputs = {k: (media[k] if k in media and v is media[k].data else v) for k, v in inputs.items()}
         normed, _ = self.normalize_trace_io(self._filter_for_trace(inputs), {})
         return normed
 

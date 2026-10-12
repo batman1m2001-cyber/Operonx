@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.2] - 2026-10-12
+
+### Fixed
+
+- **An op's `Media` input is recorded with its type.** The op body still
+  receives the raw bytes, but the trace's copy of the input is the `Media`
+  it came from: a call's utterance, `audio/L16` where it was made, was
+  recorded as untyped bytes (`.bin`) at the STT op that heard it, so a
+  trace viewer could not play it. Same blob, now typed; no cost unless an
+  input is a `Media`.
+
 ## [1.22.1] - 2026-10-11
 
 ### Added
@@ -3573,7 +3584,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.2...HEAD
+[1.22.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.1...v1.22.2
 [1.22.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.0...v1.22.1
 [1.22.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.1...v1.22.0
 [1.21.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.0...v1.21.1
