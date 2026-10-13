@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.4] - 2026-10-13
+
+### Fixed
+
+- **A run's input and output preview reads a dataclass or pydantic model as
+  its fields.** The preview kept with a run's summary (what the studio's
+  Runs list and run header show) used `repr()`, so a call's output read
+  `AgentState(current_state='FINISH', …)` while its rows already showed
+  fields. It now uses `fields_of`, the same `{"$type": …, …fields}` form.
+
 ## [1.22.3] - 2026-10-13
 
 ### Added
@@ -3615,6 +3625,8 @@ Unreleased — folded into 0.7.0 above.
   before constructing the engine.
 
 [Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.2...HEAD
+[1.22.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.3...v1.22.4
+[1.22.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.2...v1.22.3
 [1.22.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.1...v1.22.2
 [1.22.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.0...v1.22.1
 [1.22.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.21.1...v1.22.0
