@@ -26,7 +26,9 @@ id), and it is saved in the parent's store. So:
 
 - ``AgentOp.of(agent=support, input=...)``: one frame; outputs
   ``output``, ``status``, ``usage``, ``interruptions``, ``state_id``,
-  ``error`` that bind downstream like any op's. An interrupted run is
+  ``error`` and ``messages`` (the conversation the model last saw, its
+  tool messages included: a step that checks the answer against what the
+  tools returned reads it) that bind downstream like any op's. An interrupted run is
   answered outside the graph with
   ``Runner.resume(agent, state_id, store=..., approvals=...)``.
 - ``AgentOp.of(agent=support, stream=True, input=...)``: a transient
@@ -147,7 +149,7 @@ def _answer(agent: "Agent", res: "RunResult") -> str:
 
 # ── as_op ──────────────────────────────────────────────────────────────
 
-_RESULT_OUTPUTS = ("output", "status", "usage", "interruptions", "state_id", "error")
+_RESULT_OUTPUTS = ("output", "status", "usage", "interruptions", "state_id", "error", "messages")
 
 
 def agent_op(
@@ -306,4 +308,5 @@ def _outputs(res: "RunResult") -> Dict[str, Any]:
         "interruptions": data["interruptions"],
         "state_id": res.state_id,
         "error": res.error,
+        "messages": data["messages"],
     }

@@ -238,7 +238,9 @@ asyncio.run(main())
 An agent is a spec, not an op: `AgentOp.of(agent=..., input=...)` runs it as
 one step, like `LLMOp.of(...)`, with `session_id` and `deps` as optional
 inputs. Its outputs are `output`, `status`, `usage`, `interruptions`,
-`state_id`, `error`. `AgentOp.of(agent=..., stream=True, input=...)` is a
+`state_id`, `error` and `messages`: the conversation the model last saw,
+its tool messages included, for a step that checks the answer against what
+the tools returned. `AgentOp.of(agent=..., stream=True, input=...)` is a
 transient `event` stream for an `EmitOp` instead.
 
 ## Tools that are ops and graphs

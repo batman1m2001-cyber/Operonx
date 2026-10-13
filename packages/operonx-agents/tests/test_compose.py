@@ -251,6 +251,12 @@ def told_by_factory(question):
 
 
 @graph
+def refund_free(question):
+    t = AgentOp.of(agent=TELLER, input=question)
+    START >> t >> END
+
+
+@graph
 def refund_asked(question):
     t = AgentOp.of(agent=REFUNDER, store=REFUND_STORE, input=question)
     START >> t >> END
@@ -268,6 +274,16 @@ class TestAgentAsOp:
         hub(m=ScriptedLLM(asks(("balance", {"account": "9"})), says("1200")))
         out = await Operon(told_by_factory, params={"question": None}).run({"question": "balance?"})
         assert out["loud"] == "completed: 1200!"
+
+    async def test_the_conversation_is_an_output(self, hub):
+        """A step after the agent can check its answer against what the
+        tools returned: the run's messages, tool messages included."""
+        hub(m=ScriptedLLM(asks(("balance", {"account": "9"})), says("1200")))
+        out = await Operon(refund_free, params={"question": None}).run({"question": "balance?"})
+        roles = [m["role"] for m in out["messages"]]
+        assert roles == ["user", "assistant", "tool", "assistant"]
+        tool_msg = out["messages"][2]
+        assert tool_msg["name"] == "balance" and "1200" in tool_msg["content"]
 
     async def test_an_interrupted_run_is_resumed_from_its_state_id(self, hub):
         hub(m=ScriptedLLM(asks(("refund", {"order_id": "A1", "amount": 5})), says("refunded")))
