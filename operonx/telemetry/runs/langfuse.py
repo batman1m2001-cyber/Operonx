@@ -45,6 +45,11 @@ def records_of_langfuse_trace(detail: Dict[str, Any]) -> Iterator[Dict[str, Any]
     """A Langfuse trace's observations as local-shaped rows."""
     for obs in detail.get("observations") or []:
         meta = obs.get("metadata") or {}
+        if meta.get("kind") in ("container", "stand-in") and not meta.get("op_type"):
+            # a box `build_tree` drew round ops (a graph, a stream's item):
+            # no execution of its own — the tree draws it again on read. A
+            # box holding a subgraph's record has the record's fields.
+            continue
         duration = meta.get("duration_ms")
         if duration is None and obs.get("startTime") and obs.get("endTime"):
             duration = (_epoch(obs["endTime"]) - _epoch(obs["startTime"])) * 1000.0

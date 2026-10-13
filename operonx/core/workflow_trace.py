@@ -37,6 +37,7 @@ __all__ = [
     "STATUS_ERROR",
     "STATUS_CANCELLED",
     "STATUS_RETRIED",
+    "SUBGRAPH",
     # What every run in this process carries (the code's version, ...).
     "set_run_metadata",
     "run_metadata",
@@ -54,6 +55,12 @@ STATUS_CANCELLED = "cancelled"
 #: An attempt that failed and was run again by the op's `retry=`. Not a
 #: failure of the run: the attempt after it decides. Its `error` is kept.
 STATUS_RETRIED = "retried"
+
+#: ``op_type`` of a nested graph's own record: its inputs, its outputs, the
+#: span round the ops inside it. Not ``"graph"`` — that is a nested *run*'s
+#: root (``operonx.core.nested``), which the tree hangs a run under. Its
+#: time, cost and errors are its children's: summaries leave it out.
+SUBGRAPH = "subgraph"
 
 
 # ---------------------------------------------------------------------------

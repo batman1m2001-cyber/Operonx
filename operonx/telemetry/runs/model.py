@@ -19,7 +19,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED, superseded_ids
+from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED, SUBGRAPH, superseded_ids
 
 __all__ = [
     "MAX_SAMPLES",
@@ -327,6 +327,10 @@ def summarize(
     # steps that failed inside a retried attempt: the attempt after it decides
     gone = superseded_ids(rows, lambda r, k: r.get(k))
     for row in rows:
+        if row.get("op_type") == SUBGRAPH:
+            # a nested graph's own record: its time, cost and errors are
+            # the ops' inside it, counted there
+            continue
         op = str(row.get("op_name") or row.get("op_full_name") or "?")
         dur = float(row.get("duration_ms") or 0.0)
         r = per_op.get(op)

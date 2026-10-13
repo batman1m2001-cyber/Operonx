@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from operonx.core.workflow_trace import OpExecution, WorkflowTrace
+from operonx.telemetry.media import fields_of
 
 __all__ = ["Consumer"]
 
@@ -142,6 +143,9 @@ class Consumer(ABC):
         # protocol — leave for offload_media.
         if _is_ndarray(payload) or _is_media(payload):
             return payload
+        record = fields_of(payload)
+        if record is not None:
+            return self.sanitize(record)
         return {"$unserializable": type(payload).__name__}
 
     def offload_media(

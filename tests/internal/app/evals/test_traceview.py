@@ -54,16 +54,22 @@ async def test_a_live_trace_and_its_stored_run_are_the_same_view(tmp_path, llm, 
 
     # not equal by being empty: every shape the graph has is in the view
     assert [r.op_name for r in live.rows] == [
+        "handle",  # the subgraph's own record (operonx 1.22.3): a row, not a step of the path
         "classify",
         "route",
         "lookup_order",
         "reply",
         "run_tool",
     ]
-    assert {r.op_type for r in live.rows} == {"code", "branch", "llm"}
+    assert {r.op_type for r in live.rows} == {"subgraph", "code", "branch", "llm"}
     assert live.metadata == json.loads(json.dumps(trace.metadata, default=str))
     # and value for value: a row's inputs and outputs are what the store holds
-    for got, row in zip(stored.rows, record.nodes):
+    # (paired by id: the view is in start order, the store in record order,
+    # and a subgraph is recorded when it ends though it started first)
+    held = {row["op_id"]: row for row in record.nodes}
+    assert len(held) == len(stored.rows)
+    for got in stored.rows:
+        row = held[got.op_id]
         assert (got.inputs, got.outputs, got.ctx) == (
             row["inputs"],
             row["outputs"],
@@ -93,7 +99,7 @@ async def test_a_view_from_a_live_trace_builds_its_rows_on_first_read(tmp_path, 
     )
     view = TraceView.from_trace(trace)
     assert view.trace_id == trace.trace_id and built == []
-    assert len(view.rows) == 5 and built == [1]
+    assert len(view.rows) == 6 and built == [1]  # 5 ops and the subgraph round them
     view.path()
     view.tool_calls()
     assert built == [1]  # once
