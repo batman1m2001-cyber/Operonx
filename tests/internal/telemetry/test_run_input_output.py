@@ -66,6 +66,18 @@ def test_a_preview_describes_media_and_stops_at_its_limit():
     assert run_preview({}) is None and run_preview(None) is None
 
 
+def test_a_preview_reads_a_state_object_as_its_fields():
+    import dataclasses
+
+    @dataclasses.dataclass
+    class AgentState:
+        current_state: str = "FINISH"
+        should_hangup: bool = True
+
+    assert json.loads(run_preview({"agent_state": AgentState()})) == {
+        "agent_state": {"$type": "AgentState", "current_state": "FINISH", "should_hangup": True}}
+
+
 def _trace(trace_id, inputs, output):
     node = OpExecution(
         op_id=f"g.step#main@{trace_id}", op_name="step", op_full_name="g.step", ctx=("main",),
