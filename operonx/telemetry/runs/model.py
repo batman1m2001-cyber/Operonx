@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED, SUBGRAPH, superseded_ids
+from operonx.telemetry.media import fields_of
 
 __all__ = [
     "MAX_SAMPLES",
@@ -538,6 +539,10 @@ def _describe(value: Any) -> Any:
     if mime is not None:  # an operonx Media object
         duration = getattr(value, "duration_s", None)
         return f"[{mime}{f' {float(duration):.1f} s' if duration else ''}]"
+    # a dataclass or pydantic model reads as its fields, as in the run's rows
+    fields = fields_of(value)
+    if fields is not None:
+        return _describe(fields)
     return repr(value)
 
 
