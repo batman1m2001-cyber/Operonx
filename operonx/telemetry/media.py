@@ -50,6 +50,24 @@ __all__ = [
 # ── the walk ────────────────────────────────────────────────────────────
 
 
+def fields_of(v: Any) -> Optional[Dict[str, Any]]:
+    """A dataclass or pydantic model as its fields, named by ``$type`` —
+    what a trace shows of an op's state object instead of a placeholder.
+    ``None`` for anything else (a Media is not a record)."""
+    import dataclasses
+
+    if dataclasses.is_dataclass(v) and not isinstance(v, type) and not _is_media(v):
+        return {"$type": type(v).__name__,
+                **{f.name: getattr(v, f.name) for f in dataclasses.fields(v)}}
+    dump = getattr(v, "model_dump", None)
+    if callable(dump) and not isinstance(v, type):
+        try:
+            return {"$type": type(v).__name__, **dump()}
+        except Exception:  # noqa: BLE001 — a model that cannot dump stays a placeholder
+            return None
+    return None
+
+
 def _is_media(v: Any) -> bool:
     return type(v).__module__ == "operonx.core.media" and type(v).__name__ == "Media"
 
@@ -119,6 +137,9 @@ def json_default(store: MediaStore, threshold: int = 1024) -> Any:
             return v.tolist()
         if type(v).__module__ == "numpy" and hasattr(v, "item"):
             return v.item()
+        record = fields_of(v)
+        if record is not None:
+            return record
         return {"$unserializable": type(v).__name__}
 
     return default

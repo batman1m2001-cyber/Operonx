@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.22.3] - 2026-10-13
+
+### Added
+
+- **A subgraph is a step with values.** A nested graph (`@graph` used as an
+  op) now records its own execution: its inputs, its outputs, start, end,
+  status and error, at the ctx of the ops inside it — one per item when it
+  streams. Before, a trace held the ops inside `agent_turn` and an empty
+  box named after it. The record's `op_type` is `"subgraph"` (`SUBGRAPH`),
+  not `"graph"`, which stays a nested run's root. Not recorded: the root
+  graph (the run records its own input and output) and synthetic loop
+  graphs.
+  - `build_tree` gives each record to the box it already drew, so the tree
+    in the studio and in Langfuse keeps its shape; the box carries values.
+  - Summaries and per-op rollups leave it out: its time, cost, tokens and
+    errors are its children's. An eval's trajectory leaves it out too.
+    `TraceView.rows` (every execution) includes it.
+  - No schema change: one more row per subgraph run.
+- **A dataclass or pydantic model in a trace reads as its fields**, tagged
+  `{"$type": "<class>"}`, instead of `{"$unserializable": "<class>"}` — an
+  op's state object (`AgentState`) was unreadable on every op carrying it.
+
+### Fixed
+
+- **A Langfuse trace read back has no fake ops.** `records_of_langfuse_trace`
+  turned the boxes `build_tree` draws (a graph round its ops, a stream's
+  item) into rows, so a run read from Langfuse showed `agent_turn` as an
+  op with no type and stand-ins as steps. Boxes are skipped; one holding a
+  subgraph's record reads as that record.
+
 ## [1.22.2] - 2026-10-12
 
 ### Fixed

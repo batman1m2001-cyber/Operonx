@@ -39,6 +39,15 @@ from operonx.core.states import MemoryState, Ref
 from operonx.core.states.cell import DEFAULT_CONTEXT
 from operonx.core.utils.common import Param
 from operonx.core.utils.context import _current_graph
+from operonx.core.workflow_trace import (
+    STATUS_CANCELLED,
+    STATUS_ERROR,
+    STATUS_OK,
+    SUBGRAPH,
+    OpExecution,
+    _current_trace,
+    make_op_id,
+)
 
 # The two arms of an op with error edges (`op.on_error(handler)`), as seen
 # by `_arm_signatures`. Tuples, so they never equal a branch arm (an op name).
@@ -969,9 +978,22 @@ class GraphOp(BaseOp):
         _inputs = {}
         _outputs = {}
         error_msg = None
+        # A nested graph is a step: its record holds its values (the root
+        # graph is the run, which records its own). A synthetic loop is not
+        # a graph anyone wrote: the graph round it is the step.
+        _wf_trace = (
+            _current_trace.get()
+            if self.parent is not None and not getattr(self, "_synthetic", False)
+            else None
+        )
+        _upstreams: list = []
+        _yielded: list = []
+        _cancelled = False
 
         try:
             _inputs = self.get_inputs(state, context_id=context_id)
+            if _wf_trace is not None:
+                _upstreams = self._v3_infer_upstreams(state, context_id)
             self._seed_declared_inputs(state, context_id)
 
             if self._is_building:
@@ -1047,7 +1069,13 @@ class GraphOp(BaseOp):
                         self._drop_unwritten(state, sctx, item)
                     if any(v is not None for v in item.values()):
                         self.store_result(state, item, sctx)
+                        if _wf_trace is not None:
+                            _yielded.append((sctx, item, perf_counter()))
                         yield sctx, item
+
+        except (asyncio.CancelledError, GeneratorExit):
+            _cancelled = True
+            raise
 
         except Exception:
             import sys
@@ -1092,6 +1120,59 @@ class GraphOp(BaseOp):
             )
             if error_msg is not None:
                 state[self.full_name, "error", context_id] = error_msg
+            if _wf_trace is not None:
+                self._record_step(
+                    _wf_trace, context_id, perf_start, duration_ms, _inputs, _outputs,
+                    _upstreams, _yielded, error_msg, _cancelled,
+                )
+
+    def _record_step(
+        self, trace, context_id, perf_start, duration_ms, inputs, outputs, upstreams, yielded,
+        error_msg, cancelled,
+    ) -> None:
+        """This run of a nested graph as one ``SUBGRAPH`` record — one per
+        item when it streamed, like a generator op's yields."""
+        status = (
+            STATUS_CANCELLED if cancelled else STATUS_ERROR if error_msg is not None else STATUS_OK
+        )
+        traced_in = self._trace_inputs(inputs)
+        if yielded and status == STATUS_OK:
+            first = make_op_id(self.full_name, yielded[0][0])
+            for i, (sctx, item, at) in enumerate(yielded):
+                trace.record(
+                    OpExecution(
+                        op_id=make_op_id(self.full_name, sctx),
+                        op_name=self.name,
+                        op_full_name=self.full_name,
+                        ctx=sctx,
+                        start_time=perf_start,
+                        end_time=at,
+                        inputs=traced_in if i == 0 else None,
+                        inputs_from=None if i == 0 else first,
+                        outputs=self._trace_outputs(item),
+                        upstreams=upstreams,
+                        status=STATUS_OK,
+                        op_type=SUBGRAPH,
+                        is_yield=True,
+                    )
+                )
+            return
+        trace.record(
+            OpExecution(
+                op_id=make_op_id(self.full_name, context_id),
+                op_name=self.name,
+                op_full_name=self.full_name,
+                ctx=context_id,
+                start_time=perf_start,
+                end_time=perf_start + duration_ms / 1000.0,
+                inputs=traced_in,
+                outputs=self._trace_outputs(outputs) if isinstance(outputs, dict) else {},
+                upstreams=upstreams,
+                status=status,
+                error=error_msg,
+                op_type=SUBGRAPH,
+            )
+        )
 
     # ═══════════════════════════════════════════════════════════════════
     # 4. EXPORT — serialization, validation, debug

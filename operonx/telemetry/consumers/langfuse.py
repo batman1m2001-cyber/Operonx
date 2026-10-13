@@ -57,6 +57,7 @@ from operonx.core.utils.yaml_model import YamlModel
 from operonx.core.workflow_trace import (
     STATUS_ERROR,
     STATUS_RETRIED,
+    SUBGRAPH,
     OpExecution,
     WorkflowTrace,
     child_parent_id,
@@ -99,7 +100,13 @@ def _stand_in_name(segment: str, stream: Optional[str]) -> str:
 
 def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
     """Every observation of the run, keyed by id, with its parent set."""
-    rows = sorted(trace.nodes, key=lambda n: n.start_time)
+    # A nested graph's own record (SUBGRAPH) places nothing: the tree is
+    # built from the ops as it always was, and each record then gives its
+    # values to the box drawn for it. In `by_id` it would pull an op fed by
+    # the graph under an id no node has.
+    every = sorted(trace.nodes, key=lambda n: n.start_time)
+    rows = [n for n in every if n.op_type != SUBGRAPH]
+    steps = [n for n in every if n.op_type == SUBGRAPH]
     by_id = {n.op_id: n for n in rows}
     by_ctx: Dict[Tuple[str, ...], List[OpExecution]] = defaultdict(list)
     for n in rows:
@@ -235,6 +242,34 @@ def build_tree(trace: WorkflowTrace) -> Dict[str, Dict[str, Any]]:
             "record": r,
             "ctx": format_ctx(ctx),
         }
+    for r in steps:
+        ctx = tuple(r.ctx)
+        parts = r.op_full_name.split(".")
+        nested = nested_of(r) if child_parent_id(r.op_full_name, ctx) is None else None
+        base = nested[1] if nested is not None else 1
+        named = parts if nested is not None else parts[base:]
+        cid = f"graph:{'.'.join(named)}#{format_ctx(ctx)}"
+        box = nodes.get(cid)
+        if box is not None:
+            box["record"] = r
+            continue
+        # a graph whose ops left no record (all went round a branch): its
+        # own record is the box
+        parent, rule = parent_of(r)
+        if rule == "stand-in" and parent not in nodes:
+            parent = None
+        nodes[cid] = {
+            "id": cid,
+            "kind": "container",
+            "parent": parent,
+            "rule": "graph record",
+            "name": r.op_name,
+            "start": r.start_time,
+            "end": r.end_time,
+            "record": r,
+            "ctx": format_ctx(ctx),
+        }
+
     # synthetic nodes span their descendants
     children: Dict[Optional[str], List[str]] = defaultdict(list)
     for n in nodes.values():

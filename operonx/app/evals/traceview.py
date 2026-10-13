@@ -34,7 +34,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-from operonx.core.workflow_trace import child_parent_id, superseded_ids
+from operonx.core.workflow_trace import SUBGRAPH, child_parent_id, superseded_ids
 from operonx.telemetry.consumer import Consumer
 from operonx.telemetry.runs.model import RunSummary, rows_of_trace, summarize
 
@@ -42,7 +42,9 @@ __all__ = ["OpRow", "ToolCall", "TraceView", "run_cost"]
 
 #: Executions that route or contain, not steps: left out of ``path()``
 #: unless asked for by type.
-STRUCTURAL = ("branch", "graph")
+# a nested graph's own record (SUBGRAPH) is a box round ops, not a step of
+# the path: a trajectory names the ops inside it, as it always has
+STRUCTURAL = ("branch", "graph", SUBGRAPH)
 
 
 class _Plain(Consumer):
