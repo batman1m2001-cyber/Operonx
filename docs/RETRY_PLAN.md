@@ -1,6 +1,6 @@
 # One retry model for operonx: a project default, specific overrides
 
-**Status:** 2026-10-14. R1, R2 and R4 done; R3 decided (below), not built; R5 waits. Every "today" below was read in the code.
+**Status:** 2026-10-14. R1, R2, R3 and R4 done; R5 next. Every "today" below was read in the code.
 
 ## What exists today: eleven retry mechanisms
 
@@ -122,6 +122,13 @@ project   operonx.toml  [retry]                ← the default
 - Ops that already run their own semantic re-asks keep them: `LLMOp(max_retries=)` and agents' `output_retries`, layer 10, are a different thing (a new prompt, not the same call again).
 
 ### R3. One vocabulary everywhere. *Important · medium · library*
+- **Done.** What was built:
+  - `operonx.retry_call(fn, retry, again=)` in `core/policy.py`. Inside an op, its wait goes through R1's `backoff`. For that, the scheduler now also makes its `_Slots` when a run has `max_concurrency=`; `current_task()` is only called when a default retry needs the hand-off.
+  - `resource_retry(cfg, attempts=, initial=, max_interval=)` reads `retry:` or the old keys. `check_resource_retry` refuses a bad table, or one set beside the old keys, as the config loads.
+  - `LLMOp._call_with_retry`, agents' `_with_transport_retry`, `TritonClient.infer` (it takes `retry=`) and Gemini's `_refresh_token` all run on it.
+  - `Retry` gained `min_interval`, and `delay(attempt, error)` honours `Retry-After`.
+  - The guide (06, "Op retry or call retry") and the `operonx init` AGENTS.md and resources.yaml are updated.
+  - **Changed:** wait jitter now follows `Retry`, in [w/2, w] with a floor at `min_interval`, and a `Retry-After` is capped at `max_interval`. Counts and classification are unchanged, and the callbot sets no call retry.
 - **Decided 2026-10-14 (this replaces the bullets below where they differ):**
   - **Keep a call-level retry and make it one shared helper.** Some ops make many calls:
     - an agent op runs model, tool and model calls in one op, so an op retry after a 429 in turn 5 would run the earlier tools again;
@@ -178,7 +185,7 @@ project   operonx.toml  [retry]                ← the default
 | 1 | R1 backoff releases its slot **(done)** | high under outages | small | none, only waits |
 | 2 | R2 project/engine default + `retry=False` **(done)** | high | small to medium | none until `[retry]` is set |
 | 3 | R4 one transient classifier **(done)** | medium | small | none |
-| 4 | R3 one call-retry helper + one vocabulary (decided, see R3) | medium | medium | none: defaults unchanged |
+| 4 | R3 one call-retry helper + one vocabulary **(done)** | medium | medium | none: defaults unchanged |
 | 5 | R5 retries in trace and studio | medium | small to medium | none |
 
 Each step ships with tests in `tests/internal/policy` and `tests/internal/durable`, and a guide update (`guide/06-failures.md`). R3's alias reading is tested against every resource type.

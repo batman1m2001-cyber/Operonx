@@ -723,13 +723,20 @@ class Scheduler:
         # by (ctx, op_name) — at most one (op, ctx) pair runs concurrently.
         tasks_by_ctx: Dict[tuple, Dict[str, asyncio.Task]] = {}
 
-        # A graph with `retry=` ops, or a run with a default `retry=`: a
-        # backoff gives its slots back while it waits (`policy.backoff`), and
-        # an inline op is handed a task to wait in. Inherited by the pumps,
-        # as the state is.
+        # A graph with `retry=` ops, or a run with a default `retry=` or a
+        # `max_concurrency=` cap (any op's call retry, `retry_call`, may wait
+        # there): a backoff gives its slots back while it waits
+        # (`policy.backoff`). With a default retry, an inline op is also
+        # handed a task to wait in, which needs the main loop's task.
+        # Inherited by the pumps, as the state is.
         away = None
-        if self._retry_ops or (run_policy is not None and run_policy.retry is not None):
+        if self._retry_ops or (
+            run_policy is not None
+            and (run_policy.retry is not None or run_policy.limiter is not None)
+        ):
             slots = _Slots(_sem, limiter, tasks_by_ctx)
+            if run_policy is not None and run_policy.retry is not None:
+                slots.main = asyncio.current_task()
             away = slots.away
             _slots_token = _SLOTS.set(slots)
 

@@ -110,29 +110,29 @@ class GeminiOpenAISDKModel(OpenAISDKModel):
             google.auth.exceptions.RefreshError: If credentials are invalid or expired
 
         Note:
-            - Uses exponential backoff: 1s, 2s, 4s between retries
+            - Retried on a network error (operonx.retry_call): 1 s, then 2 s, between 3 attempts
             - SSL verification is disabled for environments with certificate issues
             - Session timeout is set to 30 seconds to prevent hanging
         """
-        for attempt in range(3):
-            try:
-                # Simple session for auth requests
-                session = requests.Session()
-                session.verify = False
-                session.timeout = 30
+        from operonx.core.policy import Retry, retry_call
 
-                self.credentials.refresh(Request(session=session))
-                return self.credentials.token
+        async def refresh() -> str:
+            # Simple session for auth requests
+            session = requests.Session()
+            session.verify = False
+            session.timeout = 30
+            self.credentials.refresh(Request(session=session))
+            return self.credentials.token
 
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                if attempt == 2:  # Last attempt
-                    raise Exception(f"Token refresh failed after 3 attempts: {e}")
-
-                wait_time = 2**attempt  # 1s, 2s, 4s
-                LOGGER.warning(
-                    "Token refresh attempt %d failed, retrying in %ss...", attempt + 1, wait_time
-                )
-                await asyncio.sleep(wait_time)
+        network = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+        try:
+            return await retry_call(
+                refresh,
+                Retry(max_attempts=3, initial=1.0, backoff=2.0, jitter=False, on=network),
+                label="gemini token refresh",
+            )
+        except network as e:
+            raise Exception(f"Token refresh failed after 3 attempts: {e}") from e
 
     async def _ensure_fresh_token(self):
         """

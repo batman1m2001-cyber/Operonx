@@ -1,5 +1,7 @@
 from enum import Enum
-from typing import ClassVar, Optional
+from typing import Any, ClassVar, Dict, Optional
+
+from pydantic import model_validator
 
 from operonx.core.utils import YamlModel
 
@@ -91,6 +93,16 @@ class EmbeddingConfig(YamlModel):
     max_retries: int = 2
     retry_base_delay: float = 0.5
     retry_max_delay: float = 8.0
+    # The same as `retry: {max_attempts: 3, initial: 0.5, max_interval: 8}`,
+    # the vocabulary every retry takes; set one or the other.
+    retry: Optional[Dict[str, Any]] = None
+
+    @model_validator(mode="after")
+    def _retry_builds(self) -> "EmbeddingConfig":
+        from operonx.core.policy import check_resource_retry
+
+        check_resource_retry(self, attempts=3, initial=0.5, max_interval=8.0)
+        return self
 
     @classmethod
     def default(cls) -> "EmbeddingConfig":

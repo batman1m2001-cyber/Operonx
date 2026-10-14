@@ -87,6 +87,10 @@ class LLMConfig(YamlModel):
     retry_min_delay: float = 0.0  # floor on jitter (never sleep less than this)
     retry_max_delay: float = 60.0  # cap on jitter range (one full QPM window)
     retry_on_empty: bool = True  # retry a 200 that carries empty content
+    # The same, in the one vocabulary every retry takes (operonx.Retry):
+    # `retry: {max_attempts: 3, initial: 1, max_interval: 30}`. Replaces the
+    # four keys above, which stay as its aliases; set one or the other.
+    retry: Optional[Dict[str, Any]] = None
 
     # ---- Per-resource generation knobs -------------------------------------
     #
@@ -126,6 +130,13 @@ class LLMConfig(YamlModel):
     # default is the one every gateway can do. `operonx-agents probe
     # <resource>` measures an endpoint and prints what to declare.
     structured_output: StructuredOutput = "prompted"
+
+    @model_validator(mode="after")
+    def _retry_builds(self) -> "LLMConfig":
+        from operonx.core.policy import check_resource_retry
+
+        check_resource_retry(self, attempts=1, initial=5.0, max_interval=60.0)
+        return self
 
     @model_validator(mode="after")
     def _structured_output_supported(self) -> "LLMConfig":

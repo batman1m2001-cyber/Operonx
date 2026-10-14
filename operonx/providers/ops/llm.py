@@ -17,7 +17,7 @@ from operonx.core.exceptions import LLMRefusalError, PromptError
 from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, should_emit_for_channel, split_shorthand_kwargs
-from operonx.core.policy import TRANSIENT, mark_retried
+from operonx.core.policy import resource_retry, retry_call
 from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
@@ -122,18 +122,6 @@ def _content_to_text(content: Any) -> str:
                 parts.append(text)
         return "".join(parts)
     return str(content)
-
-
-def _gave_up(error: BaseException, max_retries: int) -> BaseException:
-    """The error the transport retry stops on, marked if it was retried.
-
-    Marked, an op's ``retry=Retry(...)`` around this call does not retry it
-    again: both layers retry a connection failure, and stacked they make
-    ``(max_retries + 1) * max_attempts`` calls. Unmarked when the resource
-    retries nothing (``max_retries: 0``), so the op's retry is the one that
-    runs.
-    """
-    return mark_retried(error) if max_retries > 0 else error
 
 
 def _is_empty_completion(result: Any) -> bool:
@@ -860,28 +848,25 @@ class LLMOp(BaseOp):
         return per_call
 
     async def _call_with_retry(self, coro_fn, *, llm=None, **kwargs):
-        """Call ``coro_fn(**kwargs)`` with exponential backoff + full jitter.
+        """Call ``coro_fn(**kwargs)`` under the resource's call retry.
 
-        This is the **transport** retry, driven by the resource's
-        ``max_retries`` / ``retry_*`` config. It is a different thing from
-        :attr:`max_retries` on the op, which re-asks the model when a
-        parser or validator rejects a well-formed answer.
+        This is the **call** retry, the resource's ``retry:`` (or its old
+        ``max_retries`` / ``retry_*`` keys), run by ``operonx.retry_call``
+        like every other resource's. It is a different thing from
+        :attr:`max_retries` on the op, which re-asks the model when a parser
+        or validator rejects a well-formed answer. Off unless the resource
+        sets it.
 
-        Retries fire on two conditions:
-
-        1. An error ``operonx.TRANSIENT`` calls worth another try: a rate
-           limit (honouring a ``retry-after`` header when sent), a timeout
-           or lost connection, a 5xx, or a project's ``[retry] transient``.
-           A 4xx propagates immediately; retrying a bad request only
-           wastes the quota.
-        2. A successful HTTP 200 whose content is empty, when
-           ``retry_on_empty`` is set. Anthropic answers this way under
-           transient overload - a failure wearing a success's clothes.
+        Retried: an error ``operonx.TRANSIENT`` calls worth another try (a
+        rate limit, with its ``Retry-After``; a timeout or lost connection;
+        a 5xx; the project's own ``[retry] transient``), and, when
+        ``retry_on_empty`` is set, an HTTP 200 whose content is empty, which
+        Anthropic answers under transient overload. A 4xx propagates at once.
 
         Args:
             coro_fn: async callable to invoke.
-            llm: the LLM whose ``config`` supplies the retry policy. Pass
-                the specific client when walking a fallback chain so each
+            llm: the LLM whose ``config`` supplies the retry. Pass the
+                specific client when walking a fallback chain so each
                 resource retries on its own terms.
 
         Returns:
@@ -892,95 +877,16 @@ class LLMOp(BaseOp):
         import openai  # noqa: F401 — imported, so TRANSIENT knows its connection errors
 
         cfg = getattr(llm, "config", None)
-
-        def _num(name, default, cast):
-            """Read a retry knob, falling back when it is not a number.
-
-            Same reason as `_merge_generation_extras`: a config is not
-            guaranteed to be a typed model, and a non-numeric value here
-            would surface as a TypeError inside `range()` - far from the
-            config that caused it.
-            """
-            value = getattr(cfg, name, None)
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                return default
-            return cast(value)
-
-        max_retries = _num("max_retries", 0, int)
-        base_delay = _num("retry_base_delay", 5.0, float)
-        min_delay = _num("retry_min_delay", 0.0, float)
-        max_delay = _num("retry_max_delay", 60.0, float)
+        retry = resource_retry(cfg, attempts=1, initial=5.0, max_interval=60.0)
         retry_on_empty = getattr(cfg, "retry_on_empty", True)
         if not isinstance(retry_on_empty, bool):
             retry_on_empty = True
-
-        result: Any = None
-        for attempt in range(max_retries + 1):
-            try:
-                result = await coro_fn(**kwargs)
-            except Exception as e:
-                # Worth another try is `operonx.TRANSIENT`'s answer, the
-                # same as an op's `retry=`: a rate limit, a timeout, a lost
-                # connection, a 5xx (from a gateway that raises the base
-                # class too), and the project's own `[retry] transient`.
-                # A 4xx or a bug propagates at once.
-                if not TRANSIENT(e):
-                    raise
-                if attempt >= max_retries:
-                    raise _gave_up(e, max_retries)
-                status = getattr(e, "status_code", None)
-                if status == 429:  # honours a Retry-After header
-                    sleep_time = self._retry_delay(e, base_delay, min_delay, max_delay, attempt)
-                else:
-                    sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
-                LOGGER.warning(
-                    "[%s] %s%s. Attempt %d/%d. Retrying in %.2fs",
-                    self.name,
-                    type(e).__name__,
-                    f" {status}" if status else "",
-                    attempt + 1,
-                    max_retries + 1,
-                    sleep_time,
-                )
-                await asyncio.sleep(sleep_time)
-                continue
-
-            if retry_on_empty and _is_empty_completion(result) and attempt < max_retries:
-                sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
-                LOGGER.warning(
-                    "[%s] Empty content response (HTTP 200, no exception). "
-                    "Attempt %d/%d. Retrying in %.2fs",
-                    self.name,
-                    attempt + 1,
-                    max_retries + 1,
-                    sleep_time,
-                )
-                await asyncio.sleep(sleep_time)
-                continue
-
-            return result
-
-        return result
-
-    @staticmethod
-    def _jitter(base_delay: float, min_delay: float, max_delay: float, attempt: int) -> float:
-        """Full jitter: uniform in ``[min_delay, min(max_delay, base*2^attempt)]``."""
-        cap = min(max_delay, base_delay * (2**attempt))
-        return random.uniform(min_delay, max(min_delay, cap))
-
-    @staticmethod
-    def _retry_delay(
-        e, base_delay: float, min_delay: float, max_delay: float, attempt: int
-    ) -> float:
-        """``Retry-After`` header when the server sent one, else full jitter."""
-        try:
-            headers = e.response.headers
-            header = headers.get("retry-after") or headers.get("Retry-After")
-            if header:
-                return max(min_delay, float(header))
-        except Exception:
-            pass
-        return LLMOp._jitter(base_delay, min_delay, max_delay, attempt)
+        return await retry_call(
+            lambda: coro_fn(**kwargs),
+            retry,
+            again=_is_empty_completion if retry_on_empty else None,
+            label=self.name,
+        )
 
     def _is_refusal(self, result: Dict[str, Any]) -> bool:
         """Return True when the response looks like a provider-signalled refusal.

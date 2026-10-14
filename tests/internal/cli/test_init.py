@@ -507,3 +507,20 @@ def test_the_retry_block_is_off_and_parses_once_uncommented():
     assert Manifest.from_dict(_toml.loads(on)).retry == Retry(
         max_attempts=3, initial=0.5, max_interval=30
     )
+
+
+def test_the_models_retry_line_builds_once_uncommented():
+    import yaml
+
+    from operonx.core.policy import Retry, resource_retry
+    from operonx.providers.llms.config import LLMType, OpenAIConfig
+
+    text = plan("agent", "demo")["resources.yaml"].decode()
+    on = re.sub(r"^  # (retry: \{[^}]*\})", r"  \1", text, flags=re.M)
+    block = yaml.safe_load(on)["llm:assistant"]
+    cfg = OpenAIConfig(
+        api_type=LLMType.OPENAI, api_key="k", base_url="http://h", model="m", retry=block["retry"]
+    )
+    assert resource_retry(cfg, attempts=1, initial=5.0, max_interval=60.0) == Retry(
+        max_attempts=3, initial=1, max_interval=60.0
+    )

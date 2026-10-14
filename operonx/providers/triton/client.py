@@ -30,7 +30,7 @@ import random
 import re
 from typing import Any, Dict, List, Optional
 
-from operonx.core.policy import TRANSIENT, _grpc_code
+from operonx.core.policy import TRANSIENT, Retry, _grpc_code, retry_call
 from operonx.providers.triton.decode import decode_infer_output
 from operonx.providers.triton.dtypes import numpy_to_triton_dtype, to_infer_array
 
@@ -114,8 +114,6 @@ def close_all() -> None:
     if not clients:
         return
 
-    import asyncio
-
     for client in clients:
         try:
             closer = getattr(client.raw, "close", None)
@@ -197,6 +195,7 @@ class TritonClient:
         retries: int = 2,
         retry_base_delay: float = 0.5,
         retry_max_delay: float = 8.0,
+        retry: Optional[Retry] = None,
     ) -> Dict[str, Any]:
         """Run one inference request.
 
@@ -221,6 +220,9 @@ class TritonClient:
                 event loop was busy. Set 0 to disable.
             retry_base_delay: First backoff, doubling per attempt.
             retry_max_delay: Ceiling on the backoff before jitter.
+            retry: The call retry as a ``Retry`` (a resource's ``retry:``,
+                ``operonx.resource_retry``); when given, the three above are
+                not read.
 
         Returns:
             ``{triton_output_name: value}``. An output that fails to
@@ -258,35 +260,27 @@ class TritonClient:
         # succeed on the next attempt, and nothing but a retry recovers
         # them: a longer timeout does not help when the time was never
         # spent on the model.
-        last_error: Optional[Exception] = None
-        for attempt in range(max(0, retries) + 1):
-            try:
-                result = await self._raw.infer(
+        if retry is None:
+            retry = Retry(
+                max_attempts=max(0, retries) + 1,
+                initial=retry_base_delay,
+                max_interval=retry_max_delay,
+            )
+        try:
+            result = await retry_call(
+                lambda: self._raw.infer(
                     model_name=model,
                     model_version=model_version,
                     inputs=infer_inputs,
                     outputs=infer_outputs,
                     client_timeout=timeout,
-                )
-                break
-            except Exception as e:  # noqa: BLE001 — classified below
-                last_error = e
-                if attempt >= retries or not _is_transient(e):
-                    LOGGER.error("Triton inference failed for model '%s': %s", model, e)
-                    raise
-                delay = min(retry_base_delay * (2**attempt), retry_max_delay)
-                delay *= 0.5 + random.random()  # jitter; a burst retries together
-                LOGGER.warning(
-                    "Triton '%s' attempt %d/%d failed (%s) — retrying in %.1fs",
-                    model,
-                    attempt + 1,
-                    retries + 1,
-                    _status_code(e) or type(e).__name__,
-                    delay,
-                )
-                await asyncio.sleep(delay)
-        else:  # pragma: no cover — the loop always breaks or raises
-            raise last_error  # type: ignore[misc]
+                ),
+                retry,
+                label=f"triton:{model}",
+            )
+        except Exception as e:
+            LOGGER.error("Triton inference failed for model '%s': %s", model, e)
+            raise
 
         decoded: Dict[str, Any] = {}
         for name in outputs:

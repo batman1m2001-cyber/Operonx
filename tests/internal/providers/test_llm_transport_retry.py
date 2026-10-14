@@ -16,6 +16,7 @@ import pytest
 
 from operonx import END, START, Operon, Retry, graph, op
 from operonx.providers.llms.config import LLMType, OpenAIConfig
+from operonx.core.policy import resource_retry
 from operonx.providers.ops.llm import LLMOp, _is_empty_completion
 
 # ---------------------------------------------------------------------------
@@ -239,18 +240,32 @@ class TestCallWithRetry:
 
 
 class TestRetryDelay:
+    """The waits come from `Retry.delay`, read from the resource's old keys."""
+
     def test_honours_retry_after_header(self):
-        delay = _Op()._retry_delay(_rate_limit_error("7"), 1.0, 0.0, 60.0, 0)
-        assert delay == 7.0
+        retry = resource_retry(
+            _config(retry_max_delay=60.0), attempts=1, initial=5.0, max_interval=60.0
+        )
+        assert retry.delay(1, _rate_limit_error("7")) == 7.0
 
-    def test_falls_back_to_jitter_without_header(self):
-        delay = _Op()._retry_delay(_rate_limit_error(), 4.0, 1.0, 10.0, 0)
-        assert 1.0 <= delay <= 10.0
+    def test_falls_back_to_backoff_without_header(self):
+        retry = resource_retry(
+            _config(retry_base_delay=4.0, retry_min_delay=1.0, retry_max_delay=10.0),
+            attempts=1,
+            initial=5.0,
+            max_interval=60.0,
+        )
+        assert 2.0 <= retry.delay(1, _rate_limit_error()) <= 4.0
 
-    def test_jitter_respects_floor_and_cap(self):
-        for attempt in range(6):
-            d = LLMOp._jitter(base_delay=5.0, min_delay=2.0, max_delay=9.0, attempt=attempt)
-            assert 2.0 <= d <= 9.0
+    def test_waits_respect_floor_and_cap(self):
+        retry = resource_retry(
+            _config(retry_base_delay=5.0, retry_min_delay=2.0, retry_max_delay=9.0),
+            attempts=1,
+            initial=5.0,
+            max_interval=60.0,
+        )
+        for attempt in range(1, 7):
+            assert 2.0 <= retry.delay(attempt) <= 9.0
 
 
 # ---------------------------------------------------------------------------

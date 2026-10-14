@@ -1203,7 +1203,7 @@ class BaseOp(ABC):
             except Exception as error:
                 if yielded or attempt >= attempts or not retry.retries(error):
                     raise
-                delay = retry.delay(attempt)
+                delay = retry.delay(attempt, error)
                 self._record_retry(
                     state, wf_trace, upstreams, ctx, inputs, attempt, error, started, delay, retry
                 )
@@ -1641,7 +1641,7 @@ class BaseOp(ABC):
                     _retry = self._default_retry(state, _failed, idx, frame.attempt)
                     if _retry is None:
                         raise
-                    _delay = _retry.delay(frame.attempt)
+                    _delay = _retry.delay(frame.attempt, _failed)
                     self._record_retry(
                         state,
                         _wf_trace,

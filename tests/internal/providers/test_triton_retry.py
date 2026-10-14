@@ -194,9 +194,12 @@ class TestEmbedderWiring:
         )
         emb = TritonEmbedding(conf)
         assert emb._timeout == 12.5
-        assert emb._retries == 4
-        assert emb._retry_base_delay == 0.25
-        assert emb._retry_max_delay == 3.0
+        # the old keys, read as one Retry (max_retries counts the extra attempts)
+        assert (emb._retry.max_attempts, emb._retry.initial, emb._retry.max_interval) == (
+            5,
+            0.25,
+            3.0,
+        )
 
     def test_the_defaults_are_the_documented_ones(self):
         from operonx.providers.embeddings.config import EmbeddingConfig, EmbeddingType
@@ -211,4 +214,4 @@ class TestEmbedderWiring:
             )
         )
         assert emb._timeout == 30.0
-        assert emb._retries == 2
+        assert emb._retry.max_attempts == 3  # max_retries: 2, unchanged
