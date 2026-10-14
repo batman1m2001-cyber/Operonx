@@ -738,11 +738,24 @@ class Ref:
     # How tightly each written operator binds, as in Python: a side that
     # binds looser than the operator it sits in is bracketed in the text.
     _PRECEDENCE: dict = {
-        "or_": 1, "and_": 2, "not_": 3,
-        "eq": 4, "ne": 4, "lt": 4, "le": 4, "gt": 4, "ge": 4, "contains": 4,
-        "add": 5, "sub": 5, "mul": 6, "truediv": 6, "floordiv": 6, "mod": 6,
+        "or_": 1,
+        "and_": 2,
+        "not_": 3,
+        "eq": 4,
+        "ne": 4,
+        "lt": 4,
+        "le": 4,
+        "gt": 4,
+        "ge": 4,
+        "contains": 4,
+        "add": 5,
+        "sub": 5,
+        "mul": 6,
+        "truediv": 6,
+        "floordiv": 6,
+        "mod": 6,
     }
-    _ATOM = 9   # a name, an index, a call: never needs brackets
+    _ATOM = 9  # a name, an index, a call: never needs brackets
 
     def describe(self) -> str:
         """Human-readable description of this Ref and its transforms.

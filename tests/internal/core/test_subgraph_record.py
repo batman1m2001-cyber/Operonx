@@ -132,11 +132,20 @@ class TestReaders:
         box = boxes[0]
         assert box["record"] is not None and box["record"].outputs == {"y": 10}
         # the op inside hangs under the box, and the record is not a second node
-        d = next(n for n in nodes.values() if n["record"] is not None
-                 and n["record"].op_full_name == "outer.sub.d")
+        d = next(
+            n
+            for n in nodes.values()
+            if n["record"] is not None and n["record"].op_full_name == "outer.sub.d"
+        )
         assert d["parent"] == box["id"]
-        assert sum(1 for n in nodes.values()
-                   if n["record"] is not None and n["record"].op_type == SUBGRAPH) == 1
+        assert (
+            sum(
+                1
+                for n in nodes.values()
+                if n["record"] is not None and n["record"].op_type == SUBGRAPH
+            )
+            == 1
+        )
 
     def test_summaries_count_the_ops_not_the_box(self):
         trace = _run(_outer(), {"n": 4})
@@ -169,8 +178,11 @@ class TestStateObjects:
 
         want = {"$type": "State", "current_state": "REMINDER", "should_hangup": False}
         assert Probe().sanitize({"s": State()}) == {"s": want}
-        text = orjson.dumps({"s": State()}, default=json_default(None, 1024),
-                            option=orjson.OPT_PASSTHROUGH_DATACLASS)
+        text = orjson.dumps(
+            {"s": State()},
+            default=json_default(None, 1024),
+            option=orjson.OPT_PASSTHROUGH_DATACLASS,
+        )
         assert orjson.loads(text) == {"s": want}
 
 
@@ -178,13 +190,29 @@ class TestLangfuseReadBack:
     def test_boxes_are_not_rows_but_a_subgraph_record_is(self):
         from operonx.telemetry.runs.langfuse import records_of_langfuse_trace
 
-        detail = {"observations": [
-            {"id": "a", "name": "d", "metadata": {"kind": "record", "op_type": "code",
-                                                   "op_full_name": "outer.sub.d"}},
-            {"id": "b", "name": "sub", "metadata": {"kind": "container"}},
-            {"id": "c", "name": "audio_in [3]", "metadata": {"kind": "stand-in"}},
-            {"id": "e", "name": "sub", "metadata": {"kind": "container", "op_type": "subgraph",
-                                                     "op_full_name": "outer.sub"}},
-        ]}
+        detail = {
+            "observations": [
+                {
+                    "id": "a",
+                    "name": "d",
+                    "metadata": {
+                        "kind": "record",
+                        "op_type": "code",
+                        "op_full_name": "outer.sub.d",
+                    },
+                },
+                {"id": "b", "name": "sub", "metadata": {"kind": "container"}},
+                {"id": "c", "name": "audio_in [3]", "metadata": {"kind": "stand-in"}},
+                {
+                    "id": "e",
+                    "name": "sub",
+                    "metadata": {
+                        "kind": "container",
+                        "op_type": "subgraph",
+                        "op_full_name": "outer.sub",
+                    },
+                },
+            ]
+        }
         rows = list(records_of_langfuse_trace(detail))
         assert [(r["op_id"], r["op_type"]) for r in rows] == [("a", "code"), ("e", "subgraph")]

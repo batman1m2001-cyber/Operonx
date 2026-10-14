@@ -251,14 +251,26 @@ def test_the_merge_reads_the_other_stream_as_absent():
 
 def test_two_streams_inside_each_item_of_a_third():
     assert _fired(two_streams_per_item) == [
-        "o0.0", "o0.1", "o0.2", "o1.0", "o1.1", "o1.2", "r0", "r1",
+        "o0.0",
+        "o0.1",
+        "o0.2",
+        "o1.0",
+        "o1.1",
+        "o1.2",
+        "r0",
+        "r1",
     ]
 
 
 def test_items_are_numbered_by_their_stream_only_where_streams_meet():
     CTXS.clear()
     _fired(two_streams)
-    assert sorted(c[-1] for c in CTXS) == ["[o:0]", "[o:1]", "[o:2]", "[r:0]"]  # the ops' names in the graph
+    assert sorted(c[-1] for c in CTXS) == [
+        "[o:0]",
+        "[o:1]",
+        "[o:2]",
+        "[r:0]",
+    ]  # the ops' names in the graph
     CTXS.clear()
     _fired(one_stream)
     assert sorted(c[-1] for c in CTXS) == ["[0]", "[1]", "[2]"]

@@ -57,8 +57,10 @@ def fields_of(v: Any) -> Optional[Dict[str, Any]]:
     import dataclasses
 
     if dataclasses.is_dataclass(v) and not isinstance(v, type) and not _is_media(v):
-        return {"$type": type(v).__name__,
-                **{f.name: getattr(v, f.name) for f in dataclasses.fields(v)}}
+        return {
+            "$type": type(v).__name__,
+            **{f.name: getattr(v, f.name) for f in dataclasses.fields(v)},
+        }
     dump = getattr(v, "model_dump", None)
     if callable(dump) and not isinstance(v, type):
         try:

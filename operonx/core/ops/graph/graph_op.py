@@ -1127,13 +1127,30 @@ class GraphOp(BaseOp):
                 state[self.full_name, "error", context_id] = error_msg
             if _wf_trace is not None:
                 self._record_step(
-                    _wf_trace, context_id, perf_start, duration_ms, _inputs, _outputs,
-                    _upstreams, _yielded, error_msg, _cancelled,
+                    _wf_trace,
+                    context_id,
+                    perf_start,
+                    duration_ms,
+                    _inputs,
+                    _outputs,
+                    _upstreams,
+                    _yielded,
+                    error_msg,
+                    _cancelled,
                 )
 
     def _record_step(
-        self, trace, context_id, perf_start, duration_ms, inputs, outputs, upstreams, yielded,
-        error_msg, cancelled,
+        self,
+        trace,
+        context_id,
+        perf_start,
+        duration_ms,
+        inputs,
+        outputs,
+        upstreams,
+        yielded,
+        error_msg,
+        cancelled,
     ) -> None:
         """This run of a nested graph as one ``SUBGRAPH`` record — one per
         item when it streamed, like a generator op's yields."""

@@ -21,6 +21,7 @@ Example::
 
 from operonx.core.configs import EdgeConfig, EdgeType
 from operonx.core.engine import ExecutionHandle, Operon
+from operonx.core.invoke import invoke
 from operonx.core.loggings import LOGGER
 from operonx.core.media import Media
 from operonx.core.ops import (
@@ -62,7 +63,6 @@ from operonx.core.runtime import (
     child,
     run_context,
 )
-from operonx.core.invoke import invoke
 from operonx.core.states import Cell, MemoryState, Ref, ScratchRef, StateSchema
 from operonx.core.utils import Param
 
