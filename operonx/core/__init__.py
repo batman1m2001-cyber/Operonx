@@ -61,6 +61,7 @@ from operonx.core.runtime import (
     TaskFinished,
     TaskStarted,
     child,
+    measure,
     run_context,
 )
 from operonx.core.states import Cell, MemoryState, Ref, ScratchRef, StateSchema
@@ -89,6 +90,7 @@ __all__ = [
     "retry_call",
     # What an op body can know about its run
     "RunContext",
+    "measure",
     "run_context",
     "child",
     "invoke",

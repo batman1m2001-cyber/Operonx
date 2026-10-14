@@ -275,11 +275,19 @@ which, in its metadata:
 - `loop_lag_ms` (a served run): `{"max", "p95"}`, how late the process's event
   loop woke while the run went, from a 50 ms heartbeat the serve layer starts.
   A run shorter than one heartbeat has none.
+- `cpu_pct` (a served run): `{"avg", "max"}`, how busy the process was, read
+  once a second, one core = 100. A late loop with `max` near 100 is a worker
+  out of CPU; a late loop with low CPU is something blocking it.
+- `latency_ms`: what the run's ops measured with `measure(name, ms)`, as
+  `{name: {"n", "p50", "p95", "max"}}`. For the latency a user feels that no
+  single op's time shows: a reply that starts in one op and is heard in
+  another. The studio's Monitor charts every name over time.
 
 ```python
 import asyncio
+import time
 
-from operonx import END, START, Operon, graph, op
+from operonx import END, START, Operon, graph, measure, op
 from operonx.telemetry.consumer import Consumer
 
 
@@ -295,19 +303,20 @@ class Keep(Consumer):
 @op
 async def packets(n: int):
     for i in range(n):
-        yield {"i": i}
+        yield {"i": i, "sent": time.perf_counter()}
 
 
 @op
-async def detect(i: int) -> dict:
+async def detect(i: int, sent: float) -> dict:
     await asyncio.sleep(0.01)  # slower than the packets come
+    measure("heard", (time.perf_counter() - sent) * 1000)  # what a caller feels
     return {"o": i}
 
 
 @graph
 def audio(n):
     p = packets(n=n)
-    d = detect(i=p["i"])
+    d = detect(i=p["i"], sent=p["sent"])
     START >> p >> d >> END
 
 
@@ -316,8 +325,11 @@ async def main():
     await Operon(audio, params={"n": None}, trace=[keep]).start({"n": 20}).collect()
     while not keep.traces:  # consumers run once the run has ended
         await asyncio.sleep(0.01)
-    queued = keep.traces[0].metadata["backlog"]["audio.p -> audio.d"]
+    metadata = keep.traces[0].metadata
+    queued = metadata["backlog"]["audio.p -> audio.d"]
     assert queued["max"] == 19 and queued["max_wait_ms"] >= 150
+    heard = metadata["latency_ms"]["heard"]  # {"n", "p50", "p95", "max"}
+    assert heard["n"] == 20 and heard["max"] >= 190  # the last packet waited for 19
 
 
 asyncio.run(main())

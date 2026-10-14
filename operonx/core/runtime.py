@@ -39,6 +39,7 @@ from operonx.core.workflow_trace import (
     STATUS_ERROR,
     STATUS_OK,
     OpExecution,
+    _current_trace,
     make_op_id,
 )
 
@@ -50,6 +51,7 @@ __all__ = [
     "TaskStarted",
     "child",
     "invocation_key",
+    "measure",
     "run_context",
 ]
 
@@ -129,6 +131,32 @@ def run_context() -> Optional[RunContext]:
         deadline=frame.deadline,
         context=run.context if run is not None else None,
     )
+
+
+#: Samples kept per name and run: a call measures a reply per turn, so
+#: this is far above any real run; past it, samples are dropped.
+MEASURE_KEEP = 10_000
+
+
+def measure(name: str, ms: float) -> None:
+    """Record one latency sample of *name*, in milliseconds, on the run
+    whose op body calls it. When the run ends its trace carries
+    ``metadata["latency_ms"][name] = {"n", "p50", "p95", "max"}``, and the
+    studio's Monitor charts it over time.
+
+    For the latency a user feels that no single op's time shows: a reply
+    that starts in one op and is heard in another. A no-op outside a
+    traced run. Call it on the event loop (in the op body, not in a thread
+    the op hands work to)::
+
+        measure("reply", (first_sent - speech_ended) * 1000)
+    """
+    trace = _current_trace.get()
+    if trace is None:
+        return
+    samples = trace.root.measures.setdefault(name, [])
+    if len(samples) < MEASURE_KEEP:
+        samples.append(float(ms))
 
 
 # ---------------------------------------------------------------------------
