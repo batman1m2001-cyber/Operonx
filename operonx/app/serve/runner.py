@@ -12,7 +12,7 @@ import asyncio
 import dataclasses
 import inspect
 from collections.abc import Mapping
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from operonx.app.declare import ref_name
 from operonx.app.doors import RESERVED_QUERY, BindError, has_doors, plain, serve_inputs
@@ -52,6 +52,7 @@ async def serve_session(
     timeout: Optional[float] = None,
     on_start: Optional[Callable[[Any], None]] = None,
     reply: bool = False,
+    resume: Optional[Tuple[str, Dict[str, Any]]] = None,
 ) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
@@ -85,19 +86,27 @@ async def serve_session(
     unhandled error, its outputs (without the ``$`` keys) are sent to the
     session as its one reply, before the session is closed. A failed run
     sends nothing.
+
+    ``resume=(run_id, options)`` continues a journalled run instead of
+    starting one (``engine.resume(run_id, **options)``: ``answers=``,
+    ``retry_failed=``): a job item retried from its failed op, a parked
+    service run answered. Everything else is the same.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
     scratch[SESSION_KEY] = session
 
-    handle = engine.start(
-        inputs=dict(request.inputs),
-        scratch=scratch,
-        request_id=request.request_id,
-        user_id=request.user_id,
-        session_id=request.session_id,
-        trace_id=request.trace_id,
-    )
+    if resume is None:
+        handle = engine.start(
+            inputs=dict(request.inputs),
+            scratch=scratch,
+            request_id=request.request_id,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            trace_id=request.trace_id,
+        )
+    else:
+        handle = await engine.resume(resume[0], **resume[1])
     trace = getattr(handle, "trace", None)
     if metadata and trace is not None:
         trace.tag(metadata)
@@ -123,7 +132,22 @@ async def serve_session(
                     f"run exceeded {timeout:g}s", trace_id=getattr(trace, "trace_id", None)
                 ) from None
         if reply and not unhandled(handle.errors):
-            await session.send(plain(await handle.result()))
+            out = await handle.result()
+            parked = out.get("$interrupted") if isinstance(out, dict) else None
+            if parked:
+                # stopped for a person (`[durable]`): the caller answers it
+                # at POST <path>/resume with {"run_id", "answers"}
+                await session.send(
+                    {
+                        "run_id": getattr(trace, "trace_id", None),
+                        "interrupted": [
+                            {"id": p["interrupt_id"], "op": p["op"], "payload": p["payload"]}
+                            for p in parked
+                        ],
+                    }
+                )
+            else:
+                await session.send(plain(out))
     finally:
         # A transport whose `close` raises must not turn a completed run
         # into a failed one. Closing is teardown; its failure is reported
@@ -355,6 +379,39 @@ class ServeRunner:
             input=self.spec.options.get("input"),
         )
 
+    async def _resume_of(self, engine: Any, session: Session) -> Any:
+        """``(run_id, {"answers": ...})`` from a resume's body, or the
+        `BindError` that refuses it: ``400`` for a body that is not a resume,
+        ``404`` for a run the journal does not hold, ``409`` for one that is
+        not waiting for an answer."""
+        body = None
+        async for body in session.recv():
+            break
+        if not isinstance(body, Mapping) or not isinstance(body.get("run_id"), str):
+            return BindError(
+                'a resume is {"run_id": "...", "answers": {"<interrupt id>": value}}',
+                field="run_id",
+            )
+        answers = body.get("answers") or {}
+        if not isinstance(answers, Mapping):
+            return BindError('"answers" is an object: {"<interrupt id>": value}', field="answers")
+        from operonx.durable import JournalError
+
+        run_id = body["run_id"]
+        try:
+            header, _ = await asyncio.to_thread(engine._journal.read, run_id)
+        except JournalError:
+            gone = BindError(f"no run {run_id!r} to resume", field="run_id")
+            gone.status = 404
+            return gone
+        if header.status != "interrupted":
+            busy = BindError(
+                f"run {run_id!r} is {header.status}, not waiting for an answer", field="run_id"
+            )
+            busy.status = 409
+            return busy
+        return run_id, {"answers": dict(answers)}
+
     async def _bind(self, engine: Any, request: RunRequest, session: Session) -> RunRequest:
         """A doorless run's inputs: the hook's (or the query's), plus the
         session's one item — its body, or a schedule's tick."""
@@ -397,14 +454,14 @@ class ServeRunner:
             return exc
         return None
 
-    async def _refuse(self, session: Session, exc: BindError) -> None:
+    async def _refuse(self, session: Session, exc: BindError, status: int = 400) -> None:
         """A doorless request that does not fit: no run. The session is told
         (an http door answers ``400``), and the hooks that opened something
         close it."""
         LOGGER.info(f"[serve:{self.spec.name}] refused a request: {exc}")
         refuse = getattr(session, "refuse", None)
         if refuse is not None:
-            refuse(400, {"error": str(exc), "endpoint": self.spec.name, "field": exc.field})
+            refuse(status, {"error": str(exc), "endpoint": self.spec.name, "field": exc.field})
         await self._report_failure(session)
         await session.close()
         await self._close_one(session, None)
@@ -424,7 +481,14 @@ class ServeRunner:
         doorless = self._doorless(engine)
         metadata = self._origin(request)
         served = self._recorded(session, metadata) if self.spec.options.get("replay") else session
-        if doorless:
+        resume = None
+        if doorless and self.spec.options.get("resumes"):
+            # POST <path>/resume: {"run_id", "answers"} continue a parked run
+            resume = await self._resume_of(engine, served)
+            if isinstance(resume, BindError):
+                await self._refuse(session, resume, getattr(resume, "status", 400))
+                return
+        elif doorless:
             try:
                 request = await self._bind(engine, request, served)
             except BindError as exc:
@@ -439,6 +503,7 @@ class ServeRunner:
                 metadata=metadata,
                 on_start=lambda h: _note_trace_id(session, h),
                 reply=doorless,
+                resume=resume,
             )
             failed = bool(unhandled(handle.errors))
         except Exception as exc:  # noqa: BLE001

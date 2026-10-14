@@ -16,6 +16,7 @@ such, never mistaken for success.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import uuid
@@ -144,8 +145,42 @@ async def _settle(handle: Any) -> None:
         pass  # the record reads the trace, not this
 
 
-async def _attempt(job: "Job", engine: Any, raw: Any, key: str, run_id: str) -> ItemResult:
-    """One run for one item."""
+def item_run_id(job_run: str, key: Any) -> str:
+    """The journal run (and trace) id of one item of one job run: stable for
+    the pair, safe in a file name whatever the key holds."""
+    return f"{job_run}-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+
+
+async def _resume_mode(journal: Any, run_id: str) -> Optional[Dict[str, Any]]:
+    """How an item's journalled run continues: from its failed op
+    (``retry_failed``) when one failed, as it was when it stopped (a crash, a
+    drain), or None when the journal has no such run, or it ended well."""
+    from operonx.durable import JournalError
+    from operonx.durable.journal import END
+
+    try:
+        header, steps = await asyncio.to_thread(journal.read, run_id)
+    except JournalError:
+        return None
+    if any(s.index == END and s.status == "error" for s in steps):
+        return {"retry_failed": True}
+    if header.status in ("running", "drained"):
+        return {}
+    return None
+
+
+async def _attempt(
+    job: "Job",
+    engine: Any,
+    raw: Any,
+    key: str,
+    run_id: str,
+    journal_run: Optional[str] = None,
+    resume: Optional[Dict[str, Any]] = None,
+) -> ItemResult:
+    """One run for one item. With a journal (``[durable]``) the run is
+    ``journal_run``; ``resume`` continues that run instead
+    (``engine.resume(journal_run, **resume)``)."""
     session = JobSession(key, meta={"job": job.name, "job_run": run_id})
     doorless = not job.has_doors()
     item = job.item_of(raw)
@@ -164,9 +199,10 @@ async def _attempt(job: "Job", engine: Any, raw: Any, key: str, run_id: str) -> 
         handle = await serve_session(
             engine,
             session,
-            RunRequest(inputs=inputs),
+            RunRequest(inputs=inputs, trace_id=journal_run),
             metadata=_trace_metadata(job, run_id, key),
             timeout=job.timeout,
+            resume=(journal_run, resume) if resume is not None else None,
         )
     except RunTimeout as exc:
         return ItemResult(
@@ -337,11 +373,21 @@ async def run_job(job: "Job", *, resume: bool = False) -> JobRun:
     tasks: set = set()
     source_error: Optional[str] = None
 
+    journal = getattr(engine, "_journal", None)  # `[durable]`: items are journalled
+
     async def one(raw: Any, key: str) -> None:
         try:
             result = None
+            run = item_run_id(record.run_id, key) if journal is not None else None
+            resume = None
+            if journal is not None and previous is not None:
+                # left mid-way, or failed, by the run this one resumes
+                before = item_run_id(previous.run_id, key)
+                resume = await _resume_mode(journal, before)
+                if resume is not None:
+                    run = before
             for attempt in range(1, attempts + 1):
-                result = await _attempt(job, engine, raw, key, record.run_id)
+                result = await _attempt(job, engine, raw, key, record.run_id, run, resume)
                 result.attempts = attempt
                 if result.status not in _RETRIABLE or attempt == attempts:
                     break
@@ -351,6 +397,11 @@ async def run_job(job: "Job", *, resume: bool = False) -> JobRun:
                     f"retry {attempt}/{attempts - 1} in {delay:.2f}s"
                 )
                 await asyncio.sleep(delay)
+                if journal is not None:
+                    # from its failed op: what ended before the failure stands
+                    resume = await _resume_mode(journal, run)
+                    if resume is None:  # nothing to continue: a new run, an id of its own
+                        run = f"{item_run_id(record.run_id, key)}.{attempt + 1}"
             if result.status == ITEM_OK:
                 try:
                     await output.write(key, result.result)

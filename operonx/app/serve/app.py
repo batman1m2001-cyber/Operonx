@@ -53,6 +53,7 @@ def compile_graph(
     trace: Any = None,
     concurrency: Optional[int] = None,
     retry: Any = None,
+    durable: Any = None,
     where: str = "graph",
 ) -> Any:
     """An ``Operon`` from a ``module:attr`` entry point, the way anything
@@ -122,6 +123,14 @@ def compile_graph(
         # called `engine`.
         graph_fn = graph_fn(name=graph_fn.__name__, **params)
         kwargs.pop("params", None)
+    if durable is not None:
+        from operonx.core.engine import _ingress_of
+
+        # a graph that reads through a door is served live, never resumed
+        # (and a factory's graph is not known until it is built: none)
+        if hasattr(graph_fn, "_ops") and _ingress_of(graph_fn) is None:
+            kwargs["journal"] = durable.open()
+            kwargs["durability"] = durable.durability
     engine = Operon(graph_fn, **kwargs)
     if concurrency:
         engine.graph.concurrency = int(concurrency)
@@ -183,6 +192,7 @@ def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
         trace=spec.options.get("trace"),
         concurrency=spec.options.get("concurrency"),
         retry=spec.options.get("retry"),
+        durable=spec.options.get("durable"),
         where=where,
     )
 

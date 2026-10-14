@@ -226,6 +226,17 @@ class ServeSpec:
         resume graph, named ``<name>.resume``, with this door's codec,
         hooks, trace and address. ``None`` when there is no resume graph."""
         if self.resume is None:
+            if self.kind == "http" and "durable" in self.options:
+                # `[durable]`: a parked run is answered here with
+                # {"run_id", "answers"}, by the service's own graph
+                return replace(
+                    self,
+                    name=f"{self.name}.resume",
+                    path=self.path.rstrip("/") + "/resume",
+                    method="POST",
+                    options={**self.options, "resumes": True},
+                    description=f"answers {self.name}'s parked runs",
+                )
             return None
         return replace(
             self,
@@ -276,6 +287,9 @@ class Manifest:
     #: ``[retry]``: the default ``Retry`` of every op without its own, in the
     #: project's jobs and request-response services (not a stream door's).
     retry: Any = None
+    #: ``[durable]``: the journal the project's doorless jobs and services
+    #: record their runs in (`DurableSpec`), or None.
+    durable: Any = None
 
     @property
     def name(self) -> str:
@@ -405,6 +419,8 @@ class Manifest:
         serves = settle_serves(serves, project.get("trace"), tracing)
         retry = _retry_table(raw.get("retry"), where)
         serves = settle_retry(serves, retry)
+        durable = _durable_table(raw.get("durable"), where, source.parent if source else None)
+        serves = settle_durable(serves, durable)
 
         if raw.get("job"):
             raise ManifestError(
@@ -433,6 +449,7 @@ class Manifest:
             queues=queues,
             jobs_dir=str(jobs_table["dir"]) if jobs_table.get("dir") else None,
             retry=retry,
+            durable=durable,
         )
 
 
@@ -496,6 +513,88 @@ def _retry_table(table: Any, where: str) -> Any:
         return Retry(**table)
     except (TypeError, ValueError) as e:
         raise ManifestError(f"{where}: [retry]: {e}") from None
+
+
+@dataclass(frozen=True)
+class DurableSpec:
+    """``[durable]``: where the project's doorless jobs and services journal
+    their runs, so a stopped run resumes and a parked one is answered later.
+
+    ``journal`` is ``"sqlite:<path>"`` (relative to the project) or
+    ``"memory"`` (one process, for tests); ``durability`` is when steps are
+    written (``Operon(durability=)``).
+    """
+
+    journal: str
+    durability: str = "async"
+    #: The project's folder, where a relative journal path lands.
+    root: Optional[Path] = None
+
+    def open(self, root: Optional[Path] = None) -> Any:
+        """The journal, one object per file in this process (the jobs and the
+        services of a project share it)."""
+        from operonx.durable import MemoryJournal, SqliteJournal
+
+        if self.journal == "memory":
+            key = ("memory", id(self))
+            if key not in _JOURNALS:
+                _JOURNALS[key] = MemoryJournal()
+            return _JOURNALS[key]
+        path = Path(self.journal.split(":", 1)[1]).expanduser()
+        if not path.is_absolute():
+            path = (root or self.root or Path.cwd()) / path
+        key = ("sqlite", str(path.resolve()))
+        if key not in _JOURNALS:
+            _JOURNALS[key] = SqliteJournal(path)
+        return _JOURNALS[key]
+
+
+#: Journals opened in this process, by file: one `SqliteJournal` per path.
+_JOURNALS: Dict[Any, Any] = {}
+
+
+def _durable_table(table: Any, where: str, root: Optional[Path] = None) -> Optional[DurableSpec]:
+    """``[durable]`` as a `DurableSpec`, or None when the file has none."""
+    if table is None:
+        return None
+    if not isinstance(table, dict):
+        raise ManifestError(f"{where}: [durable] is a table")
+    unknown = sorted(set(table) - {"journal", "durability"})
+    if unknown:
+        raise ManifestError(
+            f"{where}: [durable] takes journal and durability; not {', '.join(unknown)}"
+        )
+    journal = table.get("journal")
+    if not isinstance(journal, str) or not (
+        journal == "memory" or (journal.startswith("sqlite:") and len(journal) > len("sqlite:"))
+    ):
+        raise ManifestError(
+            f'{where}: [durable] journal is "sqlite:<path>" (relative to the project) or "memory", '
+            f"got {journal!r}"
+        )
+    from operonx.durable import DURABILITY
+
+    durability = table.get("durability", "async")
+    if durability not in DURABILITY:
+        raise ManifestError(
+            f"{where}: [durable] durability is one of {', '.join(DURABILITY)}, got {durability!r}"
+        )
+    return DurableSpec(journal, durability, root)
+
+
+def settle_durable(serves: Tuple["ServeSpec", ...], durable: Any) -> Tuple["ServeSpec", ...]:
+    """Each request-response service with ``options["durable"]``, the project's
+    ``[durable]``, unless it set its own. A stream door is left alone: its
+    items come from a live connection no journal holds. (A request-response
+    service whose graph reads through a door is skipped when it is compiled.)"""
+    if durable is None:
+        return serves
+    return tuple(
+        spec
+        if spec.kind == "asgi" or spec.is_stream or "durable" in spec.options
+        else replace(spec, options={**spec.options, "durable": durable})
+        for spec in serves
+    )
 
 
 def check_transient() -> None:
