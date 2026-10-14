@@ -1,6 +1,6 @@
 # CCU capacity: see the backlog, then lift the ceiling
 
-Status: plan, 2026-10-14. Driven by the callbot (educa-reminder-agent,
+Status: **done** 2026-10-14 (phases 1–4; phase 5 not needed). Results at the end. Driven by the callbot (educa-reminder-agent,
 `refactor/operonx-studio`), but every generic part lands in operonx.
 
 ## Why
@@ -140,11 +140,11 @@ op" is added to operonx.
 
 | # | Phase | Where | Status |
 |---|---|---|---|
-| 1 | T1–T4 traces | operonx + callbot | |
-| 2 | VAD maths | callbot | |
-| 3 | release_context | operonx | |
-| 4 | even spread | operonx serve | |
-| 5 | VAD process | callbot resource | only if needed |
+| 1 | T1–T4 traces | operonx + callbot | **done**: operonx 1.24.0 (#173), callbot f12c632, studio #93 |
+| 2 | VAD maths | callbot | **done**: c54dfb6 |
+| 3 | release_context | operonx | **done**: 1.24.1 (#175) |
+| 4 | even spread | operonx serve | **done**: 1.25.0 (#176) |
+| 5 | VAD process | callbot resource | **not needed**: the target is met by 1–4 and 8 workers |
 
 Traces first: every fix after them is judged in ClickHouse and the
 studio. Then the small, contained wins, measured one at a time; the
@@ -157,3 +157,26 @@ Scratchpad tools from the 2026-10-14 session (move into the callbot's
 `bench/` in phase 1): `ccu_real.py` (the caller), `ccu_run.sh CCU WORKERS
 TAG [VAD_THREADS]` (one fresh local server on 19922/19932, never a 992x
 port), `serve_instr.py` (the temporary timing that phase 1 replaces).
+
+## Results (2026-10-14)
+
+Real-audio calls (`ccu_real.py`, 20 ms packets, recorded speech, turn-taking),
+read from ClickHouse, not from a profiler:
+
+| Calls / workers | Spread | Reply after the caller stops, p50 / p95 | Worst VAD lag of any call |
+|---|---|---|---|
+| 20 / 4, before | 10/6/5/0 or 8/7/3/2 | 4.35 / 6.7 s | 8.3 s |
+| 20 / 4, after | 5/5/5/5 | **0.88 / 1.09 s** | **0.30 s** |
+| 40 / 4, after | 10 each | 4.8 / 6.3 s | 10.6 s (10 calls is past one worker) |
+| 40 / 8, after | 5 each | **0.85 / 1.05 s** | **0.34 s** |
+
+- **Per phase.** Phase 2 cut a VAD push from 0.9 to 0.64 ms (2.86 to 2.09 ms
+  beside a busy loop), every segment bit-identical; one worker then held 6
+  calls on time instead of about 5. Phase 3 cut the cells a packet's release
+  visits from 472 to 18 (VAD lag at 8 calls on one worker: 1.24 to 0.93 s at
+  the median second); coverage checked over 15,271 releases, none missed.
+  Phase 4 made the spread exact; the kernel alone gave 9/2/1/0, 11/1/0/0.
+- **What one worker holds:** about 6–7 calls on time. 40 calls need 8 workers
+  (`WS_WORKERS=8`), well within this host's 24 cores.
+- **Not changed:** greeting p95 ~340 ms and 5-call replies ~1 s, as before;
+  the 8-op chain and stream A/B matched main at every phase.
