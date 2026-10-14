@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Operon.resume(run_id, retry_failed=True)` runs a failed run again from its first failed op: the steps journalled before the failure are kept (a charge is not charged twice), the failed op and everything after it run. With `allow_graph_change=True` it retries after a code fix. A run where nothing failed is refused. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L1).
+
 ## [1.22.4] - 2026-10-13
 
 ### Fixed
