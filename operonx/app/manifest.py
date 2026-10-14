@@ -450,8 +450,8 @@ def with_default_trace(serves: Tuple["ServeSpec", ...], trace: Any) -> Tuple["Se
 # -- parsing helpers -----------------------------------------------------
 
 
-#: What ``[retry]`` takes: ``Retry``'s own arguments.
-RETRY_KEYS = ("max_attempts", "initial", "backoff", "max_interval", "jitter")
+#: What ``[retry]`` takes: ``Retry``'s own arguments, and ``transient``.
+RETRY_KEYS = ("max_attempts", "initial", "backoff", "max_interval", "jitter", "transient")
 
 
 def _retry_table(table: Any, where: str) -> Any:
@@ -460,7 +460,8 @@ def _retry_table(table: Any, where: str) -> Any:
     ``max_attempts`` counts every attempt, the first included; the pause
     before attempt n+1 is ``initial * backoff**(n-1)``, at most
     ``max_interval``. Only errors worth another try are retried
-    (``operonx.TRANSIENT``)."""
+    (``operonx.TRANSIENT``); ``transient`` adds the project's own, for every
+    retry of the process, an LLM's transport retry included."""
     if table is None:
         return None
     if not isinstance(table, dict):
@@ -470,12 +471,35 @@ def _retry_table(table: Any, where: str) -> Any:
         raise ManifestError(
             f"{where}: [retry] takes {', '.join(RETRY_KEYS)}; not {', '.join(unknown)}"
         )
-    from operonx.core.policy import Retry
+    from operonx.core.policy import TRANSIENT, Retry
 
+    table = dict(table)
+    transient = table.pop("transient", [])
+    if not isinstance(transient, list) or not all(
+        isinstance(t, str) and _ENTRY_RE.match(t) for t in transient
+    ):
+        raise ManifestError(
+            f'{where}: [retry] transient is a list of "module:Name" exception classes, '
+            f"got {transient!r}"
+        )
+    # Imported when first needed, or by `TRANSIENT.check()` as the app starts.
+    TRANSIENT.also(*transient)
     try:
         return Retry(**table)
     except (TypeError, ValueError) as e:
         raise ManifestError(f"{where}: [retry]: {e}") from None
+
+
+def check_transient() -> None:
+    """Import every ``[retry] transient`` name now, as the app starts: a
+    typo fails here, naming it, rather than on the first failure it was
+    meant to catch."""
+    from operonx.core.policy import TRANSIENT
+
+    try:
+        TRANSIENT.check()
+    except ValueError as e:
+        raise ManifestError(str(e)) from None
 
 
 def settle_retry(serves: Tuple["ServeSpec", ...], retry: Any) -> Tuple["ServeSpec", ...]:

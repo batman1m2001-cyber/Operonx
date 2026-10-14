@@ -52,10 +52,16 @@ asyncio.run(main())
 ```
 
 - **What is retried:** `on=TRANSIENT` by default — a `TimeoutError`, a
-  `ConnectionError`, an error carrying HTTP status 429 or 5xx, and the
-  connection errors of `httpx` and `openai`. A `ValueError` or a 400 fails
-  the same way every time and is not retried. Pass `on=` an exception class,
-  a tuple, or a function `error -> bool` to choose.
+  `ConnectionError`, an error carrying HTTP status 429 or 5xx, the
+  connection errors of `httpx` and `openai`, and a gRPC status meaning "no
+  answer" (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, …). A `ValueError` or a 400
+  fails the same way every time and is not retried. Pass `on=` an exception
+  class, a tuple, or a function `error -> bool` to choose.
+- **Your own transient error:** `TRANSIENT.also(Throttled)`, or
+  `[retry] transient = ["crm.errors:Throttled"]` in `operonx.toml`. It then
+  counts for every retry of the process: an op's `retry=`, the run's
+  default, and an LLM resource's transport retry. A name that does not
+  import fails when the app starts.
 - **The pause:** `initial` seconds, times `backoff` (2) per attempt, at most
   `max_interval` (30 s), with jitter: a random wait between half of that
   and all of it.

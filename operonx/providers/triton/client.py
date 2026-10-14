@@ -30,6 +30,7 @@ import random
 import re
 from typing import Any, Dict, List, Optional
 
+from operonx.core.policy import TRANSIENT, _grpc_code
 from operonx.providers.triton.decode import decode_infer_output
 from operonx.providers.triton.dtypes import numpy_to_triton_dtype, to_infer_array
 
@@ -70,46 +71,21 @@ def get_aio_grpcclient():
     return _aio_grpcclient
 
 
-#: gRPC codes worth another attempt. Each says "this request did not get
-#: an answer", never "the server refused this request" — retrying an
-#: INVALID_ARGUMENT or a NOT_FOUND only burns the deadline again.
-_TRANSIENT_CODES = frozenset(
-    {"DEADLINE_EXCEEDED", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "ABORTED", "INTERNAL"}
-)
-
-_STATUS_RE = re.compile(r"StatusCode\.([A-Z_]+)")
-
-
 def _status_code(exc: Exception) -> Optional[str]:
-    """The gRPC status name for *exc*, if it carries one.
-
-    `tritonclient` wraps the gRPC error in an `InferenceServerException`
-    whose text embeds the code — `[StatusCode.DEADLINE_EXCEEDED] Deadline
-    Exceeded`. The `.code()` accessor is tried first because a string
-    match is a last resort, not a contract.
-    """
-    getter = getattr(exc, "code", None)
-    if callable(getter):
-        try:
-            code = getter()
-            name = getattr(code, "name", None)
-            if isinstance(name, str):
-                return name
-        except Exception:  # noqa: BLE001 — fall through to the text
-            pass
-    match = _STATUS_RE.search(str(exc))
-    return match.group(1) if match else None
+    """The gRPC status name for *exc*, if it carries one (``policy._grpc_code``)."""
+    return _grpc_code(exc)
 
 
 def _is_transient(exc: Exception) -> bool:
-    """Should this failure be tried again?
+    """Should this failure be tried again? ``operonx.TRANSIENT``'s answer.
 
-    Unknown shapes are **not** retried. A retry that cannot help still
-    costs a full timeout, and doing that to an error nobody classified is
-    how a 30s deadline becomes two minutes.
+    A gRPC code says "no answer" (``DEADLINE_EXCEEDED``, ``UNAVAILABLE``…)
+    or "refused" (``INVALID_ARGUMENT``…): only the first is retried, and an
+    unknown shape is not. A retry that cannot help still costs a full
+    timeout, and doing that to an error nobody classified is how a 30s
+    deadline becomes two minutes.
     """
-    code = _status_code(exc)
-    return code in _TRANSIENT_CODES if code else False
+    return TRANSIENT(exc)
 
 
 def close_all() -> None:

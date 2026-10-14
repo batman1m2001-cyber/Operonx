@@ -9,10 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **One answer to "is this error worth another try?"** `operonx.TRANSIENT` is now the only classifier. It also covers gRPC statuses that mean "no answer" (`UNAVAILABLE`, `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED`, `ABORTED`, `INTERNAL`), and the LLM transport retry and Triton ask it instead of keeping lists of their own. A project adds its own errors with `TRANSIENT.also(Throttled)` or `[retry] transient = ["crm.errors:Throttled"]`; they then count for every retry (an op's `retry=`, the run's default, an LLM resource's `max_retries`). A name is imported when first needed and checked as `operonx serve` or `operonx run` starts. Plan: docs/RETRY_PLAN.md (R4).
+
 - **A default retry for a run or a project.** `Operon(g, retry=Retry(...))` retries every op that sets no `retry=` of its own, and `[retry]` in `operonx.toml` does the same for the project's jobs and request-response services (not a stream door: an item already sent cannot be sent again). `@op(retry=False)`, or `op(..., retry=False)` for one use, opts an op out. Precedence: one use, the op, the engine, the project. Only `TRANSIENT` errors are retried. The default is looked at only when an op fails: an op that does not fail runs the path it always did, a plain `def` op still runs inline, and one that fails is handed a task of its own to wait in, so the run's main loop never sleeps. Measured with an 8-op chain at 400 runs at once, pinned to one core: identical to 1.22.4 without a default, and +2–6 µs per run (one handle per scheduler run) with one. Plan: docs/RETRY_PLAN.md (R2).
 
 ### Changed
 
+- **An LLM resource's transport retry (`max_retries:`) retries what `TRANSIENT` retries:** a timeout or a lost connection from any client library (`httpx`, `TimeoutError`), not only `openai`'s, and a project's own transient errors. A 4xx still propagates at once, and an empty answer is still retried by `retry_on_empty`.
 - **A retry's pause holds no concurrency slot.** An op waiting between two `retry=` attempts gives back its slot of the graph's `concurrency` and of the run's `max_concurrency`, and takes it again before the next attempt. Before, a provider outage filled every slot with ops that were only sleeping, and healthy ops queued behind them. Nothing is added for an op that does not fail: a graph with `retry=` ops makes one handle per run, and the rest runs on the failure path. Measured with an 8-op chain at 400 runs at once, pinned to one core: identical before and after, with and without `retry=`. Plan: docs/RETRY_PLAN.md (R1).
 
 ### Added

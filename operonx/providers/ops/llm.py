@@ -17,7 +17,7 @@ from operonx.core.exceptions import LLMRefusalError, PromptError
 from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, should_emit_for_channel, split_shorthand_kwargs
-from operonx.core.policy import mark_retried
+from operonx.core.policy import TRANSIENT, mark_retried
 from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
@@ -867,14 +867,14 @@ class LLMOp(BaseOp):
         :attr:`max_retries` on the op, which re-asks the model when a
         parser or validator rejects a well-formed answer.
 
-        Retries fire on four conditions:
+        Retries fire on two conditions:
 
-        1. ``RateLimitError`` - honours a ``retry-after`` header when sent.
-        2. ``APIConnectionError`` / ``APITimeoutError`` - transport level.
-        3. ``InternalServerError``, or any ``APIStatusError`` with a 5xx
-           code. 4xx propagates immediately; retrying a bad request only
+        1. An error ``operonx.TRANSIENT`` calls worth another try: a rate
+           limit (honouring a ``retry-after`` header when sent), a timeout
+           or lost connection, a 5xx, or a project's ``[retry] transient``.
+           A 4xx propagates immediately; retrying a bad request only
            wastes the quota.
-        4. A successful HTTP 200 whose content is empty, when
+        2. A successful HTTP 200 whose content is empty, when
            ``retry_on_empty`` is set. Anthropic answers this way under
            transient overload - a failure wearing a success's clothes.
 
@@ -889,7 +889,7 @@ class LLMOp(BaseOp):
             returns that empty result rather than raising - the caller
             (fallback chain, validator) decides what it means.
         """
-        import openai
+        import openai  # noqa: F401 — imported, so TRANSIENT knows its connection errors
 
         cfg = getattr(llm, "config", None)
 
@@ -918,52 +918,26 @@ class LLMOp(BaseOp):
         for attempt in range(max_retries + 1):
             try:
                 result = await coro_fn(**kwargs)
-            except openai.RateLimitError as e:
-                if attempt >= max_retries:
-                    raise _gave_up(e, max_retries)
-                sleep_time = self._retry_delay(e, base_delay, min_delay, max_delay, attempt)
-                LOGGER.warning(
-                    "[%s] Rate limited (429). Attempt %d/%d. Retrying in %.2fs",
-                    self.name,
-                    attempt + 1,
-                    max_retries + 1,
-                    sleep_time,
-                )
-                await asyncio.sleep(sleep_time)
-                continue
-            except (
-                openai.APIConnectionError,
-                openai.APITimeoutError,
-                openai.InternalServerError,
-            ) as e:
-                if attempt >= max_retries:
-                    raise _gave_up(e, max_retries)
-                sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
-                LOGGER.warning(
-                    "[%s] %s. Attempt %d/%d. Retrying in %.2fs",
-                    self.name,
-                    type(e).__name__,
-                    attempt + 1,
-                    max_retries + 1,
-                    sleep_time,
-                )
-                await asyncio.sleep(sleep_time)
-                continue
-            except openai.APIStatusError as e:
-                # Some gateways raise the base class with a 5xx code
-                # rather than the specific subclass. Retry 5xx, let 4xx
-                # through.
-                status_code = getattr(e, "status_code", None)
-                if not status_code or status_code < 500:
+            except Exception as e:
+                # Worth another try is `operonx.TRANSIENT`'s answer, the
+                # same as an op's `retry=`: a rate limit, a timeout, a lost
+                # connection, a 5xx (from a gateway that raises the base
+                # class too), and the project's own `[retry] transient`.
+                # A 4xx or a bug propagates at once.
+                if not TRANSIENT(e):
                     raise
                 if attempt >= max_retries:
                     raise _gave_up(e, max_retries)
-                sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
+                status = getattr(e, "status_code", None)
+                if status == 429:  # honours a Retry-After header
+                    sleep_time = self._retry_delay(e, base_delay, min_delay, max_delay, attempt)
+                else:
+                    sleep_time = self._jitter(base_delay, min_delay, max_delay, attempt)
                 LOGGER.warning(
-                    "[%s] %s %s. Attempt %d/%d. Retrying in %.2fs",
+                    "[%s] %s%s. Attempt %d/%d. Retrying in %.2fs",
                     self.name,
                     type(e).__name__,
-                    status_code,
+                    f" {status}" if status else "",
                     attempt + 1,
                     max_retries + 1,
                     sleep_time,

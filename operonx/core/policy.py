@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 import sys
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -77,23 +78,108 @@ def _http_status(error: BaseException) -> Optional[int]:
     return None
 
 
-class _Transient:
-    """Is this error worth another attempt? The default of ``Retry(on=...)``.
+#: gRPC codes worth another attempt. Each says "this request did not get an
+#: answer", never "the server refused this request": retrying an
+#: INVALID_ARGUMENT or a NOT_FOUND only burns the deadline again.
+_GRPC_CODES = frozenset(
+    {"DEADLINE_EXCEEDED", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "ABORTED", "INTERNAL"}
+)
 
-    Yes for a timeout, a connection failure, and an HTTP 429 or 5xx — the
-    errors a second attempt can get past. No for everything else: a
-    ``ValueError`` or a 400 fails the same way every time, and retrying it
-    only spends the quota.
+_GRPC_RE = re.compile(r"StatusCode\.([A-Z_]+)")
+
+
+def _grpc_code(error: BaseException) -> Optional[str]:
+    """The gRPC status name *error* carries, if any.
+
+    ``grpc.aio.AioRpcError.code()`` first; ``tritonclient`` wraps the error
+    in an ``InferenceServerException`` whose text embeds the code
+    (``[StatusCode.DEADLINE_EXCEEDED] Deadline Exceeded``), so the text is
+    the last resort, not a contract.
+    """
+    getter = getattr(error, "code", None)
+    if callable(getter):
+        try:
+            name = getattr(getter(), "name", None)
+            if isinstance(name, str):
+                return name
+        except Exception:  # noqa: BLE001 — fall through to the text
+            pass
+    match = _GRPC_RE.search(str(error))
+    return match.group(1) if match else None
+
+
+class _Transient:
+    """Is this error worth another attempt? The one answer every retry asks.
+
+    Yes for a timeout, a connection failure, an HTTP 429 or 5xx, a gRPC
+    status that means "no answer" (``UNAVAILABLE``, ``DEADLINE_EXCEEDED``…),
+    and whatever the project added with :meth:`also` (``[retry] transient``
+    in ``operonx.toml``). No for everything else: a ``ValueError`` or a 400
+    fails the same way every time, and retrying it only spends the quota.
 
     ``httpx`` and ``openai`` transport errors count as connection failures
     when those packages are already imported; this module never imports
-    them.
+    them. Asked on the failure path only.
     """
 
-    __slots__ = ()
+    __slots__ = ("_types", "_names")
+
+    def __init__(self) -> None:
+        self._types: Tuple[type, ...] = ()
+        self._names: Tuple[str, ...] = ()  # "module:Name", imported when first needed
+
+    def also(self, *errors: Union[Type[BaseException], str]) -> None:
+        """Count these errors as transient too, for every retry of this process.
+
+        An exception class, or ``"module:Name"``, imported the first time it
+        is needed (``[retry] transient = ["crm.errors:Throttled"]``)::
+
+            TRANSIENT.also(crm.errors.Throttled)
+        """
+        for error in errors:
+            if isinstance(error, str):
+                if ":" not in error:
+                    raise ValueError(f"TRANSIENT.also({error!r}): write it as 'module:Name'")
+                if error not in self._names:
+                    self._names += (error,)
+            elif _is_exception_type(error):
+                if error not in self._types:
+                    self._types += (error,)
+            else:
+                raise TypeError(
+                    f"TRANSIENT.also takes exception classes or 'module:Name', not {error!r}"
+                )
+
+    def check(self) -> None:
+        """Import every ``"module:Name"`` added; a name that is not an
+        exception class fails here, at start, rather than on a failure."""
+        names, self._names = self._names, ()
+        import importlib
+
+        for i, name in enumerate(names):
+            module, _, attr = name.partition(":")
+            try:
+                found = getattr(importlib.import_module(module), attr)
+            except (ImportError, AttributeError) as e:
+                self._names = names[i + 1 :]  # reported once; the rest for the next look
+                raise ValueError(f"[retry] transient {name!r}: {e}") from None
+            if not _is_exception_type(found):
+                self._names = names[i + 1 :]
+                raise ValueError(f"[retry] transient {name!r} is not an exception class")
+            if found not in self._types:
+                self._types += (found,)
 
     def __call__(self, error: BaseException) -> bool:
         if isinstance(error, (TimeoutError, asyncio.TimeoutError, ConnectionError)):
+            return True
+        if self._names:
+            try:
+                self.check()
+            except ValueError as e:
+                from operonx.core.loggings import LOGGER
+
+                LOGGER.error("%s; it is not counted as transient", e)
+        if self._types and isinstance(error, self._types):
             return True
         status = _http_status(error)
         if status is not None:
@@ -104,13 +190,15 @@ class _Transient:
         openai = sys.modules.get("openai")
         if openai is not None and isinstance(error, openai.APIConnectionError):
             return True
-        return False
+        code = _grpc_code(error)
+        return code in _GRPC_CODES if code else False
 
     def __repr__(self) -> str:
         return "TRANSIENT"
 
 
-#: The default ``Retry(on=...)``: timeouts, connection errors, HTTP 429 and 5xx.
+#: The default ``Retry(on=...)``, and what every transport retry asks: timeouts,
+#: connection errors, HTTP 429 and 5xx, gRPC "no answer", the project's own.
 TRANSIENT: Callable[[BaseException], bool] = _Transient()
 
 RetryOn = Union[
