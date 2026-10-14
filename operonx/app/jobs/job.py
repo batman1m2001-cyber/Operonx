@@ -49,9 +49,11 @@ def default_record_dir(folder: str = ".operonx/jobs") -> Path:
     return project_root(Path.cwd()) / folder
 
 
-def _compile(job: str, what: str, g: Any, trace: Any) -> Any:
+def _compile(job: str, what: str, g: Any, trace: Any, retry: Any = None) -> Any:
     """A graph as a compiled Operon: an ``Operon`` as is, a ``GraphOp``
-    wrapped, a module-level ``@graph`` with every parameter a run input."""
+    wrapped, a module-level ``@graph`` with every parameter a run input.
+    ``retry`` is the project's default op retry (``[retry]``); an
+    ``Operon`` given as is keeps its own."""
     from operonx.core.engine import Operon
     from operonx.core.ops.graph import GraphOp
 
@@ -62,7 +64,7 @@ def _compile(job: str, what: str, g: Any, trace: Any) -> Any:
     if isinstance(g, Operon):
         return g
     if isinstance(g, GraphOp):
-        return Operon(g, trace=trace)
+        return Operon(g, trace=trace, retry=retry)
     if callable(g) and getattr(g, "_operonx_graph", False):
         try:
             params = {p: None for p in inspect.signature(g).parameters}
@@ -70,7 +72,7 @@ def _compile(job: str, what: str, g: Any, trace: Any) -> Any:
             params = {}
         # Named after the graph explicitly: built inside `Operon(...)` it
         # would take its name from the code around this call.
-        return Operon(g(name=g.__name__, **params), params=params or None, trace=trace)
+        return Operon(g(name=g.__name__, **params), params=params or None, trace=trace, retry=retry)
     raise TypeError(
         f"job {job!r}: {what} is a {type(g).__name__}, not an Operon, a GraphOp "
         "or a module-level @graph"
@@ -221,6 +223,9 @@ class Job:
         self.concurrency = int(concurrency)
         self.on_error = on_error
         self.retry = retry
+        # The default retry of the ops this job runs: the project's `[retry]`,
+        # set by `settle_jobs`. Not `retry`, which runs a failed item again.
+        self.op_retry: Optional[Retry] = None
         self.timeout = float(timeout) if timeout is not None else None
         self.preflight: List[str] = list(preflight or [])
         self.trace = trace
@@ -257,13 +262,17 @@ class Job:
         if self._engine is None:
             if self.steps is not None:
                 raise TypeError(f"job {self.name!r} runs steps; it has no graph")
-            self._engine = _compile(self.name, "graph", self.graph, self.trace)
+            self._engine = _compile(
+                self.name, "graph", self.graph, self.trace, getattr(self, "op_retry", None)
+            )
         return self._engine
 
     def reducer(self) -> Any:
         """The compiled ``reduce`` graph, built once (``None`` without one)."""
         if self.reduce is not None and self._reducer is None:
-            self._reducer = _compile(self.name, "reduce", self.reduce, self.trace)
+            self._reducer = _compile(
+                self.name, "reduce", self.reduce, self.trace, getattr(self, "op_retry", None)
+            )
             if "results" not in self._reducer.graph.inputs:
                 raise TypeError(
                     f"job {self.name!r}: the reduce graph needs a `results` parameter "

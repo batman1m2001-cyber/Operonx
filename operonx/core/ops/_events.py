@@ -124,3 +124,14 @@ class Failure:
     ctx: tuple
     error: str
     inputs: dict
+
+
+class HandOff(Failure):
+    """An op run inline by a scheduler's main loop is waiting out a retry.
+
+    Yielded by ``BaseOp.run`` when the run's default ``retry=`` is about to
+    run a plain ``def`` op again: the main loop must not sleep, so it gives
+    the op's generator a task of its own, where the backoff and the next
+    attempt run. A ``Failure`` so the success path tests nothing new; the
+    scheduler takes it out of the Failure branch. User code never sees it.
+    """

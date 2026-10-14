@@ -46,7 +46,7 @@ _BASE_INIT_KEYS = frozenset(
 )
 
 # `retry=` and `timeout=` reach the op's constructor only as a `Retry` /
-# `Timeout`. They are not in `_BASE_INIT_KEYS`: plenty of functions take a
+# `Timeout` (or `retry=False`, which opts the op out of a default). They are not in `_BASE_INIT_KEYS`: plenty of functions take a
 # `timeout` of their own, and every one of them would be warned about and
 # lose the argument.
 _POLICY_KEYS = {"retry": Retry, "timeout": Timeout}
@@ -126,7 +126,7 @@ def split_shorthand_kwargs(
             # By type, not by name: `fetch(url=u, timeout=10)` is the
             # function's own argument, `fetch(url=u, timeout=Timeout(run=10))`
             # is the op's deadline.
-            if isinstance(value, policy_type):
+            if isinstance(value, policy_type) or (key == "retry" and value is False):
                 init_kwargs[key] = value
             else:
                 inputs[key] = value

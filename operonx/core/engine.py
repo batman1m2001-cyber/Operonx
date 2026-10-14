@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional,
 
 from operonx.core.loggings import LOGGER, format_event
 from operonx.core.ops.graph.graph_op import GraphOp
-from operonx.core.policy import ERRORS_MODES, RunPolicy, _FailFast
+from operonx.core.policy import ERRORS_MODES, Retry, RunPolicy, _FailFast
 from operonx.core.runtime import _RunInfo
 from operonx.core.states import StateSchema
 
@@ -564,6 +564,7 @@ class Operon:
         "_doors",
         "_errors",
         "_max_concurrency",
+        "_retry",
         "_journal",
         "_durability",
         "_on_resume",
@@ -579,6 +580,7 @@ class Operon:
         trace: Optional[Union[str, "Consumer", List[Union[str, "Consumer"]]]] = None,
         errors: str = "record",
         max_concurrency: Optional[int] = None,
+        retry: Any = None,
         journal: Any = None,
         durability: str = "async",
         on_resume: str = "restart",
@@ -638,6 +640,16 @@ class Operon:
                    that run as tasks (async, ``bound="cpu"``); a plain
                    ``def`` op runs inline and a subgraph holds no slot of
                    its own. ``None`` (the default): no shared cap.
+            retry: The default ``Retry`` of every op that sets none of its own:
+                   ``Operon(g, retry=Retry(max_attempts=3))`` runs any op
+                   again on an error worth another try (a timeout, a
+                   connection error, HTTP 429 or 5xx — not a ``ValueError``
+                   or a 400). An op's own ``retry=`` wins, and
+                   ``retry=False`` opts it out (a payment sent once). Looked
+                   at only when an op fails: an op that does not fail runs
+                   as it would without it. A generator is retried only
+                   before its first yield. ``None`` (the default): no
+                   default retry.
             journal: Makes runs durable: a :class:`~operonx.durable.Journal`
                    (``MemoryJournal``, ``SqliteJournal``) records each
                    execution's yields and end with the cell writes they made,
@@ -675,10 +687,15 @@ class Operon:
             raise ValueError(
                 f"max_concurrency= takes an int >= 1 (ops running at once), got {max_concurrency!r}"
             )
+        if retry is not None and not isinstance(retry, Retry):
+            raise TypeError(
+                f"retry= takes a Retry, as in retry=Retry(max_attempts=3); got {retry!r}"
+            )
         if callable(graph) and not isinstance(graph, GraphOp):
             graph = graph(**(params or {}))
 
         self._errors = errors
+        self._retry = retry
         self._max_concurrency = max_concurrency
         if journal is not None:
             from operonx.durable import DURABILITY, ON_RESUME, Journal
@@ -984,10 +1001,12 @@ class Operon:
             if doors.get(node.op_full_name) == "egress" and isinstance(node.inputs, dict):
                 if "item" in node.inputs:
                     got["egress"].append(node.inputs["item"])
+
         def pack(items: List[Any]) -> Any:
             if len(items) == 1:
                 return items[0]
             return items[: self._DOOR_ITEMS]
+
         if not trace.inputs and got["ingress"]:
             trace.inputs = self.graph._filter_for_trace({"item": pack(got["ingress"])})
         if not trace.output and got["egress"]:
@@ -1087,9 +1106,13 @@ class Operon:
         if retry_failed:
             from operonx.durable.journal import END
 
-            first = next((i for i, s in enumerate(steps) if s.index == END and s.status == "error"), None)
+            first = next(
+                (i for i, s in enumerate(steps) if s.index == END and s.status == "error"), None
+            )
             if first is None:
-                raise JournalError(f"resume({run_id!r}, retry_failed=True): no op of the run failed")
+                raise JournalError(
+                    f"resume({run_id!r}, retry_failed=True): no op of the run failed"
+                )
             # what was journalled before the failure stands; from it on, runs again
             steps = list(steps[:first])
         if header.fingerprint != self.fingerprint and not allow_graph_change:
@@ -1169,7 +1192,7 @@ class Operon:
 
         # Left None at the defaults, so the scheduler and the failure path
         # pay one `is None` test for a feature the run does not use.
-        if self._errors != "record" or self._max_concurrency is not None:
+        if self._errors != "record" or self._max_concurrency is not None or self._retry is not None:
             state._run_policy = RunPolicy(
                 errors=self._errors,
                 limiter=(
@@ -1177,6 +1200,7 @@ class Operon:
                     if self._max_concurrency is not None
                     else None
                 ),
+                retry=self._retry,
             )
 
         # Phase 2: wire the checkpointer to the state's write funnel BEFORE

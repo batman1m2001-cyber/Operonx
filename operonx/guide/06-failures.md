@@ -8,6 +8,8 @@ all of it is declared, never written into an op body.
 | You want | Write |
 |---|---|
 | try a flaky call again | `@op(retry=Retry(max_attempts=4))` |
+| retry every op of a run, or a project | `Operon(g, retry=Retry())`, `[retry]` in `operonx.toml` |
+| never retry this op | `@op(retry=False)` |
 | stop a call that hangs | `@op(timeout=Timeout(run=30))` |
 | do something when an op fails | `op.on_error(handler)` |
 | the failure itself, as an exception | `Operon(g, errors="raise")` |
@@ -73,6 +75,69 @@ asyncio.run(main())
 - **`LLMOp`** retries its transport per resource (`max_retries:` in
   `resources.yaml`). An error that retry already gave up on is not retried
   again by `retry=`: set one of the two, not both, for the same errors.
+
+## A default retry for a whole run, or a project
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, Retry, graph, op
+
+SENT = []
+
+
+@op
+def quote(order: int) -> dict:  # a plain `def`: retried too
+    SENT.append("quote")
+    if SENT.count("quote") == 1:
+        raise TimeoutError("pricing service timed out")
+    return {"price": 42}
+
+
+@op(retry=False)  # sent once, whatever the default
+async def charge(price: int) -> dict:
+    SENT.append("charge")
+    return {"receipt": f"R-{price}"}
+
+
+@graph
+def checkout(order):
+    q = quote(order=order)
+    c = charge(price=q["price"])
+    START >> q >> c >> END
+
+
+async def main():
+    engine = Operon(checkout, params={"order": None}, retry=Retry(max_attempts=3, initial=0.01))
+    out = await engine.run({"order": 7})
+    assert out["receipt"] == "R-42" and SENT == ["quote", "quote", "charge"]
+
+
+asyncio.run(main())
+```
+
+- **Precedence, narrowest first:** one use (`op(..., retry=...)`), the op
+  (`@op(retry=...)`), the engine (`Operon(g, retry=...)`), the project
+  (`[retry]`). `retry=False` at the op or one use opts out.
+- **In `operonx.toml`**, for the project's jobs and request-response
+  services:
+
+  ```toml
+  [retry]
+  max_attempts = 3   # attempts in all, the first included
+  initial = 0.5      # seconds before the second attempt
+  max_interval = 30
+  ```
+
+  A stream door (a websocket call) does not take it: an item already sent
+  to the caller cannot be sent again. A job's own `Job(retry=)` is another
+  thing: it runs a failed *item* again. An `Operon` given to a job as is
+  keeps its own `retry=`.
+- **Only errors worth another try** are retried (`TRANSIENT`), so turning
+  the default on is safe for pure code: a bug fails once, as before.
+- **Free when nothing fails.** The default is looked at only when an op
+  fails. A plain `def` op still runs inline; one that fails waits out its
+  pause in a task of its own, so the rest of the run keeps moving.
 
 ## `timeout=` — a deadline per attempt
 

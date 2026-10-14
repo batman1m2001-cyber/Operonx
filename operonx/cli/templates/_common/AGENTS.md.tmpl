@@ -28,8 +28,9 @@ services and jobs.
   or `websocket(...)`.
 - **Application**: `APP` in `app/main.py`. Declare every service and job
   there.
-- **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`. Never
-  put `[[serve]]` blocks in it (deprecated; removed in operonx 2.0).
+- **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]` and
+  `[retry]`. Never put `[[serve]]` blocks in it (deprecated; removed in
+  operonx 2.0).
 
 ## Serving a graph
 
@@ -112,6 +113,12 @@ def answer_flow(question, k):  # a setting is a graph input
   `BranchOp` or `Branch` yourself.
 - An op that raises does not raise: the run's result has `"$errors"`.
   Check for it.
+- Never write a retry loop (`for attempt in ...`, `try`/`sleep`) in an op.
+  A call that can fail for a moment (a timeout, a 429, a 5xx) is retried
+  by `[retry]` in `operonx.toml`, for every op of the jobs and
+  request–reply services, or by `@op(retry=Retry(...))` for one op. An op
+  that must run once (a payment, an email) gets `@op(retry=False)`. See
+  guide page 06.
 - To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
   re-read `.operonx/guide/README.md`. After adding an operonx package
   (`{{add}} operonx-agents`), run `{{run}}operonx guide`.

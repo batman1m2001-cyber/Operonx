@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import Dict, List, Tuple
 
 from operonx.core.loggings import LOGGER
-from operonx.core.ops._events import EOF, SELF_CTX, Failure, Frame, Interrupt
+from operonx.core.ops._events import EOF, SELF_CTX, Failure, Frame, HandOff, Interrupt
 from operonx.core.policy import _SLOTS, _FailFast, _Slots, fail_fast
 from operonx.core.states._scratch_var import _reset_state, _set_state
 from operonx.core.states.ref import Ref
@@ -723,10 +723,12 @@ class Scheduler:
         # by (ctx, op_name) — at most one (op, ctx) pair runs concurrently.
         tasks_by_ctx: Dict[tuple, Dict[str, asyncio.Task]] = {}
 
-        # A graph with `retry=` ops: their backoff gives its slots back while
-        # it waits (`policy.backoff`). Inherited by the pumps, as the state is.
+        # A graph with `retry=` ops, or a run with a default `retry=`: a
+        # backoff gives its slots back while it waits (`policy.backoff`), and
+        # an inline op is handed a task to wait in. Inherited by the pumps,
+        # as the state is.
         away = None
-        if self._retry_ops:
+        if self._retry_ops or (run_policy is not None and run_policy.retry is not None):
             slots = _Slots(_sem, limiter, tasks_by_ctx)
             away = slots.away
             _slots_token = _SLOTS.set(slots)
@@ -746,7 +748,15 @@ class Scheduler:
                 task = asyncio.create_task(_pump(op_name, ctx))
                 tasks_by_ctx.setdefault(ctx, {})[op_name] = task
 
-        async def _pump(op_name: str, ctx: tuple) -> None:
+        def _hand_off(op_name: str, ctx: tuple, source) -> None:
+            """Carry on an inline op's generator in a task: it waits out a
+            retry's backoff there, where the main loop does not stall."""
+            nonlocal inflight
+            inflight += 1
+            task = asyncio.create_task(_pump(op_name, ctx, source))
+            tasks_by_ctx.setdefault(ctx, {})[op_name] = task
+
+        async def _pump(op_name: str, ctx: tuple, source=None) -> None:
             """Drive one op to completion and emit Frame/EOF events.
 
             Acquires the concurrency semaphore before running the op,
@@ -781,9 +791,14 @@ class Scheduler:
                 durable = state._durable
                 # Not bound to a name: a cancelled pump's traceback keeps its
                 # frame — and its locals — alive, and a generator held there
-                # is never finalized, so its `finally` never runs.
+                # is never finalized, so its `finally` never runs. (`source`,
+                # an inline op handed off mid-retry, is dropped in `finally`.)
                 async for item_ctx, result in (
-                    op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
+                    source
+                    if source is not None
+                    else op.run(state, ctx)
+                    if durable is None
+                    else durable.wrap(op, state, ctx)
                 ):
                     if isinstance(result, Interrupt):
                         # Validated before stamping. Raising from inside
@@ -861,6 +876,7 @@ class Scheduler:
                 _note_event(ctx, 1)
                 inflight += 1
             finally:
+                source = None
                 inflight -= 1
                 me = None
                 bucket = tasks_by_ctx.get(ctx)
@@ -985,11 +1001,11 @@ class Scheduler:
             while inline_pending:
                 op_name, ctx = inline_pending.pop(0)
                 op = g._ops[op_name]
+                moved = None
                 try:
                     durable = state._durable
-                    async for item_ctx, result in (
-                        op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
-                    ):
+                    source = op.run(state, ctx) if durable is None else durable.wrap(op, state, ctx)
+                    async for item_ctx, result in source:
                         if isinstance(result, Interrupt):
                             # Validated before stamping. Raising from inside
                             # this `async for` would throw into a suspended
@@ -1011,11 +1027,17 @@ class Scheduler:
                             await _sweep_ctx(result.ctx_to_cancel, exclude=(op_name, ctx))
                             _report_interrupt(result, ctx)
                         elif isinstance(result, Failure):
+                            if result.__class__ is HandOff:
+                                moved = source  # a retry to wait out, not here
+                                break
                             _on_failure(result)
                         else:
                             _on_frame(Frame(op_name, item_ctx, result))
-                    _on_eof(EOF(op_name, ctx))
-                    _release_if_done(ctx)
+                    if moved is None:
+                        _on_eof(EOF(op_name, ctx))
+                        _release_if_done(ctx)
+                    else:
+                        _hand_off(op_name, ctx, moved)
                 except asyncio.CancelledError:
                     raise
                 except BaseException as e:
@@ -1028,6 +1050,10 @@ class Scheduler:
                     # a schema key — so the caller got a KeyError instead.
                     fatal.append(e)
                     return
+                finally:
+                    # Held by name here (a hand-off needs it); not kept alive
+                    # by a traceback that holds this frame.
+                    source = moved = None
 
         def _report_interrupt(event: Interrupt, ctx: tuple) -> None:
             """Forward the ``__interrupt__`` record to whoever is listening.
@@ -1696,6 +1722,7 @@ class Scheduler:
                     pass
             if away is not None:
                 _SLOTS.reset(_slots_token)
+                slots.main = None  # the task holds its context, which holds slots
 
         if getattr(g, "_loop_mode", None) == "synthetic":
             signal = (loop_fired, frozenset(loop_taken))

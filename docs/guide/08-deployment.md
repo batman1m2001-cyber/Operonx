@@ -58,7 +58,7 @@ the object.
 `[[serve]]` blocks in `operonx.toml` are **deprecated** (1.19) and removed
 in 2.0: loading one warns once, naming the file. Move each block to a
 `Service(...)` in `app/main.py` and set `[project] app`. `[project]`,
-`[resources]`, `[tracing]`, `[studio]` and `[[graph]]` stay in the file.
+`[resources]`, `[tracing]`, `[retry]`, `[studio]` and `[[graph]]` stay in the file.
 
 A scheduled job runs inside the server too: `Job(..., schedule=schedule(at="07:00",
 port=...))` puts its clock on that port (see [Jobs and runbooks](10-jobs.md)).

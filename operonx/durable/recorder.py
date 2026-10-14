@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from operonx.core.loggings import LOGGER
+from operonx.core.ops._events import HandOff
 
 from . import codec
 from .journal import END, PARKED, Journal, JournalError, Step
@@ -259,6 +260,9 @@ class RunRecorder:
                 finally:
                     _SUPPRESS.reset(quiet_token)
                     _EXEC.reset(exec_token)
+                if event[1].__class__ is HandOff:
+                    yield event  # not a step: the op moves to a task to retry
+                    continue
                 digest = _digest(op.full_name, event)
                 if repeating:
                     if digest != known[index]:

@@ -273,6 +273,9 @@ class Manifest:
     #: ``[jobs] dir``: where the application's jobs record their runs,
     #: relative to the root (default ``.operonx/jobs``).
     jobs_dir: Optional[str] = None
+    #: ``[retry]``: the default ``Retry`` of every op without its own, in the
+    #: project's jobs and request-response services (not a stream door's).
+    retry: Any = None
 
     @property
     def name(self) -> str:
@@ -400,6 +403,8 @@ class Manifest:
                     "sinks — keep [tracing] sinks and remove [project] trace"
                 )
         serves = settle_serves(serves, project.get("trace"), tracing)
+        retry = _retry_table(raw.get("retry"), where)
+        serves = settle_retry(serves, retry)
 
         if raw.get("job"):
             raise ManifestError(
@@ -427,6 +432,7 @@ class Manifest:
             tracing=tracing,
             queues=queues,
             jobs_dir=str(jobs_table["dir"]) if jobs_table.get("dir") else None,
+            retry=retry,
         )
 
 
@@ -442,6 +448,48 @@ def with_default_trace(serves: Tuple["ServeSpec", ...], trace: Any) -> Tuple["Se
 
 
 # -- parsing helpers -----------------------------------------------------
+
+
+#: What ``[retry]`` takes: ``Retry``'s own arguments.
+RETRY_KEYS = ("max_attempts", "initial", "backoff", "max_interval", "jitter")
+
+
+def _retry_table(table: Any, where: str) -> Any:
+    """``[retry]`` as a ``Retry``, or None when the file has none.
+
+    ``max_attempts`` counts every attempt, the first included; the pause
+    before attempt n+1 is ``initial * backoff**(n-1)``, at most
+    ``max_interval``. Only errors worth another try are retried
+    (``operonx.TRANSIENT``)."""
+    if table is None:
+        return None
+    if not isinstance(table, dict):
+        raise ManifestError(f"{where}: [retry] is a table")
+    unknown = sorted(set(table) - set(RETRY_KEYS))
+    if unknown:
+        raise ManifestError(
+            f"{where}: [retry] takes {', '.join(RETRY_KEYS)}; not {', '.join(unknown)}"
+        )
+    from operonx.core.policy import Retry
+
+    try:
+        return Retry(**table)
+    except (TypeError, ValueError) as e:
+        raise ManifestError(f"{where}: [retry]: {e}") from None
+
+
+def settle_retry(serves: Tuple["ServeSpec", ...], retry: Any) -> Tuple["ServeSpec", ...]:
+    """Each request-response service with ``options["retry"]``, the project's
+    ``[retry]``, unless it set its own. A stream door (a live call) is left
+    alone: an item already sent to the caller cannot be sent again."""
+    if retry is None:
+        return serves
+    return tuple(
+        spec
+        if spec.kind == "asgi" or spec.is_stream or "retry" in spec.options
+        else replace(spec, options={**spec.options, "retry": retry})
+        for spec in serves
+    )
 
 
 def check_resume(resume: Any, kind: str, variants: Any, label: str) -> None:
