@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.23.1] - 2026-10-14
+
+### Changed
+
+- **`operonx init` writes the durable runs into a new project's docs.** `AGENTS.md` tells the project's coding agent how to journal a run and how to answer, retry from the failure and fork it (and never to write its own save-and-continue logic); `operonx.toml`'s `[durable]` comment names what the studio does with it. The guide gets a *Durable runs* section (deployment), and the jobs and runs pages say what a journalled item and a stopped run do. 1.23.0 shipped these features with templates that did not mention them.
+
 ## [1.23.0] - 2026-10-14
 
 ### Added
@@ -3662,7 +3668,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.23.0...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.23.1...HEAD
+[1.23.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.23.0...v1.23.1
 [1.23.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.4...v1.23.0
 [1.22.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.3...v1.22.4
 [1.22.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.2...v1.22.3
