@@ -327,7 +327,10 @@ asyncio.run(main())
   journalled as ended. `resume(run_id, retry_failed=True)` runs it again from
   its first failed op: what ended before the failure is not run again, the
   failed op and everything after it run. After fixing the op's code, pass
-  `allow_graph_change=True` too.
+  `allow_graph_change=True` too. The failed steps leave the journal as the
+  retry starts, so a second retry, or `operonx run --resume`, does not run
+  them again. In the studio, a failed journalled run's page has **Retry
+  from the failure**, which does this with the project's current code.
 - **The graph must be the one that ran:** `resume` refuses a graph whose ops,
   code or wiring changed (`allow_graph_change=True` to resume anyway).
 - A generator that had yielded and not ended runs again, its first yields

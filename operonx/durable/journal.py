@@ -173,6 +173,12 @@ class MemoryJournal:
             else:
                 self.set_status(run_id, arg)
 
+    def truncate(self, run_id: str, keep: int) -> None:
+        """Keep the run's first *keep* steps, drop the rest (a retry from
+        its failure runs them again)."""
+        with self._lock:
+            del self._get(run_id)[1][keep:]
+
     def save_trace(self, run_id: str, record: Dict[str, Any]) -> None:
         """Keep a stopped run's trace (:mod:`operonx.durable.history`)."""
         blob = json.dumps(record, default=repr)
@@ -401,6 +407,11 @@ class SqliteJournal:
             "SET vals = excluded.vals, updated_at = excluded.updated_at",
             (thread_id, _dump(values), time.time()),
         )
+
+    def truncate(self, run_id: str, keep: int) -> None:
+        """Keep the run's first *keep* steps, drop the rest (a retry from
+        its failure runs them again)."""
+        self._conn().execute("DELETE FROM steps WHERE run_id = ? AND seq >= ?", (run_id, keep))
 
     def save_trace(self, run_id: str, record: Dict[str, Any]) -> None:
         """Keep a stopped run's trace (:mod:`operonx.durable.history`)."""

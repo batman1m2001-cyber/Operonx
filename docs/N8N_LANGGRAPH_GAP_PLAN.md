@@ -139,6 +139,7 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
 
 **S2. Retry from failure.** *Essential · small · studio (needs L1, L2).*
 - **What:** a failed, journalled run's page gets **Retry from the failure**, which calls `resume(retry_failed=True, allow_graph_change=True)`. The new attempt lands in the same run, so it reads as one story.
+- **Built (2026-10-14):** the bridge's `{"op": "retry", "run_id", "service" | "job"}` resumes with the owner's engine as the code is now (found by owner, not fingerprint: the fix changed the graph). A journalled run's trace has `metadata["durable"]`, so the button shows only where it can work, and the retry's trace is the whole run (S1b). Found while building it: `retry_failed` left the failed steps in the journal, so a second retry or `--resume` ran the op again. `Journal.truncate` now drops them as the retry starts.
 
 **S3. Fork from a step.** *Important · medium · studio (needs L4).*
 - **What:** on a run's step panel, **Change this output and continue**: an editor with the recorded output, then L4's fork. The new run opens beside the original, and Compare runs (already built) shows the difference.

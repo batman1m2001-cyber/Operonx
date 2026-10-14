@@ -1103,6 +1103,7 @@ class Operon:
                 "journalled for audit, not resumed"
             )
         header, steps = await asyncio.to_thread(self._journal.read, run_id)
+        first = None
         if retry_failed:
             from operonx.durable.journal import END
 
@@ -1142,6 +1143,17 @@ class Operon:
                     f"{sorted(asked) or 'none'}"
                 )
         recorder.answers = dict(answers or {})
+        if first is not None:
+            # the failed op's step and every later one leave the journal:
+            # they are run again now, and a later retry or resume must not
+            # find this failure again
+            truncate = getattr(self._journal, "truncate", None)
+            if truncate is None:
+                raise JournalError(
+                    f"resume({run_id!r}, retry_failed=True): {type(self._journal).__name__} "
+                    "cannot drop steps (truncate)"
+                )
+            await asyncio.to_thread(truncate, run_id, first)
         load_trace = getattr(self._journal, "load_trace", None)
         prior = await asyncio.to_thread(load_trace, run_id) if load_trace is not None else None
         await asyncio.to_thread(self._journal.set_status, run_id, "running")
@@ -1305,6 +1317,9 @@ class Operon:
         recorder = state._durable
         if recorder is not None:
             from operonx.durable.history import record_of
+
+            # the run is in a journal: a reader can offer to resume it
+            _wf_trace.metadata["durable"] = True
 
         async def _close_journal(rec: Any, outcome: str) -> None:
             """Write the rest of the run to its journal, then its status. A
