@@ -54,6 +54,13 @@ the object.
   that listener's workers only — the model warmed for the call workers is
   not warmed again for the admin port. `on_startup=` on the
   `Application` runs for every listener.
+- **A pooled listener's connections are spread evenly.** Each worker
+  accepts only while it holds no more connections than the least loaded
+  one, so 20 calls on 4 workers are 5 each (the kernel alone put 10 on one
+  and none on another). Size `workers` by what one worker holds: a run's
+  trace says which worker served it and how loaded it was
+  (`metadata["worker"]`, guide 08 of the package). `OPERONX_SERVE_BALANCE=off`
+  turns it off.
 
 `[[serve]]` blocks in `operonx.toml` are **deprecated** (1.19) and removed
 in 2.0: loading one warns once, naming the file. Move each block to a
