@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import random
 import sys
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable, NamedTuple, Optional, Tuple, Type, Union
 
@@ -316,6 +317,69 @@ class RunPolicy:
 
 
 ERRORS_MODES = ("record", "raise")
+
+
+class _Slots:
+    """The concurrency one scheduler run's ops hold, for a retry's backoff to give back.
+
+    A scheduler's pump takes its graph's slot (``sem``) and, for a leaf op,
+    one of the run's shared ``max_concurrency`` limiter (``shared``) before
+    it runs an op. An op waiting out ``Retry``'s backoff is not running, so
+    holding them would let a provider outage fill every slot with sleepers
+    while healthy ops queue behind them.
+
+    One per scheduler run, made only when its graph has ops with ``retry=``,
+    and nothing per op: everything below runs on the failure path only.
+    ``away`` maps a pump task waiting out a backoff to ``[graph, shared]``,
+    what it holds again so far; the pump reads it if it ends mid-wait.
+    """
+
+    __slots__ = ("sem", "shared", "tasks", "away")
+
+    def __init__(
+        self, sem: asyncio.Semaphore, shared: Optional[asyncio.Semaphore], tasks: dict
+    ) -> None:
+        self.sem = sem
+        self.shared = shared
+        self.tasks = tasks  # the scheduler's tasks_by_ctx: ctx -> {op name: pump task}
+        self.away: dict = {}
+
+    async def wait(self, task: asyncio.Task, delay: float) -> None:
+        """Sleep *delay* seconds without the slots; take them back after,
+        in the order the pump takes them (graph, then shared)."""
+        held = self.away[task] = [False, False]
+        self.sem.release()
+        if self.shared is not None:
+            self.shared.release()
+        await asyncio.sleep(delay)
+        await self.sem.acquire()
+        held[0] = True
+        if self.shared is not None:
+            await self.shared.acquire()
+        held[1] = True
+        del self.away[task]
+
+
+#: The running scheduler's slots; set per scheduler run, inherited by its pumps.
+_SLOTS: ContextVar[Optional[_Slots]] = ContextVar("operonx_slots", default=None)
+
+
+async def backoff(delay: float, name: str, ctx: tuple) -> None:
+    """Wait *delay* seconds between two attempts of op *name* at *ctx*, slots given back.
+
+    Only the pump running that op gives them back. Anywhere else this is a
+    plain sleep: an op called directly, or one in a task an op body started
+    (such a task inherits the context, but the slots are not its to give
+    back, and two of them doing it would over-release them).
+    """
+    slots = _SLOTS.get()
+    if slots is not None:
+        task = asyncio.current_task()
+        bucket = slots.tasks.get(ctx)
+        if bucket is not None and bucket.get(name) is task:
+            await slots.wait(task, delay)
+            return
+    await asyncio.sleep(delay)
 
 
 class _Deadline:

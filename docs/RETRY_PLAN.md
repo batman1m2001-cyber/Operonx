@@ -1,6 +1,6 @@
 # One retry model for operonx: a project default, specific overrides
 
-**Status:** proposal, 2026-10-14. Nothing implemented. Every "today" below was read in the code.
+**Status:** 2026-10-14. R1 done; R2–R5 wait. Every "today" below was read in the code.
 
 ## What exists today: eleven retry mechanisms
 
@@ -99,6 +99,12 @@ project   operonx.toml  [retry]                ← the default
   ```
 
 ### R1. A backoff gives its slot back. *Essential · small · library*
+- **Done.** Built lazily, so an op that never fails pays nothing:
+  - a graph with `retry=` ops sets one handle per scheduler run (`policy._Slots`);
+  - a backoff finds its own pump in the scheduler's task table, gives the slots back, and takes them again; this happens only on the failure path;
+  - a task that an op body started never gives the pump's slots back.
+  - Measured with an 8-op chain at 400 runs at once, alternating, pinned to one core: main 1325 µs per run, R1 1325 µs; with `retry=` on every async op, R1 was within noise (1338–1381 µs against 1358–1435 µs).
+  - The callbot has no `retry=` op, so its path is the plain one, which measured identical; the 5-CCU load test was not needed for this step.
 - While an op waits between attempts it releases its concurrency slot (and the run's shared limiter), and takes them again before the next attempt. A producer waiting on a full edge already does exactly this in `_pump`.
 - Only the wait changes. Attempts, trace records and `run_context().attempt` stay as they are.
 - *Considered and not proposed:* moving the retry out of the op into the scheduler's queue, as a delayed re-dispatch. It frees the slot the same way, but it is a large refactor of the main loop for no extra gain. Surviving a crash during a backoff is already covered by the journal: a resume reruns the op.
@@ -140,7 +146,7 @@ project   operonx.toml  [retry]                ← the default
 
 | # | Item | Impact | Effort | Behaviour change |
 |---|---|---|---|---|
-| 1 | R1 backoff releases its slot | high under outages | small | none, only waits |
+| 1 | R1 backoff releases its slot **(done)** | high under outages | small | none, only waits |
 | 2 | R2 project/engine default + `retry=False` | high | small to medium | none until `[retry]` is set |
 | 3 | R4 one transient classifier | medium | small | none |
 | 4 | R3 one vocabulary + transport default on | medium | medium | **the LLM retries transient errors by default** |
