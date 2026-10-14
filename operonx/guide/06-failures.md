@@ -57,6 +57,10 @@ asyncio.run(main())
 - **The pause:** `initial` seconds, times `backoff` (2) per attempt, at most
   `max_interval` (30 s), with jitter: a random wait between half of that
   and all of it.
+- **The pause holds no slot.** While it waits, the op gives back its place
+  under the graph's `concurrency` and the run's `max_concurrency`, and takes
+  it again before the next attempt. In an outage, healthy ops keep running
+  instead of queueing behind ops that are only waiting.
 - **A generator is retried only before its first yield.** After that its
   items are already downstream; the error is recorded instead.
 - **One use of an op:** `fetch(order=o, retry=Retry(max_attempts=2))`
@@ -300,7 +304,8 @@ asyncio.run(main())
 ```
 
 It counts the ops that run as tasks (`async def`, `bound="cpu"`); a plain
-`def` op runs inline and a subgraph holds no slot of its own.
+`def` op runs inline, a subgraph holds no slot of its own, and an op waiting
+between two `retry=` attempts gives its slot back.
 
 ## Two writers of one cell must be ordered
 

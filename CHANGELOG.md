@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A retry's pause holds no concurrency slot.** An op waiting between two `retry=` attempts gives back its slot of the graph's `concurrency` and of the run's `max_concurrency`, and takes it again before the next attempt. Before, a provider outage filled every slot with ops that were only sleeping, and healthy ops queued behind them. Nothing is added for an op that does not fail: a graph with `retry=` ops makes one handle per run, and the rest runs on the failure path. Measured with an 8-op chain at 400 runs at once, pinned to one core: identical before and after, with and without `retry=`. Plan: docs/RETRY_PLAN.md (R1).
+
 ### Added
 
 - `Operon.resume(run_id, retry_failed=True)` runs a failed run again from its first failed op: the steps journalled before the failure are kept (a charge is not charged twice), the failed op and everything after it run. With `allow_graph_change=True` it retries after a code fix. A run where nothing failed is refused. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L1).

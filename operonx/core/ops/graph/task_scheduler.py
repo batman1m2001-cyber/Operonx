@@ -13,7 +13,7 @@ from typing import Dict, List, Tuple
 
 from operonx.core.loggings import LOGGER
 from operonx.core.ops._events import EOF, SELF_CTX, Failure, Frame, Interrupt
-from operonx.core.policy import _FailFast, fail_fast
+from operonx.core.policy import _SLOTS, _FailFast, _Slots, fail_fast
 from operonx.core.states._scratch_var import _reset_state, _set_state
 from operonx.core.states.ref import Ref
 
@@ -204,6 +204,7 @@ class Scheduler:
         "_wait_bounds",
         "_drop_bounds",
         "_task_ops",
+        "_retry_ops",
         "_graph_ops",
         "_loop_ops",
         "_loop_watch",
@@ -252,6 +253,13 @@ class Scheduler:
             name
             for name, child in graph._ops.items()
             if getattr(child, "_policy", None) is not None
+        )
+        # Ops with `retry=`: a run of this graph lets their backoff give its
+        # slots back while it waits (`policy._Slots`).
+        self._retry_ops: frozenset = frozenset(
+            name
+            for name, child in graph._ops.items()
+            if getattr(getattr(child, "_policy", None), "retry", None) is not None
         )
         # Children that are graphs: they take no slot of the run's shared
         # limiter (see `_pump`).
@@ -715,6 +723,14 @@ class Scheduler:
         # by (ctx, op_name) — at most one (op, ctx) pair runs concurrently.
         tasks_by_ctx: Dict[tuple, Dict[str, asyncio.Task]] = {}
 
+        # A graph with `retry=` ops: their backoff gives its slots back while
+        # it waits (`policy.backoff`). Inherited by the pumps, as the state is.
+        away = None
+        if self._retry_ops:
+            slots = _Slots(_sem, limiter, tasks_by_ctx)
+            away = slots.away
+            _slots_token = _SLOTS.set(slots)
+
         def dispatch(op_name: str, ctx: tuple) -> None:
             """Schedule op based on its bound (sync=inline, io/cpu=task)."""
             nonlocal inflight
@@ -846,9 +862,10 @@ class Scheduler:
                 inflight += 1
             finally:
                 inflight -= 1
+                me = None
                 bucket = tasks_by_ctx.get(ctx)
                 if bucket is not None:
-                    bucket.pop(op_name, None)
+                    me = bucket.pop(op_name, None)
                     if not bucket:
                         tasks_by_ctx.pop(ctx, None)
                         # Last op in this context finished. Nothing else
@@ -856,6 +873,13 @@ class Scheduler:
                         # a streaming run this is the only thing between
                         # a flat run and unbounded growth.
                         _release_if_done(ctx)
+                if away and me in away:
+                    # Ended during a backoff, which had given its slots back.
+                    # A backoff only comes before the op's first item and
+                    # backpressure only after it, so the two never overlap.
+                    graph_back, shared_back = away.pop(me)
+                    held = held and graph_back
+                    shared_held = shared_held and shared_back
                 if held:
                     _sem.release()
                 if shared_held:
@@ -1670,6 +1694,8 @@ class Scheduler:
                     # one does not suppress the original, which resumes
                     # propagating once this ``finally`` completes.
                     pass
+            if away is not None:
+                _SLOTS.reset(_slots_token)
 
         if getattr(g, "_loop_mode", None) == "synthetic":
             signal = (loop_fired, frozenset(loop_taken))

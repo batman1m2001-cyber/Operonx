@@ -27,7 +27,7 @@ from operonx.core.media import Media
 from operonx.core.ops import _cache
 from operonx.core.ops._events import Failure, Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
-from operonx.core.policy import _Deadline, fail_fast, op_policy
+from operonx.core.policy import _Deadline, backoff, fail_fast, op_policy
 from operonx.core.runtime import TaskFailed, TaskFinished, TaskStarted, _current_frame, _Frame
 from operonx.core.states.cell import DEFAULT_CONTEXT
 
@@ -1199,7 +1199,8 @@ class BaseOp(ABC):
                 self._record_retry(
                     state, wf_trace, upstreams, ctx, inputs, attempt, error, started, delay
                 )
-                await asyncio.sleep(delay)
+                # Not holding the run's slots while it waits (`backoff`).
+                await backoff(delay, self.name, ctx)
                 attempt += 1
             finally:
                 await source.aclose()
