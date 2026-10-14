@@ -1,0 +1,87 @@
+"""How late the event loop ran while a run was going.
+
+A run that is slow because its process's loop is busy looks, in its own
+trace, like ops that took long — nothing says the loop was the cause.
+One beacon per loop (a heartbeat every :data:`INTERVAL_S`) records how
+late each tick woke, and a run reads its own window when it ends
+(``metadata["loop_lag_ms"] = {"max", "p95"}``).
+
+The beacon runs only where :func:`start` was called — the serve layer
+does, once per listener — so a plain ``engine.run`` pays one dict lookup.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+import weakref
+from collections import deque
+from typing import Dict, Optional
+
+__all__ = ["INTERVAL_S", "start", "window"]
+
+#: The heartbeat. A tick that wakes late by more than this is a loop that
+#: was held: by a blocking call, a long synchronous op, or the GIL.
+INTERVAL_S = 0.05
+#: Ticks kept: 20 minutes, more than any run's window needs.
+_KEEP = int(20 * 60 / INTERVAL_S)
+
+#: Set by the first `start()`: until then `window()` returns at once, so a
+#: process that serves nothing pays one global read per run.
+_started = False
+_beacons: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Beacon]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+class _Beacon:
+    __slots__ = ("ticks", "since", "task", "__weakref__")
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.ticks: deque = deque(maxlen=_KEEP)  # (wall time, lag in ms)
+        self.since = time.perf_counter()  # when the pending tick went to sleep
+        self.task = loop.create_task(self._beat(), name="operonx-loop-lag")
+
+    async def _beat(self) -> None:
+        clock = time.perf_counter
+        while True:
+            self.since = before = clock()
+            await asyncio.sleep(INTERVAL_S)
+            late = (clock() - before - INTERVAL_S) * 1000
+            self.ticks.append((time.time(), late if late > 0 else 0.0))
+
+
+def start() -> None:
+    """Start the running loop's beacon, once. Call it from a coroutine."""
+    global _started
+    loop = asyncio.get_running_loop()
+    _started = True
+    beacon = _beacons.get(loop)
+    if beacon is None or beacon.task.done():
+        _beacons[loop] = _Beacon(loop)
+
+
+def window(started: float, ended: float) -> Optional[Dict[str, float]]:
+    """``{"max", "p95"}`` of the loop's lag, in ms, between two wall times;
+    ``None`` with no beacon on the running loop or no tick in the window."""
+    if not _started:
+        return None
+    try:
+        beacon = _beacons.get(asyncio.get_running_loop())
+    except RuntimeError:
+        return None
+    if beacon is None:
+        return None
+    # The tick that is due but has not woken: a run that ends right after
+    # the loop was held reads its window before the beacon could say so.
+    overdue = (time.perf_counter() - beacon.since - INTERVAL_S) * 1000
+    lags = [overdue] if overdue > 0 else []
+    for at, late in reversed(beacon.ticks):
+        if at < started:
+            break
+        if at <= ended + INTERVAL_S:
+            lags.append(late)
+    if not lags:
+        return None
+    lags.sort()
+    return {"max": round(lags[-1], 1), "p95": round(lags[int(0.95 * (len(lags) - 1))], 1)}

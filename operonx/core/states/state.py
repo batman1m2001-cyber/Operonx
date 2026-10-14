@@ -126,6 +126,10 @@ class MemoryState:
         # {"src -> dst": n} items dropped by a full `on_full="drop_oldest"`
         # edge. Written by the scheduler; read as `handle.drops`.
         "_edge_drops",
+        # {"src -> dst": {"max", "max_wait_ms"}} for every sequential edge
+        # whose items queued (task_scheduler._report_backlog). Read as the
+        # trace's metadata["backlog"].
+        "_edge_backlog",
         # The run's `RunPolicy` (errors="raise", the shared concurrency
         # limiter) from `Operon.start`, or None: record and carry on, no
         # shared limit — an op called directly, or an engine left at the
@@ -219,6 +223,7 @@ class MemoryState:
         # Ops that failed, one record each. See `record_op_error`.
         self._op_errors: Dict[str, Dict[str, Any]] = {}
         self._edge_drops: Dict[str, int] = {}
+        self._edge_backlog: Dict[str, Dict[str, Any]] = {}
         self._run_policy = None
         self._run_info = None
         self._durable = None

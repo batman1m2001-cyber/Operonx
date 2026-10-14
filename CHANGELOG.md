@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.24.0] - 2026-10-14
+
+### Added
+
+- **A run says what slowed it beside its ops.** A run whose ops all look fast can still be slow: items queued in front of a busy consumer, a worker serving too many runs, an event loop held by other work. Its trace now carries `metadata["backlog"]` (`{"<src> -> <dst>": {"max", "max_wait_ms"}}` for each sequential edge where 2 or more items waited, or one waited 100 ms), and a served run `metadata["worker"]` (`{"pid", "active_runs"}`) and `metadata["loop_lag_ms"]` (`{"max", "p95"}` from a 50 ms heartbeat the serve layer starts, `operonx.core.loop_lag`). A callbot load test lost 5–35 s per reply to a queue in front of its speech detector, and no trace showed it. The bookkeeping runs only for items that queue; measured with an 8-op chain at 400 runs at once and a 3000-item stream, pinned to one core: the same as 1.23.1. Guide 08 (*When a run is slow but its ops are not*), and the `AGENTS.md` that `operonx init` writes says to read these before profiling. Plan: docs/CCU_CAPACITY_PLAN.md (phase 1).
+
 ## [1.23.1] - 2026-10-14
 
 ### Changed

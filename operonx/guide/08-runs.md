@@ -259,6 +259,70 @@ asyncio.run(main())
 - `running` is all a store can say about a killed run: telling a dead writer
   from a slow op needs a lease, which durable runs bring.
 
+## When a run is slow but its ops are not
+
+Items that wait in front of a busy consumer, a busy worker and a held event
+loop make a run slow while every op in it looks fast. The run's trace says
+which, in its metadata:
+
+- `backlog`: the sequential edges whose items queued, as
+  `{"<src> -> <dst>": {"max": items waiting at once, "max_wait_ms": the longest wait}}`.
+  Only edges where 2 or more items waited, or one waited 100 ms or more;
+  a run that never queued has no `backlog`.
+- `worker` (a served run): `{"pid", "active_runs"}`, the process that served it
+  and how many runs it was serving then. Spread these over a load test to see
+  whether the workers share the load.
+- `loop_lag_ms` (a served run): `{"max", "p95"}`, how late the process's event
+  loop woke while the run went, from a 50 ms heartbeat the serve layer starts.
+  A run shorter than one heartbeat has none.
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, graph, op
+from operonx.telemetry.consumer import Consumer
+
+
+class Keep(Consumer):
+    def __init__(self):
+        super().__init__()
+        self.traces = []
+
+    def consume(self, trace):
+        self.traces.append(trace)
+
+
+@op
+async def packets(n: int):
+    for i in range(n):
+        yield {"i": i}
+
+
+@op
+async def detect(i: int) -> dict:
+    await asyncio.sleep(0.01)  # slower than the packets come
+    return {"o": i}
+
+
+@graph
+def audio(n):
+    p = packets(n=n)
+    d = detect(i=p["i"])
+    START >> p >> d >> END
+
+
+async def main():
+    keep = Keep()
+    await Operon(audio, params={"n": None}, trace=[keep]).start({"n": 20}).collect()
+    while not keep.traces:  # consumers run once the run has ended
+        await asyncio.sleep(0.01)
+    queued = keep.traces[0].metadata["backlog"]["audio.p -> audio.d"]
+    assert queued["max"] == 19 and queued["max_wait_ms"] >= 150
+
+
+asyncio.run(main())
+```
+
 ## Durable runs: resume after a crash
 
 With a `journal=`, each op's result and the cells it wrote are recorded as

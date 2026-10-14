@@ -181,6 +181,30 @@ async def _drive_final(op, state, context_id: tuple) -> bool:
     return ok
 
 
+#: An edge enters the run's backlog report when this many items waited on
+#: it at once, or one waited this long. One item parked behind one running
+#: is how a sequential stream normally moves, and says nothing.
+BACKLOG_ITEMS = 2
+BACKLOG_WAIT_S = 0.1
+
+
+def _report_backlog(graph, state, backlog: Dict[Tuple[str, str], list]) -> None:
+    """Fold one scheduler run's queue peaks into ``state._edge_backlog``:
+    ``{"<src full name> -> <dst full name>": {"max": n, "max_wait_ms": ms}}``,
+    the worst seen by any run of the graph in this state (a nested graph
+    runs its scheduler once per invocation)."""
+    report = state._edge_backlog
+    for (src, dst), (most, waited) in backlog.items():
+        if most < BACKLOG_ITEMS and waited < BACKLOG_WAIT_S:
+            continue
+        name = f"{graph._ops[src].full_name} -> {graph._ops[dst].full_name}"
+        seen = report.get(name)
+        if seen is None:
+            report[name] = seen = {"max": 0, "max_wait_ms": 0.0}
+        seen["max"] = max(seen["max"], most)
+        seen["max_wait_ms"] = max(seen["max_wait_ms"], round(waited * 1000, 1))
+
+
 class Scheduler:
     """Created once at graph.build(). Shared across all executions.
     All per-execution mutable state lives as locals inside run().
@@ -649,6 +673,13 @@ class Scheduler:
         #
         # seq_queues[(src, dst)] = deque of item contexts waiting for room.
         seq_queues: Dict[Tuple[str, str], deque] = {}
+        # What the run's trace reports as its backlog: when each item parked
+        # in `seq_queues` was parked (popped as it leaves), and per edge the
+        # most items ever parked at once and the longest wait. Touched only
+        # by an item that has to wait, so a run that never queues pays
+        # nothing. Handed to `state._edge_backlog` as the run ends.
+        queued_at: Dict[tuple, float] = {}
+        backlog: Dict[Tuple[str, str], list] = {}
 
         # seq_running[(src, dst)] = items of that edge in flight through dst.
         # The next queued item starts only when one of them reaches EOF.
@@ -950,6 +981,7 @@ class Scheduler:
         def _drop_oldest(key: tuple) -> None:
             """Drop the stalest item waiting on a full ``drop_oldest`` edge."""
             dropped = seq_queues[key].popleft()
+            queued_at.pop(dropped, None)
             src, dst = key
             name = f"{g._ops[src].full_name} -> {g._ops[dst].full_name}"
             drops = state._edge_drops
@@ -962,6 +994,15 @@ class Scheduler:
             drops[name] = n + 1
             # Its consumer will never run, so nothing else frees the item.
             _release_if_done(dropped)
+
+        def _waited(key: tuple, ctx: tuple) -> None:
+            """An item leaves an edge's queue for its consumer: note its wait."""
+            parked = queued_at.pop(ctx, None)
+            if parked is not None:
+                seen = backlog[key]
+                waited = perf_counter() - parked
+                if waited > seen[1]:
+                    seen[1] = waited
 
         def _release_if_done(ctx: tuple) -> None:
             """Free a context's cells once nothing is left to run in it.
@@ -1276,6 +1317,12 @@ class Scheduler:
                     if drop_bounds and len(q) >= drop_bounds.get(key, len(q) + 1):
                         _drop_oldest(key)
                     q.append(ctx)
+                    queued_at[ctx] = perf_counter()
+                    seen = backlog.get(key)
+                    if seen is None:
+                        backlog[key] = seen = [0, 0.0]
+                    if len(q) > seen[0]:
+                        seen[0] = len(q)
 
         def _flush_collect(key: tuple) -> None:
             """Hand one collect group to its consumer as lists, in yield order."""
@@ -1385,6 +1432,7 @@ class Scheduler:
                 q = seq_queues.get(key)
                 if q:
                     next_ctx = q.popleft()
+                    _waited(key, next_ctx)
                     seq_origins[(dst, next_ctx)] = key
                     dispatch(dst, next_ctx)
                     if wait_bounds and src in bp_waiters:
@@ -1609,8 +1657,12 @@ class Scheduler:
                 # Filter queued ctxs to keep only siblings (not descendants
                 # of the swept prefix — those are being cancelled too).
                 kept = deque(c for c in q if not _is_descendant_or_equal(c, ctx_prefix))
+                for gone in q:
+                    if _is_descendant_or_equal(gone, ctx_prefix):
+                        queued_at.pop(gone, None)
                 if kept:
                     next_ctx = kept.popleft()
+                    _waited(seq_key, next_ctx)
                     seq_queues[seq_key] = kept
                     seq_origins[(dst, next_ctx)] = seq_key
                     dispatch(dst, next_ctx)
@@ -1699,6 +1751,8 @@ class Scheduler:
                 # honestly be called finished.
                 _release_if_done(getattr(event, "ctx", ()))
         finally:
+            if backlog:
+                _report_backlog(g, state, backlog)
             # Cancelling the scheduler must also stop the op tasks it
             # spawned. ``ExecutionHandle.cancel()`` cancels this coroutine
             # and the pump; without the sweep below, every task in

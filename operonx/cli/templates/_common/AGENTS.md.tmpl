@@ -133,6 +133,10 @@ def answer_flow(question, k):  # a setting is a graph input
   never run twice, so an op with a side effect (a charge) before the
   failure is safe. Never write your own "save progress and continue"
   logic. The studio does all three from a run's page. See guide page 08.
+- A run that is slow while its ops are fast: read its trace's metadata
+  before profiling. `backlog` names the edges whose items queued and how
+  long they waited, `worker` the process that served it and its load,
+  `loop_lag_ms` how late the event loop ran. See guide page 08.
 - To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
   re-read `.operonx/guide/README.md`. After adding an operonx package
   (`{{add}} operonx-agents`), run `{{run}}operonx guide`.
