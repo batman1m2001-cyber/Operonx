@@ -245,3 +245,32 @@ async def test_the_bridge_lists_a_parked_run_and_answers_it(project):
     assert (await bridge.parked())["runs"] == []
     again = await bridge.answer({"run_id": "ask-1", "answers": {asked["interrupt_id"]: "x"}})
     assert again["status"] == "error" and "not waiting" in again["error"]
+
+
+async def test_the_bridge_runs_a_failed_item_again_from_its_failed_op(project):
+    # docs/N8N_LANGGRAPH_GAP_PLAN.md S2: the studio's "Retry from the failure"
+    from operonx.app.play import Bridge
+
+    root, name = project
+    app = Application.find(str(root))
+    app.bootstrap()
+    first = await app.run("once")
+    assert first.counts.get("failed") == 1
+    mod = _module(name)
+    bridge = Bridge(app, lambda event: None)
+    ((owner, engine),) = [
+        (o, e) for o, e in await bridge._durable_engines() if o == {"job": "once"}
+    ]
+    (header,) = engine._journal.runs()
+    run_id = header.run_id
+
+    refused = await bridge.retry({"run_id": run_id, "service": "nope"})
+    assert refused["status"] == "error" and "not journalled" in refused["error"]
+    assert "needs" in (await bridge.retry({"run_id": run_id}))["error"]
+
+    mod.BROKEN["on"] = False  # fixed
+    done = await bridge.retry({"run_id": run_id, "job": "once"})
+    assert done == {"t": "retry", "run_id": run_id, "owner": {"job": "once"}, "status": "ok"}
+    assert mod.CALLS == ["charge", "ship", "ship"]  # charged once
+    again = await bridge.retry({"run_id": run_id, "job": "once"})
+    assert again["status"] == "error" and "no op of the run failed" in again["error"]

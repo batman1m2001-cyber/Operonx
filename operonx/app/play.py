@@ -66,6 +66,7 @@ Requests (one JSON object per line; ``id`` is echoed back)::
     {"op": "rerun", "job": "score_calls", "op_name": "scored", "inputs": {...}}
     {"op": "parked"}
     {"op": "answer", "run_id": "...", "answers": {"<interrupt id>": "approve"}}
+    {"op": "retry", "run_id": "...", "service": "refund"}      # or "job": "orders"
 
 Events: ``doors``, ``opened``, ``refused``, ``out`` (an egress item, as a
 toy message), ``said`` (what a simulated user sent), ``ops`` (the op
@@ -74,7 +75,8 @@ executions that finished since the last batch — ``{"op", "status",
 before ``ended``), ``ended`` (status, error, duration), ``rerun``,
 ``parked`` (the journal's runs waiting for an answer, each with its
 questions), ``answer`` (the answered run's status: ``ok``, ``error``, or
-``interrupted`` again with its new questions), ``error``.
+``interrupted`` again with its new questions), ``retry`` (the same, for a
+failed run run again from its failed op), ``error``.
 """
 
 from __future__ import annotations
@@ -1052,7 +1054,6 @@ class Bridge:
     async def answer(self, msg: Dict[str, Any]) -> Dict[str, Any]:
         """Resume a parked run with ``answers`` ({interrupt id: value}), by
         the engine whose graph it ran, and wait for it to end or park again."""
-        from operonx.core.workflow_trace import unhandled
         from operonx.durable import JournalError
 
         run_id = str(msg.get("run_id") or "")
@@ -1074,29 +1075,60 @@ class Bridge:
                     "error": f"run {run_id} is {header.status}, not waiting for an answer",
                 }
             handle = await engine.resume(run_id, answers=answers)
-            out = await handle.result()
-            ending = getattr(handle, "_scheduler_task", None)
-            if ending is not None and not ending.done():
-                await asyncio.wait({ending})  # its trace is with the consumers
-            parked = out.get("$interrupted") if isinstance(out, dict) else None
-            reply: Dict[str, Any] = {"t": "answer", "run_id": run_id, "owner": owner}
-            if parked:
-                reply["status"] = "interrupted"
-                reply["questions"] = [
-                    {"id": p["interrupt_id"], "op": p["op"], "payload": _jsonable(p["payload"])}
-                    for p in parked
-                ]
-            elif unhandled(handle.errors):
-                reply["status"], reply["error"] = "error", _status(handle.trace)[1]
-            else:
-                reply["status"] = "ok"
-            return reply
+            return await _resumed("answer", run_id, owner, handle)
         return {
             "t": "answer",
             "run_id": run_id,
             "status": "error",
             "error": f"no journalled service or job of this project ran {run_id}",
         }
+
+    async def retry(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Run a failed journalled run again from its first failed op
+        (``resume(retry_failed=True)``), what ended before the failure kept.
+        By the engine of its *owner* (``service``/``variant`` or ``job``), as
+        the code is now: the code was likely fixed since, so the graph may
+        have changed (``allow_graph_change``)."""
+        from operonx.durable import JournalError
+
+        run_id = str(msg.get("run_id") or "")
+        owner = {k: str(msg[k]) for k in ("service", "variant", "job") if msg.get(k)}
+        if not run_id or not ({"service", "job"} & set(owner)):
+            return {
+                "t": "retry",
+                "status": "error",
+                "error": 'needs "run_id" and its "service" or "job"',
+            }
+        engines = [(o, e) for o, e in await self._durable_engines() if o == owner]
+        if not engines:
+            return {
+                "t": "retry",
+                "run_id": run_id,
+                "status": "error",
+                "error": f"{_owner_text(owner)} is not journalled in this project ([durable])",
+            }
+        ((_, engine),) = engines
+        try:
+            header, _ = await asyncio.to_thread(engine._journal.read, run_id)
+        except JournalError:
+            return {
+                "t": "retry",
+                "run_id": run_id,
+                "status": "error",
+                "error": f"the journal has no run {run_id}",
+            }
+        if header.status in ("running", "interrupted"):
+            return {
+                "t": "retry",
+                "run_id": run_id,
+                "status": "error",
+                "error": f"run {run_id} is {header.status}, not finished",
+            }
+        try:
+            handle = await engine.resume(run_id, retry_failed=True, allow_graph_change=True)
+        except JournalError as exc:  # nothing of it failed
+            return {"t": "retry", "run_id": run_id, "status": "error", "error": str(exc)}
+        return await _resumed("retry", run_id, owner, handle)
 
     # -- the loop ----------------------------------------------------------
 
@@ -1124,6 +1156,8 @@ class Bridge:
                 out = await self.parked()
             elif kind == "answer":
                 out = await self.answer(msg)
+            elif kind == "retry":
+                out = await self.retry(msg)
             else:
                 out = {"t": "error", "text": f"unknown op {kind!r}"}
         except Exception as exc:  # noqa: BLE001 — one bad request never ends the bridge
@@ -1138,6 +1172,36 @@ class Bridge:
             session.end_input()
         if self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+
+async def _resumed(kind: str, run_id: str, owner: Dict[str, Any], handle: Any) -> Dict[str, Any]:
+    """Wait for a resumed run (and its trace) and say how it went."""
+    from operonx.core.workflow_trace import unhandled
+
+    out = await handle.result()
+    ending = getattr(handle, "_scheduler_task", None)
+    if ending is not None and not ending.done():
+        await asyncio.wait({ending})  # its trace is with the consumers
+    parked = out.get("$interrupted") if isinstance(out, dict) else None
+    reply: Dict[str, Any] = {"t": kind, "run_id": run_id, "owner": owner}
+    if parked:
+        reply["status"] = "interrupted"
+        reply["questions"] = [
+            {"id": p["interrupt_id"], "op": p["op"], "payload": _jsonable(p["payload"])}
+            for p in parked
+        ]
+    elif unhandled(handle.errors):
+        reply["status"], reply["error"] = "error", _status(handle.trace)[1]
+    else:
+        reply["status"] = "ok"
+    return reply
+
+
+def _owner_text(owner: Dict[str, Any]) -> str:
+    if "job" in owner:
+        return f"job {owner['job']}"
+    variant = f" ({owner['variant']})" if owner.get("variant") else ""
+    return f"service {owner.get('service')}{variant}"
 
 
 def _questions(steps: List[Any]) -> List[Dict[str, Any]]:
