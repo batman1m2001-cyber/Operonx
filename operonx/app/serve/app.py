@@ -815,6 +815,21 @@ def _run_pooled(
     os.environ[_ROOT_ENV] = root
     os.environ[_LISTENER_ENV] = f"{host}:{port}"
     os.environ[_ONLY_ENV] = ",".join(names)
+    from .balance import balanced, run_balanced
+
+    if balanced():
+        # the workers take turns by load, not by who wakes first
+        run_balanced(
+            uvicorn.Config(
+                "operonx.app.serve.app:worker_app",
+                factory=True,
+                host=bind_host or host,
+                port=bind_port or port,
+                workers=workers,
+                log_level="info",
+            )
+        )
+        return
     uvicorn.run(
         "operonx.app.serve.app:worker_app",
         factory=True,

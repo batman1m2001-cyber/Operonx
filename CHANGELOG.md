@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.25.0] - 2026-10-14
+
+### Added
+
+- **A pooled listener spreads its connections evenly over its workers.** The workers of `workers=N` share one listening socket, and the kernel gives a connection to whichever wakes first: a callbot load test put 10 of 20 calls on one of 4 workers and none on another, and that worker fell 4 s behind real time while the others idled. Each worker now writes its open connections to a small shared table and accepts only while it holds no more than the least loaded live worker; a worker above it closes its own copy of the listening socket until it is not (its connections go on). The least loaded worker always listens, and a worker whose heartbeat stops is left out, so nothing is refused or held back. Measured with real-audio calls: 20 calls on 4 workers land 5/5/5/5 (reply p50 0.88 s, was 4.35 s), and 40 on 8 workers 5 each (reply p50 0.85 s, worst VAD lag 0.34 s). `OPERONX_SERVE_BALANCE=off` serves with plain uvicorn workers. Plan: docs/CCU_CAPACITY_PLAN.md (phase 4).
+
 ## [1.24.1] - 2026-10-14
 
 ### Changed
