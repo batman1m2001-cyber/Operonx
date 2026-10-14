@@ -1,6 +1,8 @@
 # CCU capacity: see the backlog, then lift the ceiling
 
-Status: **done** 2026-10-14 (phases 1–4; phase 5 not needed). Results at the end. Driven by the callbot (educa-reminder-agent,
+Status: part 1 **done** 2026-10-14 (phases 1–4; phase 5 not needed), results
+below. Part 2 (a latency dashboard, then 50–100 calls on the fewest workers)
+**in progress**: see the end. Driven by the callbot (educa-reminder-agent,
 `refactor/operonx-studio`), but every generic part lands in operonx.
 
 ## Why
@@ -180,3 +182,117 @@ read from ClickHouse, not from a profiler:
   (`WS_WORKERS=8`), well within this host's 24 cores.
 - **Not changed:** greeting p95 ~340 ms and 5-call replies ~1 s, as before;
   the 8-op chain and stream A/B matched main at every phase.
+
+# Part 2: latency at a glance, then 50–100 calls on the fewest workers
+
+Started 2026-10-14. Part 1 left one worker holding about 6–7 calls, so
+100 calls would take ~16 workers. Part 2 makes every latency problem
+readable on a dashboard first, then lifts what one worker holds.
+
+## What part 1 still does not show
+
+Each call explains itself now (backlog, worker, loop lag, VAD lag), but:
+
+1. **The latency a caller feels is not traced.** "Caller stops → bot's
+   first audio" was measured by the test client, not by the server.
+2. **Nothing is charted over time.** Monitor shows a call's length (how
+   long people talked) and op time; VAD lag, loop lag and calls per worker
+   were read with hand-written ClickHouse queries.
+3. **A worker's CPU is not recorded**, so "out of CPU" and "slow for
+   another reason" look the same.
+
+## Target
+
+Same latency as part 1, at 50, 75 and 100 real-audio calls:
+
+- VAD lag p95 ≤ 0.6 s; reply after the caller stops p50 ≤ 1.2 s;
+- no silence reprompt caused by lag; 5-call numbers not worse;
+- **on as few workers as possible**: accepted at ≥ 12.5 calls a worker
+  (100 on 8), aimed at 25 (100 on 4).
+
+## Hard gates (every phase, as in part 1)
+
+- No cost on the success path for an operonx change (pinned A/B).
+- **The op structure stays**: the callbot graph keeps its ops, edges and
+  names. A faster implementation goes *inside* an op or a resource, never
+  around the graph. No "process op" or "native op" kind in operonx.
+- Numbers come from the traces (ClickHouse, the Monitor page); a profiler
+  is only used to find *where* CPU goes once the traces say a worker is
+  out of it.
+
+## Phase 6: the latency dashboard
+
+- **O1 (operonx): `measure(name, ms)`.** Called from an op body; the run
+  keeps the samples and writes `metadata["latency_ms"] = {name: {"n",
+  "p50", "p95", "max"}}` when it ends. No tracing installed → a no-op. One
+  list append per sample.
+- **O2 (operonx): worker CPU.** The loop beacon (phase 1, T3) also reads
+  the process's CPU time on each tick; a run writes `metadata["cpu_pct"] =
+  {"avg", "max"}` (one core = 100; `max` over 1 s windows). One
+  `time.process_time()` per 50 ms tick, nothing per run.
+- **O3 (callbot): reply latency and VAD lag as measures.** `play`
+  measures `reply` (the first packet of a reply minus the end of the
+  caller's speech that triggered it); `detect_speech` measures `vad_lag`
+  per utterance. The existing `lag_ms` fields stay.
+- **O4 (studio): Monitor → "Latency".** From run summaries' metadata, no
+  trace opened: every measure's p95 over time (tiles + chart), loop-lag
+  p95 and worker CPU over time, the busiest worker's calls, and the
+  slowed calls (the run page's "Slowed by" rule) linked to their run
+  pages. A service without measures shows only loop lag / CPU / workers.
+- **Gate:** the A/B matches main; a 20-call run, then an overloaded one,
+  read on the Monitor page alone tell "fine" from "this worker is out of
+  CPU, replies late" — screenshots desktop + phone.
+
+## Phase 7: the per-packet budget
+
+Before any fix: the load-test client must not be the limit, then one
+worker is driven past saturation and its CPU is split by where it goes.
+
+- `ccu_real.py` spreads calls over several client processes and reports
+  its own send drift (a late client looks like a late server).
+- One worker, 8 → 20 calls: the dashboard shows where it saturates; a
+  profile of that worker splits a packet's CPU into: uvicorn/websocket
+  receive, `receive_audio`, operonx dispatch + trace, `VadState.push`
+  (and its GIL waits), `play`'s sends, heartbeat.
+- **Output:** a table in this doc, µs per packet per part, which orders
+  phases 8 and 9.
+
+## Phase 8: VAD in Rust (callbot)
+
+`VadState.push` is ~0.64 ms of numpy/scipy per packet alone and ~2.1 ms
+beside a busy loop, all of it holding the GIL. A PyO3 extension
+(`callbot_vad`, built with maturin, in the callbot repo) does the same
+DSP — resample 8k→16k, bandpass, spectral gating, AGC, the segment state
+machine — with the GIL released (`allow_threads`); Silero stays an ONNX
+session (onnxruntime already runs without the GIL). The op, its inputs,
+its yields and the `audio_worker:` resource stay; `VadState` keeps its
+methods and gains a Rust core. A pure-Python fallback stays for a host
+without the wheel.
+
+- **Gate:** on all of `tests/call/audio` the same segments (same
+  boundaries; samples within float tolerance; same transcripts from STT)
+  and the parity oracle passes; push cost alone and under load measured;
+  the reply time at 5 calls not worse.
+
+## Phase 9: the loop's per-packet cost (operonx, ordered by phase 7)
+
+Whatever phase 7 shows the loop spends per packet outside VAD (dispatch,
+trace records of ~1800 `detect_speech` invocations a call, websocket
+framing). Fixes land in operonx where they are generic, measured with the
+pinned A/B and the stream bench.
+
+## Phase 10: fewest workers
+
+50, 75, 100 calls; the smallest `WS_WORKERS` that meets the target at
+each, read on the Monitor page. The deployed default changes only if the
+owner wants it.
+
+## Part 2 order and status
+
+| # | Phase | Where | Status |
+|---|---|---|---|
+| 6 | latency dashboard | operonx + callbot + studio | in progress |
+| 7 | per-packet budget | callbot bench | |
+| 8 | VAD in Rust | callbot | |
+| 9 | loop per packet | operonx | decided by 7 |
+| 10 | fewest workers | callbot config | |
