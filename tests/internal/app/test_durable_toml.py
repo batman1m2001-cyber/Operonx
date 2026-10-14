@@ -212,3 +212,36 @@ def live():
 def test_a_graph_with_a_door_is_never_journalled():
     engine = _compile("j", "graph", live(name="live"), trace=[], journal=MemoryJournal())
     assert engine._journal is None
+
+
+async def test_the_bridge_lists_a_parked_run_and_answers_it(project):
+    # docs/N8N_LANGGRAPH_GAP_PLAN.md S1c: the studio's way in
+    from operonx.app.play import Bridge
+
+    root, _ = project
+    app = Application.find(str(root))
+    app.bootstrap()
+    bridge = Bridge(app, lambda event: None)
+    ((owner, engine),) = [(o, e) for o, e in await bridge._durable_engines() if "service" in o]
+    assert owner == {"service": "refund"}
+    out = await engine.run({"x": 9}, run_id="ask-1")
+    asked = out["$interrupted"][0]
+
+    listed = await bridge.parked()
+    assert [r["run_id"] for r in listed["runs"]] == ["ask-1"]
+    run = listed["runs"][0]
+    assert run["owner"] == {"service": "refund"} and run["inputs"] == {"x": 9}
+    assert run["questions"] == [{"id": asked["interrupt_id"], "op": ".ask", "payload": "refund 9"}]
+
+    refused = await bridge.answer({"run_id": "nope", "answers": {"a": 1}})
+    assert refused["status"] == "error" and "no journalled" in refused["error"]
+    done = await bridge.answer({"run_id": "ask-1", "answers": {asked["interrupt_id"]: "approve"}})
+    assert done == {
+        "t": "answer",
+        "run_id": "ask-1",
+        "owner": {"service": "refund"},
+        "status": "ok",
+    }
+    assert (await bridge.parked())["runs"] == []
+    again = await bridge.answer({"run_id": "ask-1", "answers": {asked["interrupt_id"]: "x"}})
+    assert again["status"] == "error" and "not waiting" in again["error"]

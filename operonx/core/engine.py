@@ -1142,6 +1142,8 @@ class Operon:
                     f"{sorted(asked) or 'none'}"
                 )
         recorder.answers = dict(answers or {})
+        load_trace = getattr(self._journal, "load_trace", None)
+        prior = await asyncio.to_thread(load_trace, run_id) if load_trace is not None else None
         await asyncio.to_thread(self._journal.set_status, run_id, "running")
         return self._launch(
             state,
@@ -1154,6 +1156,7 @@ class Operon:
             checkpointer=checkpointer,
             context=context,
             inputs=header.inputs,
+            prior=prior,
         )
 
     def runs(self, status: Optional[str] = None) -> List[Any]:
@@ -1176,9 +1179,11 @@ class Operon:
         checkpointer: Any,
         context: Any,
         inputs: Optional[Dict[str, Any]] = None,
+        prior: Optional[Dict[str, Any]] = None,
     ) -> "ExecutionHandle":
         """Run *state* in the background: the part of :meth:`start` that a
-        resume shares. ``inputs`` are what a nested run's own record shows."""
+        resume shares. ``inputs`` are what a nested run's own record shows;
+        ``prior`` is the trace a resumed run had when it stopped."""
         # `state.tracing` gates the per-op metric writes in `BaseOp.run`.
         # It is not dead and it is not back-compat: `MemoryState` defaults
         # it on, so an op driven directly — as several tests do — records
@@ -1288,12 +1293,31 @@ class Operon:
                 _wf_trace._task_listeners.append(nest.task)
             nest.opened()
 
+        if prior is not None:
+            from operonx.durable.history import restore
+
+            restore(_wf_trace, prior)
         state._run_info = _RunInfo(_wf_trace.run_id, thread_id, context)
         for _consumer in consumers:
             if _consumer.live:
                 _go_live(_consumer, _wf_trace)
 
         recorder = state._durable
+        if recorder is not None:
+            from operonx.durable.history import record_of
+
+        async def _close_journal(rec: Any, outcome: str) -> None:
+            """Write the rest of the run to its journal, then its status. A
+            run that failed keeps its trace for a retry from the failure
+            (operonx.durable.history); one that ended keeps nothing."""
+            if rec is None:
+                return None
+            try:
+                failed = outcome == "error" or _wf_trace.status == "error"
+                await rec.aclose(outcome, record_of(_wf_trace) if failed else None)
+            except Exception:
+                LOGGER.exception("journal: run %s could not be closed", _wf_trace.trace_id)
+            return None
 
         async def _run() -> None:
             nonlocal recorder
@@ -1313,9 +1337,16 @@ class Operon:
                     # by the recorder, once nothing could move — not a
                     # cancel. The handle ends with what the run made.
                     outcome = recorder.stopped = recorder.stopping
+                    _wf_trace.stopped = outcome
+                    if recorder.parked:
+                        _wf_trace.metadata["interrupted"] = [
+                            {"id": p["interrupt_id"], "op": p["op"], "payload": p["payload"]}
+                            for p in recorder.parked
+                        ]
                     try:  # closed before the handle ends: its result and
-                        # the journal's status agree
-                        await recorder.aclose(outcome)
+                        # the journal's status agree; its trace is kept for
+                        # the resume (operonx.durable.history)
+                        await recorder.aclose(outcome, record_of(_wf_trace))
                     finally:
                         recorder = None
                         queue.put_nowait(None)
@@ -1338,9 +1369,13 @@ class Operon:
                 # carrier is a BaseException only to get past every
                 # `except Exception` on its way up; the caller gets OpFailed.
                 outcome = "error"
+                recorder = await _close_journal(recorder, outcome)
                 queue.put_nowait(e.failure)
             except BaseException as e:  # includes ObserveBudgetExceeded (Phase 2)
                 outcome = "error"
+                # the caller may resume the moment it has the error: what
+                # the run journalled is written first
+                recorder = await _close_journal(recorder, outcome)
                 queue.put_nowait(e)
                 # Do NOT re-raise a BaseException — the ExecutionHandle re-raises
                 # it to the caller via _pump when the value is dequeued. Bubbling
@@ -1353,11 +1388,7 @@ class Operon:
                     self._door_io(_wf_trace)
                 if nest is not None:
                     _close_nested(nest, self.graph, state, _wf_trace, outcome)
-                if recorder is not None:
-                    try:
-                        await recorder.aclose(outcome)
-                    except Exception:
-                        LOGGER.exception("journal: run %s could not be closed", _wf_trace.trace_id)
+                recorder = await _close_journal(recorder, outcome)
                 # Detach any Phase 2 observers bound at start().
                 if _cp_unsubscribe is not None:
                     try:

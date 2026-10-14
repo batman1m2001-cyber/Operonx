@@ -34,6 +34,7 @@ __all__ = [
     "make_op_id",
     # Status constants — narrow vocab so consumers can switch on them.
     "STATUS_OK",
+    "STOPPED_SUFFIX",
     "STATUS_ERROR",
     "STATUS_CANCELLED",
     "STATUS_RETRIED",
@@ -55,6 +56,10 @@ STATUS_CANCELLED = "cancelled"
 #: An attempt that failed and was run again by the op's `retry=`. Not a
 #: failure of the run: the attempt after it decides. Its `error` is kept.
 STATUS_RETRIED = "retried"
+#: The op id suffix of a node a resumed run loaded from its stopped attempt
+#: that did not end ok (operonx.durable.history): its op ran again under the
+#: plain id. One that failed is `STATUS_RETRIED`, as an op's own retry is.
+STOPPED_SUFFIX = "@stopped"
 
 #: ``op_type`` of a nested graph's own record: its inputs, its outputs, the
 #: span round the ops inside it. Not ``"graph"`` — that is a nested *run*'s
@@ -350,6 +355,9 @@ class WorkflowTrace:
     # The trace of the run this one is a step of: set on a run started
     # inside an op body (operonx.core.nested), None for a run of its own.
     parent: Optional["WorkflowTrace"] = field(default=None, repr=False, compare=False)
+    # How a journalled run stopped on purpose (``"interrupted"``, parked on
+    # a question; ``"drained"``): its status, unless something failed.
+    stopped: Optional[str] = None
 
     @property
     def root(self) -> "WorkflowTrace":
@@ -396,7 +404,9 @@ class WorkflowTrace:
 
     @property
     def status(self) -> str:
-        """``"error"`` when anything in the run failed, else ``"ok"``.
+        """``"error"`` when anything in the run failed, else how a
+        journalled run stopped (``"interrupted"``, ``"drained"``), else
+        ``"ok"``.
 
         A failed node or an ``errors`` record: either alone is a failed
         run. The record is the one that catches a structured ``LLMOp``
@@ -425,11 +435,12 @@ class WorkflowTrace:
                     if n.op_type != NESTED_RUN
                     and nested_owner(n.op_full_name, tuple(n.ctx), roots) is None
                 ]
-        if not failed:
-            return "ok"
-        # a step that failed inside a retried attempt is not the run's failure
-        gone = superseded_ids(self.nodes)
-        return "error" if any(n.op_id not in gone for n in failed) else "ok"
+        if failed:
+            # a step that failed inside a retried attempt is not the run's failure
+            gone = superseded_ids(self.nodes)
+            if any(n.op_id not in gone for n in failed):
+                return "error"
+        return self.stopped or "ok"
 
     @property
     def run_id(self) -> str:
