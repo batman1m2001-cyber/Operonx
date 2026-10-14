@@ -1,6 +1,6 @@
 # One retry model for operonx: a project default, specific overrides
 
-**Status:** 2026-10-14. R1, R2, R3 and R4 done; R5 next. Every "today" below was read in the code.
+**Status:** 2026-10-14. All done: R1–R5. Every "today" below was read in the code.
 
 ## What exists today: eleven retry mechanisms
 
@@ -169,6 +169,10 @@ project   operonx.toml  [retry]                ← the default
 - Every layer asks it.
 
 ### R5. Retries in the trace and the studio. *Nice to have · small to medium · library and studio*
+- **Done.** What was built:
+  - The library adds `_Frame.retries`. `retry_call` appends `{call, attempt, error, waited}` on the failure path, and the node is written with `attrs["operonx.call_retries"]` by `op.run`, by `child()` and on an op retry's retried node.
+  - `backoff` also finds the pump from a `child()` step, by trying the frame's ctx prefixes.
+  - The studio (#86): the step panel shows "llm:assistant: 3 calls, 2 retried (429) · waited 3.0 s", with the attempts folded under it, and Settings shows `[retry]` as written.
 - A transport retry adds `{attempt, error, waited}` to its op's trace node.
 - The studio's step panel says "3 calls, 2 retried (429)".
 - The Settings screen shows the project's `[retry]` (read only).
@@ -186,6 +190,6 @@ project   operonx.toml  [retry]                ← the default
 | 2 | R2 project/engine default + `retry=False` **(done)** | high | small to medium | none until `[retry]` is set |
 | 3 | R4 one transient classifier **(done)** | medium | small | none |
 | 4 | R3 one call-retry helper + one vocabulary **(done)** | medium | medium | none: defaults unchanged |
-| 5 | R5 retries in trace and studio | medium | small to medium | none |
+| 5 | R5 retries in trace and studio **(done)** | medium | small to medium | none |
 
 Each step ships with tests in `tests/internal/policy` and `tests/internal/durable`, and a guide update (`guide/06-failures.md`). R3's alias reading is tested against every resource type.

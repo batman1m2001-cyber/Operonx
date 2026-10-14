@@ -202,3 +202,120 @@ async def test_gemini_token_refresh_retries_network_errors(monkeypatch):
     )
     with pytest.raises(Exception, match="Token refresh failed after 3 attempts"):
         await gemini.GeminiOpenAISDKModel._refresh_token(owner)
+
+
+# -- R5: every call sent again is on its trace node ------------------------------
+
+from operonx import child  # noqa: E402
+from operonx.core.runtime import CALL_RETRIES  # noqa: E402
+
+FAILS: dict = {}
+
+
+def _flaky_request(key: str, failures: int):
+    async def request():
+        FAILS[key] = FAILS.get(key, 0) + 1
+        if FAILS[key] <= failures:
+            raise _status(429)
+        return key
+
+    return request
+
+
+@op
+async def two_retried_calls(x: int) -> dict:
+    got = await retry_call(_flaky_request("a", 2), FAST, label="llm:assistant")
+    return {"got": got}
+
+
+@op
+async def in_a_step(x: int) -> dict:
+    async with child("lookup", {"x": x}) as step:
+        step.outputs = {"v": await retry_call(_flaky_request("b", 1), FAST, label="crm")}
+    return {"v": x}
+
+
+@op
+async def clean(x: int) -> dict:
+    return {"c": await retry_call(_flaky_request("c", 0), FAST)}
+
+
+@op(retry=Retry(max_attempts=2, initial=0.001, jitter=False))
+async def op_and_call(x: int) -> dict:
+    await retry_call(_flaky_request("d", 1), FAST, label="first")  # one call retry per attempt
+    FAILS["d"] = 0
+    FAILS["d-op"] = FAILS.get("d-op", 0) + 1
+    if FAILS["d-op"] == 1:
+        raise ConnectionError("dropped after the call")
+    return {"d": x}
+
+
+@graph
+def traced(x):
+    a = two_retried_calls(x=x)
+    b = in_a_step(x=x)
+    c = clean(x=x)
+    d = op_and_call(x=x)
+    START >> a >> END
+    START >> b >> END
+    START >> c >> END
+    START >> d >> END
+
+
+async def test_each_retried_call_is_on_the_node_that_sent_it():
+    FAILS.clear()
+    handle = Operon(traced, params={"x": None}).start({"x": 1})
+    await handle.result()
+    nodes = {(n.op_name, n.attempt, n.status): n for n in handle.trace.nodes}
+
+    a = nodes[("a", 1, "ok")].attrs[CALL_RETRIES]
+    assert [(r["call"], r["attempt"], r["error"]) for r in a] == [
+        ("llm:assistant", 1, "Exception 429"),
+        ("llm:assistant", 2, "Exception 429"),
+    ]
+    assert all(r["waited"] >= 0 for r in a)
+
+    (step,) = [n for n in handle.trace.nodes if n.op_name == "lookup"]
+    assert [r["call"] for r in step.attrs[CALL_RETRIES]] == ["crm"]
+    assert CALL_RETRIES not in nodes[("b", 1, "ok")].attrs  # on the step, not its op
+
+    assert CALL_RETRIES not in nodes[("c", 1, "ok")].attrs  # nothing failed
+
+    # each attempt of an op retry keeps its own
+    assert len(nodes[("d", 1, "retried")].attrs[CALL_RETRIES]) == 1
+    assert len(nodes[("d", 2, "ok")].attrs[CALL_RETRIES]) == 1
+
+
+@op
+async def step_waits(x: int) -> dict:
+    tries = []
+
+    async def request():
+        tries.append(time.perf_counter())
+        if len(tries) == 1:
+            raise _status(429)
+        return x
+
+    async with child("call", {"x": x}) as step:
+        step.outputs = {
+            "v": await retry_call(request, Retry(max_attempts=2, initial=0.25, jitter=False))
+        }
+    LOG["calls"] = tries
+    return {"a": x}
+
+
+@graph
+def step_beside(x):
+    s = step_waits(x=x)
+    h = healthy(x=x)
+    START >> s >> END
+    START >> h >> END
+
+
+async def test_a_call_retry_inside_a_child_step_gives_the_slot_back_too():
+    LOG.clear()
+    handle = Operon(step_beside, params={"x": None}, max_concurrency=1).start({"x": 2})
+    out = await handle.result()
+    assert out["a"] == 2 and out["h"] == 2
+    first, second = LOG["calls"]
+    assert LOG["healthy"] < second

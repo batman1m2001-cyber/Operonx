@@ -107,6 +107,10 @@ still work as its old spelling (`max_retries: 2` is `max_attempts: 3`); set
 one or the other. A rate limit's `Retry-After` is honoured by both kinds.
 Your own code can run a call the same way: `await retry_call(fetch,
 Retry(max_attempts=3))`, with `from operonx import retry_call`.
+Every call sent again is on the trace node of the op (or `child()` step)
+that sent it, as `attrs["operonx.call_retries"]`: `{call, attempt, error,
+waited}` each. The studio's step panel reads it as "llm:assistant: 3 calls,
+2 retried (429)".
 
 ## A default retry for a whole run, or a project
 
