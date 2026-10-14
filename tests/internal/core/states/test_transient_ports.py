@@ -307,3 +307,38 @@ async def test_the_release_guard_did_not_become_a_no_op():
         f"retention grew with item count: {counts} — the guard is holding "
         f"contexts it should have freed"
     )
+
+
+@op(bound="sync")
+def unrelated(n: int = 0) -> dict:
+    return {"m": n}
+
+
+@graph
+def _beside(n=0):
+    s = stream(n=n)
+    c = consume(blob=s["blob"], i=s["i"])
+    u = unrelated(n=n)
+    START >> s >> c >> END
+    START >> u >> END
+
+
+@pytest.mark.asyncio
+async def test_an_item_releases_only_the_cells_it_can_hold():
+    """A finished item visits the cells of its producer and what runs after
+    it, not every cell of the run's state (CCU plan phase 3: 476 cells per
+    audio packet in the callbot). Nothing of the item is left behind."""
+    engine = Operon(_beside, params={"n": None})
+    handle = engine.start(inputs={"n": 500})
+    await handle.collect()
+    state = handle.state
+    scheduler = engine.graph._scheduler
+    (cells,) = scheduler._release_cells.values()
+    names = {op for (op, _var), idx in state.schema._var_to_idx.items() if idx in cells}
+    # the producer, its consumer, and the graph outputs the consumer pushes
+    # to; never the op beside them (the root graph is named `engine`)
+    assert {"engine.s", "engine.c"} <= names and "engine.u" not in names
+    assert names <= {"engine.s", "engine.c", "engine"}
+    small = engine.start(inputs={"n": 5})
+    await small.collect()
+    assert _cell_entries(state) == _cell_entries(small.state)

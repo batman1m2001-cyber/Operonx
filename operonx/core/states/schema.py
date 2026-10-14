@@ -203,6 +203,28 @@ class StateSchema:
         self._pull_refs.append(None)
         self._push_refs.append(None)
 
+    def cells_of(self, op_names) -> Tuple[int, ...]:
+        """The non-shared cell indices of the ops named (full names), of
+        every op nested inside them, and of the cells their outputs push
+        to: every cell an item those ops ran in can have written."""
+        exact = set(op_names)
+        prefixes = tuple(name + "." for name in exact)
+        found = {
+            idx
+            for (op, _var), idx in self._var_to_idx.items()
+            if op in exact or op.startswith(prefixes)
+        }
+        todo = list(found)
+        while todo:
+            ref = self._push_refs[todo.pop()]
+            if ref is None:
+                continue
+            target = self._var_to_idx.get((ref.source, ref.var))
+            if target is not None and target not in found:
+                found.add(target)
+                todo.append(target)
+        return tuple(sorted(i for i in found if i not in self._shared_indices))
+
     def _register_push_ref(self, op: str, var: str, ref: Ref) -> None:
         """Đăng ký push ref (không overwrite pull ref)."""
         key = (op, var)

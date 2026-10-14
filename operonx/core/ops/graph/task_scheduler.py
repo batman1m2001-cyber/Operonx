@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from time import perf_counter
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from operonx.core.loggings import LOGGER
 from operonx.core.ops._events import EOF, SELF_CTX, Failure, Frame, HandOff, Interrupt
@@ -237,10 +237,14 @@ class Scheduler:
         "_reach",
         "_join_edges",
         "_sibling_edges",
+        "_release_cells",
     )
 
     def __init__(self, graph):
         self.graph = graph  # static compiled data — never mutated after build()
+        # (transient producer, schema id) -> the cells an item it minted can
+        # hold: what `release_context` visits as the item finishes.
+        self._release_cells: Dict[Tuple[str, int], Tuple[int, ...]] = {}
         # (src, dst) -> (collect, limit) for every edge, resolved once here
         # rather than by scanning dst's inputs for every routed item.
         # ``limit`` caps how many items of the edge run through dst at once:
@@ -577,6 +581,31 @@ class Scheduler:
         finally:
             _reset_state(token)
 
+    def _cells_downstream(self, src: str, schema) -> Tuple[int, ...]:
+        """The cells an item of transient producer *src* can hold: those of
+        *src* and of every op its edges (error edges too) reach in this
+        graph, nested ops included (`StateSchema.cells_of`), up to and
+        including a generator: what follows one runs per yield, in a context
+        of its own, never in the item's. Computed once per producer. An op
+        off that path never runs in the item's context."""
+        key = (src, id(schema))
+        cells = self._release_cells.get(key)
+        if cells is None:
+            g = self.graph
+            seen, todo = {src}, [src]
+            while todo:
+                name = todo.pop()
+                nxt = [link.dst for link in g._adj.get(name, ())]
+                nxt += [dst for dst, _ in g._err_adj.get(name, ())]
+                for dst in nxt:
+                    if dst not in seen and dst in g._ops:
+                        seen.add(dst)
+                        if not getattr(g._ops[dst], "is_gen", False):
+                            todo.append(dst)
+            cells = schema.cells_of(g._ops[name].full_name for name in seen)
+            self._release_cells[key] = cells
+        return cells
+
     async def _run_once(
         self,
         state,
@@ -678,8 +707,12 @@ class Scheduler:
         # most items ever parked at once and the longest wait. Touched only
         # by an item that has to wait, so a run that never queues pays
         # nothing. Handed to `state._edge_backlog` as the run ends.
-        queued_at: Dict[tuple, float] = {}
+        queued_at: Dict[tuple, float] = {}  # (edge, item ctx) -> when parked
         backlog: Dict[Tuple[str, str], list] = {}
+        # How many edge queues hold each item ctx (one item can wait on two
+        # edges at once): `_release_if_done` asks it instead of scanning
+        # every queue, which made a long backlog slower to drain.
+        queued_n: Dict[tuple, int] = {}
 
         # seq_running[(src, dst)] = items of that edge in flight through dst.
         # The next queued item starts only when one of them reaches EOF.
@@ -687,7 +720,7 @@ class Scheduler:
         # Contexts minted by a transient producer. Everything in them belongs
         # to one item, so the whole context is released when its last op
         # finishes rather than only the cells marked transient.
-        transient_ctxs: set = set()
+        transient_ctxs: Dict[tuple, str] = {}  # item ctx -> the producer that minted it
 
         # seq_origins[(op_name, item_ctx)] = (src, dst) key.
         # When dst_op finishes at item_ctx (EOF arrives), we use this to find
@@ -981,7 +1014,7 @@ class Scheduler:
         def _drop_oldest(key: tuple) -> None:
             """Drop the stalest item waiting on a full ``drop_oldest`` edge."""
             dropped = seq_queues[key].popleft()
-            queued_at.pop(dropped, None)
+            _unpark(key, dropped)
             src, dst = key
             name = f"{g._ops[src].full_name} -> {g._ops[dst].full_name}"
             drops = state._edge_drops
@@ -995,9 +1028,18 @@ class Scheduler:
             # Its consumer will never run, so nothing else frees the item.
             _release_if_done(dropped)
 
+        def _unpark(key: tuple, ctx: tuple) -> Optional[float]:
+            """An item leaves edge *key*'s queue: when it was parked there."""
+            n = queued_n.get(ctx, 0) - 1
+            if n > 0:
+                queued_n[ctx] = n
+            else:
+                queued_n.pop(ctx, None)
+            return queued_at.pop((key, ctx), None)
+
         def _waited(key: tuple, ctx: tuple) -> None:
             """An item leaves an edge's queue for its consumer: note its wait."""
-            parked = queued_at.pop(ctx, None)
+            parked = _unpark(key, ctx)
             if parked is not None:
                 seen = backlog[key]
                 waited = perf_counter() - parked
@@ -1026,15 +1068,14 @@ class Scheduler:
             # dispatched immediately and survived, while every later item
             # arrived at the third op as None. A two-op chain never shows it,
             # which is why the original transient-ports tests missed it.
-            for waiting in seq_queues.values():
-                if ctx in waiting:
-                    return
+            if ctx in queued_n:
+                return
             for buffered in collect_bufs.values():
                 if any(pending_ctx == ctx for pending_ctx, _ in buffered):
                     return
-            if ctx in transient_ctxs:
-                transient_ctxs.discard(ctx)
-                state.release_context(ctx)
+            src = transient_ctxs.pop(ctx, None)
+            if src is not None:
+                state.release_context(ctx, self._cells_downstream(src, state.schema))
             else:
                 state.release_transient(ctx)
 
@@ -1282,7 +1323,7 @@ class Scheduler:
         def _route(src: str, dst: str, ctx: tuple, result: dict) -> None:
             """Dispatch dst using the correct stream policy (seq/parallel/collect)."""
             if getattr(g._ops.get(src), "transient", False):
-                transient_ctxs.add(ctx)
+                transient_ctxs[ctx] = src
 
             collect, limit = route_policy.get((src, dst), _SEQUENTIAL)
 
@@ -1317,7 +1358,8 @@ class Scheduler:
                     if drop_bounds and len(q) >= drop_bounds.get(key, len(q) + 1):
                         _drop_oldest(key)
                     q.append(ctx)
-                    queued_at[ctx] = perf_counter()
+                    queued_at[(key, ctx)] = perf_counter()
+                    queued_n[ctx] = queued_n.get(ctx, 0) + 1
                     seen = backlog.get(key)
                     if seen is None:
                         backlog[key] = seen = [0, 0.0]
@@ -1659,7 +1701,7 @@ class Scheduler:
                 kept = deque(c for c in q if not _is_descendant_or_equal(c, ctx_prefix))
                 for gone in q:
                     if _is_descendant_or_equal(gone, ctx_prefix):
-                        queued_at.pop(gone, None)
+                        _unpark(seq_key, gone)
                 if kept:
                     next_ctx = kept.popleft()
                     _waited(seq_key, next_ctx)
