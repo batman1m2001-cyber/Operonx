@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.24.1] - 2026-10-14
+
+### Changed
+
+- **A finished stream item frees only the cells it can hold.** A transient item (`@op(transient=True)`) visited every cell of the run's state to drop its own entries: 472 cells for each 20 ms audio packet in the callbot, the event loop's largest cost per packet. It now visits the cells of its producer and of the ops after it up to the next generator, computed once per producer: 18 in the callbot. A check over the whole internal suite (9,139 releases) and real calls (6,132) found no cell left holding an item. The test "is this item still queued?" no longer scans every queued item of the run either, which made a long backlog slower to drain. Measured with 8 real-audio calls on one worker: VAD heard the caller 0.93 s late at the median second, against 1.24 s; an 8-op chain at 400 runs at once and a 3000-item stream, pinned: the same as 1.24.0. Plan: docs/CCU_CAPACITY_PLAN.md (phase 3).
+
 ## [1.24.0] - 2026-10-14
 
 ### Added

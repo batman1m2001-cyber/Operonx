@@ -600,7 +600,7 @@ class MemoryState:
         """Get value with explicit parameters."""
         return self[op, var, ctx]
 
-    def release_context(self, ctx) -> int:
+    def release_context(self, ctx, cells=None) -> int:
         """Drop every non-shared cell entry for a finished context.
 
         Used for contexts minted by a transient stream: the producer's
@@ -611,10 +611,21 @@ class MemoryState:
 
         Shared cells are skipped: they are graph-level by definition and
         outlive every context.
+
+        ``cells``: the only indices the context can hold
+        (``StateSchema.cells_of`` the ops that run in it), so a packet of a
+        long stream does not visit every cell of the run's state — 476 in
+        the callbot, where it was the loop's largest cost per packet.
         """
         if ctx is None:
             return 0
         dropped = 0
+        if cells is not None:
+            every = self._cells
+            for idx in cells:
+                if every[idx].contexts.pop(ctx, _MISSING) is not _MISSING:
+                    dropped += 1
+            return dropped
         for cell in self._cells:
             if cell.is_shared:
                 continue
