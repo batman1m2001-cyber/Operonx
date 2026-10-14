@@ -31,6 +31,9 @@ sinks = ["local"]
 # Record every step of the jobs and request-reply services, so a crashed or
 # failed job item finishes from where it stopped (operonx run NAME --resume)
 # and a run that asks a person is answered later (POST <path>/resume).
+# In the studio: Runs > "Waiting for an answer" answers a parked run, a
+# failed run's page has "Retry from the failure", and any step can be
+# changed and the run continued from it ("What if").
 # Costs a few ms per run. Off until uncommented.
 # [durable]
 # journal = "sqlite:.operonx/journal.db"
