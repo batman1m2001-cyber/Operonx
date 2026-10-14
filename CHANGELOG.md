@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.23.0] - 2026-10-14
+
 ### Added
 
 - **Fork a run from a step: `await engine.fork(run_id, at="op", outputs={...})`.** A journalled run runs again from one op as if it had answered `outputs`: what ended before it is replayed from the journal, what follows runs with the new value, and the original is not changed. The new run (`<run_id>~<8 hex>`) is traced whole: a resume with no trace kept from before (a fork, a process that was killed) now records the steps it replayed (`attrs["operonx.replayed"]`). The playground bridge takes `{"op": "fork"}` for the studio. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L4).
@@ -3660,7 +3662,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.2...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.23.0...HEAD
+[1.23.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.4...v1.23.0
 [1.22.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.3...v1.22.4
 [1.22.3]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.2...v1.22.3
 [1.22.2]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.1...v1.22.2
