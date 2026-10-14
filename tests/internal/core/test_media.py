@@ -124,7 +124,9 @@ class TestConsumedMediaInTheTrace:
 
         @op
         def make() -> dict:
-            return {"audio": Media(data=b"\x00\x01" * 8, mime_type="audio/L16;rate=16000;channels=1")}
+            return {
+                "audio": Media(data=b"\x00\x01" * 8, mime_type="audio/L16;rate=16000;channels=1")
+            }
 
         @op
         def hear(audio=None, label: str = "x") -> dict:
@@ -142,9 +144,9 @@ class TestConsumedMediaInTheTrace:
             return handle.trace
 
         trace = asyncio.run(go())
-        assert seen["type"] is bytes                      # the body: raw bytes
+        assert seen["type"] is bytes  # the body: raw bytes
         (rec,) = [n for n in trace.nodes if n.op_name == "h"]
         audio = rec.exported()[0]["audio"]
-        assert isinstance(audio, Media)                   # the trace: typed
+        assert isinstance(audio, Media)  # the trace: typed
         assert audio.mime_type.startswith("audio/L16") and audio.data == b"\x00\x01" * 8
         assert rec.exported()[0]["label"] == "x"

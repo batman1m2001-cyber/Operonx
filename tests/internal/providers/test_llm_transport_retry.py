@@ -15,8 +15,8 @@ import openai
 import pytest
 
 from operonx import END, START, Operon, Retry, graph, op
-from operonx.providers.llms.config import LLMType, OpenAIConfig
 from operonx.core.policy import resource_retry
+from operonx.providers.llms.config import LLMType, OpenAIConfig
 from operonx.providers.ops.llm import LLMOp, _is_empty_completion
 
 # ---------------------------------------------------------------------------

@@ -75,7 +75,8 @@ def test_a_preview_reads_a_state_object_as_its_fields():
         should_hangup: bool = True
 
     assert json.loads(run_preview({"agent_state": AgentState()})) == {
-        "agent_state": {"$type": "AgentState", "current_state": "FINISH", "should_hangup": True}}
+        "agent_state": {"$type": "AgentState", "current_state": "FINISH", "should_hangup": True}
+    }
 
 
 def _trace(trace_id, inputs, output):
@@ -119,9 +120,8 @@ def test_a_sqlite_index_made_before_the_columns_gains_them(tmp_path):
 
 
 def test_the_langfuse_trace_gets_the_runs_input_and_output():
-    from tests.internal.telemetry.test_langfuse_consumer import FakeLangfuseClient
-
     from operonx.telemetry.consumers.langfuse import LangfuseConsumer
+    from tests.internal.telemetry.test_langfuse_consumer import FakeLangfuseClient
 
     client = FakeLangfuseClient()
     trace = _run(Operon(hello(name=None, times=None)), {"name": "Minh", "times": 1}, "h-lf")

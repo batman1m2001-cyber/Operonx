@@ -531,7 +531,6 @@ class ExecutionHandle:
         self._pump_task.cancel()
 
 
-
 def _run_health(state: Any, trace: Any) -> None:
     """What slowed the run down, beside its ops' own time, onto its trace:
     the edges whose items queued (``metadata["backlog"]``) and how late the
@@ -543,6 +542,7 @@ def _run_health(state: Any, trace: Any) -> None:
         lag = loop_lag.window(trace.wall_started_at, time.time())
         if lag is not None:
             trace.metadata["loop_lag_ms"] = lag
+
 
 class Operon:
     """Workflow execution engine.

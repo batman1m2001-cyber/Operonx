@@ -194,7 +194,9 @@ class TestTwoStreamsMeeting:
         return build_tree(_run(Operon(call_shape, params={"n": 2}), "call"))
 
     def test_the_recorded_stream_is_top_level_under_its_own_name(self, tree):
-        tops = sorted(n["name"] for n in tree.values() if n["parent"] is None and n["name"].startswith("b"))
+        tops = sorted(
+            n["name"] for n in tree.values() if n["parent"] is None and n["name"].startswith("b")
+        )
         assert tops == ["b [0]", "b [1]"]
 
     def test_the_transient_streams_stand_ins_carry_its_name(self, tree):

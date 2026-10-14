@@ -151,7 +151,9 @@ class SqlIndex:
             have = {d[0].lower() for d in cur.description or ()}
             for col in SUMMARY_COLUMNS:
                 if col not in have:
-                    cur.execute(f"ALTER TABLE {self.runs} ADD COLUMN {col} {_coltype(col, self.real_type)}")
+                    cur.execute(
+                        f"ALTER TABLE {self.runs} ADD COLUMN {col} {_coltype(col, self.real_type)}"
+                    )
 
     # -- write ---------------------------------------------------------------
 

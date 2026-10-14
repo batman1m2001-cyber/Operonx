@@ -796,8 +796,12 @@ class TestRefOperands:
     def test_describe_keeps_the_grouping_python_needs(self):
         a, b, c = Ref("n", "a"), Ref("n", "b"), Ref("n", "c")
         # an `or` inside an `and`: bracketed, on either side
-        assert (((a == "x") | (b >= 3)) & (c > 0.5)).describe() == "(a == 'x' or b >= 3) and c > 0.5"
-        assert ((c < 0.4) & ((b < 3) | (a == "vi"))).describe() == "c < 0.4 and (b < 3 or a == 'vi')"
+        assert (
+            ((a == "x") | (b >= 3)) & (c > 0.5)
+        ).describe() == "(a == 'x' or b >= 3) and c > 0.5"
+        assert (
+            (c < 0.4) & ((b < 3) | (a == "vi"))
+        ).describe() == "c < 0.4 and (b < 3 or a == 'vi')"
         # the same operator, or a tighter one inside: no brackets
         assert ((a == 1) & (b == 2) & (c == 3)).describe() == "a == 1 and b == 2 and c == 3"
         assert (((a == 1) & (b == 2)) | (c == 3)).describe() == "a == 1 and b == 2 or c == 3"
