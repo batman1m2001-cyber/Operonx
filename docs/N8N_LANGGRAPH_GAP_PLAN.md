@@ -158,11 +158,11 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
 | # | Item | Where | Impact | Effort | Status |
 |---|---|---|---|---|---|
 | 1 | L1 retry from the failed op | library | high | small | **done with this plan** |
-| 2 | L2 journal in Jobs and Services | library | high, architectural | medium | **done** |
-| 3 | S1 answer parked runs | studio | high once L2 is in | medium | after L2 |
-| 4 | S2 retry-from-failure button | studio | high | small | after L2 |
-| 5 | L4 fork from a step | library | medium-high | medium | |
-| 6 | S3 fork in the studio | studio | medium-high | medium | after L4 |
+| 2 | L2 journal in Jobs and Services | library | high, architectural | medium | **done** (#161; L2b shared writer #162) |
+| 3 | S1 answer parked runs | studio | high once L2 is in | medium | **done** (#163, #164, studio #87) |
+| 4 | S2 retry-from-failure button | studio | high | small | **done** (#165, studio #88) |
+| 5 | L4 fork from a step | library | medium-high | medium | **done** (#166) |
+| 6 | S3 fork in the studio | studio | medium-high | medium | **done** (studio #89) |
 | 7 | L3 Postgres journal | library | high at scale | medium | when needed |
 | 8 | S5 code diff between runs | studio | low-medium | small | |
 | 9 | L5 durable timers, S4 breakpoints | both | low | medium | not now |
