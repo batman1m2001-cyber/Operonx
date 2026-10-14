@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The runs of one journal share one writer.** Their steps and ends go in one SQLite transaction, where each run had a thread of its own and SQLite's one writer made their commits wait for each other. With an 8-op chain at 400 runs at once, a journalled run costs about 3.7 ms against 10.5 ms before (1.2 ms without a journal); one run at a time costs the same as before or less. A run whose writes fail still fails alone. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L2b).
 - **The waits of a resource's call retry follow `Retry`.** A wait is now between half the backoff and all of it (at least `min_interval`), where the LLM's transport retry waited anywhere from `retry_min_delay` up, and Triton's up to 1.5 times the backoff. A `Retry-After` longer than the resource's `retry_max_delay` is cut to it. Attempt counts and which errors are retried do not change.
 - **operonx-agents requires operonx 1.23.0**, for `retry_call`.
 - **An LLM resource's transport retry (`max_retries:`) retries what `TRANSIENT` retries:** a timeout or a lost connection from any client library (`httpx`, `TimeoutError`), not only `openai`'s, and a project's own transient errors. A 4xx still propagates at once, and an empty answer is still retried by `retry_on_empty`.

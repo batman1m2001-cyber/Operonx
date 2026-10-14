@@ -38,8 +38,11 @@ them. A resume runs them; ``answers`` give a parked interrupt its response.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import queue
 import threading
+import time
+import weakref
 from collections import Counter
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -148,9 +151,9 @@ class RunRecorder:
         # inside, in journal order
         self._emitted: List[Tuple[Key, Tuple[Key, ...], List[Any]]] = []
         self._pending: List[Step] = []  # durability="exit"
-        self._writer: Optional[_Writer] = (
-            _Writer(journal, run_id) if durability == "async" else None
-        )
+        # the journal's one writer thread, shared by every run that records
+        # into it: steps of many runs go in one transaction (`_SharedWriter`)
+        self._writer: _SharedWriter = _writer_for(journal)
         # stopping on purpose: the status the run stops with, once asked
         self.stopping: Optional[str] = None
         #: Set by the engine when the run did stop so: ``"interrupted"`` or
@@ -379,22 +382,30 @@ class RunRecorder:
             **fields,
         )
         if self.durability == "sync":
-            await asyncio.to_thread(self.journal.append, self.run_id, [step])
-        elif self._writer is not None:
-            self._writer.put(step)
+            # committed before the scheduler sees the event; the commit is
+            # shared with whatever other runs have waiting (group commit)
+            await asyncio.wrap_future(self._writer.append(self.run_id, [step], wait=True))
+        elif self.durability == "async":
+            self._writer.append(self.run_id, [step])
         else:
             self._pending.append(step)
 
-    def close(self, status: str) -> None:
-        """Make every step durable, then record *status*. Blocking: the
-        engine calls it from a thread, or directly on the cancel path."""
+    def _end(self, status: str) -> "concurrent.futures.Future":
+        """Hand the rest of the run to the writer: its steps (``"exit"``),
+        then *status*. The future is done when all of it is written."""
         if self._pending:
             steps, self._pending = self._pending, []
-            self.journal.append(self.run_id, steps)
-        if self._writer is not None:
-            writer, self._writer = self._writer, None
-            writer.close()
-        self.journal.set_status(self.run_id, status)
+            self._writer.append(self.run_id, steps)
+        return self._writer.finish(self.run_id, status)
+
+    def close(self, status: str) -> None:
+        """Make every step durable, then record *status*. Blocking: the
+        engine's cancel path calls it directly (`aclose` otherwise)."""
+        self._end(status).result()
+
+    async def aclose(self, status: str) -> None:
+        """``close``, awaited: no thread is held while the writer writes."""
+        await asyncio.wrap_future(self._end(status))
 
     # -- resume -----------------------------------------------------------------
 
@@ -461,44 +472,155 @@ class _Emitting:
         self._queue.put_nowait(item)
 
 
-class _Writer:
-    """``durability="async"``: one thread appends steps in order, in batches.
-    A step that cannot be journalled stops the writer; the run fails at its
-    next step with the reason."""
+class _SharedWriter:
+    """The writer of one journal, shared by every run recording into it.
 
-    def __init__(self, journal: Journal, run_id: str):
-        self.journal, self.run_id = journal, run_id
-        self.error: Optional[BaseException] = None
-        self._q: "queue.Queue[Optional[Step]]" = queue.Queue()
-        self._thread = threading.Thread(target=self._loop, name=f"journal:{run_id}", daemon=True)
-        self._thread.start()
+    One thread takes every run's steps and ends, in the order they were
+    given, and writes all it has waiting in one transaction where the
+    journal can (``Journal.write``): a commit for many runs, where a thread
+    and a commit per run serialized on SQLite's single writer. A run whose
+    write fails fails alone: the batch is written op by op to find it, and
+    that run's next step (or its end) raises the reason.
+    """
 
-    def put(self, step: Step) -> None:
-        if self.error is not None:
-            raise JournalError(f"the journal stopped recording run {self.run_id}: {self.error}")
-        self._q.put(step)
+    #: Seconds a writer with nothing to write waits before its thread ends;
+    #: the next write starts another.
+    IDLE = 5.0
+    #: Seconds a batch nobody waits on (``"async"`` steps) waits for more
+    #: before it is written: a run's steps, and its end, go in one commit
+    #: instead of one each. A waited item (a ``"sync"`` step, an end) cuts
+    #: it short.
+    LINGER = 0.002
+
+    def __init__(self, journal: Journal):
+        # weakly: this writer is the journal's value in `_WRITERS`, and a
+        # strong reference back would keep every journal (and a thread) alive
+        self._journal = weakref.ref(journal)
+        self.errors: Dict[str, BaseException] = {}
+        self._q: "queue.Queue[tuple]" = queue.Queue()
+        self._lock = threading.Lock()
+        self._thread: Optional[threading.Thread] = None
+
+    def _put(self, item: tuple) -> None:
+        with self._lock:
+            self._q.put(item)
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(
+                    target=self._loop, name="journal-writer", daemon=True
+                )
+                self._thread.start()
+
+    def append(
+        self, run_id: str, steps: Sequence[Step], wait: bool = False
+    ) -> Optional["concurrent.futures.Future"]:
+        error = self.errors.get(run_id)
+        if error is not None:
+            raise JournalError(f"the journal stopped recording run {run_id}: {error}")
+        done = concurrent.futures.Future() if wait else None
+        self._put(("append", run_id, list(steps), done))
+        return done
+
+    def finish(self, run_id: str, status: str) -> "concurrent.futures.Future":
+        done: concurrent.futures.Future = concurrent.futures.Future()
+        self._put(("status", run_id, status, done))
+        return done
 
     def _loop(self) -> None:
-        stop = False
-        while not stop:
-            batch = [self._q.get()]
+        while True:
+            try:
+                first = self._q.get(timeout=self.IDLE)
+            except queue.Empty:
+                with self._lock:  # nothing came: end, unless a put just did
+                    if self._q.empty():
+                        self._thread = None
+                        return
+                continue
+            batch = [first]
             while True:
                 try:
                     batch.append(self._q.get_nowait())
                 except queue.Empty:
                     break
-            if None in batch:
-                stop = True
-                batch = [s for s in batch if s is not None]
-            if batch and self.error is None:
-                try:
-                    self.journal.append(self.run_id, batch)
-                except BaseException as exc:  # noqa: BLE001 — surfaced by put()/close()
-                    self.error = exc
-                    LOGGER.error("journal for run %s stopped: %s", self.run_id, exc)
+            if all(item[3] is None for item in batch):
+                until = time.monotonic() + self.LINGER
+                while (left := until - time.monotonic()) > 0:
+                    try:
+                        item = self._q.get(timeout=left)
+                    except queue.Empty:
+                        break
+                    batch.append(item)
+                    if item[3] is not None:
+                        break
+            try:
+                self._write(batch)
+            except BaseException as exc:  # noqa: BLE001 — the thread must outlive any batch
+                LOGGER.exception("journal writer: a batch could not be written")
+                for _op, _run, _arg, done in batch:
+                    _settle(done, JournalError(f"the journal writer failed: {exc}"))
 
-    def close(self) -> None:
-        self._q.put(None)
-        self._thread.join()
-        if self.error is not None:
-            raise JournalError(f"the journal stopped recording run {self.run_id}: {self.error}")
+    def _write(self, batch: List[tuple]) -> None:
+        """Write *batch*, then settle each of its futures — every one, so no
+        run waits forever on a step the writer took."""
+        journal = self._journal()
+        if journal is None:  # its runs are gone with it
+            for *_, done in batch:
+                _settle(done, JournalError("the journal was closed"))
+            return
+        ops = [(op, run, arg) for op, run, arg, _ in batch if run not in self.errors]
+        written = False
+        write = getattr(journal, "write", None)
+        if write is not None and ops:
+            try:
+                write(ops)
+                written = True
+            except BaseException:  # noqa: BLE001 — find the run at fault, below
+                pass
+        if not written:
+            for op, run, arg in ops:
+                if run in self.errors:
+                    continue
+                try:
+                    if op == "append":
+                        journal.append(run, arg)
+                    else:
+                        journal.set_status(run, arg)
+                except BaseException as exc:  # noqa: BLE001 — surfaced to the run
+                    self.errors[run] = exc
+                    LOGGER.error("journal for run %s stopped: %s", run, exc)
+        del journal
+        for op, run, _arg, done in batch:
+            error = self.errors.pop(run, None) if op == "status" else self.errors.get(run)
+            _settle(
+                done,
+                JournalError(f"the journal stopped recording run {run}: {error}")
+                if error is not None
+                else None,
+            )
+
+
+def _settle(done: Optional["concurrent.futures.Future"], error: Optional[BaseException]) -> None:
+    """Resolve *done* — unless its waiter is gone: a cancelled run cancels
+    the future it awaited (``asyncio.wrap_future``), and setting it then
+    would raise in the writer's thread."""
+    if done is None or done.cancelled():
+        return
+    try:
+        if error is None:
+            done.set_result(None)
+        else:
+            done.set_exception(error)
+    except concurrent.futures.InvalidStateError:  # cancelled just now
+        pass
+
+
+#: The writer of each journal in this process, made on first use.
+_WRITERS: "weakref.WeakKeyDictionary[Journal, _SharedWriter]" = weakref.WeakKeyDictionary()
+_WRITERS_LOCK = threading.Lock()
+
+
+def _writer_for(journal: Journal) -> _SharedWriter:
+    with _WRITERS_LOCK:
+        writer = _WRITERS.get(journal)
+        if writer is None:
+            writer = _WRITERS[journal] = _SharedWriter(journal)
+        return writer
