@@ -25,9 +25,9 @@ from typing import (
 from operonx.core.loggings import LOGGER, format_event, format_log_data
 from operonx.core.media import Media
 from operonx.core.ops import _cache
-from operonx.core.ops._events import Failure, Interrupt
+from operonx.core.ops._events import Failure, HandOff, Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
-from operonx.core.policy import _Deadline, backoff, fail_fast, op_policy
+from operonx.core.policy import _Deadline, _handed_off, backoff, fail_fast, op_policy
 from operonx.core.runtime import TaskFailed, TaskFinished, TaskStarted, _current_frame, _Frame
 from operonx.core.states.cell import DEFAULT_CONTEXT
 
@@ -372,6 +372,8 @@ class BaseOp(ABC):
         # OpPolicy(retry, timeout), or None for an op that sets neither —
         # the common case, which then runs exactly the path it always did.
         "_policy",
+        # `retry=False`: never retried, not even by the run's default retry.
+        "_retry_off",
         # True when the op has error edges (`op.on_error(handler)`): its
         # failure is then yielded as a `Failure` for the scheduler to route.
         # Stamped by the parent graph's build.
@@ -439,7 +441,8 @@ class BaseOp(ABC):
         self.delay = delay
         # retry=Retry(...) / timeout=Timeout(...); checked against the op's
         # core in _set_core, once its bound is known.
-        self._policy = op_policy(retry, timeout)
+        self._retry_off = retry is False
+        self._policy = op_policy(None if retry is False else retry, timeout)
         self._error_routes = False
         self.transient = transient
         self._transient_vars = None  # stamped post-compile by StateSchema
@@ -958,7 +961,9 @@ class BaseOp(ABC):
         holds those bytes."""
         media = getattr(inputs, "media", None)
         if media:
-            inputs = {k: (media[k] if k in media and v is media[k].data else v) for k, v in inputs.items()}
+            inputs = {
+                k: (media[k] if k in media and v is media[k].data else v) for k, v in inputs.items()
+            }
         normed, _ = self.normalize_trace_io(self._filter_for_trace(inputs), {})
         return normed
 
@@ -1158,6 +1163,9 @@ class BaseOp(ABC):
         the item would cancel whatever the consumer's task awaits next.
         """
         retry, timeout = self._policy
+        if retry is None and not self._retry_off:
+            run_policy = state._run_policy
+            retry = run_policy.retry if run_policy is not None else None
         attempts = retry.max_attempts if retry is not None else 1
         run_s = timeout.run if timeout is not None else None
         idle_s = timeout.idle if timeout is not None else None
@@ -1197,7 +1205,7 @@ class BaseOp(ABC):
                     raise
                 delay = retry.delay(attempt)
                 self._record_retry(
-                    state, wf_trace, upstreams, ctx, inputs, attempt, error, started, delay
+                    state, wf_trace, upstreams, ctx, inputs, attempt, error, started, delay, retry
                 )
                 # Not holding the run's slots while it waits (`backoff`).
                 await backoff(delay, self.name, ctx)
@@ -1336,6 +1344,24 @@ class BaseOp(ABC):
             )
         return out
 
+    def _default_retry(
+        self, state: "MemoryState", error: BaseException, yielded: int, attempt: int
+    ) -> Any:
+        """The run's default ``Retry`` when it retries this failed attempt, else None.
+
+        For an op without a policy of its own (one with ``retry=`` or
+        ``timeout=`` runs ``_exec_with_policy``, which reads the default
+        itself) that has yielded nothing yet and did not opt out with
+        ``retry=False``. Called on the failure path only.
+        """
+        if yielded or self._policy is not None or self._retry_off:
+            return None
+        run_policy = state._run_policy
+        retry = run_policy.retry if run_policy is not None else None
+        if retry is None or attempt >= retry.max_attempts or not retry.retries(error):
+            return None
+        return retry
+
     def _record_retry(
         self,
         state: "MemoryState",
@@ -1347,6 +1373,7 @@ class BaseOp(ABC):
         error: BaseException,
         started: float,
         delay: float,
+        retry: Any,
     ) -> None:
         """Log and trace one failed attempt that ``retry=`` is about to repeat.
 
@@ -1357,7 +1384,6 @@ class BaseOp(ABC):
         of the run. The last attempt of an op that never succeeds is the
         ordinary ``error`` node.
         """
-        retry = self._policy.retry
         LOGGER.warning(
             format_event(
                 "op_retry",
@@ -1523,88 +1549,125 @@ class BaseOp(ABC):
                     _inputs, frame, state, _wf_trace, _v3_upstreams, ctx_for_end
                 )
             prefix = self._item_prefix
-            async for result in _source:
-                ctx = base_ctx + (f"[{prefix}{idx}]",) if self.is_gen else context_id
-                # Interrupt is a scheduler control event, not a result dict.
-                # Forward it untouched — _pump puts it on the queue as-is.
-                if isinstance(result, Interrupt):
-                    yield ctx, result
-                    idx += 1
-                    if frame.item is not None:
-                        frame.item, frame.counts = idx, None
-                    _yield_start = perf_counter()
-                    continue
-                self.store_result(state, result, ctx)
-                _outputs = result
-                if self.is_gen and _tracing:
-                    _yield_end = perf_counter()
-                    _now = datetime.now(timezone.utc)
-                    self._store_metrics(
+            # A run's default `retry=` (`Operon(retry=)`, `[retry]`) is looked
+            # at only here, when an attempt of an op without its own policy
+            # failed: an op that does not fail runs the path it always did.
+            while True:
+                try:
+                    async for result in _source:
+                        ctx = base_ctx + (f"[{prefix}{idx}]",) if self.is_gen else context_id
+                        # Interrupt is a scheduler control event, not a result dict.
+                        # Forward it untouched — _pump puts it on the queue as-is.
+                        if isinstance(result, Interrupt):
+                            yield ctx, result
+                            idx += 1
+                            if frame.item is not None:
+                                frame.item, frame.counts = idx, None
+                            _yield_start = perf_counter()
+                            continue
+                        self.store_result(state, result, ctx)
+                        _outputs = result
+                        if self.is_gen and _tracing:
+                            _yield_end = perf_counter()
+                            _now = datetime.now(timezone.utc)
+                            self._store_metrics(
+                                state,
+                                ctx,
+                                start_time=_now,
+                                end_time=_now,
+                                duration_ms=(_yield_end - _yield_start) * 1000,
+                            )
+                        elif not self.is_gen and _tracing:
+                            # Batch ops: record timing BEFORE yield. The yield
+                            # suspends this generator until the scheduler resumes
+                            # it, inflating duration if measured in finally.
+                            _batch_end = perf_counter()
+                            end_time = datetime.now(timezone.utc)
+                            duration_ms = (_batch_end - perf_start) * 1000
+                        if not self.is_gen and self.cache is not None:
+                            _cache_store.put(_cache_key, result)
+                        # V3 tracing: one OpExecution per yield for generator ops.
+                        # ctx already carries the yield sub-index (`("main","[T]","[i]")`),
+                        # so op_id is unique per yield → downstream consumers of
+                        # yield i produce matching UpstreamRef.from_op_id.
+                        if _wf_trace is not None and self.is_gen and self.transient:
+                            # A transient op is a stream: one node per yield means
+                            # 30,000 spans for a ten-minute call, and every one of
+                            # them holds its ctx for the life of the run. Count them
+                            # and emit a single span at EOF instead — see the summary
+                            # node below.
+                            _transient_yields += 1
+                            _transient_last_ctx = ctx
+                        elif _wf_trace is not None and self.is_gen:
+                            _yield_id = make_op_id(self.full_name, ctx)
+                            _inputs_from = _trace_in_at
+                            if _trace_in is None:
+                                _trace_in, _trace_in_at = self._trace_inputs(_inputs), _yield_id
+                            _wf_trace.record(
+                                OpExecution(
+                                    op_id=_yield_id,
+                                    op_name=self.name,
+                                    op_full_name=self.full_name,
+                                    ctx=ctx,
+                                    start_time=_yield_start,
+                                    end_time=perf_counter(),
+                                    # Shallow copies — the op may reuse its dicts —
+                                    # with @op(exclude=/include=) applied. Every
+                                    # trace consumer reads these, so filtering at
+                                    # the source is what makes the filter mean
+                                    # anything at all. The inputs are one per
+                                    # invocation: every yield shares them, and an
+                                    # LLM stream renders its request once, not
+                                    # once per frame — and stores it once.
+                                    inputs=_trace_in,
+                                    inputs_from=_inputs_from,
+                                    outputs=self._trace_outputs(result)
+                                    if isinstance(result, dict)
+                                    else {"_": result},
+                                    upstreams=_v3_upstreams,
+                                    status=STATUS_OK,
+                                    op_type=str(self.type),
+                                    is_yield=True,
+                                    attempt=frame.attempt,
+                                )
+                            )
+                        yield ctx, result
+                        idx += 1
+                        if frame.item is not None:
+                            frame.item, frame.counts = idx, None
+                        _yield_start = perf_counter()
+                    break
+                except Exception as _failed:
+                    _retry = self._default_retry(state, _failed, idx, frame.attempt)
+                    if _retry is None:
+                        raise
+                    _delay = _retry.delay(frame.attempt)
+                    self._record_retry(
                         state,
-                        ctx,
-                        start_time=_now,
-                        end_time=_now,
-                        duration_ms=(_yield_end - _yield_start) * 1000,
+                        _wf_trace,
+                        _v3_upstreams,
+                        ctx_for_end,
+                        _inputs,
+                        frame.attempt,
+                        _failed,
+                        perf_start,
+                        _delay,
+                        _retry,
                     )
-                elif not self.is_gen and _tracing:
-                    # Batch ops: record timing BEFORE yield. The yield
-                    # suspends this generator until the scheduler resumes
-                    # it, inflating duration if measured in finally.
-                    _batch_end = perf_counter()
-                    end_time = datetime.now(timezone.utc)
-                    duration_ms = (_batch_end - perf_start) * 1000
-                if not self.is_gen and self.cache is not None:
-                    _cache_store.put(_cache_key, result)
-                # V3 tracing: one OpExecution per yield for generator ops.
-                # ctx already carries the yield sub-index (`("main","[T]","[i]")`),
-                # so op_id is unique per yield → downstream consumers of
-                # yield i produce matching UpstreamRef.from_op_id.
-                if _wf_trace is not None and self.is_gen and self.transient:
-                    # A transient op is a stream: one node per yield means
-                    # 30,000 spans for a ten-minute call, and every one of
-                    # them holds its ctx for the life of the run. Count them
-                    # and emit a single span at EOF instead — see the summary
-                    # node below.
-                    _transient_yields += 1
-                    _transient_last_ctx = ctx
-                elif _wf_trace is not None and self.is_gen:
-                    _yield_id = make_op_id(self.full_name, ctx)
-                    _inputs_from = _trace_in_at
-                    if _trace_in is None:
-                        _trace_in, _trace_in_at = self._trace_inputs(_inputs), _yield_id
-                    _wf_trace.record(
-                        OpExecution(
-                            op_id=_yield_id,
-                            op_name=self.name,
-                            op_full_name=self.full_name,
-                            ctx=ctx,
-                            start_time=_yield_start,
-                            end_time=perf_counter(),
-                            # Shallow copies — the op may reuse its dicts —
-                            # with @op(exclude=/include=) applied. Every
-                            # trace consumer reads these, so filtering at
-                            # the source is what makes the filter mean
-                            # anything at all. The inputs are one per
-                            # invocation: every yield shares them, and an
-                            # LLM stream renders its request once, not
-                            # once per frame — and stores it once.
-                            inputs=_trace_in,
-                            inputs_from=_inputs_from,
-                            outputs=self._trace_outputs(result)
-                            if isinstance(result, dict)
-                            else {"_": result},
-                            upstreams=_v3_upstreams,
-                            status=STATUS_OK,
-                            op_type=str(self.type),
-                            is_yield=True,
-                            attempt=frame.attempt,
-                        )
-                    )
-                yield ctx, result
-                idx += 1
-                if frame.item is not None:
-                    frame.item, frame.counts = idx, None
-                _yield_start = perf_counter()
+                    del _failed
+                if _handed_off(self.name, ctx_for_end):
+                    # Run inline by the scheduler's main loop, which must not
+                    # sleep: hand this generator to a task of its own, and
+                    # wait there. The main loop's frame is its own again.
+                    _current_frame.set(prev_frame)
+                    yield ctx_for_end, HandOff(self.name, ctx_for_end, "", {})
+                    _current_frame.set(frame)
+                await backoff(_delay, self.name, ctx_for_end)
+                frame.attempt += 1
+                if _wf_trace is not None and _wf_trace._task_listeners:
+                    _wf_trace.emit_task(TaskStarted(self.full_name, ctx_for_end, frame.attempt))
+                perf_start = _yield_start = perf_counter()
+                _source = self._exec_core(_inputs)
 
         except asyncio.CancelledError:
             # Mark for the OP_END emit below. finally still runs because Python

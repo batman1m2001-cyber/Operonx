@@ -495,3 +495,15 @@ def test_the_guide_block_follows_the_project(tmp_path):
     (root / "uv.lock").write_text("")
     guide.sync(root)  # moved to uv
     assert "uv lock --upgrade-package operonx" in (root / "AGENTS.md").read_text()
+
+
+def test_the_retry_block_is_off_and_parses_once_uncommented():
+    from operonx.app.manifest import Manifest, _toml
+    from operonx.core.policy import Retry
+
+    toml = plan("hello", "demo")["operonx.toml"].decode()
+    assert Manifest.from_dict(_toml.loads(toml)).retry is None
+    on = re.sub(r"^# (\[retry\]|max_attempts|initial|max_interval)", r"\1", toml, flags=re.M)
+    assert Manifest.from_dict(_toml.loads(on)).retry == Retry(
+        max_attempts=3, initial=0.5, max_interval=30
+    )

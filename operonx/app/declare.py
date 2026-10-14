@@ -599,6 +599,7 @@ def load_declared(manifest: Any) -> Any:
     # one, and then `[]` is a choice ("trace nothing"), not an empty default.
     mine = {k: v for k, v in obj.manifest.project.items() if v or k == "trace"}
     project = {**manifest.project, **mine}
+    from .manifest import settle_retry
     from .tracing import check_names, settle_serves
 
     # `[tracing]` lives only in the file. Its names are checked against
@@ -613,8 +614,11 @@ def load_declared(manifest: Any) -> Any:
         # `[project] trace` and `[tracing]` in the file reach services the
         # object left without their own; recomputed from what each service
         # declared, so the object's default does not pass for its own
-        serves=settle_serves(obj.manifest.serves, project.get("trace"), tracing),
+        serves=settle_retry(
+            settle_serves(obj.manifest.serves, project.get("trace"), tracing), manifest.retry
+        ),
         tracing=tracing,
+        retry=manifest.retry,
         source=manifest.source,
         src=manifest.src,
         graphs=obj.manifest.graphs or manifest.graphs,
@@ -669,10 +673,20 @@ def settle_jobs(jobs: Dict[str, Any], manifest: Any, root: Path) -> Dict[str, An
         where = str(manifest.source) if manifest.source else "<manifest>"
         check_names(tracing, where, None, _job_names(jobs.values()))
     trace = manifest.project.get("trace")
+    retry = getattr(manifest, "retry", None)
     for job in jobs.values():
         inherit_trace(job, trace, tracing)
         _place(job, root, getattr(manifest, "jobs_dir", None))
+        _op_retry(job, retry)
     return jobs
+
+
+def _op_retry(job: Any, retry: Any) -> None:
+    """``[retry]``: the default retry of the ops a job (and each step) runs.
+    Not the job's own ``retry=``, which runs a failed item again."""
+    job.op_retry = retry
+    for step in job.steps or ():
+        _op_retry(step, retry)
 
 
 def _place(job: Any, root: Path, jobs_dir: Optional[str]) -> None:

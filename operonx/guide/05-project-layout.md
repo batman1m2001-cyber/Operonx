@@ -85,6 +85,9 @@ overlay = "resources.yaml"
 
 [tracing]                 # where every service's and job's runs are recorded
 sinks = ["local"]         # e.g. ["trace_clickhouse:default"]: a resources.yaml key
+
+[retry]                   # optional: an op that hits a timeout, 429 or 5xx runs again
+max_attempts = 3          # in every job and request-reply service (guide 06)
 ```
 
 ```yaml file=resources.yaml

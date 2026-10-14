@@ -1,6 +1,6 @@
 # One retry model for operonx: a project default, specific overrides
 
-**Status:** 2026-10-14. R1 done; R2–R5 wait. Every "today" below was read in the code.
+**Status:** 2026-10-14. R1 and R2 done; R3–R5 wait. Every "today" below was read in the code.
 
 ## What exists today: eleven retry mechanisms
 
@@ -110,6 +110,13 @@ project   operonx.toml  [retry]                ← the default
 - *Considered and not proposed:* moving the retry out of the op into the scheduler's queue, as a delayed re-dispatch. It frees the slot the same way, but it is a large refactor of the main loop for no extra gain. Surviving a crash during a backoff is already covered by the journal: a resume reruns the op.
 
 ### R2. A project and engine default, with per-op opt-out. *Essential · small to medium · library*
+- **Done.** What was built, and how it differs from the bullets below:
+  - `Operon(g, retry=)`, `[retry]` (`max_attempts`, `initial`, `backoff`, `max_interval`, `jitter`; `transient` comes with R4), `@op(retry=False)`, and `op(..., retry=False)` for one use; `@graph` refuses `retry=False`.
+  - `op.run`'s item loop sits in a retry loop whose decision runs only in its `except`. An op with its own `timeout=` reads the default inside `_exec_with_policy`.
+  - A plain `def` op stays inline. When it fails, it yields a `HandOff` (a `Failure` subclass, so the success branch tests nothing new). The main loop then carries its generator on in a pump task, where the backoff gives its slot back (R1). The durable recorder passes the `HandOff` through without journalling a step.
+  - `[retry]` reaches request-response services through `options["retry"]` and jobs through `settle_jobs` (`job.op_retry`). It does not reach stream doors, ASGI mounts, or an `Operon` given to a job as is.
+  - **Known limit:** an op inside a nested graph whose ops are all plain `def` (such a graph runs inline in its parent) still blocks the parent's main loop while it waits. It is retried correctly.
+  - **Measured** (8-op chain, 400 concurrent runs, pinned, alternating): with no default, main 1244–1296 µs against R2 1241–1275 µs. With the default on and off in one process, +2–6 µs per run at the median, a fixed cost per scheduler run (`_Slots`, `current_task()`). A first version cost +10–14 µs because of a task → context → `_Slots` cycle, which is now broken when the run ends.
 - `[retry]` in `operonx.toml` and `Operon(g, retry=...)`; `@op(retry=False)` opts out; precedence as above.
 - Jobs and Services built from the application pick up the project default.
 - Ops that already run their own semantic re-asks keep them: `LLMOp(max_retries=)` and agents' `output_retries`, layer 10, are a different thing (a new prompt, not the same call again).
@@ -147,7 +154,7 @@ project   operonx.toml  [retry]                ← the default
 | # | Item | Impact | Effort | Behaviour change |
 |---|---|---|---|---|
 | 1 | R1 backoff releases its slot **(done)** | high under outages | small | none, only waits |
-| 2 | R2 project/engine default + `retry=False` | high | small to medium | none until `[retry]` is set |
+| 2 | R2 project/engine default + `retry=False` **(done)** | high | small to medium | none until `[retry]` is set |
 | 3 | R4 one transient classifier | medium | small | none |
 | 4 | R3 one vocabulary + transport default on | medium | medium | **the LLM retries transient errors by default** |
 | 5 | R5 retries in trace and studio | medium | small to medium | none |

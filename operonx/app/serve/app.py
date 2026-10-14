@@ -52,6 +52,7 @@ def compile_graph(
     bind: Optional[Dict[str, Any]] = None,
     trace: Any = None,
     concurrency: Optional[int] = None,
+    retry: Any = None,
     where: str = "graph",
 ) -> Any:
     """An ``Operon`` from a ``module:attr`` entry point, the way anything
@@ -112,6 +113,8 @@ def compile_graph(
         kwargs["params"] = params
     if trace:
         kwargs["trace"] = list(trace) if isinstance(trace, (list, tuple)) else [str(trace)]
+    if retry is not None:
+        kwargs["retry"] = retry
 
     if getattr(graph_fn, "_operonx_graph", False):
         # Named after the graph, explicitly: built inside `Operon(...)` it
@@ -162,7 +165,8 @@ def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
     """Compile the graph a `[[serve]]` entry names — one of its variants,
     when it declares them.
 
-    `trace` and `concurrency` ride in the spec's free-form options. They
+    `trace`, `concurrency` and `retry` (the project's ``[retry]``, see
+    `manifest.settle_retry`) ride in the spec's free-form options. They
     are engine settings rather than transport settings, but they have to
     be declarable: a manifest that boots the graph and silently drops its
     trace consumers would take a project's observability away as the
@@ -178,6 +182,7 @@ def engine_for(spec: ServeSpec, variant: Optional[str] = None) -> Any:
         bind=bind,
         trace=spec.options.get("trace"),
         concurrency=spec.options.get("concurrency"),
+        retry=spec.options.get("retry"),
         where=where,
     )
 

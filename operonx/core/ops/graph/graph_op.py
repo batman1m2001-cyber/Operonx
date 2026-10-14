@@ -146,6 +146,11 @@ class GraphOp(BaseOp):
         super().__init__(**kwargs)
         if self._policy is not None:
             self._check_graph_policy(*self._policy)
+        if self._retry_off:
+            raise TypeError(
+                f"Graph '{self.name}': retry=False applies to an op, not to a graph — a "
+                f"graph is never retried. Put retry=False on the ops inside that must not be."
+            )
         self._token = None
         self._is_building = True
         self._ops: Dict[str, BaseOp] = {}

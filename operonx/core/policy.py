@@ -243,7 +243,7 @@ class OpPolicy(NamedTuple):
 
 def op_policy(retry: Any, timeout: Any) -> Optional[OpPolicy]:
     """Check ``retry=`` / ``timeout=`` as given to an op, and pair them."""
-    if retry is not None and not isinstance(retry, Retry):
+    if retry is not None and retry is not False and not isinstance(retry, Retry):
         hint = f"Retry(max_attempts={retry})" if isinstance(retry, int) else "Retry(...)"
         raise TypeError(f"retry= takes a Retry, as in retry={hint}; got {retry!r}")
     if timeout is not None and not isinstance(timeout, Timeout):
@@ -253,6 +253,8 @@ def op_policy(retry: Any, timeout: Any) -> Optional[OpPolicy]:
             else "Timeout(run=...)"
         )
         raise TypeError(f"timeout= takes a Timeout, as in timeout={hint}; got {timeout!r}")
+    if retry is False:
+        retry = None  # the op opts out of a default; kept as `op._retry_off`
     if retry is None and timeout is None:
         return None
     return OpPolicy(retry, timeout)
@@ -310,6 +312,9 @@ class RunPolicy:
 
     errors: str = "record"
     limiter: Optional[asyncio.Semaphore] = None
+    #: The default ``Retry`` of every op without one of its own
+    #: (``Operon(retry=)``, ``[retry]`` in ``operonx.toml``).
+    retry: Optional["Retry"] = None
 
     @property
     def fail_fast(self) -> bool:
@@ -334,7 +339,7 @@ class _Slots:
     what it holds again so far; the pump reads it if it ends mid-wait.
     """
 
-    __slots__ = ("sem", "shared", "tasks", "away")
+    __slots__ = ("sem", "shared", "tasks", "away", "main")
 
     def __init__(
         self, sem: asyncio.Semaphore, shared: Optional[asyncio.Semaphore], tasks: dict
@@ -343,6 +348,9 @@ class _Slots:
         self.shared = shared
         self.tasks = tasks  # the scheduler's tasks_by_ctx: ctx -> {op name: pump task}
         self.away: dict = {}
+        # The task of the scheduler's main loop, which runs plain `def` ops
+        # inline: one of those waiting out a retry is handed to a task.
+        self.main = asyncio.current_task()
 
     async def wait(self, task: asyncio.Task, delay: float) -> None:
         """Sleep *delay* seconds without the slots; take them back after,
@@ -362,6 +370,19 @@ class _Slots:
 
 #: The running scheduler's slots; set per scheduler run, inherited by its pumps.
 _SLOTS: ContextVar[Optional[_Slots]] = ContextVar("operonx_slots", default=None)
+
+
+def _handed_off(name: str, ctx: tuple) -> bool:
+    """Is op *name* at *ctx* run inline by its scheduler's main loop?
+
+    Asked on the failure path only, before a retry's backoff: such an op is
+    handed to a task of its own (``HandOff``) rather than sleep there.
+    """
+    slots = _SLOTS.get()
+    if slots is None or slots.main is not asyncio.current_task():
+        return False
+    bucket = slots.tasks.get(ctx)
+    return bucket is None or bucket.get(name) is None
 
 
 async def backoff(delay: float, name: str, ctx: tuple) -> None:
