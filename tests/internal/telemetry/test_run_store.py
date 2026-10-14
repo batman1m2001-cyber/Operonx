@@ -605,3 +605,41 @@ def test_the_team_backends_say_what_they_need():
         open_run_store({"backend": "clickhouse"})
     with pytest.raises(ValueError, match="postgres, mongo"):
         open_run_store({"backend": "cassandra"})
+
+
+# -- a journalled run stopped on purpose, and resumed (GAP_PLAN S1) -------------------
+
+
+def test_a_parked_run_is_listed_waiting_and_its_resume_is_read_again(tmp_path):
+    from operonx.core.workflow_trace import STATUS_CANCELLED
+
+    store = FilesRunStore(root=tmp_path, refresh_every=0)
+    parked = _trace(
+        "r1",
+        wall=NOW,
+        nodes=[_exec("plan", 100.0, 5), _exec("ask", 100.01, 1, status=STATUS_CANCELLED)],
+    )
+    parked.stopped = "interrupted"
+    store.put_trace(parked)
+    (row,) = store.list_runs().items
+    # the step the stop cut off is not a failure: the run waits
+    assert (row.status, row.errors) == ("interrupted", 0)
+    assert [r.trace_id for r in store.list_runs(RunFilter(status="interrupted")).items] == ["r1"]
+
+    # resumed under the same id, by another writer: the directory is written again
+    time.sleep(0.01)
+    ask = _exec("ask", 100.01, 1, status=STATUS_CANCELLED)
+    ask.op_id += "@stopped"
+    whole = _trace("r1", wall=NOW, nodes=[_exec("plan", 100.0, 5), ask, _exec("ask", 100.5, 1)])
+    LocalConsumer(config={"root": str(tmp_path)}).consume(whole)
+    got = store.get_run("r1")
+    assert (got.summary.status, got.summary.errors) == ("ok", 0) and len(got.nodes) == 3
+    assert store.list_runs(RunFilter(status="interrupted")).items == []
+
+
+def test_a_failed_run_stays_failed_when_cancelled_steps_are_not_a_stop():
+    from operonx.core.workflow_trace import STATUS_CANCELLED
+
+    rows = [{"op_id": "g.a#main", "op_name": "a", "status": STATUS_CANCELLED, "duration_ms": 1}]
+    summary, _ = summarize("t", rows, {"status": "ok"})
+    assert (summary.status, summary.errors) == ("error", 1)

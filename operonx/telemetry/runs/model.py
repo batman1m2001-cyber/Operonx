@@ -19,7 +19,14 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from operonx.core.workflow_trace import STATUS_OK, STATUS_RETRIED, SUBGRAPH, superseded_ids
+from operonx.core.workflow_trace import (
+    STATUS_CANCELLED,
+    STATUS_OK,
+    STATUS_RETRIED,
+    STOPPED_SUFFIX,
+    SUBGRAPH,
+    superseded_ids,
+)
 from operonx.telemetry.media import fields_of
 
 __all__ = [
@@ -72,7 +79,8 @@ class RunSummary:
     origin: str = "adhoc"
     #: The origin's own name: the service, the job, else the workflow.
     name: str = ""
-    #: "ok", "error", or "running": a live store's run that has not ended
+    #: "ok", "error", "running" (a live store's run that has not ended), or
+    #: "interrupted" / "drained" (a journalled run stopped on purpose)
     #: (or whose process died before it did).
     status: str = "ok"
     started_at: float = 0.0  # epoch seconds
@@ -299,6 +307,10 @@ def _first_line(text: Any, limit: int = 300) -> str:
     return (lines[-1] if lines else str(text))[:limit]
 
 
+#: How a journalled run can stop on purpose: its status, unless it failed.
+STOPPED = ("interrupted", "drained")
+
+
 def summarize(
     trace_id: str,
     rows: Iterable[Dict[str, Any]],
@@ -327,6 +339,10 @@ def summarize(
     rows = list(rows)
     # steps that failed inside a retried attempt: the attempt after it decides
     gone = superseded_ids(rows, lambda r, k: r.get(k))
+    # a journalled run stopped on purpose (parked on a question, drained):
+    # the steps its stop cut off are not failures, nor are a resumed run's
+    # steps cut off by the stop before (``<op_id>@stopped``)
+    stopped = meta.get("status") in STOPPED
     for row in rows:
         if row.get("op_type") == SUBGRAPH:
             # a nested graph's own record: its time, cost and errors are
@@ -355,9 +371,13 @@ def summarize(
         if isinstance(wall, (int, float)):
             first_wall = wall if first_wall is None else min(first_wall, wall)
         # A retried attempt is not a failure: the attempt after it decides.
+        cut = row.get("status") == STATUS_CANCELLED and (
+            stopped or str(row.get("op_id") or "").endswith(STOPPED_SUFFIX)
+        )
         if (
             row.get("status") not in (None, STATUS_OK, STATUS_RETRIED)
             and row.get("op_id") not in gone
+            and not cut
         ):
             r.errors += 1
             s.errors += 1
@@ -398,7 +418,8 @@ def summarize(
         # not ended: what failed so far is counted, the verdict waits
         s.status = "running"
     else:
-        s.status = "error" if s.errors or recorded or meta.get("status") == "error" else "ok"
+        failed = s.errors or recorded or meta.get("status") == "error"
+        s.status = "error" if failed else meta["status"] if stopped else "ok"
     if meta.get("duration_ms") is not None:
         s.duration_ms = float(meta["duration_ms"])
     elif first_start is not None and last_end is not None:
