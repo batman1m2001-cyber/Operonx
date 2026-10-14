@@ -117,8 +117,9 @@ def answer_flow(question, k):  # a setting is a graph input
   A call that can fail for a moment (a timeout, a 429, a 5xx) is retried
   by `[retry]` in `operonx.toml`, for every op of the jobs and
   request–reply services, or by `@op(retry=Retry(...))` for one op. An op
-  that must run once (a payment, an email) gets `@op(retry=False)`. See
-  guide page 06.
+  that must run once (a payment, an email) gets `@op(retry=False)`. A
+  service's own "try later" error goes in `[retry] transient`. See guide
+  page 06.
 - To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
   re-read `.operonx/guide/README.md`. After adding an operonx package
   (`{{add}} operonx-agents`), run `{{run}}operonx guide`.

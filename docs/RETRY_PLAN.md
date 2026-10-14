@@ -1,6 +1,6 @@
 # One retry model for operonx: a project default, specific overrides
 
-**Status:** 2026-10-14. R1 and R2 done; R3–R5 wait. Every "today" below was read in the code.
+**Status:** 2026-10-14. R1, R2 and R4 done; R3 and R5 wait. Every "today" below was read in the code.
 
 ## What exists today: eleven retry mechanisms
 
@@ -134,6 +134,11 @@ project   operonx.toml  [retry]                ← the default
   - This is the one behaviour change. It fixes P5, and `mark_retried` keeps it from multiplying with an op's retry.
 
 ### R4. One list of transient errors. *Important · small · library*
+- **Done.** What was built:
+  - `TRANSIENT` took in Triton's gRPC codes (`policy._grpc_code`). Triton's `_is_transient` and the LLM's `_call_with_retry` now ask it.
+  - The LLM's rate-limit case is a 429, which `TRANSIENT` already had. Its "empty answer" is a result rather than an error, so it stays the LLM layer's `retry_on_empty`.
+  - `TRANSIENT.also(type | "module:Name")` and `[retry] transient`. Names are imported on the first failure, or by `check_transient()` as `serve` or `run` starts; a bad name fails there.
+  - It costs nothing when nothing fails: the classifier only runs on an error.
 - `TRANSIENT` becomes the single classifier:
   - it adds the LLM transport's cases (empty answer, provider rate limit) and Triton's gRPC codes;
   - it also includes what a project lists under `[retry] transient`.
@@ -155,7 +160,7 @@ project   operonx.toml  [retry]                ← the default
 |---|---|---|---|---|
 | 1 | R1 backoff releases its slot **(done)** | high under outages | small | none, only waits |
 | 2 | R2 project/engine default + `retry=False` **(done)** | high | small to medium | none until `[retry]` is set |
-| 3 | R4 one transient classifier | medium | small | none |
+| 3 | R4 one transient classifier **(done)** | medium | small | none |
 | 4 | R3 one vocabulary + transport default on | medium | medium | **the LLM retries transient errors by default** |
 | 5 | R5 retries in trace and studio | medium | small to medium | none |
 

@@ -36,6 +36,26 @@ def test_retry_is_parsed_as_a_retry():
     assert m.retry == Retry(max_attempts=4, initial=1, max_interval=60)
 
 
+def test_transient_names_are_added_to_the_one_list_and_checked_at_start():
+    from operonx.app.manifest import check_transient
+    from operonx.core.policy import TRANSIENT
+
+    kept = TRANSIENT._types, TRANSIENT._names
+    try:
+        m = _manifest("""
+        [project]
+        name = "x"
+        [retry]
+        transient = ["no_such_crm_xyz.errors:Throttled"]
+        """)
+        assert m.retry == Retry()
+        assert "no_such_crm_xyz.errors:Throttled" in TRANSIENT._names
+        with pytest.raises(ManifestError, match="no_such_crm_xyz"):
+            check_transient()
+    finally:
+        TRANSIENT._types, TRANSIENT._names = kept
+
+
 def test_without_retry_there_is_no_default():
     assert _manifest('[project]\nname = "x"\n').retry is None
 
@@ -46,6 +66,8 @@ def test_without_retry_there_is_no_default():
         ("max_retries = 3", r"\[retry\] takes max_attempts.*not max_retries"),
         ("max_attempts = 0", r"\[retry\]: Retry\(max_attempts=0\)"),
         ('max_attempts = "3"', r"\[retry\]: Retry\(max_attempts=\.\.\.\) takes an int"),
+        ('transient = "crm:Throttled"', r"\[retry\] transient is a list"),
+        ('transient = ["Throttled"]', r"\[retry\] transient is a list"),
     ],
 )
 def test_a_mistake_fails_at_load_naming_the_key(table, match):

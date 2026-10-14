@@ -338,8 +338,11 @@ class Job:
         where it is written (for this run, and every step's); *on_item* is
         called with each item's ``ItemResult`` as it is recorded; *trigger*
         says what started it (a schedule's tick), kept in the record."""
+        from operonx.app.manifest import check_transient
+
         from .runner import TRIGGER, run_job, run_steps
 
+        check_transient()  # a `[retry] transient` typo fails here, not in an item
         kept = (self.record_dir, self.on_item)
         if record_dir is not None:
             self.record_dir = Path(record_dir)

@@ -305,6 +305,7 @@ def build_app(
             'pip install "operonx[serve]"'
         ) from exc
 
+    from operonx.app.manifest import check_transient
     from operonx.app.tracing import check_sinks
 
     # A door's resume route is a door of its own (`ServeSpec.resume_spec`):
@@ -313,6 +314,7 @@ def build_app(
     # before any engine is compiled: a missing sink named with the level
     # that chose it, not a KeyError from inside the first `Operon(...)`
     check_sinks("serve", specs)
+    check_transient()
     engines = dict(engines or {})
     routes: List[Any] = []
     runners: List[Any] = []  # a ServeRunner per door, a JobClock per scheduled job
