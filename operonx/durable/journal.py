@@ -160,6 +160,14 @@ class MemoryJournal:
             header = self._get(run_id)[0]
             header.status, header.updated_at = status, time.time()
 
+    def write(self, ops: Sequence[Tuple[str, str, Any]]) -> None:
+        """Several runs' appends and ends, in order (the shared writer's batch)."""
+        for op, run_id, arg in ops:
+            if op == "append":
+                self.append(run_id, arg)
+            else:
+                self.set_status(run_id, arg)
+
     def runs(self, status: Optional[str] = None) -> List[RunHeader]:
         with self._lock:
             return [h for h, _ in self._runs.values() if status is None or h.status == status]
@@ -292,6 +300,43 @@ class SqliteJournal:
             )
         ]
         return header, steps
+
+    def write(self, ops: Sequence[Tuple[str, str, Any]]) -> None:
+        """Several runs' ``("append", run_id, steps)`` and ``("status",
+        run_id, status)``, in order, in one transaction: the shared writer's
+        batch, one commit for all of it. Fails whole; the writer then writes
+        op by op to find the run at fault."""
+        conn = self._conn()
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            following: Dict[str, int] = {}
+            for op, run_id, arg in ops:
+                if op == "append":
+                    if not arg:
+                        continue
+                    if run_id not in following:
+                        row = conn.execute(
+                            "SELECT COALESCE(MAX(seq), -1) FROM steps WHERE run_id = ?", (run_id,)
+                        ).fetchone()
+                        following[run_id] = int(row[0]) + 1
+                    first = following[run_id]
+                    conn.executemany(
+                        "INSERT INTO steps VALUES (?, ?, ?)",
+                        [(run_id, first + i, _dump(step)) for i, step in enumerate(arg)],
+                    )
+                    following[run_id] = first + len(arg)
+                else:
+                    _check_status(arg)
+                    cur = conn.execute(
+                        "UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ?",
+                        (arg, time.time(), run_id),
+                    )
+                    if cur.rowcount == 0:
+                        raise JournalError(f"no run {run_id!r} in {self.path}")
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
 
     def set_status(self, run_id: str, status: str) -> None:
         _check_status(status)

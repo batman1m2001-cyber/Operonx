@@ -97,7 +97,8 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
   - **Studio:** S1 (inbox) and S2 (retry button) use this same journal through the project's bridge.
 - **Done (2026-10-14).** Built as designed. Measured (8-op chain, one run at a time): no journal 1.4 ms p50; SQLite `async` 3.85 ms p50 and 8.6 ms p95; `exit` 3.7 ms; `sync` 7.3 ms. At 400 runs at once, throughput drops about 10×.
   - Profiled: the journal starts a writer thread per run (`recorder.py`), and SQLite has one writer, so commits serialize.
-  - **Follow-up L2b:** one shared writer per journal file, batching steps across runs into one transaction. It is not built yet; it decides whether a busy service can be journalled.
+  - **L2b, done (2026-10-14):** one shared writer per journal, batching the steps and ends of all its runs into one transaction (`_SharedWriter`). A batch nobody waits on (`async` steps) lingers up to 2 ms, so a run's steps and end go in one commit (1.6 commits per run, against 2.1 with a thread per run and 4.1 without the linger).
+    - Measured, pinned A/B against main: at 400 runs at once, 10.2–10.9 ms → 3.6–4.0 ms per run (no journal: 1.2 ms). One run at a time: `async` 3.9 → 3.8 ms p50, `exit` 3.6 → 3.2 ms, `sync` 7.5 → 7.2 ms p50 and 13.8 → 8.8 ms p95. Without a journal: unchanged.
 
 **L3. A shared journal: Postgres.** *Essential for more than one machine · medium · library.*
 - **Why:** `SqliteJournal` is one file on one machine. LangGraph ships a Postgres checkpointer for this reason: a run parked on one worker is answered on another. The journal is a `Protocol`, and the codec is already JSON, which is what a Postgres table needs.

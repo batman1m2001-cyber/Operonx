@@ -337,9 +337,11 @@ asyncio.run(main())
   `is None` test per op.
 - **What it costs:** every step is written to the journal. Measured with an
   8-op chain, one run at a time: 1.4 ms per run without a journal, about 3.8 ms
-  with `SqliteJournal` (`"async"` or `"exit"`), 7.3 ms with `"sync"`. SQLite
-  takes one writer at a time, so many runs at once share it: journal the runs
-  that must survive a crash or wait for a person, not a live call.
+  with `SqliteJournal` (`"async"` or `"exit"`), 7.3 ms with `"sync"`. The runs
+  of one journal share one writer, which puts their steps in one commit: at
+  400 runs at once a run costs about 3.7 ms with the journal against 1.2 ms
+  without. Journal the runs that must survive a crash or wait for a person,
+  not a live call.
 
 ### `[durable]`: the project's jobs and services
 

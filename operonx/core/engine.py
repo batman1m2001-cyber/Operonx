@@ -1315,7 +1315,7 @@ class Operon:
                     outcome = recorder.stopped = recorder.stopping
                     try:  # closed before the handle ends: its result and
                         # the journal's status agree
-                        await asyncio.to_thread(recorder.close, outcome)
+                        await recorder.aclose(outcome)
                     finally:
                         recorder = None
                         queue.put_nowait(None)
@@ -1355,7 +1355,7 @@ class Operon:
                     _close_nested(nest, self.graph, state, _wf_trace, outcome)
                 if recorder is not None:
                     try:
-                        await asyncio.to_thread(recorder.close, outcome)
+                        await recorder.aclose(outcome)
                     except Exception:
                         LOGGER.exception("journal: run %s could not be closed", _wf_trace.trace_id)
                 # Detach any Phase 2 observers bound at start().
