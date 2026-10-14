@@ -32,7 +32,7 @@ import traceback
 from contextvars import ContextVar
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from operonx.core.workflow_trace import (
     STATUS_CANCELLED,
@@ -344,7 +344,7 @@ class _ChildScope:
                 error=error,
                 op_type=self._op_type,
                 attempt=frame.attempt,
-                attrs=dict(handle.attrs),
+                attrs=_with_retries(handle.attrs, frame),
                 redact=handle.redact,
             )
         )
@@ -404,6 +404,10 @@ class _Frame:
         "deadline",
         "item",
         "counts",
+        # Each call the code here sent again (`policy.retry_call`), in order;
+        # None until one is. Recorded on this frame's trace node as
+        # attrs["operonx.call_retries"].
+        "retries",
     )
 
     def __init__(
@@ -423,12 +427,26 @@ class _Frame:
         self.deadline: Optional[float] = None
         self.item: Optional[int] = None
         self.counts: Optional[Dict[str, int]] = None
+        self.retries: Optional[List[Dict[str, Any]]] = None
 
     def child_base(self) -> Tuple[str, ...]:
         """The ctx of the record a child opened now hangs under."""
         if self.item is None:
             return self.ctx
         return self.ctx + (f"[{getattr(self.op, '_item_prefix', '')}{self.item}]",)
+
+
+def _with_retries(attrs: Dict[str, Any], frame: "_Frame") -> Dict[str, Any]:
+    """A trace node's attrs, with the calls its code sent again, if any."""
+    out = dict(attrs)
+    if frame.retries:
+        out[CALL_RETRIES] = list(frame.retries)
+    return out
+
+
+#: The attr a trace node lists its retried calls under: ``[{call, attempt,
+#: error, waited}, ...]``, one per call that failed and was sent again.
+CALL_RETRIES = "operonx.call_retries"
 
 
 #: The innermost frame of the code running now; ``None`` outside an op.

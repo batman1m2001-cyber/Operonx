@@ -478,6 +478,7 @@ async def retry_call(
             delay = retry.delay(attempt)
             why = "an empty answer"
         from operonx.core.loggings import LOGGER
+        from operonx.core.runtime import _current_frame
 
         LOGGER.warning(
             "[%s] %s. Attempt %d/%d. Retrying in %.2fs",
@@ -487,15 +488,20 @@ async def retry_call(
             retry.max_attempts,
             delay,
         )
-        await _call_backoff(delay)
+        frame = _current_frame.get(None)
+        if frame is not None:
+            # On the trace node of the op (or child step) that sent it.
+            note = {"call": label or "call", "attempt": attempt, "error": why, "waited": delay}
+            if frame.retries is None:
+                frame.retries = [note]
+            else:
+                frame.retries.append(note)
+        await _call_backoff(delay, frame)
         attempt += 1
 
 
-async def _call_backoff(delay: float) -> None:
+async def _call_backoff(delay: float, frame: Any) -> None:
     """A call retry's wait: inside an op, its slot given back (``backoff``)."""
-    from operonx.core.runtime import _current_frame
-
-    frame = _current_frame.get(None)
     op = getattr(frame, "op", None)
     if op is None:
         await asyncio.sleep(delay)
@@ -666,10 +672,13 @@ async def backoff(delay: float, name: str, ctx: tuple) -> None:
     slots = _SLOTS.get()
     if slots is not None:
         task = asyncio.current_task()
-        bucket = slots.tasks.get(ctx)
-        if bucket is not None and bucket.get(name) is task:
-            await slots.wait(task, delay)
-            return
+        # A call inside a child step has the step's ctx, the op's plus its
+        # own segments: the pump is filed under the op's, a prefix of it.
+        for end in range(len(ctx), 0, -1):
+            bucket = slots.tasks.get(ctx[:end])
+            if bucket is not None and bucket.get(name) is task:
+                await slots.wait(task, delay)
+                return
     await asyncio.sleep(delay)
 
 

@@ -28,7 +28,14 @@ from operonx.core.ops import _cache
 from operonx.core.ops._events import Failure, HandOff, Interrupt
 from operonx.core.ops._params import merge_params, normalize_params, resolve_value
 from operonx.core.policy import _Deadline, _handed_off, backoff, fail_fast, op_policy
-from operonx.core.runtime import TaskFailed, TaskFinished, TaskStarted, _current_frame, _Frame
+from operonx.core.runtime import (
+    TaskFailed,
+    TaskFinished,
+    TaskStarted,
+    _current_frame,
+    _Frame,
+    _with_retries,
+)
 from operonx.core.states.cell import DEFAULT_CONTEXT
 
 #: Output name for an op whose function returns a bare value rather than
@@ -1177,6 +1184,7 @@ class BaseOp(ABC):
             frame.attempt = attempt
             frame.deadline = run_at
             frame.counts = None
+            frame.retries = None
             if attempt > 1 and wf_trace is not None and wf_trace._task_listeners:
                 wf_trace.emit_task(TaskStarted(self.full_name, ctx, attempt))
             source = self._exec_core(inputs)
@@ -1397,6 +1405,7 @@ class BaseOp(ABC):
         )
         if wf_trace is None:
             return
+        frame = _current_frame.get()
         ended = perf_counter()
         wf_trace.record(
             OpExecution(
@@ -1413,6 +1422,7 @@ class BaseOp(ABC):
                 error="".join(traceback.format_exception(type(error), error, error.__traceback__)),
                 op_type=str(self.type),
                 attempt=attempt,
+                attrs=_with_retries({}, frame) if frame is not None and frame.retries else {},
             )
         )
         if wf_trace._task_listeners:
@@ -1664,6 +1674,7 @@ class BaseOp(ABC):
                     _current_frame.set(frame)
                 await backoff(_delay, self.name, ctx_for_end)
                 frame.attempt += 1
+                frame.retries = None
                 if _wf_trace is not None and _wf_trace._task_listeners:
                     _wf_trace.emit_task(TaskStarted(self.full_name, ctx_for_end, frame.attempt))
                 perf_start = _yield_start = perf_counter()
@@ -1803,6 +1814,7 @@ class BaseOp(ABC):
                                 error=error_msg,
                                 op_type=str(self.type),
                                 attempt=frame.attempt,
+                                attrs=_with_retries({}, frame) if frame.retries else {},
                             )
                         )
                     # A transient op in a stream emits no per-item node on
@@ -1835,6 +1847,7 @@ class BaseOp(ABC):
                                 error=error_msg,
                                 op_type=str(self.type),
                                 attempt=frame.attempt,
+                                attrs=_with_retries({}, frame) if frame.retries else {},
                             )
                         )
                     if _wf_trace._task_listeners:
