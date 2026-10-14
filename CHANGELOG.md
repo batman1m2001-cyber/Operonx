@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Run stores read a parked run as waiting, and a resumed run again.** A run summary counted the step a park cut off (`cancelled`) as a failure, so a parked run listed as failed; it now lists as `interrupted` (`drained`), and an answered run's `<op_id>@stopped` step is not a failure either. The files store (`.operonx/runs`) indexed a run directory once: a resumed run, written again under its own id, kept its old summary. It now reads a run again when its `meta.json` changed, and on its first scan the runs it holds as stopped.
 - **A journalled run that dies is journalled before its caller hears of it.** The exception reached `run()` before the run's journal was closed, so a resume made at once (the guide's crash example) could miss the last steps, still waiting in the journal's writer, and run an op that had ended again. The journal is now closed first, as a parked run's already was.
 
 ## [1.22.4] - 2026-10-13

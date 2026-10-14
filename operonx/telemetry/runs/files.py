@@ -27,7 +27,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from operonx.telemetry.consumers.local import LocalConsumer, resolve_root
 
 from .base import RunStore
-from .model import OpRollup, Page, RunFilter, RunRecord, RunSummary, summarize
+from .model import STOPPED, OpRollup, Page, RunFilter, RunRecord, RunSummary, summarize
 from .sql import SqlIndex
 
 __all__ = ["FilesRunStore", "read_run_dir"]
@@ -77,6 +77,9 @@ class FilesRunStore(RunStore):
         self.refresh_every = float(refresh_every)
         self._writer = consumer or LocalConsumer(config={"root": str(self.root), "layout": layout})
         self._last_refresh = 0.0
+        # each indexed run's meta.json mtime, as last seen: a run written
+        # again (a journalled run resumed under its own id) is read again
+        self._seen_at: Dict[str, float] = {}
         self.root.mkdir(parents=True, exist_ok=True)
         path = self.root / _INDEX
 
@@ -128,13 +131,27 @@ class FilesRunStore(RunStore):
 
     def refresh(self) -> int:
         known = self.index.locations()
+        first = not self._seen_at
+        # a run stopped on purpose may have been resumed while nothing
+        # watched: on the first pass, read those again
+        stale = set()
+        if first and known:
+            for status in STOPPED:
+                page = self.index.list(RunFilter(status=status), "started_desc", 10_000, None)
+                stale.update(r.location for r in page.items if r.location)
         seen = set()
         added = 0
         batch: list = []
         for run_dir in self._run_dirs():
             loc = run_dir.relative_to(self.root).as_posix()
             seen.add(loc)
-            if loc in known:
+            try:
+                written = (run_dir / "meta.json").stat().st_mtime
+            except OSError:
+                written = 0.0
+            before = self._seen_at.get(loc)
+            self._seen_at[loc] = written
+            if loc in known and loc not in stale and (before is None or before == written):
                 continue
             try:
                 batch.append(self._summarize_dir(run_dir))
@@ -178,6 +195,13 @@ class FilesRunStore(RunStore):
         run_dir = self.root / summary.location
         if not (run_dir / "nodes.jsonl").is_file():
             return None
+        try:
+            written = (run_dir / "meta.json").stat().st_mtime
+        except OSError:
+            written = 0.0
+        if self._seen_at.get(summary.location, written) != written:
+            summary = self._index_dir(run_dir)  # written again since: a resumed run
+        self._seen_at[summary.location] = written
         got = read_run_dir(run_dir)
         return RunRecord(
             summary=summary, nodes=got["nodes"], meta=got["meta"], media_root=str(run_dir)
