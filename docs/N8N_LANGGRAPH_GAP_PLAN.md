@@ -1,0 +1,136 @@
+# What n8n and LangGraph do best, and what OperonX should take from them
+
+**Status:** 2026-10-14. Research and plan. L1 is implemented with this plan; the rest waits for a go.
+
+**Scope:** the operonx library (`/home/thanglq/Operon`) and operonx-studio (`/home/thanglq/operonx-studio`).
+
+## How this was done
+
+Every claim about OperonX below was checked in the code, not assumed:
+- the library's own guide (`operonx/guide/01`–`09`);
+- `core/policy.py`, `core/ops/_cache.py`, `durable/`, `checkpoint/` and `core/engine.py` (`resume`);
+- the studio's app, access table and screens;
+- three real projects: the callbot, meeting-prep and meeting-prep-brd.
+
+n8n and LangGraph are compared on their strongest ideas, not their whole surface.
+
+## The verdict in one paragraph
+
+The operonx library already has most of what LangGraph is known for:
+- retries, timeouts, error edges and fail-fast;
+- one concurrency cap per run, and op caching;
+- dynamic parallel fan-out (`.parallel(max=N)`);
+- streaming in several modes, subgraphs, and cells with reducers;
+- conversation threads, idempotency keys and live traces;
+- **durable runs**: a journal, resume after a crash, approvals that park a run for days, and the same three durability modes LangGraph has.
+
+**The gap is not in the engine. It is that none of the durability reaches the tools people use.** No project, Job, Service or studio screen runs with a journal, so in practice:
+- a failed run is a dead record;
+- an approval cannot be answered from the studio;
+- nothing can be rewound.
+
+The second gap is two LangGraph debugging ideas built on that journal: **retry from the failure** and **fork from a step** (its "time travel"). n8n's best ideas for the studio (pinned input, run one node, run history, alerts) are already covered or were added this week.
+
+## What already exists (not recommended again)
+
+| Idea | n8n / LangGraph | OperonX today |
+|---|---|---|
+| Retry and timeout per node | both | `retry=Retry(...)`, `timeout=` (guide 06) |
+| Route a failure | n8n error output, LangGraph | `op.on_error(handler)`, `errors="raise"` |
+| Concurrency limits | both | `max_concurrency=`, `.parallel(max=N, max_pending=P)` |
+| Dynamic fan-out (LangGraph `Send`) | LangGraph | `.parallel()` over a stream |
+| Node caching | LangGraph | `@op(cache=...)`, keyed by graph, op code and inputs |
+| Streaming modes | LangGraph | several modes at once, `tasks` (guide 08) |
+| Subgraphs | both | `@graph` in `@graph`, `invoke()` |
+| Human in the loop | both | `InterruptOp`; parks with a journal; `resume(answers=)` |
+| Durable execution and modes | LangGraph | `journal=`, `durability="async"/"sync"/"exit"` |
+| Threads and short-term memory | LangGraph | threads: cells kept between runs |
+| Long-term memory / store | LangGraph | operonx-agents sessions, operonx-kb |
+| Triggers: webhook, schedule | n8n | Services (doors), `Job(schedule=)` |
+| Sub-workflows | n8n | `invoke`, Steps |
+| Rate limits | n8n | `rate_limit` |
+| Pinned test data, run one node | n8n | studio Inspect: input picker and **Run this op** (#85) |
+| Execution history, search | both | studio Runs: filters, tree, timeline, workflow replay |
+| State per step | LangGraph Studio | studio step panel, state-as-change |
+| Failure alerts ("error workflow") | n8n | studio Alerts: thresholds, webhooks |
+| Evals, datasets | LangSmith | `operonx eval`, judges, review queues, online evals |
+
+## Recommendations
+
+### Library
+
+**L1. Retry a failed run from the failed op.** *Essential · small · library.* **Implemented with this plan.**
+- **Why:** this is n8n's "retry execution" and the first thing anyone wants after a fix. Today a failed op is journalled as a finished step, so `resume` restores it as finished and nothing reruns. A run that failed on a bug cannot be finished, even after the bug is fixed.
+- **What:** `resume(run_id, retry_failed=True)` keeps every step before the first failure, drops that step and everything journalled after it, and runs from there.
+  - What ran before the failure is not run again: a charge is not charged twice.
+  - Work that ran after the failure runs again, as a resume after a crash does, with the same idempotency key.
+  - After a code fix, add `allow_graph_change=True`, as for any resume across a change.
+
+**L2. Durable runs inside Jobs and Services.** *Essential · medium · library (then studio).* The architectural item.
+- **Why:** durability exists only for code that builds an `Operon` with `journal=` by hand. Jobs (one run per item) and Services (one run per request) never pass one. So:
+  - a job item that dies mid-way starts over;
+  - a served approval flow has nowhere to park.
+- **What:** one switch in `operonx.toml`, `[durable] journal = "sqlite:.operonx/journal.db"`, which Jobs and Services pick up:
+  - a job item resumes where it stopped, and a failed item can be retried from its failed op (L1);
+  - a request-response Service with an `InterruptOp` parks and answers later.
+  - A **door** graph (a live stream, such as the callbot) stays as it is: its items come from a live connection that no journal holds. `resume` already refuses one.
+
+**L3. A shared journal: Postgres.** *Essential for more than one machine · medium · library.*
+- **Why:** `SqliteJournal` is one file on one machine. LangGraph ships a Postgres checkpointer for this reason: a run parked on one worker is answered on another. The journal is a `Protocol`, and the codec is already JSON, which is what a Postgres table needs.
+- **What:** `PostgresJournal(dsn)` with the same tests as `SqliteJournal`. Do it after L2, when a real deployment needs it.
+
+**L4. Fork a run from a step ("time travel").** *Important · medium · library.*
+- **Why:** LangGraph's most-loved debugging idea is to rewind to a step, change what it produced, and let the rest run. For agents this answers "would it have done better if the tool had said X?" without replaying the whole conversation. The studio's Run this op covers one op; fork covers what follows it.
+- **What:** `fork(run_id, at=(op, ctx), outputs={...}) -> new run id`, which works like this:
+  - it copies the journal's steps up to that op's end into a new run, with the op's outputs replaced;
+  - it resumes the new run;
+  - the original run is never changed.
+
+**L5. Durable timers: wait until a time.** *Nice to have · medium · library.*
+- **Why:** n8n's Wait node handles "follow up in two days". With L2, `InterruptOp` can already wait for a person; a timer would let a run wait for a time without a person or a scheduler.
+- **What:** later. Until then, a Job with `schedule=` that resumes parked runs covers it.
+
+### Studio
+
+**S1. Waiting approvals: answer a parked run.** *Essential once L2 lands · medium · studio.*
+- **Why:** both n8n (Wait and Form nodes) and LangGraph Studio let a person answer an interrupt from the UI. With L2, a parked run is just a status no screen shows.
+- **What:**
+  - Runs shows **interrupted** runs, with a filter for them;
+  - the run page shows the question (`payload`) with **Approve** / **Reject** or a JSON answer;
+  - answering calls `resume(answers=)` through the project's bridge.
+
+**S2. Retry from failure.** *Essential · small · studio (needs L1, L2).*
+- **What:** a failed, journalled run's page gets **Retry from the failure**, which calls `resume(retry_failed=True, allow_graph_change=True)`. The new attempt lands in the same run, so it reads as one story.
+
+**S3. Fork from a step.** *Important · medium · studio (needs L4).*
+- **What:** on a run's step panel, **Change this output and continue**: an editor with the recorded output, then L4's fork. The new run opens beside the original, and Compare runs (already built) shows the difference.
+
+**S4. Pause before an op, in the Playground.** *Nice to have · small to medium.*
+- **Why:** LangGraph Studio's `interrupt_before` breakpoints.
+- **What:** later. Run this op and fork cover most of the need.
+
+**S5. What changed in the code between two runs.** *Nice to have · small.*
+- **Why:** n8n keeps workflow versions. OperonX is code-first and a run already records its commit.
+- **What:** Compare runs could show `git diff` between the two runs' commits.
+
+## Order
+
+| # | Item | Where | Impact | Effort | Status |
+|---|---|---|---|---|---|
+| 1 | L1 retry from the failed op | library | high | small | **done with this plan** |
+| 2 | L2 journal in Jobs and Services | library | high, architectural | medium | next |
+| 3 | S1 answer parked runs | studio | high once L2 is in | medium | after L2 |
+| 4 | S2 retry-from-failure button | studio | high | small | after L2 |
+| 5 | L4 fork from a step | library | medium-high | medium | |
+| 6 | S3 fork in the studio | studio | medium-high | medium | after L4 |
+| 7 | L3 Postgres journal | library | high at scale | medium | when needed |
+| 8 | S5 code diff between runs | studio | low-medium | small | |
+| 9 | L5 durable timers, S4 breakpoints | both | low | medium | not now |
+
+## Considered and left out, on purpose
+
+- **n8n's integration catalogue (400+ nodes), its expression language, and drag-and-drop editing.** OperonX is code-first; an op is a Python function, and the assistant writes new ones.
+- **n8n's credential vault.** Resources plus `${VAR}` from `.env` (guide 05) already do this, and the studio shows what is missing.
+- **LangGraph's Functional API.** `@op` / `@graph` already are the functional form.
+- **The LangGraph Platform** (hosted assistants and cron API). Services, Jobs and `operonx-serve` cover it on the user's own machines.
+- **A second checkpoint system.** `operonx.checkpoint` (observation) and `operonx.durable` (the journal) already split the work: L1–L4 build on the journal alone.

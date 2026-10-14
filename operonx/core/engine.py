@@ -1036,6 +1036,7 @@ class Operon:
         *,
         answers: Optional[Dict[str, Any]] = None,
         allow_graph_change: bool = False,
+        retry_failed: bool = False,
         checkpointer=None,
         context: Any = None,
     ) -> "ExecutionHandle":
@@ -1054,12 +1055,19 @@ class Operon:
         their responses as ``answers={interrupt_id: value}``; one left
         unanswered parks the run again. A drained run resumes as it is.
 
+        ``retry_failed=True`` runs a failed run again from its first failed
+        op: the steps journalled before that failure are kept (what had
+        ended is not run again), the failed op's and every later step are
+        dropped, so the failed op and what follows it run. After fixing the
+        op's code, pass ``allow_graph_change=True`` as well.
+
         Raises:
             RuntimeError: The engine has no ``journal=``.
             JournalError: The journal has no such run, the graph changed
                 since the run started (``allow_graph_change=True`` resumes
                 anyway, at the caller's risk), an answer names no question
-                the run asked, or the graph reads through a door.
+                the run asked, the graph reads through a door, or
+                ``retry_failed`` was asked of a run where nothing failed.
         """
         from operonx.durable import JournalError
 
@@ -1076,6 +1084,14 @@ class Operon:
                 "journalled for audit, not resumed"
             )
         header, steps = await asyncio.to_thread(self._journal.read, run_id)
+        if retry_failed:
+            from operonx.durable.journal import END
+
+            first = next((i for i, s in enumerate(steps) if s.index == END and s.status == "error"), None)
+            if first is None:
+                raise JournalError(f"resume({run_id!r}, retry_failed=True): no op of the run failed")
+            # what was journalled before the failure stands; from it on, runs again
+            steps = list(steps[:first])
         if header.fingerprint != self.fingerprint and not allow_graph_change:
             raise JournalError(
                 f"run {run_id!r} ran graph {header.fingerprint} and this engine's graph is "
