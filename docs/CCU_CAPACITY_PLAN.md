@@ -2,7 +2,7 @@
 
 Status: part 1 **done** 2026-10-14 (phases 1–4; phase 5 not needed), results
 below. Part 2 (a latency dashboard, then 50–100 calls on the fewest workers)
-**in progress**: see the end. Driven by the callbot (educa-reminder-agent,
+**done** 2026-10-15: 100 calls held on 4 workers; results at the end. Driven by the callbot (educa-reminder-agent,
 `refactor/operonx-studio`), but every generic part lands in operonx.
 
 ## Why
@@ -291,8 +291,62 @@ owner wants it.
 
 | # | Phase | Where | Status |
 |---|---|---|---|
-| 6 | latency dashboard | operonx + callbot + studio | in progress |
-| 7 | per-packet budget | callbot bench | |
-| 8 | VAD in Rust | callbot | |
-| 9 | loop per packet | operonx | decided by 7 |
-| 10 | fewest workers | callbot config | |
+| 6 | latency dashboard | operonx + callbot + studio | **done**: operonx 1.26.0 (#179), callbot ef95c79, studio #94 |
+| 7 | per-packet budget | callbot bench | **done**: table below |
+| 8 | VAD off the worker's GIL | callbot | **done** as process mode (a5f6d85, d561b6e); Rust tried and **not kept** |
+| 9 | loop per packet | operonx | measured, nothing shipped: no single cut is big enough (below) |
+| 10 | fewest workers | callbot config | **done**: 100 calls on 4 workers |
+
+## Part 2 results (2026-10-15)
+
+**The per-packet budget (phase 7).** One worker, 10 calls, VAD in a thread:
+the VAD thread spent ~1.1 ms of work per packet (DSP 0.8, Silero 0.27) plus
+waits for the GIL; the loop ~0.5 ms. Every push gives the GIL up and takes
+it back 3–4 times (soxr, DSP, Silero); a native profile at 18 calls put 55%
+of the VAD thread's samples in those waits. More VAD threads and a 1 ms
+switch interval changed nothing.
+
+**Rust (phase 8, tried).** The DSP as a PyO3 extension, GIL released:
+2071 of 2478 test chunks bit-identical (the rest within 4e-7), every segment
+boundary and every STT transcript the same. In a thread it lifted one
+worker from ~7 to ~12 calls: the GIL handoffs remained. In a VAD process it
+held 34 calls on one worker where a numpy process held ~24, but two numpy
+processes hold 34 too: Rust saves CPU (about half the VAD's share, ~25% of
+a call's total), not calls per worker. The callbot stays pure Python; the
+crate is kept outside the repo.
+
+**Process mode (phase 8, shipped).** `audio_worker: mode: process`: each
+server worker starts `n_workers` VAD processes at boot (~160 MB each), a
+call's `VadState` lives in one, and the loop pipes packets to it. The graph
+is unchanged; the op awaits `vad_pool.push(...)`. Segments are identical to
+thread mode. At 5 calls: reply p50 0.86 s (threads 0.90 s).
+
+| One worker, calls held | VAD | Reply p50 / p95 |
+|---|---|---|
+| 12 | thread, Rust | 1.12 / 1.24 s |
+| 18 | thread, numpy or Rust | 5.6–6.0 s late |
+| 18 | 1 process, numpy | 0.88 / 1.10 s |
+| 26 | 1 process, numpy | 1.43 / 1.67 s |
+| 34 | 2 processes, numpy | 0.97 / 1.14 s |
+
+**Sustained load (phase 10).** `ccu_real.py --duration 120`: every slot
+places calls back to back, so the CCU is held, not ramped through (a call
+lasts ~30 s). `VAD_MODE=process SHARED_AUDIO_WORKERS=2`:
+
+| Calls held ~110 s | Workers | Calls placed | Reply p50 / p95 / max |
+|---|---|---|---|
+| 50 | 2 | 50 (ramp only) | 0.92 / 1.07 / 1.22 s |
+| 100 | 4 | 482 | **0.92 / 1.18 / 1.44 s** |
+| 100 | 3 | 441 | 1.39 / 3.27 / 4.86 s |
+
+Part 1 needed 8 workers for 40 calls; 100 now take 4, ~25 calls each.
+
+**The loop per packet (phase 9, measured).** At ~30 calls a worker's loop
+is the limit (~95% of a core). Native profile of a pooled (uvloop) worker:
+zlib deflate/inflate (permessage-deflate on the bot's audio) ~12%, JSON
+encode/decode ~8%, websocket framing ~10%, operonx dispatch ~18%, the rest
+asyncio handoffs. Without permessage-deflate, 100 calls on 3 workers moved
+from p50 1.39 to 1.14 s but p95 stayed 2.85 s. A single-worker listener runs
+the stdlib loop while pooled workers run uvloop; switching it gave no
+measurable difference (p95 1.43 vs 1.56 s, then the reverse), so nothing
+shipped. Going below 4 workers for 100 calls needs ~25% off the loop.
