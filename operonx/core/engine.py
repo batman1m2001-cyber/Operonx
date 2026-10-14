@@ -29,7 +29,18 @@ import time
 import uuid
 from collections import deque
 from time import perf_counter
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from operonx.core.loggings import LOGGER, format_event
 from operonx.core.ops.graph.graph_op import GraphOp
@@ -1156,6 +1167,9 @@ class Operon:
             await asyncio.to_thread(truncate, run_id, first)
         load_trace = getattr(self._journal, "load_trace", None)
         prior = await asyncio.to_thread(load_trace, run_id) if load_trace is not None else None
+        # no trace kept from before (a fork, a run that crashed): the steps
+        # replayed from the journal go on this one, so it shows the whole run
+        recorder.trace_replays = prior is None
         await asyncio.to_thread(self._journal.set_status, run_id, "running")
         return self._launch(
             state,
@@ -1170,6 +1184,110 @@ class Operon:
             inputs=header.inputs,
             prior=prior,
         )
+
+    async def fork(
+        self,
+        run_id: str,
+        *,
+        at: str,
+        outputs: Dict[str, Any],
+        ctx: Tuple[str, ...] = ("main",),
+        occurrence: int = 0,
+        allow_graph_change: bool = False,
+    ) -> "ExecutionHandle":
+        """Run *run_id* again from op *at*, as if *at* had answered
+        *outputs*, and return the new run's handle::
+
+            handle = await engine.fork("order-42", at="quote", outputs={"price": 90})
+            out = await handle.result()   # what follows `quote`, with price 90
+
+        The journal's steps up to *at*'s end are copied into a new run
+        (``<run_id>~<8 hex>``), *at*'s outputs replaced; the new run then
+        resumes, so nothing that ended before *at* runs again and what came
+        after it runs with the new value. The original run is not changed.
+        *at* is an op that yields once (not a generator or a graph), named
+        as in the graph; *ctx* and *occurrence* pick one execution of it
+        (an op in a loop runs at the same ctx once per iteration).
+
+        Raises:
+            JournalError: no such run or execution, *at* yields more than
+                once, an output *at* does not have, or the graph changed
+                (``allow_graph_change=True`` forks anyway).
+        """
+        from operonx.durable import JournalError, RunHeader
+        from operonx.durable.journal import END
+
+        if self._journal is None:
+            raise RuntimeError(f"fork({run_id!r}): this engine has no journal=")
+        op = self._op_named(at)
+        if op is None:
+            raise JournalError(f"fork({run_id!r}): the graph has no op {at!r}")
+        if getattr(op, "is_gen", False) or hasattr(op, "_ops"):
+            raise JournalError(
+                f"fork({run_id!r}): {at} yields more than once (a generator or a graph); "
+                "fork at an op that answers once"
+            )
+        unknown = [k for k in outputs if self._schema.get_index(op.full_name, k) < 0]
+        if unknown:
+            raise JournalError(
+                f"fork({run_id!r}): {at} has no output {', '.join(map(repr, unknown))}"
+            )
+        header, steps = await asyncio.to_thread(self._journal.read, run_id)
+        if header.fingerprint != self.fingerprint and not allow_graph_change:
+            raise JournalError(
+                f"fork({run_id!r}): the run ran graph {header.fingerprint} and this engine's is "
+                f"{self.fingerprint}. Fork with the graph it ran, or pass allow_graph_change=True"
+            )
+        root = self._schema.name
+        rel = op.full_name[len(root) :] if op.full_name.startswith(root + ".") else op.full_name
+        ctx = tuple(ctx)
+        ends = [
+            i
+            for i, s in enumerate(steps)
+            if s.op == rel and tuple(s.ctx) == ctx and s.index == END and s.status != "error"
+        ]
+        if len(ends) <= occurrence:
+            raise JournalError(
+                f"fork({run_id!r}): {at} at {'/'.join(ctx)} did not end there "
+                f"{occurrence + 1} time(s) in the run"
+            )
+        cut = ends[occurrence]
+        kept = list(steps[: cut + 1])
+        kept[cut] = _with_outputs(kept[cut], rel, dict(outputs))
+        new_id = f"{run_id}~{uuid.uuid4().hex[:8]}"
+        await asyncio.to_thread(
+            self._journal.open_run,
+            RunHeader(
+                run_id=new_id,
+                fingerprint=header.fingerprint,
+                inputs=dict(header.inputs),
+                carried=dict(header.carried or {}),
+            ),
+        )
+        await asyncio.to_thread(self._journal.append, new_id, kept)
+        handle = await self.resume(new_id, allow_graph_change=allow_graph_change)
+        trace = getattr(handle, "trace", None)
+        if trace is not None:
+            trace.tag({"forked_from": run_id, "fork_at": f"{at}@{'/'.join(ctx)}"})
+        return handle
+
+    def _op_named(self, name: str) -> Any:
+        """An op of the graph (nested graphs included) by its name, its full
+        name, or its name relative to the root graph."""
+        root = self._schema.name
+
+        def walk(graph: Any) -> Any:
+            for op_name, op in (getattr(graph, "_ops", None) or {}).items():
+                full = getattr(op, "full_name", "")
+                if name in (op_name, full, full[len(root) :], full[len(root) + 1 :]):
+                    return op
+                if getattr(op, "_ops", None):
+                    inner = walk(op)
+                    if inner is not None:
+                        return inner
+            return None
+
+        return walk(self.graph)
 
     def runs(self, status: Optional[str] = None) -> List[Any]:
         """The journalled runs (their headers), optionally only *status*
@@ -1930,3 +2048,41 @@ class Operon:
 
     def __repr__(self) -> str:
         return f"<Operon engine='{self.name}' ops={len(self.graph._ops)}>"
+
+
+def _with_outputs(step: Any, rel: str, outputs: Dict[str, Any]) -> Any:
+    """*step* (an op's journalled end) as if the op had answered *outputs*:
+    its event, its writes to its own outputs, and the copies of them it
+    wrote further (a parent graph's cell) — a write in the step holding an
+    output's old value, when no output left as it was holds that value."""
+    import dataclasses
+
+    old: Dict[str, Any] = {}
+    for op, var, _ctx, value in step.writes:
+        if op == rel and var in outputs:
+            old.setdefault(var, value)
+    unchanged = [v for op, var, _c, v in step.writes if op == rel and var not in outputs]
+
+    def new_value(op: str, var: str, value: Any) -> Any:
+        if op == rel:
+            return outputs.get(var, value)
+        for name, before in old.items():
+            if _same(value, before) and not any(_same(value, u) for u in unchanged):
+                return outputs[name]
+        return value
+
+    writes = [(op, var, c, new_value(op, var, value)) for op, var, c, value in step.writes]
+    events = tuple(
+        (ev[0], {**ev[1], **outputs})
+        if isinstance(ev, tuple) and len(ev) == 2 and isinstance(ev[1], dict)
+        else ev
+        for ev in (step.event or ())
+    )
+    return dataclasses.replace(step, writes=writes, event=events or step.event)
+
+
+def _same(a: Any, b: Any) -> bool:
+    try:
+        return type(a) is type(b) and bool(a == b)
+    except Exception:  # noqa: BLE001 — an object that cannot compare is not a copy
+        return a is b

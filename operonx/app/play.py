@@ -67,6 +67,8 @@ Requests (one JSON object per line; ``id`` is echoed back)::
     {"op": "parked"}
     {"op": "answer", "run_id": "...", "answers": {"<interrupt id>": "approve"}}
     {"op": "retry", "run_id": "...", "service": "refund"}      # or "job": "orders"
+    {"op": "fork", "run_id": "...", "service": "refund", "at": "quote", "ctx": ["main"],
+                   "outputs": {"price": 90}}
 
 Events: ``doors``, ``opened``, ``refused``, ``out`` (an egress item, as a
 toy message), ``said`` (what a simulated user sent), ``ops`` (the op
@@ -76,7 +78,8 @@ before ``ended``), ``ended`` (status, error, duration), ``rerun``,
 ``parked`` (the journal's runs waiting for an answer, each with its
 questions), ``answer`` (the answered run's status: ``ok``, ``error``, or
 ``interrupted`` again with its new questions), ``retry`` (the same, for a
-failed run run again from its failed op), ``error``.
+failed run run again from its failed op), ``fork`` (the new run's id as
+``run_id``, its status, ``forked_from``), ``error``.
 """
 
 from __future__ import annotations
@@ -1130,6 +1133,52 @@ class Bridge:
             return {"t": "retry", "run_id": run_id, "status": "error", "error": str(exc)}
         return await _resumed("retry", run_id, owner, handle)
 
+    async def fork(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Run a journalled run again from one op, as if it had answered
+        ``outputs`` (``engine.fork``), by its owner's engine as the code is
+        now. The new run is a playground run (``toy=fork``), so it is kept
+        as a what-if, not as traffic; it says which run and op it forked."""
+        from operonx.durable import JournalError
+
+        run_id, at = str(msg.get("run_id") or ""), str(msg.get("at") or "")
+        outputs = msg.get("outputs")
+        owner = {k: str(msg[k]) for k in ("service", "variant", "job") if msg.get(k)}
+        if (
+            not run_id
+            or not at
+            or not isinstance(outputs, dict)
+            or not ({"service", "job"} & set(owner))
+        ):
+            return {
+                "t": "fork",
+                "status": "error",
+                "error": 'needs "run_id", "at", "outputs" and its "service" or "job"',
+            }
+        engines = [e for o, e in await self._durable_engines() if o == owner]
+        if not engines:
+            return {
+                "t": "fork",
+                "status": "error",
+                "error": f"{_owner_text(owner)} is not journalled in this project ([durable])",
+            }
+        ctx = tuple(msg.get("ctx") or ("main",))
+        try:
+            handle = await engines[0].fork(
+                run_id,
+                at=at,
+                outputs=outputs,
+                ctx=ctx,
+                occurrence=int(msg.get("occurrence") or 0),
+                allow_graph_change=True,
+            )
+        except JournalError as exc:
+            return {"t": "fork", "run_id": run_id, "status": "error", "error": str(exc)}
+        new_id = handle.trace.trace_id
+        handle.trace.tag(origin_metadata(ORIGIN_PLAYGROUND, **owner, toy="fork"))
+        reply = await _resumed("fork", new_id, owner, handle)
+        reply["forked_from"] = run_id
+        return reply
+
     # -- the loop ----------------------------------------------------------
 
     async def handle(self, msg: Dict[str, Any]) -> None:
@@ -1158,6 +1207,8 @@ class Bridge:
                 out = await self.answer(msg)
             elif kind == "retry":
                 out = await self.retry(msg)
+            elif kind == "fork":
+                out = await self.fork(msg)
             else:
                 out = {"t": "error", "text": f"unknown op {kind!r}"}
         except Exception as exc:  # noqa: BLE001 — one bad request never ends the bridge

@@ -110,6 +110,7 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
   - it copies the journal's steps up to that op's end into a new run, with the op's outputs replaced;
   - it resumes the new run;
   - the original run is never changed.
+- **Built (2026-10-14):** `Operon.fork(run_id, at=, outputs=, ctx=, occurrence=, allow_graph_change=)` returns the new run's handle. `at` must answer once (not a generator or a graph). The op's journalled end is rewritten: its event, its own output cells, and the copies it wrote further (a write in that step holding an output's old value, unless an unchanged output holds the same value). A resume with no kept trace records its replayed steps, so a fork's trace (and a killed run's resume) is the whole run. The bridge's `{"op": "fork"}` forks with the owner's engine as the code is now, filed as a playground run (`toy=fork`).
 
 **L5. Durable timers: wait until a time.** *Nice to have · medium · library.*
 - **Why:** n8n's Wait node handles "follow up in two days". With L2, `InterruptOp` can already wait for a person; a timer would let a run wait for a time without a person or a scheduler.

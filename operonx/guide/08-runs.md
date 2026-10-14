@@ -438,6 +438,66 @@ asyncio.run(main())
   `[durable]` project, and a waiting run's page answers each question:
   *Approve* (`"approve"`), *Deny* (`"deny"`), or any JSON.
 
+### Fork a run from a step
+
+`await engine.fork(run_id, at="op", outputs={...})` runs a journalled run
+again from one op, as if that op had answered `outputs`: what ended before it
+is replayed from the journal, not run; what follows it runs with the new
+value. It answers "what would have happened if the tool had said X?" without
+running the whole run again, and the original run is not changed.
+
+```python
+import asyncio
+
+from operonx import END, START, Operon, graph, op
+from operonx.durable import MemoryJournal
+
+CALLS = []
+
+
+@op
+async def quote(item: str) -> dict:
+    CALLS.append("quote")  # slow, or paid: not run again by a fork
+    return {"price": 120}
+
+
+@op
+async def decide(price: int) -> dict:
+    return {"verdict": "buy" if price < 100 else "wait"}
+
+
+@graph
+def shop(item):
+    q = quote(item=item)
+    d = decide(price=q["price"])
+    START >> q >> d >> END
+
+
+async def main():
+    engine = Operon(shop, params={"item": None}, journal=MemoryJournal())
+    out = await engine.run({"item": "lamp"}, run_id="lamp-1")
+    assert out["verdict"] == "wait"
+    handle = await engine.fork("lamp-1", at="q", outputs={"price": 90})
+    assert (await handle.result())["verdict"] == "buy"
+    assert CALLS == ["quote"]  # quote ran once: the fork replayed it
+    print(handle.trace.trace_id)  # lamp-1~<8 hex>, a run of its own
+
+
+asyncio.run(main())
+```
+
+- **`at`** is an op that answers once (not a generator or a graph), named as
+  in the graph. `ctx=` and `occurrence=` pick one execution of an op that ran
+  more than once (in a loop: one per iteration).
+- The new run is `<run_id>~<8 hex>`. Its trace holds the whole run: the steps
+  replayed from the journal (`attrs["operonx.replayed"]`, no time of their own)
+  and the ones that ran, with `metadata["forked_from"]` and `["fork_at"]`.
+- The op's changed output reaches every cell it was copied to (a parent
+  graph's output too). The graph must be the one that ran
+  (`allow_graph_change=True` to fork with the code as it is now).
+- In the studio, a step of a journalled run has **Change this output and
+  continue**, which forks there.
+
 ### Threads: cells a conversation keeps between runs
 
 `carry=` names declared cells a thread keeps: a run started with

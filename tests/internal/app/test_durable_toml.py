@@ -274,3 +274,26 @@ async def test_the_bridge_runs_a_failed_item_again_from_its_failed_op(project):
     assert mod.CALLS == ["charge", "ship", "ship"]  # charged once
     again = await bridge.retry({"run_id": run_id, "job": "once"})
     assert again["status"] == "error" and "no op of the run failed" in again["error"]
+
+
+async def test_the_bridge_forks_a_run_from_an_op(project):
+    # docs/N8N_LANGGRAPH_GAP_PLAN.md L4/S3: "change this output and continue"
+    from operonx.app.play import Bridge
+
+    root, name = project
+    app = Application.find(str(root))
+    app.bootstrap()
+    mod = _module(name)
+    mod.BROKEN["on"] = False
+    bridge = Bridge(app, lambda event: None)
+    ((_, engine),) = [(o, e) for o, e in await bridge._durable_engines() if o == {"job": "once"}]
+    await engine.run({"order": 3}, run_id="o-3")
+
+    done = await bridge.fork(
+        {"run_id": "o-3", "job": "once", "at": "c", "outputs": {"receipt": "R-77"}}
+    )
+    assert done["status"] == "ok" and done["forked_from"] == "o-3"
+    assert done["run_id"].startswith("o-3~")
+    assert mod.CALLS == ["charge", "ship", "ship"]  # charged once
+    bad = await bridge.fork({"run_id": "o-3", "job": "once", "at": "c", "outputs": {"x": 1}})
+    assert bad["status"] == "error" and "has no output 'x'" in bad["error"]

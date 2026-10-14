@@ -99,6 +99,11 @@ class _Recorded:
     digests: List[str] = field(default_factory=list)
     signals: Dict[Tuple[str, Tuple[str, ...]], Any] = field(default_factory=dict)
     ended: bool = False
+    #: What it wrote to its own outputs, and how it ended — for a replayed
+    #: step's trace node.
+    outputs: Dict[str, Any] = field(default_factory=dict)
+    status: Optional[str] = None
+    error: Any = None
 
 
 def _digest(op: str, event: Any) -> str:
@@ -169,6 +174,10 @@ class RunRecorder:
         #: Called once a stopping run has nothing left that is not waiting;
         #: None once the graph has returned.
         self.on_quiet: Optional[Callable[[], None]] = None
+        #: Record each execution replayed from the journal on the run's
+        #: trace: a resume with no trace of its own before (a fork, a run
+        #: that crashed) still shows the whole run.
+        self.trace_replays = False
 
     # -- the write funnel ----------------------------------------------------
 
@@ -215,6 +224,8 @@ class RunRecorder:
         key: Key = (name, ctx, n, parent)
         done = self._replay.get(key)
         if done is not None and done.ended:
+            if self.trace_replays:
+                _trace_replay(op, ctx, done)
             self._re_emit(state, key)
             state._loop_signals.update(done.signals)
             for event in done.events:
@@ -436,8 +447,10 @@ class RunRecorder:
                 self._emitted.append((key, tuple(step.within), list(step.emits)))
             rec = self._replay.setdefault(key, _Recorded())
             rec.signals.update({(self._abs(k[0]), k[1]): v for k, v in step.signals.items()})
+            rec.outputs.update({var: value for op, var, _, value in step.writes if op == step.op})
             if step.index == END:
                 rec.ended = True
+                rec.status, rec.error = step.status, step.error
                 rec.events.extend(step.event or ())  # a single-yield op's event
                 idx = schema.get_index(self._abs(step.op), "error")
                 if idx >= 0:
@@ -458,6 +471,42 @@ class RunRecorder:
             if emitter == key or key in within:
                 for item in items:
                     queue_.put_nowait(item)
+
+
+def _trace_replay(op: Any, ctx: Tuple[str, ...], done: _Recorded) -> None:
+    """A trace node for an execution replayed from the journal: what it
+    wrote, how it ended, no time of its own (``attrs["operonx.replayed"]``)."""
+    from time import perf_counter
+
+    from operonx.core.workflow_trace import (
+        STATUS_ERROR,
+        STATUS_OK,
+        OpExecution,
+        _current_trace,
+        make_op_id,
+    )
+
+    trace = _current_trace.get()
+    if trace is None:
+        return
+    now = perf_counter()
+    failed = done.status == "error"
+    trace.record(
+        OpExecution(
+            op_id=make_op_id(op.full_name, tuple(ctx)),
+            op_name=op.name,
+            op_full_name=op.full_name,
+            ctx=tuple(ctx),
+            start_time=now,
+            end_time=now,
+            inputs={},
+            outputs=dict(done.outputs),
+            status=STATUS_ERROR if failed else STATUS_OK,
+            error=str(done.error) if failed and done.error is not None else None,
+            op_type=getattr(op, "type", "") or "",
+            attrs={"operonx.replayed": True},
+        )
+    )
 
 
 class _Emitting:
