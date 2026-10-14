@@ -42,6 +42,7 @@ from typing import (
     Union,
 )
 
+from operonx.core import loop_lag
 from operonx.core.loggings import LOGGER, format_event
 from operonx.core.ops.graph.graph_op import GraphOp
 from operonx.core.policy import ERRORS_MODES, Retry, RunPolicy, _FailFast
@@ -529,6 +530,19 @@ class ExecutionHandle:
         self._scheduler_task.cancel()
         self._pump_task.cancel()
 
+
+
+def _run_health(state: Any, trace: Any) -> None:
+    """What slowed the run down, beside its ops' own time, onto its trace:
+    the edges whose items queued (``metadata["backlog"]``) and how late the
+    process's event loop ran meanwhile (``metadata["loop_lag_ms"]``, only
+    where a beacon runs — see operonx.core.loop_lag)."""
+    if state._edge_backlog:
+        trace.metadata["backlog"] = {k: dict(v) for k, v in state._edge_backlog.items()}
+    if trace.wall_started_at:
+        lag = loop_lag.window(trace.wall_started_at, time.time())
+        if lag is not None:
+            trace.metadata["loop_lag_ms"] = lag
 
 class Operon:
     """Workflow execution engine.
@@ -1522,6 +1536,7 @@ class Operon:
                 if nest is not None:
                     _close_nested(nest, self.graph, state, _wf_trace, outcome)
                 recorder = await _close_journal(recorder, outcome)
+                _run_health(state, _wf_trace)
                 # Detach any Phase 2 observers bound at start().
                 if _cp_unsubscribe is not None:
                     try:

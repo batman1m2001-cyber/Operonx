@@ -13,6 +13,7 @@ The gates:
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import subprocess
 from pathlib import Path
@@ -115,6 +116,8 @@ async def test_a_service_run_carries_its_service():
     md = trace.metadata
     assert md["origin"] == "service" and md["service"] == "shouter" and md["transport"] == "memory"
     assert "origin:service" in md["tags"] and "service:shouter" in md["tags"]
+    # which worker served it, and how many runs it held then (CCU plan T2)
+    assert md["worker"] == {"pid": os.getpid(), "active_runs": 1}
 
 
 async def test_the_steps_of_a_job_carry_its_run(tmp_path):

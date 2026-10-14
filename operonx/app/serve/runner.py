@@ -11,18 +11,25 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import inspect
+import os
 from collections.abc import Mapping
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from operonx.app.declare import ref_name
 from operonx.app.doors import RESERVED_QUERY, BindError, has_doors, plain, serve_inputs
 from operonx.app.manifest import STREAM_KINDS, ServeSpec
+from operonx.core import loop_lag
 from operonx.core.loggings import LOGGER
 from operonx.core.ops.graph.task_scheduler import FINAL_TIMEOUT_S
 from operonx.core.workflow_trace import unhandled
 
 from .protocol import SESSION_KEY, RunRequest, Session
 from .registry import resolve_ref, resolve_transport
+
+#: Sessions this process is running a run for, across its listeners: what
+#: a run's `metadata["worker"]` reports, so a trace shows how loaded the
+#: worker that served it was (and an uneven spread over workers shows).
+_in_flight = [0]
 
 __all__ = ["RunTimeout", "ServeRunner", "serve_session"]
 
@@ -495,6 +502,8 @@ class ServeRunner:
                 await self._refuse(session, exc)
                 return
             self._declared_trace_id(request)
+        _in_flight[0] += 1
+        metadata["worker"] = {"pid": os.getpid(), "active_runs": _in_flight[0]}
         try:
             handle = await serve_session(
                 engine,
@@ -515,6 +524,7 @@ class ServeRunner:
                 f"[serve:{self.spec.name}] session run failed: {type(exc).__name__}: {exc}"
             )
         finally:
+            _in_flight[0] -= 1
             if failed:
                 await self._report_failure(session)
             await self._close_one(session, handle)
@@ -600,6 +610,7 @@ class ServeRunner:
             + (f", max_inflight={self.spec.max_inflight}" if self.spec.max_inflight else "")
             + ")"
         )
+        loop_lag.start()
         try:
             async for session in self.transport.sessions():
                 task = asyncio.ensure_future(self._run_one(session))
