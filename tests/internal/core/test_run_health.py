@@ -5,7 +5,10 @@ A callbot load test lost 5–35 s per reply to packets queued in front of
 a busy consumer, and nothing in the traces said so: every op looked fast.
 Now the run reports the edges whose items queued (``metadata["backlog"]``)
 and, where a loop beacon runs, how late its event loop ran
-(``metadata["loop_lag_ms"]``).
+(``metadata["loop_lag_ms"]``) and how busy its process was
+(``metadata["cpu_pct"]``). The latency a user feels across ops — a reply
+heard after the caller stopped — is measured by the ops themselves
+(``measure``) and summarised on the run (``metadata["latency_ms"]``).
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import time
 
 import pytest
 
-from operonx import END, START, Operon, graph, op
+from operonx import END, START, Operon, graph, measure, op
 from operonx.core import loop_lag
 from operonx.telemetry.consumer import Consumer
 
@@ -135,3 +138,57 @@ async def test_a_held_loop_shows_as_loop_lag():
 
 def test_the_window_is_empty_outside_a_loop():
     assert loop_lag.window(0, time.time()) is None
+
+
+@op
+async def replies(n: int) -> dict:
+    for i in range(1, n + 1):
+        measure("reply", i * 10.0)  # 10, 20, ... ms
+    return {"done": n}
+
+
+@graph
+def measured(n):
+    r = replies(n=n)
+    START >> r >> END
+
+
+async def test_measures_are_summarised_on_the_run():
+    capture = _Capture()
+    await Operon(measured, params={"n": None}, trace=[capture]).run({"n": 100})
+    reply = (await _traced(capture)).metadata["latency_ms"]["reply"]
+    assert reply == {"n": 100, "p50": 500.0, "p95": 950.0, "max": 1000.0}
+
+
+async def test_a_run_that_measured_nothing_has_no_latency():
+    capture = _Capture()
+    await Operon(single, params={"x": None}, trace=[capture]).run({"x": 1})
+    assert "latency_ms" not in (await _traced(capture)).metadata
+
+
+def test_measure_outside_a_run_is_a_no_op():
+    measure("reply", 5.0)
+
+
+@op
+def spin(y: int) -> dict:
+    end = time.process_time() + 1.3  # CPU, not sleep: the process is busy
+    while time.process_time() < end:
+        pass
+    return {"z": y}
+
+
+@graph
+def busy(x):
+    p = plain(x=x)
+    s = spin(y=p["y"])
+    START >> p >> s >> END
+
+
+async def test_a_busy_process_shows_its_cpu():
+    loop_lag.start()
+    await asyncio.sleep(loop_lag.INTERVAL_S * 2)
+    capture = _Capture()
+    await Operon(busy, params={"x": None}, trace=[capture]).run({"x": 1})
+    cpu = (await _traced(capture)).metadata["cpu_pct"]
+    assert cpu["max"] >= 60, cpu  # the spin, about one core

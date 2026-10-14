@@ -62,6 +62,7 @@ from operonx.core import (
     child,
     graph,
     invoke,
+    measure,
     op,
     retry_call,
     run_context,
@@ -159,6 +160,7 @@ __all__ = [
     # What an op body can know about its run
     "RunContext",
     "run_context",
+    "measure",
     "child",
     "invoke",
     # engine.stream(mode="tasks") events

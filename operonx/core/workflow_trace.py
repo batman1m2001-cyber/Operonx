@@ -358,6 +358,9 @@ class WorkflowTrace:
     # How a journalled run stopped on purpose (``"interrupted"``, parked on
     # a question; ``"drained"``): its status, unless something failed.
     stopped: Optional[str] = None
+    # `operonx.core.measure` samples, ``{name: [ms, ...]}``, summarised
+    # into ``metadata["latency_ms"]`` when the run ends.
+    measures: Dict[str, List[float]] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def root(self) -> "WorkflowTrace":

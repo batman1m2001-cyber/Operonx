@@ -136,7 +136,10 @@ def answer_flow(question, k):  # a setting is a graph input
 - A run that is slow while its ops are fast: read its trace's metadata
   before profiling. `backlog` names the edges whose items queued and how
   long they waited, `worker` the process that served it and its load,
-  `loop_lag_ms` how late the event loop ran. See guide page 08.
+  `loop_lag_ms` how late the event loop ran, `cpu_pct` how busy the
+  process was. Latency a user feels across ops (a reply heard after the
+  caller stopped): `measure(name, ms)` in the op where it ends; it shows
+  as `latency_ms` and on the studio's Monitor. See guide page 08.
 - To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
   re-read `.operonx/guide/README.md`. After adding an operonx package
   (`{{add}} operonx-agents`), run `{{run}}operonx guide`.

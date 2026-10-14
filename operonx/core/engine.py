@@ -533,15 +533,34 @@ class ExecutionHandle:
 
 def _run_health(state: Any, trace: Any) -> None:
     """What slowed the run down, beside its ops' own time, onto its trace:
-    the edges whose items queued (``metadata["backlog"]``) and how late the
-    process's event loop ran meanwhile (``metadata["loop_lag_ms"]``, only
-    where a beacon runs — see operonx.core.loop_lag)."""
+    the edges whose items queued (``metadata["backlog"]``), how late the
+    process's event loop ran meanwhile and how busy the process was
+    (``metadata["loop_lag_ms"]``, ``["cpu_pct"]``, only where a beacon runs
+    — see operonx.core.loop_lag), and the latencies its ops measured
+    (``metadata["latency_ms"]``, see operonx.core.runtime.measure)."""
     if state._edge_backlog:
         trace.metadata["backlog"] = {k: dict(v) for k, v in state._edge_backlog.items()}
+    if trace.measures:
+        trace.metadata["latency_ms"] = {k: _summary(v) for k, v in trace.measures.items() if v}
     if trace.wall_started_at:
-        lag = loop_lag.window(trace.wall_started_at, time.time())
+        now = time.time()
+        lag = loop_lag.window(trace.wall_started_at, now)
         if lag is not None:
             trace.metadata["loop_lag_ms"] = lag
+            busy = loop_lag.cpu(trace.wall_started_at, now)
+            if busy is not None:
+                trace.metadata["cpu_pct"] = busy
+
+
+def _summary(samples: List[float]) -> Dict[str, float]:
+    ordered = sorted(samples)
+    last = len(ordered) - 1
+    return {
+        "n": len(ordered),
+        "p50": round(ordered[last // 2], 1),
+        "p95": round(ordered[int(0.95 * last)], 1),
+        "max": round(ordered[last], 1),
+    }
 
 
 class Operon:

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.26.0] - 2026-10-15
+
+### Added
+
+- **`measure(name, ms)`: the latency a user feels, on the run.** Called from an op body, it records one sample; when the run ends its trace carries `metadata["latency_ms"] = {name: {"n", "p50", "p95", "max"}}`, which the studio's Monitor charts over time. For a latency no single op's time shows: the callbot measures a reply from the end of the caller's speech to its first audio packet, three ops apart. A no-op outside a traced run; one list append per sample.
+- **A served run says how busy its worker was.** The loop beacon (1.24.0) also reads the process's CPU time once a second; a run carries `metadata["cpu_pct"] = {"avg", "max"}` (one core = 100) beside `loop_lag_ms`, so a worker out of CPU is told from a loop blocked for another reason. One `process_time()` per 50 ms heartbeat, nothing per run. Measured with an 8-op chain at 400 runs at once and a 3000-item stream, pinned: the same as 1.25.0. Guide 08 and the `AGENTS.md` that `operonx init` writes cover both. Plan: docs/CCU_CAPACITY_PLAN.md (phase 6).
+
 ## [1.25.0] - 2026-10-14
 
 ### Added
