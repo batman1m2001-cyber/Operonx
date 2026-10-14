@@ -122,6 +122,17 @@ def answer_flow(question, k):  # a setting is a graph input
   makes many calls (an agent) retries each call instead: `retry:` on its
   model in `resources.yaml`, so a 429 does not run its earlier turns again.
   See guide page 06.
+- A run that must survive a crash, wait for a person, or be retried from
+  where it failed is journalled: `[durable]` in `operonx.toml` (jobs and
+  request–reply services), or `Operon(g, journal=SqliteJournal(...))`. Then
+  `InterruptOp(payload=...)` parks the run instead of holding the process;
+  `await engine.resume(run_id, answers={id: value})` answers it,
+  `resume(run_id, retry_failed=True)` runs a failed run again from its
+  failed op, and `await engine.fork(run_id, at="op", outputs={...})` runs it
+  again as if one op had answered otherwise. What ended before is replayed,
+  never run twice, so an op with a side effect (a charge) before the
+  failure is safe. Never write your own "save progress and continue"
+  logic. The studio does all three from a run's page. See guide page 08.
 - To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
   re-read `.operonx/guide/README.md`. After adding an operonx package
   (`{{add}} operonx-agents`), run `{{run}}operonx guide`.

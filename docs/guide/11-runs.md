@@ -241,6 +241,13 @@ thread); async code wraps a call in `asyncio.to_thread`.
 backend uses it: status, the first error's last line, executions and
 ops, duration, LLM calls and tokens, and **cost**.
 
+A run's status is `ok`, `error`, `running` (a live store's run that has
+not ended), or, for a journalled run that stopped on purpose,
+`interrupted` (waiting for a person's answer) or `drained` (stopped for a
+deploy). A step its stop cut off is not counted as a failure. When such a
+run is resumed, answered, retried or forked, its trace is written again,
+whole, under the same id; the files store reads it again when it changes.
+
 Cost keeps one distinction everywhere: **a priced zero is a price; an
 unpriced call is not $0.** A model priced at 0 (an in-house one) adds 0;
 a call with no price leaves the cost unknown and counts in `unpriced`. A

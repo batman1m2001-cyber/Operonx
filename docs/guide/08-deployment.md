@@ -145,6 +145,45 @@ src = ["src"]        # import roots, relative to the manifest; default ["."]
 `Application.bootstrap()` puts each root on `sys.path`; `operonx serve`,
 `operonx run` and the studio all go through it.
 
+## Durable runs
+
+One table in `operonx.toml` journals every step of the project's jobs and
+request–reply services:
+
+```toml
+[durable]
+journal = "sqlite:.operonx/journal.db"   # relative to the project; or "memory"
+# durability = "async"                   # "sync" (each step before the next) or "exit"
+```
+
+What a journalled run can do that a plain one cannot:
+
+- **Survive a crash.** `operonx run NAME --resume` finishes the items the
+  last run left mid-way or failed, from the op where each stopped.
+- **Wait for a person.** An `InterruptOp` parks the run: the reply is
+  `{"run_id", "interrupted": [{"id", "op", "payload"}]}`, and
+  `POST <path>/resume` with `{"run_id", "answers": {"<id>": value}}`
+  continues it, on any worker that opens the same journal.
+- **Run again from its failure.** A failed run, after the fix, runs again
+  from its failed op (`engine.resume(run_id, retry_failed=True)`); what
+  ended before it is not done again.
+- **Fork from a step.** `engine.fork(run_id, at="op", outputs={...})` runs
+  it again as if one op had answered otherwise; the original is unchanged.
+
+The studio does the last three from a run's page: **Runs → Waiting for an
+answer** answers a parked run (Approve, Deny, or any JSON), a failed run
+has **Retry from the failure**, and every step has **What if → Change this
+output and continue**. Compare runs then shows what changed, step by step.
+
+Each resumed, answered, retried or forked run keeps one trace, the whole
+run, under its own id.
+
+**Cost:** an 8-op run takes about 3.8 ms with a SQLite journal against
+1.4 ms without; at 400 runs at once, about 3.7 ms against 1.2 ms. A graph
+with a door (a websocket call) is never journalled: its items come from a
+live connection. SQLite is one machine; runs that must move between
+machines need a shared journal (Postgres, planned).
+
 ## Configuration
 
 The server honours the standard Operonx setup:

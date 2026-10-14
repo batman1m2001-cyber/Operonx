@@ -197,6 +197,14 @@ reads the job's last run and feeds only the keys that are not `ok`,
 `empty` or `skipped`. A job without `key` gets a random id per item and
 cannot resume.
 
+With `[durable]` in `operonx.toml` (see [Deployment](08-deployment.md#durable-runs)),
+each item's run is journalled, and resuming does more: an item that
+failed or was cut off mid-way continues **from the op where it stopped**,
+not from the start, so what ended before (a charge, an email) is not done
+again. `Job(retry=Retry(...))` retries a failed item the same way. In the
+studio, a failed item's run has **Retry from the failure**, which runs it
+again from its failed op with the code as it is now.
+
 ## Failure policy and deadlines
 
 ```python
