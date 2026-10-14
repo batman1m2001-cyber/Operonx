@@ -164,7 +164,7 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
 | 5 | L4 fork from a step | library | medium-high | medium | **done** (#166) |
 | 6 | S3 fork in the studio | studio | medium-high | medium | **done** (studio #89) |
 | 7 | L3 Postgres journal | library | high at scale | medium | when needed |
-| 8 | S5 code diff between runs | studio | low-medium | small | |
+| 8 | S5 code diff between runs | studio | low-medium | small | **done** (studio #90) |
 | 9 | L5 durable timers, S4 breakpoints | both | low | medium | not now |
 
 ## Considered and left out, on purpose
