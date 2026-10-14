@@ -390,22 +390,25 @@ class RunRecorder:
         else:
             self._pending.append(step)
 
-    def _end(self, status: str) -> "concurrent.futures.Future":
+    def _end(self, status: str, trace: Optional[Dict[str, Any]]) -> "concurrent.futures.Future":
         """Hand the rest of the run to the writer: its steps (``"exit"``),
-        then *status*. The future is done when all of it is written."""
+        the trace of a run that stopped (:mod:`.history`), then *status*.
+        The future is done when all of it is written."""
         if self._pending:
             steps, self._pending = self._pending, []
             self._writer.append(self.run_id, steps)
+        if trace is not None and hasattr(self.journal, "save_trace"):
+            self._writer.keep_trace(self.run_id, trace)
         return self._writer.finish(self.run_id, status)
 
-    def close(self, status: str) -> None:
+    def close(self, status: str, trace: Optional[Dict[str, Any]] = None) -> None:
         """Make every step durable, then record *status*. Blocking: the
         engine's cancel path calls it directly (`aclose` otherwise)."""
-        self._end(status).result()
+        self._end(status, trace).result()
 
-    async def aclose(self, status: str) -> None:
+    async def aclose(self, status: str, trace: Optional[Dict[str, Any]] = None) -> None:
         """``close``, awaited: no thread is held while the writer writes."""
-        await asyncio.wrap_future(self._end(status))
+        await asyncio.wrap_future(self._end(status, trace))
 
     # -- resume -----------------------------------------------------------------
 
@@ -520,6 +523,9 @@ class _SharedWriter:
         self._put(("append", run_id, list(steps), done))
         return done
 
+    def keep_trace(self, run_id: str, record: Dict[str, Any]) -> None:
+        self._put(("trace", run_id, record, None))
+
     def finish(self, run_id: str, status: str) -> "concurrent.futures.Future":
         done: concurrent.futures.Future = concurrent.futures.Future()
         self._put(("status", run_id, status, done))
@@ -582,6 +588,8 @@ class _SharedWriter:
                 try:
                     if op == "append":
                         journal.append(run, arg)
+                    elif op == "trace":
+                        journal.save_trace(run, arg)
                     else:
                         journal.set_status(run, arg)
                 except BaseException as exc:  # noqa: BLE001 — surfaced to the run

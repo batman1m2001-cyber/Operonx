@@ -422,6 +422,18 @@ asyncio.run(main())
   `resume(run_id)` on the next worker continues it.
 - A graph that reads through a door (`ingress`) is journalled but not
   resumable: its items came from a live connection the journal does not hold.
+- **The trace says it stopped.** A parked run's trace has status
+  `interrupted` (`drained` for a drain) and its questions in
+  `metadata["interrupted"]` (`[{id, op, payload}]`).
+- **A resumed run's trace is the whole run.** A run that stops (parked,
+  drained or failed) keeps its trace in the journal; its resume starts from
+  it, under the same trace id, so each trace store holds one run from its
+  first op to its last. A step that was cut off appears twice: the stopped
+  one as `<op_id>@stopped` (status `retried` when it had failed), then the
+  one that ran after the resume. A run that ends keeps nothing extra.
+- **The studio answers them.** Runs → *Waiting* lists the parked runs of a
+  `[durable]` project, and a waiting run's page answers each question:
+  *Approve* (`"approve"`), *Deny* (`"deny"`), or any JSON.
 
 ### Threads: cells a conversation keeps between runs
 

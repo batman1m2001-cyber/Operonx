@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Parked runs can be found and answered.** A parked run's trace has status `interrupted` and its questions in `metadata["interrupted"]`. The playground bridge (`python -m operonx.app.play`) takes `{"op": "parked"}`, the project's journalled runs waiting for an answer with their questions and owner (service or job), and `{"op": "answer", "run_id", "answers"}`, which resumes the run with its owner's engine; the studio uses both. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (S1).
 - **`[durable]` in `operonx.toml`: the project's jobs and services journal their runs.** `journal = "sqlite:.operonx/journal.db"` (or `"memory"`), `durability` optional. A job item is journalled as `<job run id>-<key hash>`: a failed item retried by `Job(retry=)` continues from its failed op (`resume(retry_failed=True)`), and `operonx run NAME --resume` finishes the items the last run left mid-way or failed, from where they stopped. A request-reply service's run that stops on an `InterruptOp` replies `{"run_id", "interrupted": [...]}`, and `POST <path>/resume` with `{"run_id", "answers"}` continues it (404 for an unknown run, 409 for one not waiting); a service with its own `resume=` graph keeps it. A graph with a door is never journalled. Off unless set. Measured: an 8-op run takes about 3.8 ms with a SQLite journal against 1.4 ms without (guide 08). Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L2).
 
 - **Retried calls are in the trace.** Each call `retry_call` sent again is recorded on the trace node of the op or `child()` step that sent it, as `attrs["operonx.call_retries"]` (`{call, attempt, error, waited}`), kept by every store and sent to Langfuse with the node's attrs. An op retry's failed attempt keeps the call retries of that attempt. Inside a `child()` step a call retry now also gives the run's slot back. Nothing is recorded, and nothing changes, when no call fails. Plan: docs/RETRY_PLAN.md (R5).
@@ -23,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A resumed run's trace is the whole run.** A resume records under the run's own id, so every trace store replaced the run with what ran after the resume: answering a parked run, or retrying a failed one, lost the record of everything before. A run that stops (parked, drained or failed) now keeps its trace in the journal, and its resume starts from it: one trace from the first op to the last, a cut-off step kept as `<op_id>@stopped`. A run that ends keeps nothing; measured with an 8-op chain at 400 runs at once, with and without a journal, the same as before.
 - **The runs of one journal share one writer.** Their steps and ends go in one SQLite transaction, where each run had a thread of its own and SQLite's one writer made their commits wait for each other. With an 8-op chain at 400 runs at once, a journalled run costs about 3.7 ms against 10.5 ms before (1.2 ms without a journal); one run at a time costs the same as before or less. A run whose writes fail still fails alone. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L2b).
 - **The waits of a resource's call retry follow `Retry`.** A wait is now between half the backoff and all of it (at least `min_interval`), where the LLM's transport retry waited anywhere from `retry_min_delay` up, and Triton's up to 1.5 times the backoff. A `Retry-After` longer than the resource's `retry_max_delay` is cut to it. Attempt counts and which errors are retried do not change.
 - **operonx-agents requires operonx 1.23.0**, for `retry_call`.
@@ -32,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `Operon.resume(run_id, retry_failed=True)` runs a failed run again from its first failed op: the steps journalled before the failure are kept (a charge is not charged twice), the failed op and everything after it run. With `allow_graph_change=True` it retries after a code fix. A run where nothing failed is refused. Plan: docs/N8N_LANGGRAPH_GAP_PLAN.md (L1).
+
+### Fixed
+
+- **A journalled run that dies is journalled before its caller hears of it.** The exception reached `run()` before the run's journal was closed, so a resume made at once (the guide's crash example) could miss the last steps, still waiting in the journal's writer, and run an op that had ended again. The journal is now closed first, as a parked run's already was.
 
 ## [1.22.4] - 2026-10-13
 

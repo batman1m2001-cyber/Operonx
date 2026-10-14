@@ -64,13 +64,17 @@ Requests (one JSON object per line; ``id`` is echoed back)::
                        "turns": 6, "first": "user", "conditions": {...}}
     {"op": "rerun", "service": "chat", "op_name": "reply", "inputs": {...}, "of": "run-id"}
     {"op": "rerun", "job": "score_calls", "op_name": "scored", "inputs": {...}}
+    {"op": "parked"}
+    {"op": "answer", "run_id": "...", "answers": {"<interrupt id>": "approve"}}
 
 Events: ``doors``, ``opened``, ``refused``, ``out`` (an egress item, as a
 toy message), ``said`` (what a simulated user sent), ``ops`` (the op
 executions that finished since the last batch — ``{"op", "status",
 "ms"}`` each — so a canvas can follow the run live; the last batch comes
 before ``ended``), ``ended`` (status, error, duration), ``rerun``,
-``error``.
+``parked`` (the journal's runs waiting for an answer, each with its
+questions), ``answer`` (the answered run's status: ``ok``, ``error``, or
+``interrupted`` again with its new questions), ``error``.
 """
 
 from __future__ import annotations
@@ -1001,6 +1005,99 @@ class Bridge:
             "outputs": _jsonable(outputs[-1] if len(outputs) == 1 else outputs),
         }
 
+    # -- parked runs (docs/N8N_LANGGRAPH_GAP_PLAN.md S1) ----------------------
+
+    async def _durable_engines(self) -> List[Tuple[Dict[str, Any], Any]]:
+        """``(owner, engine)`` for each journalled graph of the project: a
+        service's (each variant's) and a job's, compiled as they run, tracing
+        to all their consumers — an answer is a real run, not a toy's."""
+        out: List[Tuple[Dict[str, Any], Any]] = []
+        for spec in self.app.services:
+            if spec.kind == "asgi" or not spec.options.get("durable"):
+                continue
+            runner = await self._runner(spec.name, remote=True)
+            if runner.variants:
+                for variant, engine in runner.variants.items():
+                    out.append(({"service": spec.name, "variant": variant}, engine))
+            else:
+                out.append(({"service": spec.name}, runner.engine))
+        for job in self.app.jobs:
+            if getattr(job, "journal", None) is None or getattr(job, "steps", None) is not None:
+                continue
+            out.append(({"job": job.name}, job.engine()))
+        return [(owner, e) for owner, e in out if getattr(e, "_journal", None) is not None]
+
+    async def parked(self) -> Dict[str, Any]:
+        """The journal's runs waiting for an answer, with their questions."""
+        engines = await self._durable_engines()
+        owners = {e.fingerprint: owner for owner, e in engines}
+        journals = {id(e._journal): e._journal for _, e in engines}
+        runs = []
+        for journal in journals.values():
+            for light in await asyncio.to_thread(journal.runs, "interrupted"):
+                header, steps = await asyncio.to_thread(journal.read, light.run_id)
+                runs.append(
+                    {
+                        "run_id": header.run_id,
+                        "owner": owners.get(header.fingerprint),
+                        "inputs": _jsonable(header.inputs),
+                        "created_at": header.created_at,
+                        "updated_at": header.updated_at,
+                        "questions": _questions(steps),
+                    }
+                )
+        runs.sort(key=lambda r: r["updated_at"], reverse=True)
+        return {"t": "parked", "runs": runs}
+
+    async def answer(self, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """Resume a parked run with ``answers`` ({interrupt id: value}), by
+        the engine whose graph it ran, and wait for it to end or park again."""
+        from operonx.core.workflow_trace import unhandled
+        from operonx.durable import JournalError
+
+        run_id = str(msg.get("run_id") or "")
+        answers = msg.get("answers")
+        if not run_id or not isinstance(answers, dict) or not answers:
+            return {"t": "answer", "status": "error", "error": 'needs "run_id" and "answers"'}
+        for owner, engine in await self._durable_engines():
+            try:
+                header, _ = await asyncio.to_thread(engine._journal.read, run_id)
+            except JournalError:
+                continue
+            if header.fingerprint != engine.fingerprint:
+                continue
+            if header.status != "interrupted":
+                return {
+                    "t": "answer",
+                    "run_id": run_id,
+                    "status": "error",
+                    "error": f"run {run_id} is {header.status}, not waiting for an answer",
+                }
+            handle = await engine.resume(run_id, answers=answers)
+            out = await handle.result()
+            ending = getattr(handle, "_scheduler_task", None)
+            if ending is not None and not ending.done():
+                await asyncio.wait({ending})  # its trace is with the consumers
+            parked = out.get("$interrupted") if isinstance(out, dict) else None
+            reply: Dict[str, Any] = {"t": "answer", "run_id": run_id, "owner": owner}
+            if parked:
+                reply["status"] = "interrupted"
+                reply["questions"] = [
+                    {"id": p["interrupt_id"], "op": p["op"], "payload": _jsonable(p["payload"])}
+                    for p in parked
+                ]
+            elif unhandled(handle.errors):
+                reply["status"], reply["error"] = "error", _status(handle.trace)[1]
+            else:
+                reply["status"] = "ok"
+            return reply
+        return {
+            "t": "answer",
+            "run_id": run_id,
+            "status": "error",
+            "error": f"no journalled service or job of this project ran {run_id}",
+        }
+
     # -- the loop ----------------------------------------------------------
 
     async def handle(self, msg: Dict[str, Any]) -> None:
@@ -1023,6 +1120,10 @@ class Bridge:
                 return
             elif kind == "rerun":
                 out = await self.rerun(msg)
+            elif kind == "parked":
+                out = await self.parked()
+            elif kind == "answer":
+                out = await self.answer(msg)
             else:
                 out = {"t": "error", "text": f"unknown op {kind!r}"}
         except Exception as exc:  # noqa: BLE001 — one bad request never ends the bridge
@@ -1037,6 +1138,19 @@ class Bridge:
             session.end_input()
         if self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+
+
+def _questions(steps: List[Any]) -> List[Dict[str, Any]]:
+    """The questions a parked run waits on: each journalled question
+    (``PARKED``) whose execution has not ended since."""
+    from operonx.durable.journal import END, PARKED
+
+    ended = {(s.op, s.ctx, s.occurrence, s.parent) for s in steps if s.index == END}
+    return [
+        {"id": s.event[0], "op": s.op, "payload": _jsonable(s.event[1])}
+        for s in steps
+        if s.index == PARKED and (s.op, s.ctx, s.occurrence, s.parent) not in ended
+    ]
 
 
 def _find_op(graph: Any, name: str) -> Any:

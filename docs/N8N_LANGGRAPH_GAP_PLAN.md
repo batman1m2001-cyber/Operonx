@@ -123,6 +123,19 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
   - Runs shows **interrupted** runs, with a filter for them;
   - the run page shows the question (`payload`) with **Approve** / **Reject** or a JSON answer;
   - answering calls `resume(answers=)` through the project's bridge.
+- **Found while designing (probe, 2026-10-14):**
+  - A parked run's trace says `status: ok`. Nothing in any store tells it apart from a finished run.
+  - A resume records its trace under the same id (the run id), holding only what ran after the resume. The local store replaces the run's folder with it, and ClickHouse replaces the node rows by `(trace_id, seq)`. Answering a run deletes the record of everything before the question. Probe: parked trace `[p, s, ask]`, after the answer `[ask, a]`.
+  - The resume cannot take a new trace id. The run id is the trace id, and interrupt ids and `run_context().idempotency_key` are derived from it. A new id would give an op that charges a card a new idempotency key.
+- **Design:**
+  - **S1a. A stopped run's trace says so.** The trace of a parked run has status `interrupted` (`drained` for a drain) and `metadata["interrupted"] = [{id, op, payload}]`. An error still wins.
+  - **S1b. A resumed run's trace is the whole run.** When a journalled run stops (parked, drained or failed), the engine saves its trace nodes in the journal. This happens only on the stop path, so a run that ends pays nothing. A resume loads them into its trace before it runs: wall times are kept, the trace starts when the run first started, and a loaded node that did not end ok gets the suffix `@stopped` (its op runs again under the plain id). Every store then gets one complete trace and replaces the old one, so local, ClickHouse and Langfuse need no change. A failed run's retry (S2) and a job item retried by resume get the same.
+  - **S1c. The bridge answers.** `{"op": "parked"}` lists the journal's interrupted runs: run id, owner (the service or job whose compiled graph has the run's fingerprint), inputs, times, and questions (`[{id, op, payload}]` from the PARKED steps). `{"op": "answer", "run_id", "answers"}` resumes the run with the owner's engine and its real trace consumers, filed as the original run was. It replies with the new status, plus the questions if the run parked again.
+  - **S1d. Studio.** The Runs list gets a **Waiting** filter, and its count comes from the bridge's `parked`, because the journal is the truth (a run answered elsewhere leaves it). The run page of a waiting run shows each question with its payload: **Approve** sends `"approve"`, **Deny** sends `"deny"` (operonx-agents' words), and **Answer** sends any JSON. The page then reloads the run, which now holds the whole story.
+- **Gates:**
+  - No cost on a run that ends: the A/B benchmark (8 ops, 400 runs at once, with and without a journal) matches main.
+  - The stop path is measured and stated in the guide.
+  - Tests: a parked trace's status and questions; after an answer, the trace holds every node once, in order, with the parked `ask@stopped`; `retry_failed` gets the same; the bridge's `parked` and `answer` against a service and a job.
 
 **S2. Retry from failure.** *Essential · small · studio (needs L1, L2).*
 - **What:** a failed, journalled run's page gets **Retry from the failure**, which calls `resume(retry_failed=True, allow_graph_change=True)`. The new attempt lands in the same run, so it reads as one story.

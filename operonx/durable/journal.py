@@ -16,6 +16,7 @@ a way into the workers that resume from it.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -135,6 +136,7 @@ class MemoryJournal:
     def __init__(self) -> None:
         self._runs: Dict[str, Tuple[RunHeader, List[bytes]]] = {}
         self._threads: Dict[str, bytes] = {}
+        self._traces: Dict[str, str] = {}
         self._lock = threading.Lock()
 
     def open_run(self, header: RunHeader) -> None:
@@ -161,12 +163,27 @@ class MemoryJournal:
             header.status, header.updated_at = status, time.time()
 
     def write(self, ops: Sequence[Tuple[str, str, Any]]) -> None:
-        """Several runs' appends and ends, in order (the shared writer's batch)."""
+        """Several runs' appends, traces and ends, in order (the shared
+        writer's batch)."""
         for op, run_id, arg in ops:
             if op == "append":
                 self.append(run_id, arg)
+            elif op == "trace":
+                self.save_trace(run_id, arg)
             else:
                 self.set_status(run_id, arg)
+
+    def save_trace(self, run_id: str, record: Dict[str, Any]) -> None:
+        """Keep a stopped run's trace (:mod:`operonx.durable.history`)."""
+        blob = json.dumps(record, default=repr)
+        with self._lock:
+            self._get(run_id)
+            self._traces[run_id] = blob
+
+    def load_trace(self, run_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            blob = self._traces.get(run_id)
+        return json.loads(blob) if blob is not None else None
 
     def runs(self, status: Optional[str] = None) -> List[RunHeader]:
         with self._lock:
@@ -210,6 +227,10 @@ CREATE TABLE IF NOT EXISTS steps (
     seq    INTEGER NOT NULL,
     step   BLOB NOT NULL,
     PRIMARY KEY (run_id, seq)
+);
+CREATE TABLE IF NOT EXISTS traces (
+    run_id TEXT PRIMARY KEY,
+    record TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS runs_status ON runs (status);
 """
@@ -325,6 +346,8 @@ class SqliteJournal:
                         [(run_id, first + i, _dump(step)) for i, step in enumerate(arg)],
                     )
                     following[run_id] = first + len(arg)
+                elif op == "trace":
+                    conn.execute(_SAVE_TRACE, (run_id, json.dumps(arg, default=repr)))
                 else:
                     _check_status(arg)
                     cur = conn.execute(
@@ -379,8 +402,23 @@ class SqliteJournal:
             (thread_id, _dump(values), time.time()),
         )
 
+    def save_trace(self, run_id: str, record: Dict[str, Any]) -> None:
+        """Keep a stopped run's trace (:mod:`operonx.durable.history`)."""
+        self._conn().execute(_SAVE_TRACE, (run_id, json.dumps(record, default=repr)))
+
+    def load_trace(self, run_id: str) -> Optional[Dict[str, Any]]:
+        row = (
+            self._conn().execute("SELECT record FROM traces WHERE run_id = ?", (run_id,)).fetchone()
+        )
+        return json.loads(row[0]) if row is not None else None
+
     def __repr__(self) -> str:
         return f"SqliteJournal({str(self.path)!r})"
+
+
+_SAVE_TRACE = (
+    "INSERT INTO traces VALUES (?, ?) ON CONFLICT (run_id) DO UPDATE SET record = excluded.record"
+)
 
 
 def _dump(value: Any) -> bytes:
