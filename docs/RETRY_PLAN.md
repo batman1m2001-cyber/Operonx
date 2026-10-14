@@ -1,6 +1,6 @@
 # One retry model for operonx: a project default, specific overrides
 
-**Status:** 2026-10-14. R1, R2 and R4 done; R3 and R5 wait. Every "today" below was read in the code.
+**Status:** 2026-10-14. R1, R2 and R4 done; R3 decided (below), not built; R5 waits. Every "today" below was read in the code.
 
 ## What exists today: eleven retry mechanisms
 
@@ -122,6 +122,23 @@ project   operonx.toml  [retry]                ← the default
 - Ops that already run their own semantic re-asks keep them: `LLMOp(max_retries=)` and agents' `output_retries`, layer 10, are a different thing (a new prompt, not the same call again).
 
 ### R3. One vocabulary everywhere. *Important · medium · library*
+- **Decided 2026-10-14 (this replaces the bullets below where they differ):**
+  - **Keep a call-level retry and make it one shared helper.** Some ops make many calls:
+    - an agent op runs model, tool and model calls in one op, so an op retry after a 429 in turn 5 would run the earlier tools again;
+    - a fallback chain retries its primary before moving on;
+    - an empty 200 answer is a result, not an error, and only the call layer sees it.
+
+    So the call retry stays, but as one core helper, `retry_call(fn, retry)`, built on `Retry`, `TRANSIENT`, `mark_retried` and, later, the R5 trace hook.
+  - **Delete the three hand-written loops:**
+    - `LLMOp._call_with_retry`;
+    - operonx-agents' `_with_transport_retry` (`packages/operonx-agents/operonx_agents/model/model.py`, a 12th mechanism found after the inventory);
+    - the Triton loop in `providers/triton/client.py`.
+
+    Gemini's token-refresh loop becomes a `Retry` too.
+  - **Configured on the resource:** `retry: {max_attempts, initial, max_interval}` in `resources.yaml`. The old keys are aliases (`max_retries: 2` becomes `max_attempts: 3`; `retry_base_delay`, `retry_max_delay` and `retry_min_delay` map onto `initial`, `max_interval` and a floor).
+  - **No default changes.** The LLM stays off; embeddings and Triton keep their short retry. P5 is answered by `[retry]` at the op level instead: it already skips stream doors, which a resource cannot know about. So the LLM default does **not** turn on, which reverses the earlier bullet.
+  - **`Retry` honours `Retry-After`:** the op-level and project retries read the header too, so moving LLM retries up to `[retry]` loses nothing.
+  - **The rule for users:** op retry (`[retry]`, `@op(retry=)`) is for ops that make one call; call retry (on the resource) is for ops that make many calls, such as agents. Document it in guide 06 and the `operonx init` AGENTS.md.
 - Transport retries (LLM, embeddings, Triton, Gemini's token), the run queue, webhook callbacks and the trace writer all take a `Retry` (`max_attempts` counts every attempt).
 - In `resources.yaml`:
 
@@ -161,7 +178,7 @@ project   operonx.toml  [retry]                ← the default
 | 1 | R1 backoff releases its slot **(done)** | high under outages | small | none, only waits |
 | 2 | R2 project/engine default + `retry=False` **(done)** | high | small to medium | none until `[retry]` is set |
 | 3 | R4 one transient classifier **(done)** | medium | small | none |
-| 4 | R3 one vocabulary + transport default on | medium | medium | **the LLM retries transient errors by default** |
+| 4 | R3 one call-retry helper + one vocabulary (decided, see R3) | medium | medium | none: defaults unchanged |
 | 5 | R5 retries in trace and studio | medium | small to medium | none |
 
 Each step ships with tests in `tests/internal/policy` and `tests/internal/durable`, and a guide update (`guide/06-failures.md`). R3's alias reading is tested against every resource type.
