@@ -78,9 +78,35 @@ asyncio.run(main())
   that was run again has `status="retried"` (its error kept) and an
   `op_id` ending in `@1`, `@2` …; it does not make the run a failure. The
   last attempt of an op that never succeeds is an ordinary `error`.
-- **`LLMOp`** retries its transport per resource (`max_retries:` in
-  `resources.yaml`). An error that retry already gave up on is not retried
-  again by `retry=`: set one of the two, not both, for the same errors.
+- **A model or a store can also retry one call** (below); an error that
+  call retry already gave up on is not retried again by `retry=`.
+
+## Op retry or call retry
+
+Two places retry, with one vocabulary (`Retry`'s fields) and one list of
+errors worth it (`TRANSIENT`):
+
+| | op retry | call retry |
+|---|---|---|
+| runs again | the whole op | one request |
+| set with | `@op(retry=)`, `Operon(retry=)`, `[retry]` | `retry:` on the resource in `resources.yaml` |
+| use it for | an op that makes one call | an op that makes many (an agent: model, tool, model) |
+
+An agent's fifth model call that hits a 429 must not run its first four
+turns, and their tools, again: give its model resource a call retry.
+
+```yaml
+llm:assistant:
+  api_type: openai
+  model: gpt-4o-mini
+  retry: {max_attempts: 3, initial: 1, max_interval: 30}   # off unless set
+```
+
+`max_retries`, `retry_base_delay`, `retry_max_delay` and `retry_min_delay`
+still work as its old spelling (`max_retries: 2` is `max_attempts: 3`); set
+one or the other. A rate limit's `Retry-After` is honoured by both kinds.
+Your own code can run a call the same way: `await retry_call(fetch,
+Retry(max_attempts=3))`, with `from operonx import retry_call`.
 
 ## A default retry for a whole run, or a project
 

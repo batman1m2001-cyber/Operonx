@@ -41,7 +41,7 @@ from operonx.core.ops import (
     graph,
     op,
 )
-from operonx.core.policy import TRANSIENT, OpFailed, Retry, Timeout
+from operonx.core.policy import TRANSIENT, OpFailed, Retry, Timeout, retry_call
 from operonx.core.registry import (
     REGISTRY,
     CacheEntry,
@@ -86,6 +86,7 @@ __all__ = [
     "Timeout",
     "TRANSIENT",
     "OpFailed",
+    "retry_call",
     # What an op body can know about its run
     "RunContext",
     "run_context",

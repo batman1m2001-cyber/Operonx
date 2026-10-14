@@ -8,3 +8,4 @@ llm:assistant:
   api_key: ${LLM_API_KEY}
   base_url: ${LLM_BASE_URL:https://api.openai.com/v1}
   model: ${LLM_MODEL:gpt-4o-mini}
+  # retry: {max_attempts: 3, initial: 1}   # send a failed request again (429, 5xx)

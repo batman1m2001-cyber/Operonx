@@ -11,9 +11,9 @@ license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "Operon Team" }]
 dependencies = [
-    # K7 (operonx main 2279cea): one tool-call shape, `timeout:` and
-    # `structured_output:` on llm: resources, logprobs on streams.
-    "operonx[openai,anthropic]>=1.18.0",
+    # 1.23.0: `operonx.retry_call` / `resource_retry`, the one call retry the
+    # model's transport retry now runs on (operonx docs/RETRY_PLAN.md R3).
+    "operonx[openai,anthropic]>=1.23.0",
     "pydantic>=2.0",
     "httpx>=0.24",
     "python-dotenv>=1.0",   # `operonx-agents probe --env`

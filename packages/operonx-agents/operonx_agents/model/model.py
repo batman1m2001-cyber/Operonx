@@ -11,8 +11,9 @@ operonx's ``ResourceHub``)::
 Who retries what (operonx.agents' rule, kept):
 
 - **Transport** — 429, 5xx, a dropped connection, the resource's own
-  ``timeout:`` — retried on the *same* resource as its ``max_retries`` /
-  ``retry_*`` say, the way ``LLMOp`` does.
+  ``timeout:`` — retried on the *same* resource as its ``retry:`` (or old
+  ``max_retries`` / ``retry_*``) says, by ``operonx.retry_call``, as
+  ``LLMOp`` does. One request is sent again, not the agent's turn.
 - **Fallback** — a resource that still fails, or refuses
   (``finish_reason`` ``content_filter``/``safety``, or a ``refusal``),
   hands over to the next one. A stream falls back only before its first
@@ -33,14 +34,13 @@ record stays open across its yields without becoming the current frame
 
 from __future__ import annotations
 
-import asyncio
-import random
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Union
 
 from operonx import child
 from operonx.core import LOGGER
+from operonx.core.policy import resource_retry, retry_call
 from operonx.core.registry.resource_hub import ResourceHub
 from operonx.providers.llms.base import normalize_tool_call
 
@@ -398,51 +398,17 @@ def _per_resource(llm: Any, params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _with_transport_retry(llm: Any, params: Dict[str, Any], messages) -> tuple:
-    """``(completion, usage of every attempt)``; retries what the resource
-    config says is transient, on this resource only."""
+    """``(completion, usage)``: one request under this resource's call retry
+    (its ``retry:``, or its old ``max_retries`` / ``retry_*`` keys), retried
+    on this resource only and only for what ``operonx.TRANSIENT`` calls worth
+    another try. ``operonx.retry_call``, the one every resource uses."""
     cfg = getattr(llm, "config", None)
-    retries = _num(cfg, "max_retries", 0)
-    base = _num(cfg, "retry_base_delay", 5.0)
-    floor = _num(cfg, "retry_min_delay", 0.0)
-    cap = _num(cfg, "retry_max_delay", 60.0)
-    attempt = 0
-    while True:
-        try:
-            completion = await llm.generate(messages=messages, **params)
-            return completion, Usage.from_completion(getattr(completion, "usage", None), cfg)
-        except Exception as exc:  # noqa: BLE001
-            if attempt >= retries or not _transient(exc):
-                raise
-            delay = random.uniform(floor, max(floor, min(cap, base * 2**attempt)))
-            LOGGER.warning(
-                "transient %s (%s); retry %d/%d", type(exc).__name__, exc, attempt + 1, retries
-            )
-            attempt += 1
-            await asyncio.sleep(delay)
-
-
-def _num(cfg: Any, name: str, default: float) -> Any:
-    value = getattr(cfg, name, None)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return default
-    return value
-
-
-def _transient(exc: BaseException) -> bool:
-    status = getattr(exc, "status_code", None) or getattr(
-        getattr(exc, "response", None), "status_code", None
+    completion = await retry_call(
+        lambda: llm.generate(messages=messages, **params),
+        resource_retry(cfg, attempts=1, initial=5.0, max_interval=60.0),
+        label=str(getattr(cfg, "model", None) or "model"),
     )
-    if isinstance(status, int):
-        return status == 429 or status >= 500
-    name = type(exc).__name__
-    return isinstance(exc, (ConnectionError, TimeoutError)) or name in (
-        "APIConnectionError",
-        "APITimeoutError",
-        "ConnectError",
-        "ReadTimeout",
-        "ConnectTimeout",
-        "RemoteProtocolError",
-    )
+    return completion, Usage.from_completion(getattr(completion, "usage", None), cfg)
 
 
 def _response(completion: Any, resource: str, usage: Usage) -> ModelResponse:

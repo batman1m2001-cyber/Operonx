@@ -63,6 +63,7 @@ from operonx.core import (
     graph,
     invoke,
     op,
+    retry_call,
     run_context,
 )
 from operonx.core.registry import (
@@ -154,6 +155,7 @@ __all__ = [
     "Timeout",
     "TRANSIENT",
     "OpFailed",
+    "retry_call",
     # What an op body can know about its run
     "RunContext",
     "run_context",

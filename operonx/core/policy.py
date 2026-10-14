@@ -37,6 +37,8 @@ __all__ = [
     "Retry",
     "Timeout",
     "mark_retried",
+    "resource_retry",
+    "retry_call",
 ]
 
 #: Set on an error an inner layer has already retried to exhaustion.
@@ -210,6 +212,24 @@ def _is_exception_type(value: Any) -> bool:
     return isinstance(value, type) and issubclass(value, BaseException)
 
 
+def _retry_after(error: BaseException) -> Optional[float]:
+    """Seconds a rate-limited server asked to wait, from the error's response
+    (``retry-after-ms`` or ``retry-after`` in seconds), or None."""
+    headers = getattr(getattr(error, "response", None), "headers", None)
+    if headers is None:
+        return None
+    try:
+        ms = headers.get("retry-after-ms")
+        if ms is not None:
+            return max(0.0, float(ms) / 1000)
+        seconds = headers.get("retry-after")
+        if seconds is not None:
+            return max(0.0, float(seconds))
+    except (TypeError, ValueError, AttributeError):  # an HTTP date, a stranger
+        pass
+    return None
+
+
 @dataclass(frozen=True)
 class Retry:
     """Run a failed op again, after a growing pause.
@@ -221,8 +241,13 @@ class Retry:
         initial: seconds to wait after the first failed attempt.
         backoff: each later wait is this many times the one before.
         max_interval: no wait is longer than this.
+        min_interval: no wait is shorter than this, jitter and ``Retry-After``
+            included.
         jitter: wait a random time between half the computed wait and all
             of it, so many runs failing together do not retry together.
+
+    A rate limit that says when to come back (a ``Retry-After`` header on
+    the error's response) is waited out as asked, up to ``max_interval``.
         on: which errors to retry: an exception class, a tuple of them, or a
             predicate ``error -> bool``. Defaults to :data:`TRANSIENT`.
 
@@ -240,6 +265,7 @@ class Retry:
     max_interval: float = 30.0
     jitter: bool = True
     on: RetryOn = TRANSIENT
+    min_interval: float = 0.0
 
     def __post_init__(self) -> None:
         if isinstance(self.max_attempts, bool) or not isinstance(self.max_attempts, int):
@@ -249,10 +275,15 @@ class Retry:
                 f"Retry(max_attempts={self.max_attempts}): it counts the first attempt too, "
                 f"so it is at least 1"
             )
-        for name in ("initial", "backoff", "max_interval"):
+        for name in ("initial", "backoff", "max_interval", "min_interval"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
                 raise ValueError(f"Retry({name}=...) takes a number >= 0, got {value!r}")
+        if self.min_interval > self.max_interval:
+            raise ValueError(
+                f"Retry(min_interval={self.min_interval}) is longer than "
+                f"max_interval={self.max_interval}"
+            )
         if self.backoff < 1:
             raise ValueError(
                 f"Retry(backoff={self.backoff}): waits must not shrink; use 1 for a fixed wait"
@@ -278,12 +309,19 @@ class Retry:
             return isinstance(error, on)
         return bool(on(error))
 
-    def delay(self, attempt: int) -> float:
-        """Seconds to wait after failed attempt number *attempt* (1-based)."""
+    def delay(self, attempt: int, error: Optional[BaseException] = None) -> float:
+        """Seconds to wait after failed attempt number *attempt* (1-based).
+
+        *error*'s ``Retry-After`` (a rate limit saying when to come back),
+        when it has one, else the backoff.
+        """
+        after = _retry_after(error) if error is not None else None
+        if after is not None:
+            return max(self.min_interval, min(self.max_interval, after))
         wait = min(self.max_interval, self.initial * self.backoff ** (attempt - 1))
         if self.jitter:
             wait = random.uniform(wait / 2, wait)
-        return wait
+        return max(self.min_interval, wait)
 
 
 @dataclass(frozen=True)
@@ -320,6 +358,149 @@ class Timeout:
                 continue
             if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
                 raise ValueError(f"Timeout({name}=...) takes seconds > 0, got {value!r}")
+
+
+#: What a resource's ``retry:`` table takes (``resources.yaml``).
+RESOURCE_RETRY_KEYS = (
+    "max_attempts",
+    "initial",
+    "backoff",
+    "max_interval",
+    "min_interval",
+    "jitter",
+)
+
+#: The old per-resource keys, still read: ``max_retries`` counts the extra
+#: attempts (``max_retries: 2`` is ``max_attempts: 3``).
+LEGACY_RETRY_KEYS = ("max_retries", "retry_base_delay", "retry_max_delay", "retry_min_delay")
+
+
+def resource_retry(
+    cfg: Any,
+    *,
+    attempts: int,
+    initial: float,
+    max_interval: float,
+    min_interval: float = 0.0,
+) -> Retry:
+    """The call retry a resource config asks for, as a ``Retry``.
+
+    Its ``retry:`` table when it has one (``retry: {max_attempts: 3,
+    initial: 1}``), else the old keys (``max_retries``, ``retry_base_delay``,
+    ``retry_max_delay``, ``retry_min_delay``), else the given defaults, which
+    are the resource kind's: an LLM's is one attempt (no retry), Triton's
+    three. Only ``TRANSIENT`` errors are retried.
+    """
+    table = getattr(cfg, "retry", None)
+    if isinstance(table, Retry):
+        return table
+    # A typed config checked its `retry:` as it loaded (`check_resource_retry`);
+    # anything else here (a stand-in config, a mock) is not a table, and is
+    # read like a config without one.
+    if isinstance(table, dict):
+        unknown = sorted(set(table) - set(RESOURCE_RETRY_KEYS))
+        if unknown:
+            raise ValueError(
+                f"retry: takes {', '.join(RESOURCE_RETRY_KEYS)}; not {', '.join(unknown)}"
+            )
+        base = {
+            "max_attempts": attempts,
+            "initial": initial,
+            "max_interval": max_interval,
+            "min_interval": min_interval,
+        }
+        return Retry(**{**base, **table})
+
+    def number(name: str, default: float) -> float:
+        value = getattr(cfg, name, None)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return default
+        return value
+
+    return Retry(
+        max_attempts=int(number("max_retries", attempts - 1)) + 1,
+        initial=number("retry_base_delay", initial),
+        max_interval=number("retry_max_delay", max_interval),
+        min_interval=number("retry_min_delay", min_interval),
+    )
+
+
+def check_resource_retry(cfg: Any, *, attempts: int, initial: float, max_interval: float) -> None:
+    """Refuse, as a resource loads, a ``retry:`` table that will not build, or
+    one set beside the old keys (two answers, one of them silently ignored)."""
+    if getattr(cfg, "retry", None) is None:
+        return
+    both = sorted(set(LEGACY_RETRY_KEYS) & set(getattr(cfg, "model_fields_set", ()) or ()))
+    if both:
+        raise ValueError(f"set retry: or {', '.join(both)}, not both: retry: replaces them")
+    resource_retry(cfg, attempts=attempts, initial=initial, max_interval=max_interval)
+
+
+async def retry_call(
+    fn: Callable[[], Any],
+    retry: Retry,
+    *,
+    again: Optional[Callable[[Any], bool]] = None,
+    label: str = "",
+) -> Any:
+    """``await fn()``, called again on a failure ``retry`` retries.
+
+    The call retry of a resource: one request sent again, where an op's
+    ``retry=`` runs the whole op again. An op that makes many calls (an
+    agent: model, tools, model) needs this one, or a 429 in its fifth turn
+    would run its first four again.
+
+    * Retried: an error ``retry.retries`` says is worth it (``TRANSIENT`` by
+      default), and a result ``again(result)`` rejects (an empty answer).
+      The last such result is returned, not raised.
+    * The wait is ``retry.delay`` (a ``Retry-After`` honoured). Inside an op
+      it gives the run's concurrency slot back, as an op's retry does.
+    * An error it gives up on after retrying is marked (:func:`mark_retried`)
+      so an op's ``retry=`` around the call does not retry it again.
+    """
+    attempt = 1
+    while True:
+        try:
+            result = await fn()
+        except Exception as error:
+            if not retry.retries(error):
+                raise
+            if attempt >= retry.max_attempts:
+                if retry.max_attempts > 1:
+                    mark_retried(error)
+                raise
+            delay = retry.delay(attempt, error)
+            status = _http_status(error)
+            why = f"{type(error).__name__}{f' {status}' if status else ''}"
+        else:
+            if again is None or attempt >= retry.max_attempts or not again(result):
+                return result
+            delay = retry.delay(attempt)
+            why = "an empty answer"
+        from operonx.core.loggings import LOGGER
+
+        LOGGER.warning(
+            "[%s] %s. Attempt %d/%d. Retrying in %.2fs",
+            label or "call",
+            why,
+            attempt,
+            retry.max_attempts,
+            delay,
+        )
+        await _call_backoff(delay)
+        attempt += 1
+
+
+async def _call_backoff(delay: float) -> None:
+    """A call retry's wait: inside an op, its slot given back (``backoff``)."""
+    from operonx.core.runtime import _current_frame
+
+    frame = _current_frame.get(None)
+    op = getattr(frame, "op", None)
+    if op is None:
+        await asyncio.sleep(delay)
+    else:
+        await backoff(delay, op.name, frame.ctx)
 
 
 class OpPolicy(NamedTuple):
@@ -437,8 +618,9 @@ class _Slots:
         self.tasks = tasks  # the scheduler's tasks_by_ctx: ctx -> {op name: pump task}
         self.away: dict = {}
         # The task of the scheduler's main loop, which runs plain `def` ops
-        # inline: one of those waiting out a retry is handed to a task.
-        self.main = asyncio.current_task()
+        # inline: one of those waiting out a default retry is handed to a
+        # task. Set by the scheduler only then (`current_task()` costs ~1.6 µs).
+        self.main: Optional[asyncio.Task] = None
 
     async def wait(self, task: asyncio.Task, delay: float) -> None:
         """Sleep *delay* seconds without the slots; take them back after,
@@ -467,7 +649,7 @@ def _handed_off(name: str, ctx: tuple) -> bool:
     handed to a task of its own (``HandOff``) rather than sleep there.
     """
     slots = _SLOTS.get()
-    if slots is None or slots.main is not asyncio.current_task():
+    if slots is None or slots.main is None or slots.main is not asyncio.current_task():
         return False
     bucket = slots.tasks.get(ctx)
     return bucket is None or bucket.get(name) is None

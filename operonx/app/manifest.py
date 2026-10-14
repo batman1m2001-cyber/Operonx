@@ -451,7 +451,15 @@ def with_default_trace(serves: Tuple["ServeSpec", ...], trace: Any) -> Tuple["Se
 
 
 #: What ``[retry]`` takes: ``Retry``'s own arguments, and ``transient``.
-RETRY_KEYS = ("max_attempts", "initial", "backoff", "max_interval", "jitter", "transient")
+RETRY_KEYS = (
+    "max_attempts",
+    "initial",
+    "backoff",
+    "max_interval",
+    "min_interval",
+    "jitter",
+    "transient",
+)
 
 
 def _retry_table(table: Any, where: str) -> Any:

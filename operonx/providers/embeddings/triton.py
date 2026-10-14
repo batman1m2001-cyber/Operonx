@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 
+from operonx.core.policy import resource_retry
 from operonx.providers.embeddings.base import BaseEmbedder
 from operonx.providers.embeddings.config import EmbeddingConfig
 
@@ -74,9 +75,7 @@ class TritonEmbedding(BaseEmbedder):
         "_batch_size",
         "_output_dim",
         "_timeout",
-        "_retries",
-        "_retry_base_delay",
-        "_retry_max_delay",
+        "_retry",
     ]
 
     def __init__(self, config: EmbeddingConfig) -> None:
@@ -123,9 +122,8 @@ class TritonEmbedding(BaseEmbedder):
         # operonx; the retries cover the deadline that expires with the
         # budget spent on something other than the model.
         self._timeout = config.timeout
-        self._retries = config.max_retries
-        self._retry_base_delay = config.retry_base_delay
-        self._retry_max_delay = config.retry_max_delay
+        # The resource's `retry:` (or its old max_retries / retry_* keys).
+        self._retry = resource_retry(config, attempts=3, initial=0.5, max_interval=8.0)
         self.tokenizer = None
 
         if self._input_name:
@@ -261,9 +259,7 @@ class TritonEmbedding(BaseEmbedder):
                 outputs=[self._output_name],
                 timeout=timeout,
                 decode=False,
-                retries=self._retries,
-                retry_base_delay=self._retry_base_delay,
-                retry_max_delay=self._retry_max_delay,
+                retry=self._retry,
             )
 
             vec = result.get(self._output_name)
