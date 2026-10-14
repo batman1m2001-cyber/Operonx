@@ -524,3 +524,12 @@ def test_the_models_retry_line_builds_once_uncommented():
     assert resource_retry(cfg, attempts=1, initial=5.0, max_interval=60.0) == Retry(
         max_attempts=3, initial=1, max_interval=60.0
     )
+
+
+def test_the_durable_block_is_off_and_parses_once_uncommented():
+    from operonx.app.manifest import Manifest, _toml
+
+    toml = plan("hello", "demo")["operonx.toml"].decode()
+    assert Manifest.from_dict(_toml.loads(toml)).durable is None
+    on = re.sub(r"^# (\[durable\]|journal = )", r"\1", toml, flags=re.M)
+    assert Manifest.from_dict(_toml.loads(on)).durable.journal == "sqlite:.operonx/journal.db"

@@ -27,3 +27,10 @@ sinks = ["local"]
 # initial = 0.5      # seconds before the second attempt, doubling after
 # max_interval = 30  # no pause longer than this
 # transient = []    # your own errors worth another try, as "module:Name"
+
+# Record every step of the jobs and request-reply services, so a crashed or
+# failed job item finishes from where it stopped (operonx run NAME --resume)
+# and a run that asks a person is answered later (POST <path>/resume).
+# Costs a few ms per run. Off until uncommented.
+# [durable]
+# journal = "sqlite:.operonx/journal.db"

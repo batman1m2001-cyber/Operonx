@@ -49,12 +49,22 @@ def default_record_dir(folder: str = ".operonx/jobs") -> Path:
     return project_root(Path.cwd()) / folder
 
 
-def _compile(job: str, what: str, g: Any, trace: Any, retry: Any = None) -> Any:
+def _compile(
+    job: str,
+    what: str,
+    g: Any,
+    trace: Any,
+    retry: Any = None,
+    journal: Any = None,
+    durability: str = "async",
+) -> Any:
     """A graph as a compiled Operon: an ``Operon`` as is, a ``GraphOp``
     wrapped, a module-level ``@graph`` with every parameter a run input.
-    ``retry`` is the project's default op retry (``[retry]``); an
+    ``retry`` is the project's default op retry (``[retry]``) and
+    ``journal`` its ``[durable]`` journal, taken by a graph without a door
+    (a door's items come from a live connection no journal holds); an
     ``Operon`` given as is keeps its own."""
-    from operonx.core.engine import Operon
+    from operonx.core.engine import Operon, _ingress_of
     from operonx.core.ops.graph import GraphOp
 
     if isinstance(g, str):
@@ -63,8 +73,14 @@ def _compile(job: str, what: str, g: Any, trace: Any, retry: Any = None) -> Any:
         g = load_object(g, field=f"job {job!r} {what}")
     if isinstance(g, Operon):
         return g
+
+    def durable(graph: Any) -> dict:
+        if journal is None or _ingress_of(graph) is not None:
+            return {}
+        return {"journal": journal, "durability": durability}
+
     if isinstance(g, GraphOp):
-        return Operon(g, trace=trace, retry=retry)
+        return Operon(g, trace=trace, retry=retry, **durable(g))
     if callable(g) and getattr(g, "_operonx_graph", False):
         try:
             params = {p: None for p in inspect.signature(g).parameters}
@@ -72,7 +88,8 @@ def _compile(job: str, what: str, g: Any, trace: Any, retry: Any = None) -> Any:
             params = {}
         # Named after the graph explicitly: built inside `Operon(...)` it
         # would take its name from the code around this call.
-        return Operon(g(name=g.__name__, **params), params=params or None, trace=trace, retry=retry)
+        built = g(name=g.__name__, **params)
+        return Operon(built, params=params or None, trace=trace, retry=retry, **durable(built))
     raise TypeError(
         f"job {job!r}: {what} is a {type(g).__name__}, not an Operon, a GraphOp "
         "or a module-level @graph"
@@ -226,6 +243,9 @@ class Job:
         # The default retry of the ops this job runs: the project's `[retry]`,
         # set by `settle_jobs`. Not `retry`, which runs a failed item again.
         self.op_retry: Optional[Retry] = None
+        # The journal its items run in (`[durable]`), set by `settle_jobs`.
+        self.journal: Any = None
+        self.durability: str = "async"
         self.timeout = float(timeout) if timeout is not None else None
         self.preflight: List[str] = list(preflight or [])
         self.trace = trace
@@ -263,7 +283,13 @@ class Job:
             if self.steps is not None:
                 raise TypeError(f"job {self.name!r} runs steps; it has no graph")
             self._engine = _compile(
-                self.name, "graph", self.graph, self.trace, getattr(self, "op_retry", None)
+                self.name,
+                "graph",
+                self.graph,
+                self.trace,
+                getattr(self, "op_retry", None),
+                getattr(self, "journal", None),
+                getattr(self, "durability", "async"),
             )
         return self._engine
 

@@ -28,8 +28,8 @@ services and jobs.
   or `websocket(...)`.
 - **Application**: `APP` in `app/main.py`. Declare every service and job
   there.
-- **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]` and
-  `[retry]`. Never put `[[serve]]` blocks in it (deprecated; removed in
+- **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`,
+  `[retry]` and `[durable]`. Never put `[[serve]]` blocks in it (deprecated; removed in
   operonx 2.0).
 
 ## Serving a graph

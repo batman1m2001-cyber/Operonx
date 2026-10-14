@@ -74,6 +74,30 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
   - a job item resumes where it stopped, and a failed item can be retried from its failed op (L1);
   - a request-response Service with an `InterruptOp` parks and answers later.
   - A **door** graph (a live stream, such as the callbot) stays as it is: its items come from a live connection that no journal holds. `resume` already refuses one.
+- **Design (2026-10-14, audited before building):**
+  - **The switch.** `operonx.toml`:
+
+    ```toml
+    [durable]
+    journal = "sqlite:.operonx/journal.db"   # relative to the project
+    durability = "async"                     # optional: async | sync | exit
+    ```
+
+    Parsed into `Manifest.durable`. A typo fails at load. Absent, nothing changes.
+  - **Who gets it:** doorless jobs and doorless request-reply services. A graph with a door (`ingress`), such as a websocket call or a job fed through a session, never does: `resume` refuses doors, and its items come from a live connection. An `Operon` handed to a job as is keeps its own `journal=`.
+  - **Job items:**
+    - Each item's run id is `<job run id>:<item key>`, so a job that processes the same key every night never replays yesterday's run.
+    - `Job(retry=)`: attempt 2 of a failed item is `engine.resume(run_id, retry_failed=True)` (L1), so what ended before the failure (a charge) is not done again.
+    - `operonx run NAME --resume`: an item the previous run left mid-way, or failed, resumes from the journal under the previous run's id. A finished item is skipped, as today. An item with no journal run starts fresh.
+  - **Services:**
+    - Each request's run is journalled under its trace id.
+    - A run that parks on an `InterruptOp` replies with `{"run_id", "$interrupted": [...]}` instead of an answer.
+    - `POST <path>/resume` with `{"run_id", "answers": {id: value}}` continues it (`engine.resume(answers=)`) and replies as the first request would have. operonx adds this route unless the service declares its own `resume=` graph (operonx-agents' approvals keep theirs).
+  - **Cost:** the journal writes each step (`durability="async"`: a background writer). Measured on a request-reply service before it ships, and stated in the guide.
+  - **Studio:** S1 (inbox) and S2 (retry button) use this same journal through the project's bridge.
+- **Done (2026-10-14).** Built as designed. Measured (8-op chain, one run at a time): no journal 1.4 ms p50; SQLite `async` 3.85 ms p50 and 8.6 ms p95; `exit` 3.7 ms; `sync` 7.3 ms. At 400 runs at once, throughput drops about 10×.
+  - Profiled: the journal starts a writer thread per run (`recorder.py`), and SQLite has one writer, so commits serialize.
+  - **Follow-up L2b:** one shared writer per journal file, batching steps across runs into one transaction. It is not built yet; it decides whether a busy service can be journalled.
 
 **L3. A shared journal: Postgres.** *Essential for more than one machine · medium · library.*
 - **Why:** `SqliteJournal` is one file on one machine. LangGraph ships a Postgres checkpointer for this reason: a run parked on one worker is answered on another. The journal is a `Protocol`, and the codec is already JSON, which is what a Postgres table needs.
@@ -118,7 +142,7 @@ The second gap is two LangGraph debugging ideas built on that journal: **retry f
 | # | Item | Where | Impact | Effort | Status |
 |---|---|---|---|---|---|
 | 1 | L1 retry from the failed op | library | high | small | **done with this plan** |
-| 2 | L2 journal in Jobs and Services | library | high, architectural | medium | next |
+| 2 | L2 journal in Jobs and Services | library | high, architectural | medium | **done** |
 | 3 | S1 answer parked runs | studio | high once L2 is in | medium | after L2 |
 | 4 | S2 retry-from-failure button | studio | high | small | after L2 |
 | 5 | L4 fork from a step | library | medium-high | medium | |

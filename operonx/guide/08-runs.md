@@ -335,6 +335,35 @@ asyncio.run(main())
   `on_resume="fail"` refuses instead).
 - Without `journal=` nothing is recorded, and the scheduler pays one
   `is None` test per op.
+- **What it costs:** every step is written to the journal. Measured with an
+  8-op chain, one run at a time: 1.4 ms per run without a journal, about 3.8 ms
+  with `SqliteJournal` (`"async"` or `"exit"`), 7.3 ms with `"sync"`. SQLite
+  takes one writer at a time, so many runs at once share it: journal the runs
+  that must survive a crash or wait for a person, not a live call.
+
+### `[durable]`: the project's jobs and services
+
+One table in `operonx.toml` journals every doorless job and request-reply
+service of the project, without touching their code:
+
+```toml
+[durable]
+journal = "sqlite:.operonx/journal.db"   # relative to the project; or "memory"
+durability = "async"                     # optional
+```
+
+- **A job item** is journalled as `<job run id>-<key hash>`. A failed item
+  retried by `Job(retry=)` continues from its failed op, and `operonx run
+  NAME --resume` finishes the items the last run left mid-way or failed, from
+  where they stopped: a charge is not charged twice.
+- **A service run that asks a person** (an `InterruptOp`) replies
+  `{"run_id": ..., "interrupted": [{"id", "op", "payload"}]}` instead of an
+  answer; `POST <path>/resume` with `{"run_id": ..., "answers": {"<id>":
+  value}}` continues it and replies with the answer (`404` for a run the
+  journal does not hold, `409` for one not waiting). A service with its own
+  `resume=` graph (operonx-agents' approvals) keeps it.
+- **A graph with a door** (a websocket call, a job fed through a session) is
+  never journalled: its items come from a live connection.
 
 ### Approvals that outlive the process, and drains
 
