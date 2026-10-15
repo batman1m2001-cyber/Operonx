@@ -258,6 +258,50 @@ Per op, a rollup keeps the count, total and max time, errors, cost and
 tokens, and up to 64 duration samples, so percentiles across runs stay
 honest without storing every execution twice.
 
+## Why a run was slow
+
+A run whose ops all look fast can still be slow for whoever waits on it:
+items queued in front of a busy op, a worker serving too many runs, an
+event loop held by other work. A run's metadata says which, so the cause
+is read from the trace, not found with a profiler:
+
+| Key | When | What it says |
+|---|---|---|
+| `backlog` | items queued on a sequential edge (2 or more at once, or one for 100 ms) | `{"<src> -> <dst>": {"max", "max_wait_ms"}}`: how many waited at once, and the longest wait |
+| `worker` | a served run | `{"pid", "active_runs"}`: the process that served it and how many runs it was serving |
+| `loop_lag_ms` | a served run | `{"max", "p95"}`: how late the process's event loop woke (a 50 ms heartbeat) |
+| `cpu_pct` | a served run | `{"avg", "max"}`: how busy the process was, one core = 100 |
+| `latency_ms` | an op called `measure` | `{name: {"n", "p50", "p95", "max"}}` |
+
+How to read them: a late loop with `cpu_pct` near 100 is a worker out of
+CPU (fewer runs per worker, or more workers); a late loop with low CPU is
+something blocking it (a synchronous call in an `async` op); a `backlog`
+with a fast loop is one op too slow for what feeds it.
+
+The latency a user feels often spans ops: a voice bot's reply starts when
+the caller stops speaking (one op) and ends when its first audio is sent
+(another). No op's duration is that number, so the op where it ends
+measures it:
+
+```python
+import time
+
+from operonx import measure, op
+
+
+@op
+async def play(audio: bytes, spoke_at: float, line=None) -> dict:
+    await line.send(audio)  # the first audio of the reply leaves
+    measure("reply", (time.time() - spoke_at) * 1000)  # milliseconds
+    return {"played": True}
+```
+
+Each sample is kept with the run (a list append; nothing outside a traced
+run), and the run ends with `metadata["latency_ms"]["reply"] = {"n": 3,
+"p50": 870.0, "p95": 1080.0, "max": 1100.0}`. The studio's Monitor charts
+every measured name over time, beside the busiest worker's runs, its CPU
+and loop lag, and lists the runs that were slowed with the reason.
+
 ## Retention
 
 How long runs are kept is a policy per origin, in days or `None` for
@@ -318,4 +362,5 @@ the same loop.
 
 - Try a service by hand, record the session: [The playground bridge](12-playground.md).
 - Judge a graph against a dataset: [Evals](13-evals.md).
-- The API: [operonx.telemetry.runs](../api/runs.md).
+- The API: [operonx.telemetry.runs](../api/runs.md), and `measure` in
+  [operonx.core](../api/core.md).
