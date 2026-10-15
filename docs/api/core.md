@@ -17,10 +17,11 @@ The two decorators that turn ordinary Python into Operonx ops:
 
 ## Inside a run
 
-What an op body can read about its run, the steps it records, and the
+What an op body can read about its run, the latency it measures, the steps it records, and the
 events `engine.stream(mode="tasks")` yields:
 
 ::: operonx.core.runtime.run_context
+::: operonx.core.runtime.measure
 ::: operonx.core.runtime.RunContext
 ::: operonx.core.runtime.child
 ::: operonx.core.runtime.ChildExecution
