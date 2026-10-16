@@ -168,13 +168,13 @@ What I read and ran, and what each piece means for this engine.
 | Crash recovery of a task | journal replay; `idempotency_key` | Claude session id recorded at `init` |
 | Retries, timeouts | `Retry`, `Timeout`, `retry_call` | the engine's own rules per round (§7) |
 | Durable inbound commands | `SqliteQueue` | — |
-| Traces and inspection | run stores, studio run pages | `metadata={mission, task, round}` |
+| Traces and inspection | run stores, studio run pages | `metadata={milestone, task, round}` |
 | Coding agent | studio's Claude Code plumbing (ported) | a `Coder` protocol, a structured-output schema per role |
 | **Dynamic task DAG** | — | **a scheduler above the engine (new)** |
-| **Mission state** (tasks, attempts, findings, interactions) | SQLite (as journal, queue and run store already use) | **a mission store (new)** |
+| **Project state** (milestones, cards, rounds, findings, questions) | SQLite (as journal, queue and run store already use) | **a project store (new)** |
 | **Telegram** | `retry_call`, the redactor | **a messenger + Telegram adapter (new)** |
 | **Requirements from any input; traceability** | OneWealth's `docs/brd` layout, rules and checker, as the model | **readers, extraction checks, a generalized template and checker (new)** |
-| **Dashboard** | studio tab conventions, run pages, diff view | **a Missions tab with board, checklist and graph (new)** |
+| **Dashboard** | studio tab conventions, run pages, diff view | **a Board tabs with board, checklist and graph (new)** |
 
 No new database server, queue, service or language is needed.
 
@@ -188,17 +188,20 @@ No new database server, queue, service or language is needed.
    name), published like agents and kb (`publish.yaml` matrix, its own tag
    prefix). The UI is a tab in the **operonx-studio** repo. Both were agreed
    in this session.
-2. **A mission is a record, a task attempt is a run.** The engine keeps a
-   mission store (SQLite). Each stage that does work is one journalled
+2. **A milestone is a record, a task attempt is a run.** The engine keeps a
+   project store (SQLite). Each stage that does work is one journalled
    `Operon` run of a static, module-level graph. The DAG scheduler is
    asyncio above the engine, the same rule as Jobs. This gives one trace
    per task attempt rather than a single 6-hour trace, and gives the
    studio the run pages, journal answers, retry and fork for free.
-3. **"Mission", not "project".** In this ecosystem, *project* already
-   means a folder with an `operonx.toml`, and the studio's Projects home
-   lists those. One goal on one repo, taken from plan to delivery, is a
-   **mission**. Its parts are **tasks**, and a task's work happens in
-   **rounds**.
+3. **The project is the unit; work comes in milestones.** The name is
+   literal: operonx-project runs a *project*, meaning the product repo.
+   That is the same thing the studio's Projects home lists, and usually
+   an operonx project made with `operonx init`. A project lives a long
+   time and holds its BRD, its checklist and its board. A **milestone** is
+   one push of work on it: a goal and the rows it covers, from plan to
+   delivery. Its pieces of work are **cards**, and a card's work happens
+   in **rounds**. No other nouns.
 4. **The coding agent is headless Claude Code** behind a `Coder` protocol.
    It is the only available agent with real file, search and shell tools
    and strong code models. The studio already runs it, and it is signed
@@ -220,7 +223,7 @@ No new database server, queue, service or language is needed.
      to cite a file in the diff and a line that exists. If it does not,
      it is kept as *unverified* and does not block.
 6. **Parallel tasks never share a working tree.** Each task gets a git
-   worktree on `mission/<mission>/<task>`, branched from the integration
+   worktree on `milestone/<milestone>/<task>`, branched from the integration
    branch once its dependencies have merged. Tasks whose declared `paths`
    overlap do not run at the same time. Merges into the integration branch
    take one lock and are followed by the full checks (regression against
@@ -253,7 +256,7 @@ No new database server, queue, service or language is needed.
 11. **Nothing leaves the machine without approval.** Delivery is a local
     integration branch plus a PR description. `git push`, opening a PR,
     merging into a base branch and deleting branches are each an
-    *approval* interaction unless the mission's policy pre-authorizes them.
+    *approval* interaction unless the milestone's policy pre-authorizes them.
     Telegram can approve what the policy allows and nothing more.
 12. **Plan approval: one tap by default.** After the plan passes its
     review and the mechanical checks, you get it on Telegram once
@@ -261,12 +264,12 @@ No new database server, queue, service or language is needed.
     skips the tap when the plan review passed and no task is marked risky.
     There are no other gates by default.
 13. **Delivery state is kept in git.** Each round that changes code ends
-    in a commit on the task branch, with the mission, task and round in
+    in a commit on the task branch, with the milestone, task and round in
     the message, so the git history is part of the record and partial
     work survives anything.
 
 14. **Requirements are a living BRD in the target repo** (§4), with
-    OneWealth's layout and rules generalized. A mission's definition of
+    OneWealth's layout and rules generalized. A milestone's definition of
     done is its matrix rows verified, not its tasks finished.
 15. **The workflow is chosen by a bake-off, not by taste** (§5). One
     engine with policy knobs runs both candidates, so the comparison
@@ -326,20 +329,20 @@ No new database server, queue, service or language is needed.
 ## 3. Architecture
 
 ```
-            you ── Telegram ──┐          studio Missions tab ──┐        `operonx project` CLI ──┐
+            you ── Telegram ──┐          studio Board tabs ──┐        `operonx project` CLI ──┐
                               ▼                                ▼                    ▼
                     ┌───────────────────── commands (SqliteQueue) ─────────────────────┐
                     │  submit_answer · pause · resume · cancel · approve · revise      │
                     └──────────────────────────────┬───────────────────────────────────┘
                                                    ▼
-   ┌───────────────────────────── project daemon (one per workspace) ─────────────────────────────┐
-   │  MissionRunner: lifecycle (§6) · Scheduler: DAG, waves, locks, budgets (§8)               │
+   ┌───────────────────────────── project daemon (one per project) ───────────────────────────────┐
+   │  MilestoneRunner: lifecycle (§6) · Scheduler: DAG, waves, locks, budgets (§8)               │
    │  Messenger: outbound questions, inbound updates (§9) · Recovery on start (§10)             │
    └───────┬──────────────────────────────┬──────────────────────────────────┬──────────────────┘
            │ one journalled Operon run     │ git worktree per task            │ reads / writes
            ▼ per stage / task attempt      ▼                                  ▼
-   discover_flow · plan_flow ·      <repo>/.git  ── mission/<m>/<task>    missions.db (mission store)
-   task_flow · integrate_flow ·        integration: mission/<m>           journal.db (its own)      
+   discover_flow · plan_flow ·      <repo>/.git  ── milestone/<m>/<card>  project.db (project store)
+   task_flow · integrate_flow ·        integration: milestone/<m>         journal.db (its own)      
    final_flow                                                           .operonx/runs (traces)
            │ each round's stages call
            ▼
@@ -347,18 +350,40 @@ No new database server, queue, service or language is needed.
    Checks (subprocess or docker: the repo's own test / lint / type commands)
 ```
 
-**The workspace** is a folder made by `operonx project init`. It holds an
-`operonx.toml`, so the studio opens it like any operonx project, and it
-has `.operonx/project/{missions.db, journal.db, missions/<id>/…}`. The **target
-repo** is anywhere. A mission names it, and its worktrees live under the
-mission folder.
+**Where things live. There is no separate workspace.**
+- **The tool.** operonx-project is installed once as a tool (`uv tool
+  install`, or pip in its own venv; like the studio). `operonx project …`
+  inside any repo hands off to it, as `operonx studio` does. Its own
+  dependencies therefore never enter the product's environment; the coder
+  runs the product's commands in the product's own environment.
+- **The state lives in the project:**
+  - `docs/brd/` (committed): the living BRD and the checklist (§4);
+  - `.operonx/project/` (git-ignored): `project.db` (milestones, cards,
+    rounds, questions, events), `journal.db`, and the coder transcripts.
+    Core's `operonx init` gitignore gets this line; on an existing repo,
+    the engine adds it to `.git/info/exclude`;
+  - runs go into the project's own trace store (`.operonx/runs`), tagged
+    with the milestone, card and round, so the studio's Runs tab shows
+    them and can filter them out.
+- **Outside the repo**, so that the project's own tools (pytest, the
+  linter, the studio's watcher) never scan them:
+  - worktrees: `~/.operonx/worktrees/<project>/<milestone>/<card>`;
+  - held-out tests: `~/.operonx/heldout/<project>/<milestone>/`.
+
+```
+operonx project new leak-watch          # operonx init + docs/brd + an empty board
+operonx project source add brd.docx     # register a source, extract its rows
+operonx project milestone "first release" --rows all
+operonx project up                      # plan, run the board, ask you on Telegram
+operonx project status                  # or the Board tab in the studio
+```
 
 **Package layout** (`packages/operonx-project/operonx_project/`):
 
 | Module | What |
 |---|---|
-| `store.py` | the mission store: schema, transitions (one function per transition, checked), events |
-| `model.py` | `Mission`, `Task`, `Round`, `Finding`, `CheckResult`, `Interaction` dataclasses and their state enums |
+| `store.py` | the project store: schema, transitions (one function per transition, checked), events |
+| `model.py` | `Milestone`, `Task`, `Round`, `Finding`, `CheckResult`, `Interaction` dataclasses and their state enums |
 | `dag.py` | validation (acyclic, deps exist, coverage), waves, ready set, blocked propagation, path locks |
 | `board.py` | columns, WIP limits, pull and push policies, the replenisher's trigger (§8.5) |
 | `brd/` | readers (`.docx`, PDF, images, zip, text), the source register, extraction checks, `Q-nn`, the template, `operonx project brd init / check` (§4) |
@@ -370,7 +395,7 @@ mission folder.
 | `gitops.py` | worktrees, branches, commits, merges under a lock, conflict detection, diff for review |
 | `interact/` | `Interaction` lifecycle, `submit_answer`, escalation triage, message rendering, expiry |
 | `messengers/` | `Messenger` protocol, `TelegramMessenger`, `FakeBotAPI` (test server), `ConsoleMessenger` |
-| `daemon.py`, `cli.py` | `operonx project init / new / up / status / pending / answer / pause / resume / cancel / show` |
+| `daemon.py`, `cli.py` | `operonx project new / source add / milestone / up / status / pending / answer / pause / resume / cancel / show` |
 | `guide/` | the package's tested guide page, like agents and kb |
 
 ---
@@ -379,7 +404,7 @@ mission folder.
 
 Requirements are not a planner's scratch list inside the engine. They are
 a **folder in the target repo**, versioned with the code, that every
-mission on that repo reads and updates. The model for it is OneWealth's
+milestone on that repo reads and updates. The model for it is OneWealth's
 `docs/brd/`, which was built by hand over seven plans (P0–P7, N, K, R, F,
 G, A; 46 commits). In that folder:
 - an immutable source register with hashes;
@@ -485,8 +510,8 @@ The status uses OneWealth's vocabulary:
 - `blocked`, with what blocks it and who can unblock it;
 - `not_applicable`, with why.
 
-This matrix is the **definition of done** for a mission:
-- the mission's target rows end `implemented_verified`, or end in a
+This matrix is the **definition of done** for a milestone:
+- the milestone's target rows end `implemented_verified`, or end in a
   status with the reason stated;
 - the checker (`operonx project brd check`, generalized from `check_brd_docs.py`:
   links, IDs, coverage, cited tests exist and passed) is one of the QA
@@ -500,13 +525,13 @@ This matrix is the **definition of done** for a mission:
 
   The reviewer checks them like code.
 
-### 4.5 Change, and the next mission
+### 4.5 Change, and the next milestone
 
 - **A new version of a source.** It is registered as a new row. The
   extraction runs on the difference, and the rows that changed are marked
   in the matrix. Cards for those rows re-open; done rows whose
   requirement did not change stay done.
-- **The next mission on the same repo** starts from the matrix: the rows
+- **The next milestone on the same repo** starts from the matrix: the rows
   that are not `implemented_verified` are its candidate scope, and the
   folder is its memory.
 
@@ -518,7 +543,7 @@ This matrix is the **definition of done** for a mission:
 
 Your flow is **create BRD → checklist → kanban board**. It is one of a
 few serious ways to run agents from requirements to code. Since these
-differ in ways that cost or save hours per mission, the engine should
+differ in ways that cost or save hours per milestone, the engine should
 choose between them by measurement, not by taste. This section is the
 theory. Phase P7 (§14) is the measurement.
 
@@ -553,7 +578,7 @@ theory. Phase P7 (§14) is the measurement.
   oscillate. A PDDL study found step-by-step agentic planning only +3
   points at 5.7× the tokens. Its authors note that coding agents do have
   grounded signals (compilers, tests), which favours feedback loops
-  *inside* a task rather than replanning the whole mission.
+  *inside* a task rather than replanning the whole milestone.
 - **Evidence on tests** (SpecBench, 2026). Frontier agents saturate the
   **visible** tests while a gap on **held-out** tests of the same
   features persists, and the gap grows with code-base size (about 28
@@ -586,7 +611,7 @@ Each workflow is a choice on five axes:
   waterfall). They have no grounded feedback until the end, which is the
   opposite of what the evidence favours.
 - **A design document per feature** (Kiro's `design.md` per spec). That
-  is one architecture note per mission, plus ADRs. Per-card design lives
+  is one architecture note per milestone, plus ADRs. Per-card design lives
   in the card.
 
 ### 5.4 The candidates
@@ -627,7 +652,7 @@ the harness's failing-first checklist).
 - **V2**: V1 **plus held-out tests**. A separate *examiner* session writes
   a second test set from the same rows. It lives outside the repo, and
   neither the implementer, the reviewer nor the test author sees it. It
-  runs at card done and at mission end.
+  runs at card done and at milestone end.
 
   A card that passes its visible tests but fails held-out ones goes back
   with only the *names and messages* of the failures, never the test code.
@@ -721,7 +746,7 @@ Everything below is common to both workflows, and §5.5's knobs decide the
 differences. Each stage is adaptive: it is skipped or repeated by rules,
 not mechanically.
 
-1. **Intake.** The mission is created from its sources (any form, §4.1),
+1. **Intake.** The milestone is created from its sources (any form, §4.1),
    the repo path, constraints, its policy (budgets, approvals, models,
    workflow mode) and its target scope (default: every row that is not
    verified). It is stored and nothing runs yet.
@@ -769,7 +794,7 @@ not mechanically.
    unresolved review notes goes to you instead of looping.
 6. **Approval** (one tap by default, §2 decision 12).
 7. **Examiner** (V2 only). The held-out tests are written from the rows
-   by a separate session into the mission folder, outside the repo,
+   by a separate session into `~/.operonx/heldout/<project>/<milestone>/`, outside the repo,
    before any implementation.
 8. **Execute** (§7, §8). Cards run, by push (W1) or pull (W2), and the
    replenisher details new cards as the Ready column drains (W2).
@@ -777,7 +802,7 @@ not mechanically.
    - the full checks on the integration branch against the baseline;
    - the held-out tests (V2);
    - `operonx project brd check`;
-   - one review of the whole mission diff, looking at integration
+   - one review of the whole milestone diff, looking at integration
      problems that no single card saw;
    - the matrix rows of the scope, each with its evidence.
 
@@ -789,7 +814,7 @@ not mechanically.
 
 **Replanning.** A card that fails for good, a "revise" from you, or a
 changed source can change the part of the plan that has not started
-yet. That is at most 2 replans per mission, besides W2's ordinary
+yet. That is at most 2 replans per milestone, besides W2's ordinary
 just-in-time detailing. Done cards are never redone. Questions on cards
 that were replaced become `superseded` (§9.5).
 
@@ -797,7 +822,7 @@ that were replaced become `superseded` (§9.5).
 ### 6.1 A new project is an operonx project, made with `operonx init`
 
 In this ecosystem a new product is an operonx project. So when the
-mission is greenfield, the first card is fixed: **create the project with
+milestone is greenfield, the first card is fixed: **create the project with
 `operonx init`**. The planner chooses the template from the requirements:
 - `hello`: a job and an HTTP service;
 - `http`: a doors graph;
@@ -854,11 +879,10 @@ rules:
   effects (a commit, a merge, a send) are `@op(retry=False)`;
 - models are resources by key.
 
-`operonx lint` and the build check run on the package in CI. The
-workspace that `operonx project init` makes is an ordinary operonx
-project: it calls `operonx init` and then adds its `[project]` block, so
-the studio opens it like any other, and its runs land in the project's
-trace store.
+`operonx lint` and the build check run on the package in CI. On a
+greenfield repo, `operonx project new` is `operonx init` plus `docs/brd/`
+and an empty board, so the studio opens the result like any other
+project.
 ---
 
 ## 7. A task: the rounds inside `task_flow`
@@ -911,7 +935,7 @@ Its `next` output loops back (`fix`), parks (`ask`) or ends the run:
 | a finding with the same fingerprint again after a fix | arbitration: one third session sees both sides; if still unresolved, escalate |
 | the implementer reports `needs_human` | triage (§9.1): answered from evidence, back to fix; or **ask** |
 | `max_rounds` (6) or the task budget is reached | escalate with a choice: "keep trying with X / skip / stop", never a silent loop |
-| a rate limit on the coder | pause the mission until the reset time (§10) |
+| a rate limit on the coder | pause the milestone until the reset time (§10) |
 | an infra error (the binary is gone, the disk is full) | the task fails with the reason; dependents are blocked |
 
 A round inside a task is never retried blindly. Each repeat carries new
@@ -940,7 +964,7 @@ same-signature repeats, arbitrations, revisions, budget).
 | `blocked` | a dependency failed or was cancelled; the reason names it |
 | `cancelled` | you cancelled it, or a replan removed it |
 
-**Mission**
+**Milestone**
 
 | state | meaning |
 |---|---|
@@ -950,7 +974,7 @@ same-signature repeats, arbitrations, revisions, budget).
 | `done` | delivered |
 | `failed` | nothing can run, and something failed |
 | `cancelled` | you cancelled it |
-| `budget_exhausted` | a mission budget ran out; it is asking you |
+| `budget_exhausted` | a milestone budget ran out; it is asking you |
 
 Every transition is one function in `store.py`. It checks that the
 transition is legal (a table), writes the event row, and is unit-tested.
@@ -962,14 +986,14 @@ An illegal transition raises.
   dynamic: a task starts as soon as its last dependency is `done`, not
   when its whole wave is done.
 - A task starts when it is `ready`, a slot is free (`max_parallel`,
-  default 2), no running task's `paths` overlap its own, and the mission
+  default 2), no running task's `paths` overlap its own, and the milestone
   is `running`.
 - **When a dependency fails or is cancelled**, every task downstream of
   it becomes `blocked` with the reason. **When a dependency is waiting on
   you**, the tasks downstream of it stay `pending` ("waiting on T4's
   decision"), and **independent tasks keep running**.
 - **Integration** happens in order under one lock:
-  1. merge the task branch into `mission/<m>`;
+  1. merge the task branch into `milestone/<m>`;
   2. on a conflict, the task gets a new round "rebase onto the
      integration tip", with the conflict as input, then review and checks
      again;
@@ -985,7 +1009,7 @@ An illegal transition raises.
 | `max_usd` (from Claude's `total_cost_usd`; notional on Max) | 30 | 80 %: one heads-up message; 100 %: `budget_exhausted` and a question (extend / stop) |
 | `max_hours` (wall clock while running; waiting for you does not count) | 8 | same |
 | per task: `max_rounds`, `max_usd` | 6, 5 | escalate (§7) |
-| `max_questions` you get per mission without a digest | 5 | further questions are batched into one digest message |
+| `max_questions` you get per milestone without a digest | 5 | further questions are batched into one digest message |
 | `max_replans`, `max_tasks`, plan-review rounds | 2, 25, 2 | ask |
 
 Each coder call also gets `--max-budget-usd` and a wall-clock timeout, so
@@ -993,7 +1017,7 @@ a single runaway session is cut by Claude Code itself.
 
 ### 8.4 Why it ends
 
-A mission ends because each loop draws on a finite counter: task rounds,
+A milestone ends because each loop draws on a finite counter: task rounds,
 plan reviews, replans, integration re-opens, budgets. When the counters
 run out, a question goes to you rather than another attempt. The
 scheduler itself only acts on events (a run ended, a command arrived, a
@@ -1037,7 +1061,7 @@ A card's state (§8.1) maps onto a board column:
 ### 9.1 Asking only when it must
 
 Before any question reaches you, **triage** runs. It is a short,
-read-only session with the repo, the brief, the goal and the mission's
+read-only session with the repo, the brief, the goal and the milestone's
 decisions so far. It gets the question and must do one of:
 
 - **answer it from evidence**, citing the files or docs. The answer goes
@@ -1121,7 +1145,7 @@ studio when a link exists.
   one it took. Otherwise the bot lists the open questions and asks you to
   reply to the one you mean. A guess is never taken.
 - **Commands** (one handler with validated arguments):
-  - `/status`, `/pending`, `/mission <id>`;
+  - `/status`, `/pending`, `/milestone <id>`;
   - `/pause`, `/resume`;
   - `/cancel <id>`, which needs a second confirmation tap;
   - `/budget <id> +10`.
@@ -1132,7 +1156,7 @@ studio when a link exists.
   processed-ids table; also the `offset` ack). A second answer to an
   answered question gets "already answered (A, 14:02)", with no change.
 - **Stale:** every interaction carries a `context_hash` of the task spec,
-  the base commit, the question version and the mission state. A replan,
+  the base commit, the question version and the milestone state. A replan,
   a cancel, a pause→resume that changed the context, or the task having
   moved on makes the interaction `superseded`. A late answer then gets
   "this question is no longer current, here is the current one (if any)".
@@ -1140,7 +1164,7 @@ studio when a link exists.
   after 24 h. At `expires_at` (72 h by default) one of two things happens:
   - if the question had a *safe default* (the recommended option, marked
     reversible by triage), the engine takes it and says so;
-  - otherwise the task stays `waiting_human` and the mission summary
+  - otherwise the task stays `waiting_human` and the milestone summary
     flags it.
 - **Delivery failure:** sends retry with backoff (`retry_call`, the
   `TRANSIENT` classifier). The interaction keeps `delivery: pending |
@@ -1156,7 +1180,7 @@ studio when a link exists.
 
 - **Allowlist:** Telegram user ids *and* chat ids, from config. Anything
   else is dropped, and logged with the user id only. The bot never
-  replies to strangers, so its existence and its missions are not leaked.
+  replies to strangers, so its existence and its milestones are not leaked.
 - **The token** comes from the environment or `secrets.yaml`. It is never
   logged and is redacted in traces (it is part of every Bot API URL, so
   the HTTP client logs only paths).
@@ -1185,15 +1209,15 @@ of these are tested in P9.
 | between `submit_answer` and the resume | the `resume` command is found in the queue and run |
 | merging | merges are atomic per command; a half-written merge (`MERGE_HEAD` present) is aborted and redone under the lock |
 
-**Single daemon.** A lease in `missions.db` stops two daemons from driving
-one workspace. A stale lease expires after 30 s.
+**Single daemon.** A lease in `project.db` stops two daemons from driving
+one project. A stale lease expires after 30 s.
 
 **Rate limits.** A Claude rate-limit reply carries its reset time. The
-mission becomes `paused` with `resume_at`, a timer is set (not a polling
+milestone becomes `paused` with `resume_at`, a timer is set (not a polling
 loop), and you get one message.
 
 **Cost tracking.** Each coder call's `total_cost_usd`, tokens and turns
-go on its round and are summed per task and per mission. On Max this is
+go on its round and are summed per task and per milestone. On Max this is
 the notional API cost, which is still the right measure for budgets and
 comparisons.
 
@@ -1203,9 +1227,9 @@ comparisons.
   information.
 - Reviewers get the diff and the criteria, not the repo; they read files
   on demand.
-- No session ever gets the whole mission history.
+- No session ever gets the whole milestone history.
 
-**Traces.** Every run carries `metadata={mission, task, round, role}`.
+**Traces.** Every run carries `metadata={milestone, task, round, role}`.
 The studio's Runs tab lists them; a task's run page shows `round_ →
 implement / checks / review` as `child()` steps. Coder transcripts
 (stream-json) are kept per round on disk for the studio to render.
@@ -1221,16 +1245,16 @@ implement / checks / review` as `child()` steps. Coder transcripts
 |---|---|
 | Files the implementer can write | `cwd` = its worktree. Claude file tools are confined to it (`--restricted` + `--tools` naming Bash for the implementer only). Paths are guarded per task (§7, step 3). |
 | The implementer's shell | **D2:** bubblewrap sandbox (no network, writes only in the worktree), or no boundary on a trusted repo, said plainly |
-| Check commands | `docker run --rm --network none -v <worktree>:/work`, an image named in the mission policy (host execution is opt-in for trusted repos) |
+| Check commands | `docker run --rm --network none -v <worktree>:/work`, an image named in the milestone policy (host execution is opt-in for trusted repos) |
 | Credentials | the child environment is scrubbed (the studio's `base_env`: no `ANTHROPIC_*`, `CLAUDE*`, no project `.env`); deny rules `Read(**/.env*)`, `Read(~/.claude/**)`, `Read(<project state>/**)` |
 | Git | the engine owns branches; the coder's `git push`, `git remote`, `git config`, `reset --hard` on other branches are denied; push or merge to a base branch only by approval |
-| Untrusted repo content | file contents and tool output are data: the role prompts say so, the reviewer's and triage's tools are read-only, and nothing a repo file says can change the mission policy (policy lives in `missions.db`, set by you) |
+| Untrusted repo content | file contents and tool output are data: the role prompts say so, the reviewer's and triage's tools are read-only, and nothing a repo file says can change the milestone policy (policy lives in `project.db`, set by you) |
 | Telegram | §9.6 |
-| Studio | the studio's login is the boundary; its Missions tab calls the `operonx project` CLI under the workspace's interpreter, so the same checks apply |
+| Studio | the studio's login is the boundary; its Board tabs call the installed `operonx-project` tool, so the same checks apply |
 
 ---
 
-## 12. The studio: a Missions tab with a board
+## 12. The studio: Board, Checklist and Graph on the project's page
 
 **Why the studio and not a separate UI.** It already has the shell (tabs,
 themes, auth, phone layout), run pages for each card attempt, the diff
@@ -1239,22 +1263,24 @@ rebuild all of that. The engine stays usable without the studio: the
 CLI, Telegram and `DELIVERY.md` cover everything.
 
 **How it reads and acts.**
-- **Reads** go straight to `missions.db`, read-only, and to the target
-  repo's BRD folder. The schema is documented and versioned
+- The tabs appear on a project's page when the project has
+  `.operonx/project/`; there is no separate area of the studio.
+- **Reads** go straight to the project's `.operonx/project/project.db`,
+  read-only, and to its BRD folder. The schema is documented and versioned
   (`schema_version`), the way the studio already reads run stores.
 - **Actions** (answer, approve, pause, resume, cancel, reprioritize a
-  card) run `operonx project api <json>` under the workspace's interpreter, so
+  card) run the installed tool's `operonx-project api <json>`, so
   validation lives in one place, the same as the playground bridge.
 - Updates arrive by cursor, like the assistant and the playground.
 
-**Three views of one mission**, because they answer three different
+**Three views of one milestone**, because they answer three different
 questions:
 - **Board** (default): what is moving, and what is stuck?
 - **Checklist**: which requirements are met, with what evidence?
 - **Graph**: what depends on what, and which waves?
 
 ```
-Missions ▸ leak-watch            W2 · running · rows 9/14 verified · $4.10 / $30 · 1h12m
+leak-watch ▸ Board               W2 · running · rows 9/14 verified · $4.10 / $30 · 1h12m
 [ Board ] [ Checklist ] [ Graph ]
 ┌ Waiting on you (1) ─────────────────────────────────────────────────────────────────┐
 │ Q-01 conflict · C4 Office documents — allowlist templates or block everywhere? [A][B][C][✏️]│
@@ -1361,7 +1387,7 @@ other test does.
 - `DELIVERY.md`;
 - the board, checklist and graph showing all of it.
 
-**A further real mission** (P10) runs with the winning mode on a live
+**A further real milestone** (P10) runs with the winning mode on a live
 backlog: OneWealth rows still `planned`, or an Operon finding, whichever
 you choose then. It is delivered as a branch for your review and never
 merged by the engine.
@@ -1376,7 +1402,7 @@ of each gate go into §17.
 
 **P1. Store, model, cards, scheduler (no LLM)**
 - **Builds:** the package skeleton in `packages/operonx-project`, the CI
-  matrix entries, the mission store with its transition table, cards
+  matrix entries, the project store with its transition table, cards
   with dependencies, the board columns and WIP limits, the knobs of
   §5.5, and the scheduler driven by fake card runners.
 - **Gate:**
@@ -1468,7 +1494,7 @@ of each gate go into §17.
   the template choice, and the operonx QA commands.
 - **Gate:**
   - the whole lifecycle in both modes with the scripted coder;
-  - a greenfield mission creates its project with `operonx init`, and
+  - a greenfield milestone creates its project with `operonx init`, and
     its QA runs pytest, the build check, `operonx lint` and
     `operonx guide --check`;
   - the plan-review cap;
@@ -1513,13 +1539,13 @@ of each gate go into §17.
   windows (D3), notional $40–100. The rows are written into
   `docs/project/BAKEOFF.md`.
 
-**P8. Studio Missions tab (studio repo, its own branch)**
-- **Builds:** the list, the mission page with **board, checklist and
-  graph**, the waiting-on-you card (answers via `operonx project api`), the card
+**P8. Studio Board tabs (studio repo, its own branch)**
+- **Builds:** the **Board, Checklist and Graph** tabs on the project's
+  page, a milestone switcher, the waiting-on-you card (answers via `operonx project api`), the card
   panel and the links to run pages.
 - **Gate:**
   - studio tests for the read API and the action calls;
-  - screenshots on desktop and phone of P7's real missions, live and
+  - screenshots on desktop and phone of P7's real milestones, live and
     finished;
   - answering from the studio follows the same rules (a stale answer is
     refused).
@@ -1539,10 +1565,10 @@ of each gate go into §17.
   - regression: the operonx-project suite, `tests/internal/durable`, `tests/guide`,
     agents' suite (redact is reused), and studio tests.
 
-**P10. Real Telegram and a live mission (needs D4)**
+**P10. Real Telegram and a live milestone (needs D4)**
 - **Builds:** your bot token and user id, long poll (or webhook), the S
   scenario with **you** answering on your phone, and then the further
-  real mission (§13) in the winning mode.
+  real milestone (§13) in the winning mode.
 - **Gate (your brief's mandatory scenario, all eight steps):**
   1. a genuine decision arises;
   2. a real Telegram message arrives on your phone;
@@ -1581,7 +1607,7 @@ typing or happy path alone.
 
 ## 15. Not building, or later
 
-- **A general workflow runtime, or a "graph of missions".** The DAG is
+- **A general workflow runtime, or a "graph of milestones".** The DAG is
   scheduler data, as Jobs' steps are.
 - **A coder backend on operonx-agents** (an OpenRouter model with file
   and shell tools). This is later: it would make review vendor-independent
@@ -1589,9 +1615,9 @@ typing or happy path alone.
   for it.
 - **More workflow candidates** (an agent per role à la BMAD, Spec Kit's
   constitution file). §5.3 says why not now; P7's numbers can re-open it.
-- **Missions across several repos**, running the same task in several
+- **A project spanning several repos**, running the same task in several
   worktrees, and choosing the best.
-- **Postgres** for the mission store. SQLite holds one workspace on one
+- **Postgres** for the project store. SQLite holds one project on one
   machine. The store sits behind a small interface, as the journal does.
 - **Slack or e-mail messengers.** The `Messenger` protocol leaves room
   for them.
@@ -1606,7 +1632,7 @@ typing or happy path alone.
 | Claude Code's stream-json or `--json-schema` shapes change between versions | they are parsed in one module; the P2 smoke runs per version; the version is recorded on every round |
 | The reviewer approves bad code | the commands decide, not the reviewer alone; acceptance tests are written first by another session; the final whole-diff review |
 | Triage escalates too much, or too little | P7 measures both: every question asked and every assumption taken is listed in `DELIVERY.md`; the rules are tuned on that evidence |
-| The Max quota runs out mid-mission | the rate-limit pause (§10); D3 |
+| The Max quota runs out mid-milestone | the rate-limit pause (§10); D3 |
 | A shared host (staging callbot) is slowed | `max_parallel` = 2; checks in docker with CPU limits |
 | Merge conflicts between parallel tasks | path locks, then the rebase round, then at most 2 re-opens, then you |
 | The bake-off's N is tiny (6 runs) | a pre-registered rule; the result is labelled directional; both modes kept unless one wins clearly |
