@@ -14,8 +14,7 @@ git clone https://github.com/batman1m2001-cyber/operonx-studio
 operonx-studio/install.sh             # again after a `git pull` to upgrade
 ```
 
-It installs `operonx-studio` (and `operonx-lint`, `operonx-extract`,
-`operonx-new`) as a uv tool, in an environment of its own, or with plain
+It installs `operonx-studio` (and `operonx-extract`) as a uv tool, in an environment of its own, or with plain
 pip when uv is missing. Without bash (Windows): `pip install ./operonx-studio`.
 
 ## Open a project
@@ -83,7 +82,7 @@ The **?** button on the canvas explains every mark; `/` finds an op.
 ## The project commands it brings
 
 ```bash
-operonx-lint              # lint operonx.toml and the graphs
-operonx-lint --build .    # … and build every graph offline
+operonx lint              # core's: the conventions (operonx-lint is its old name)
+operonx lint --build .    # … and build every graph offline
 operonx-extract           # the project's graphs as JSON (what the canvas draws)
 ```

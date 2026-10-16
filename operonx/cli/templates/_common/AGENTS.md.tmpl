@@ -96,6 +96,7 @@ def answer_flow(question, k):  # a setting is a graph input
 
 {{shell}}```bash
 {{run}}pytest                 # the tests: keep them green
+{{run}}operonx lint           # the rules below, checked (operonx lint --rules)
 {{run}}operonx serve --list   # every service, and where it listens
 {{run}}operonx run --list     # every job
 {{run}}operonx serve          # serve every service (and run scheduled jobs on their clocks)
