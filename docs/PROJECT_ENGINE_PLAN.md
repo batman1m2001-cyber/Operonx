@@ -1,11 +1,15 @@
 # operonx-project: an engine that builds software projects on its own
 
-**Status:** 2026-10-17. Plan for review. Nothing is implemented yet. Every
+**Status:** 2026-10-17, v2: adds the living BRD (§4) and the workflow
+bake-off (§5). Plan for review. Nothing is implemented yet. Every
 "today" below was read in the code or measured on this machine.
 
-**In one paragraph.** You give the engine a goal and a git repository. It
-studies the repo, writes a plan as a graph of tasks with acceptance
-criteria, and runs the tasks. Independent tasks run in parallel, each in
+**In one paragraph.** You give the engine your requirements, in any form
+(a sentence, a BRD `.docx`, a zip of mockups), and a git repository. It
+turns them into a **living BRD** in the repo with a traceability matrix,
+the **checklist**, and runs the work as cards on a **board** (§4–§6), or
+as a whole task graph planned up front, whichever the bake-off in §5
+shows works better. Independent tasks run in parallel, each in
 its own git worktree. A coding agent (headless Claude Code) implements
 each task. A *different* session reviews the diff, and the repo's real
 tests decide whether it passes. When it hits a decision it cannot make
@@ -17,14 +21,21 @@ every claim.
 
 **One example.** Goal: *"Build `commit-guard`, a pre-commit hook that stops
 commits that would leak archives, office documents, `.env` files or keys
-into a public repo."* The engine plans 6 tasks in 3 waves. Task T4
-("office documents") finds that the repo ships `.docx` templates in
-`docs/templates/`, which a blanket block would break. It messages you:
-*"Block all office files, or allow `docs/templates/`? I recommend the
-allowlist."* T4 parks while T2, T3 and T5 carry on. You reply "allowlist,
-but warn". T4 resumes in the same Claude session with your answer and
-writes the code. A reviewer session that never saw T4's reasoning checks
-the diff. pytest runs on real temporary git repos, and T4 merges.
+into a public repo."*
+1. The engine writes `docs/brd/` in the repo: the goal as source SRC-01,
+   14 requirement rows, and `Q-01 (conflict)`. The goal says "block office
+   documents", but the repo commits `.docx` templates in
+   `docs/templates/`.
+2. It plans 6 cards. The rows of `Q-01` wait, while cards C1–C3 and C5
+   move across the board.
+3. You get *"Block all office files, or allow `docs/templates/`? I
+   recommend the allowlist."* on Telegram, and reply "allowlist, but
+   warn".
+4. Card C4 resumes in the same Claude session with your answer. A
+   reviewer session that never saw C4's reasoning checks the diff, pytest
+   runs on real temporary git repos, and held-out tests the implementer
+   never saw run too.
+5. C4's rows turn `implemented_verified` in the checklist.
 
 ---
 
@@ -51,7 +62,7 @@ What I read and ran, and what each piece means for this engine.
   (`RAN == [0, 1, 2]`). One caveat: ops inside a loop do not surface their
   outputs as the run's outputs; only declared cells do. The task flow
   writes its outcome to a cell.
-  A second probe (`probe2.py`) ran **the exact §5 shape**: `round_` loops
+  A second probe (`probe2.py`) ran **the exact §7 shape**: `round_` loops
   back to itself on `fix`, parks on `ask` (then `keep` loops back to it),
   and ends otherwise. The script was fix, fix, ask, fix, ask, end. It
   parked twice, and three engine instances finished it. `prepare` and
@@ -151,14 +162,15 @@ What I read and ran, and what each piece means for this engine.
 |---|---|---|
 | Durable waiting for a human | `InterruptOp` + journal park/resume | nothing in core |
 | Crash recovery of a task | journal replay; `idempotency_key` | Claude session id recorded at `init` |
-| Retries, timeouts | `Retry`, `Timeout`, `retry_call` | the engine's own rules per round (§5) |
+| Retries, timeouts | `Retry`, `Timeout`, `retry_call` | the engine's own rules per round (§7) |
 | Durable inbound commands | `SqliteQueue` | — |
 | Traces and inspection | run stores, studio run pages | `metadata={mission, task, round}` |
 | Coding agent | studio's Claude Code plumbing (ported) | a `Coder` protocol, a structured-output schema per role |
 | **Dynamic task DAG** | — | **a scheduler above the engine (new)** |
 | **Mission state** (tasks, attempts, findings, interactions) | SQLite (as journal, queue and run store already use) | **a mission store (new)** |
 | **Telegram** | `retry_call`, the redactor | **a messenger + Telegram adapter (new)** |
-| **Dashboard** | studio tab conventions, run pages, diff view | **a Missions tab in the studio (new)** |
+| **Requirements from any input; traceability** | OneWealth's `docs/brd` layout, rules and checker, as the model | **readers, extraction checks, a generalized template and checker (new)** |
+| **Dashboard** | studio tab conventions, run pages, diff view | **a Missions tab with board, checklist and graph (new)** |
 
 No new database server, queue, service or language is needed.
 
@@ -186,7 +198,7 @@ No new database server, queue, service or language is needed.
 4. **The coding agent is headless Claude Code** behind a `Coder` protocol.
    It is the only available agent with real file, search and shell tools
    and strong code models. The studio already runs it, and it is signed
-   in here. A backend on operonx-agents is a later phase (§13).
+   in here. A backend on operonx-agents is a later phase (§15).
 5. **Independence of review and QA, by construction, not by prompt:**
    - **Different session and different model.** By default the
      implementer is `opus`, the reviewer `fable`, and planner and triage
@@ -216,7 +228,7 @@ No new database server, queue, service or language is needed.
 8. **Answers have exactly one authority.** Every answer, from Telegram,
    the CLI or the studio, goes through one function,
    `submit_answer(interaction, answer, actor, via)`. In one transaction it
-   checks the actor, the status (`pending`) and the context (§7.5), then
+   checks the actor, the status (`pending`) and the context (§9.5), then
    puts a `resume` command on the queue. The engine journals its task
    runs in its own journal, not the project's `[durable]` one, so the
    studio's generic "Waiting" card cannot answer around these checks.
@@ -249,6 +261,19 @@ No new database server, queue, service or language is needed.
     the message, so the git history is part of the record and partial
     work survives anything.
 
+14. **Requirements are a living BRD in the target repo** (§4), with
+    OneWealth's layout and rules generalized. A mission's definition of
+    done is its matrix rows verified, not its tasks finished.
+15. **The workflow is chosen by a bake-off, not by taste** (§5). One
+    engine with policy knobs runs both candidates, so the comparison
+    costs runs, not a second implementation. Both modes stay if each wins
+    on a different kind of input.
+16. **Quality is measured on held-out tests.** The bake-off measures it
+    that way, and V2 makes it part of the engine if it earns its cost.
+    Visible tests alone over-report (SpecBench).
+17. **"Card" is the board's name for a task.** The two words mean the
+    same thing in this document.
+
 ### Open: yours to decide
 
 - **D1. The name.** `operonx-project` would import as `operonx_project`,
@@ -279,13 +304,21 @@ No new database server, queue, service or language is needed.
   can use up the 5-hour window you also work in. Options:
   - **(a) Max login with `max_parallel = 2` (recommended for the PoC).**
     The engine pauses on a rate-limit reply and resumes at the reset time.
+    The bake-off (P7) needs about 8–12 coder hours. I would run it in
+    windows you are not using, overnight for example.
   - (b) An `ANTHROPIC_API_KEY` with a hard spend cap, kept separate from
     your usage.
-- **D4. Telegram, at the end** (P9):
+- **D4. Telegram, at the end** (P10):
   - a bot token (BotFather) and your Telegram user id;
   - long poll (recommended) or webhook through your ngrok domain.
 
-  Nothing before P9 needs them.
+  Nothing before P10 needs them.
+- **D5. OneWealth as test input M.** The bake-off replays a finished
+  OneWealth phase on a **local copy** (never pushed; the private `.docx`
+  stays out of git, ADR-0001), and E0 reads your original BRD `.docx`
+  locally. Recommended: yes. The alternative is to find a public project
+  with a spec and history, which is weaker: no real BRD, no Vietnamese
+  sources, and no rows to score against.
 
 ---
 
@@ -299,8 +332,8 @@ No new database server, queue, service or language is needed.
                     └──────────────────────────────┬───────────────────────────────────┘
                                                    ▼
    ┌───────────────────────────── forge daemon (one per workspace) ─────────────────────────────┐
-   │  MissionRunner: lifecycle (§4) · Scheduler: DAG, waves, locks, budgets (§6)               │
-   │  Messenger: outbound questions, inbound updates (§7) · Recovery on start (§8)             │
+   │  MissionRunner: lifecycle (§6) · Scheduler: DAG, waves, locks, budgets (§8)               │
+   │  Messenger: outbound questions, inbound updates (§9) · Recovery on start (§10)             │
    └───────┬──────────────────────────────┬──────────────────────────────────┬──────────────────┘
            │ one journalled Operon run     │ git worktree per task            │ reads / writes
            ▼ per stage / task attempt      ▼                                  ▼
@@ -326,6 +359,9 @@ mission folder.
 | `store.py` | the mission store: schema, transitions (one function per transition, checked), events |
 | `model.py` | `Mission`, `Task`, `Round`, `Finding`, `CheckResult`, `Interaction` dataclasses and their state enums |
 | `dag.py` | validation (acyclic, deps exist, coverage), waves, ready set, blocked propagation, path locks |
+| `board.py` | columns, WIP limits, pull and push policies, the replenisher's trigger (§8.5) |
+| `brd/` | readers (`.docx`, PDF, images, zip, text), the source register, extraction checks, `Q-nn`, the template, `forge brd init / check` (§4) |
+| `examiner.py` | held-out tests: written outside the repo, run at card done and at the end; failures reported by name and message only (§5.4) |
 | `scheduler.py` | the asyncio loop: start ready tasks under limits, react to run ends and commands |
 | `flows/` | the module-level graphs: `discover_flow`, `plan_flow`, `task_flow`, `integrate_flow`, `final_flow` |
 | `coder/` | `Coder` protocol, `ClaudeCodeCoder` (ported from the studio), role prompts and JSON schemas |
@@ -338,66 +374,427 @@ mission folder.
 
 ---
 
-## 4. The lifecycle
+## 4. Requirements: a living BRD
 
-The stages run in this order. Only "execute" is a loop over many runs.
-Each stage is adaptive: it is skipped or repeated by rules, not
-mechanically.
+Requirements are not a planner's scratch list inside the engine. They are
+a **folder in the target repo**, versioned with the code, that every
+mission on that repo reads and updates. The model for it is OneWealth's
+`docs/brd/`, which was built by hand over seven plans (P0–P7, N, K, R, F,
+G, A; 46 commits). In that folder:
+- an immutable source register with hashes;
+- requirements extracted with their original wording and location;
+- feature (behaviour) and UX layers;
+- open questions of four types;
+- ADRs;
+- one traceability matrix where status lives, whose
+  `implemented_verified` needs a cited passing test;
+- a checker (`scripts/check_brd_docs.py`) that runs in the test suite.
 
-1. **Intake.** The mission is created from goal text, the repo path,
-   optional constraints, and its policy (budgets, approvals,
-   models). It is stored and nothing runs yet.
+At the end of G9 it traced 252 rows. The engine makes that discipline
+automatic and general.
+
+### 4.1 Input in any form
+
+| Input | How it is read |
+|---|---|
+| a goal in a sentence, a chat message | kept verbatim as a source (`sources/owner_requests/<date>_<slug>.md`) |
+| `.docx` | the standard library (`zipfile` + the document XML): text with headings, tables, and embedded figures saved as images. There is no pandoc or LibreOffice on this machine, and none is needed |
+| `.pdf`, images (mockups, screenshots, photos of whiteboards) | Claude Code reads both natively; `tesseract` (installed) for scanned pages whose text is needed for quoting |
+| a `.zip` kit | extracted into its own empty folder as untrusted data, then each file by its type |
+| Markdown, plain text | as is |
+
+**The source register** (`sources/README.md`): each source gets `SRC-nn`,
+its kind, where it lives, its SHA-256, and its role: *authoritative*,
+*approved* (you asked for it) or *proposed* (a kit, a suggestion).
+Sources are never edited. A new version is a new row.
+
+A source marked **private** (your BRD `.docx`) is identified only by path
+and hash, and is never committed: this is OneWealth's ADR-0001, and the
+lesson of the leaked zips. The engine adds it to `.git/info/exclude` and
+refuses a commit that contains it (the same guard as §7, step 3).
+
+### 4.2 Extraction, checked mechanically
+
+The requirements session (`brd_flow`) writes requirement records:
+- an ID that keeps the source's own codes (`BR-09` → `BRD-BR-09`) or gets
+  a prefix per source (`OWN-`, `KIT-`, …);
+- the **quote in the original language** and its location (section,
+  table, figure, page);
+- a type (business, functional, non-functional, rule, KPI) and a
+  documentation status (`documented`, or `needs_clarification` with a
+  `Q-nn`).
+
+Then the engine checks what an agent tends to get wrong:
+
+- **Quotes are real.** Each quote must occur in the source text, after
+  normalizing whitespace and punctuation. If it does not, the record is
+  sent back. A paraphrase is allowed only when marked as one, as
+  OneWealth's rules table does.
+- **Nothing is skipped.** Every section of the source yields at least one
+  requirement, or is marked *descriptive* with a reason. The engine
+  computes this from the section list it extracted itself, not from the
+  agent's word.
+- **IDs are stable and unique.** A retired ID is marked `superseded` and
+  never reused.
+- **A second session hunts for misses.** It is given the source and the
+  extraction and asked only for requirements that are missing. Its finds
+  must quote the source too.
+
+**Depth scales with the input.**
+- A one-sentence goal gets `requirements.md` (five to fifteen `R-` rows)
+  and the matrix.
+- A real BRD gets the three layers (requirements, features, UX),
+  architecture notes and ADRs.
+
+  The template is OneWealth's layout, generalized (`forge brd init`), with
+  its `MAINTAINING.md` rules.
+
+### 4.3 Questions are `Q-nn`
+
+Every open question in the folder has a type:
+- **ambiguity**: a source is unclear;
+- **conflict**: two statements disagree;
+- **divergence**: the product differs from a source, knowingly;
+- **gap**: required, not built, found while documenting.
+
+Each also separates *fact* (with a source) from *interpretation* (ours,
+proposed), and says who can decide. These are the escalation categories
+of §9.1, so a Telegram question *is* a `Q-nn`. Your answer becomes its
+resolution, and an ADR when it shapes the design. A question is never
+deleted and never silently resolved.
+
+The commit-guard conflict in the first example is `Q-01 (conflict)`: the
+goal's "block office documents" against `CONTRIBUTING.md`'s templates.
+
+### 4.4 The checklist is the traceability matrix
+
+There is one row per requirement:
+
+```text
+requirement ─▶ feature ─▶ screen ─▶ code path / API ─▶ test ─▶ evidence
+```
+
+The status uses OneWealth's vocabulary:
+- `implemented_verified`: at least one test cited by name, existing, and
+  passing in the recorded run;
+- `implemented_unverified`;
+- `partially_implemented`, with the gap stated;
+- `planned`, with the phase or card;
+- `not_implemented`;
+- `blocked`, with what blocks it and who can unblock it;
+- `not_applicable`, with why.
+
+This matrix is the **definition of done** for a mission:
+- the mission's target rows end `implemented_verified`, or end in a
+  status with the reason stated;
+- the checker (`forge brd check`, generalized from `check_brd_docs.py`:
+  links, IDs, coverage, cited tests exist and passed) is one of the QA
+  commands of every card;
+- a card's done includes its **doc obligations** from `MAINTAINING.md`:
+  - the feature file;
+  - the matrix row;
+  - screenshots for UI;
+  - a changelog line;
+  - an ADR for a significant decision.
+
+  The reviewer checks them like code.
+
+### 4.5 Change, and the next mission
+
+- **A new version of a source.** It is registered as a new row. The
+  extraction runs on the difference, and the rows that changed are marked
+  in the matrix. Cards for those rows re-open; done rows whose
+  requirement did not change stay done.
+- **The next mission on the same repo** starts from the matrix: the rows
+  that are not `implemented_verified` are its candidate scope, and the
+  folder is its memory.
+
+  This is how OneWealth's G-plan started from the 15 rows F1–F10 had left.
+
+---
+
+## 5. Which workflow: candidates, and a bake-off to choose
+
+Your flow is **create BRD → checklist → kanban board**. It is one of a
+few serious ways to run agents from requirements to code. Since these
+differ in ways that cost or save hours per mission, the engine should
+choose between them by measurement, not by taste. This section is the
+theory. Phase P7 (§14) is the measurement.
+
+### 5.1 What was researched
+
+- **GitHub Spec Kit** (constitution → specify → plan → tasks →
+  implement): each phase is a Markdown artifact that feeds the next.
+  GitHub calls it an experiment, and an independent review says it gets
+  you a clean spec and a first generation, then leaves you on your own.
+- **Kiro** (requirements → design → tasks). Requirements are user
+  stories whose acceptance criteria use **EARS** ("When ⟨event⟩, the
+  system shall ⟨response⟩"; also state-driven, unwanted-behaviour and
+  optional forms). The design comes from the code base, tasks are a
+  checklist whose items go In progress → Done, and you approve each
+  document.
+- **BMAD** (analyst → PM writes a PRD → architect → the scrum master
+  *shards* them into self-contained **story files** carrying context,
+  constraints, tests and links back → dev, one story at a time → QA).
+  In its guide a human approves each story.
+- **Anthropic's long-running harness.** A feature list with every item
+  failing at the start; one feature at a time; marked passing only after
+  end-to-end verification; progress kept in a file and in git, not in
+  context.
+- **Agent kanban boards** (Vibe Kanban, Cline Kanban, agent-kanban,
+  kanbots). Each card gets its own worktree and agent; the columns are To
+  do → In progress → Review → Done; Review holds both "waiting for your
+  approval" and "finished, to be reviewed". Some have dependency-aware
+  scheduling; one merges automatically by default.
+- **Evidence on planning horizon** (CAIS 2026, on data QA, not code).
+  Full-horizon planning with **lazy replanning** matched step-by-step
+  planning at **2–3× fewer tokens**; constant replanning makes agents
+  oscillate. A PDDL study found step-by-step agentic planning only +3
+  points at 5.7× the tokens. Its authors note that coding agents do have
+  grounded signals (compilers, tests), which favours feedback loops
+  *inside* a task rather than replanning the whole mission.
+- **Evidence on tests** (SpecBench, 2026). Frontier agents saturate the
+  **visible** tests while a gap on **held-out** tests of the same
+  features persists, and the gap grows with code-base size (about 28
+  points per tenfold). ImpossibleBench measures how often agents game
+  tests that contradict the spec. Visible tests alone over-report quality.
+
+### 5.2 The axes that matter
+
+Each workflow is a choice on five axes:
+
+| Axis | One end | Other end |
+|---|---|---|
+| A. where requirements live | engine-internal list | a living BRD in the repo (§4) |
+| B. when work gets detailed | the whole DAG up front | coarse epics up front, cards detailed **just in time** |
+| C. what starts work | push: a task starts when its deps are done | pull: a free slot takes the highest-priority ready card, under WIP limits per column |
+| D. the unit of done | a task passed its checks | a **requirement row** is `implemented_verified` |
+| E. what the verdict trusts | visible acceptance tests, protected from edits | plus **held-out** tests the implementer never sees |
+
+### 5.3 Rejected in theory (not worth a run)
+
+- **One agent looping over a checklist**, Ralph-style or the bare
+  harness. It has no parallelism and no independent review, and the
+  replanning evidence shows the oscillation risk. The harness's good
+  ideas are kept: a failing-first checklist, and progress kept in files
+  and git.
+- **A human approves every story** (BMAD's guide, Kiro's per-document
+  approval). It defeats autonomy. One plan tap is kept, plus questions
+  only when §9.1 says so.
+- **Role chains that hand off documents only** (MetaGPT-, ChatDev-style
+  waterfall). They have no grounded feedback until the end, which is the
+  opposite of what the evidence favours.
+- **A design document per feature** (Kiro's `design.md` per spec). That
+  is one architecture note per mission, plus ADRs. Per-card design lives
+  in the card.
+
+### 5.4 The candidates
+
+**W1. Spec → DAG** (the first version of this plan; Spec Kit, Kiro).
+- A1 internal, B whole DAG, C push, D task, E visible and protected.
+- Requirements → one design note → the whole task DAG up front → tasks
+  start as their dependencies merge → final verification maps tasks back
+  to requirements.
+- *Expected strength:* maximum parallelism, and the whole picture once,
+  early. *Expected weakness:* plan errors found late; detailing tasks that
+  later change.
+
+**W2. BRD → checklist → board** (your flow, with BMAD's story cards and
+the harness's failing-first checklist).
+- A living BRD, B just in time, C pull with WIP limits, D requirement row.
+- The steps:
+  1. The living BRD (§4) is written.
+  2. The **checklist** is its matrix, every row starting `planned`.
+  3. A coarse plan groups the rows into epics, with the dependencies
+     between epics and one architecture note.
+  4. A **replenisher** keeps the Ready column topped up. It details only
+     the next few cards (`ready_depth`, default 2 × WIP) as
+     self-contained story cards: the rows they serve, criteria, context
+     excerpts, paths, dependencies and doc obligations.
+  5. Free slots pull the highest-priority ready card.
+  6. A card is Done when its rows are `implemented_verified` and the
+     checker passes.
+  7. Replanning is lazy: what a finished card taught (a new constraint, a
+     failed approach) reaches only cards not yet detailed.
+- *Expected strength:* cheaper and more adaptive (the lazy-replanning
+  evidence); progress is measured in requirements, not tasks; it is what
+  a person running the project wants to see. *Expected weakness:* less
+  parallelism early; architecture drift if the epic plan is thin.
+
+**Verification variants, crossed with both:**
+- **V1**: visible acceptance tests, protected (the first version).
+- **V2**: V1 **plus held-out tests**. A separate *examiner* session writes
+  a second test set from the same rows. It lives outside the repo, and
+  neither the implementer, the reviewer nor the test author sees it. It
+  runs at card done and at mission end.
+
+  A card that passes its visible tests but fails held-out ones goes back
+  with only the *names and messages* of the failures, never the test code.
+  That lets an agent learn the behaviour without gaming the test.
+
+### 5.5 One engine, not two
+
+W1 and W2 differ only in policy, so the engine has one runtime with these
+knobs:
+- `horizon` (`all` | `ready_depth`);
+- `start` (`push` | `pull`, with column WIP limits);
+- `done_unit` (`task` | `row`);
+- `heldout` (on | off).
+
+Cards carry dependencies either way, and the board and the DAG are two
+views of the same cards. W1 is `horizon=all, start=push, done_unit=task`;
+W2 is `horizon=ready_depth, start=pull, done_unit=row`. A bake-off then
+costs runs, not a second implementation. The result may well be "both,
+by input": W1 for a small goal, W2 for a real BRD. The engine keeps both
+as modes and picks the default from the input's size.
+
+### 5.6 The bake-off (P7), designed before any run
+
+The metrics are written down before any run, so the numbers decide
+rather than whoever reads them. The rule I break otherwise is
+[the benchmark must match the shape].
+
+**Inputs**
+
+- **S, small greenfield:** commit-guard (§13). A one-paragraph goal, a
+  seeded repo, one genuine conflict.
+- **M, medium brownfield, a replay:** a finished OneWealth phase, for
+  example F8 (newsletter, #48) or F7 (alerts, #47), picked by size in P7.
+  The repo is checked out at the commit **before** that phase. The
+  engine gets that phase's requirement rows and the BRD folder as it
+  was, never the later code. The tests the phase actually added are
+  removed from the checkout and become **held-out tests** written by a
+  third party (the original work). This is SWE-bench's method on your own
+  history, and it gives a known-good reference for scoring. The run uses
+  a local copy that is never pushed (D5).
+
+**Pre-registered metrics**, recorded per run:
+1. **held-out pass rate**: the primary quality measure. For S, the tests
+   are written by me and hashed before the first run; for M, the
+   phase's real tests;
+2. **requirement rows verified** (checker-confirmed) / target rows;
+3. **cost**: notional USD, tokens, wall clock, coder minutes;
+4. **your load**: questions asked, and how many of them were on the
+   pre-registered list of genuine ambiguities in the input (wasted
+   questions are counted against the workflow);
+5. **rework**: rounds per card, re-opened cards, replans, reverted
+   commits;
+6. **escapes**: findings of an independent final review of the delivered
+   diff (the same reviewer prompt for every run), and regressions against
+   the baseline.
+
+**Runs:**
+- S: W1 and W2, two repeats each, with V2 on, so that held-out tests are
+  measured everywhere;
+- M: W1 and W2, one run each, with V2;
+- the V1 vs V2 effect is read from the same runs. In V2, held-out
+  failures that reached card done are the escapes that V1 would have
+  shipped.
+
+That is about 6 runs, roughly 8–12 hours of coder time spread over
+several Max windows (D3).
+
+**The decision rule**, fixed now:
+1. The higher held-out pass rate wins, if the gap is ≥ 10 points on M or
+   consistent across both S repeats.
+2. Otherwise, lower cost at an equal or better rows-verified score.
+3. Your load is a constraint: a workflow that asked you twice as many
+   unnecessary questions loses a tie.
+4. With N this small the result is *directional*. The report says so,
+   keeps both modes, and lists what a larger run would need.
+
+**Predictions** are written now so the result can surprise us:
+- W2 costs fewer tokens and re-opens fewer cards on M;
+- W1 finishes S sooner (more parallel early);
+- V2 catches at least one escape on M that V1 would ship.
+
+[the benchmark must match the shape]: a past mistake. I blocked a design
+three times with numbers that measured something else. So every metric
+here is measured on the real thing being decided.
+
+---
+
+## 6. The lifecycle
+
+Everything below is common to both workflows, and §5.5's knobs decide the
+differences. Each stage is adaptive: it is skipped or repeated by rules,
+not mechanically.
+
+1. **Intake.** The mission is created from its sources (any form, §4.1),
+   the repo path, constraints, its policy (budgets, approvals, models,
+   workflow mode) and its target scope (default: every row that is not
+   verified). It is stored and nothing runs yet.
 2. **Discover** (`discover_flow`, read-only coder). This writes the repo
    brief: stack, layout, conventions (it reads CLAUDE.md, AGENTS.md and
    CONTRIBUTING), and the commands to install, test, lint and type-check.
    **The commands are then run** to record the baseline: which checks pass
    *before* any change, so a test that was already failing never counts as
-   a regression and is never blamed on a task. If a check command cannot
-   be found or does not run, that is the first escalation candidate.
-3. **Clarify.** The planner lists open questions, and triage (§7.1) sorts
-   each one:
+   a regression and is never blamed on a card. A check command that
+   cannot be found or does not run is the first escalation candidate.
+3. **Requirements** (`brd_flow`, §4). Sources are registered, requirements
+   extracted with the mechanical checks, misses hunted, and questions
+   written as `Q-nn` and triaged (§9.1):
    - *decidable*: decide it from the evidence and record the assumption;
-   - *owner's, and it blocks the whole plan*: ask now;
-   - *owner's, and it blocks only part*: plan that part as a task marked
-     `needs_decision`, so the rest proceeds.
-4. **Plan** (`plan_flow`, `--json-schema`). It produces requirements
-   (R1…) and tasks. Each task has a title, intent, acceptance criteria
-   (testable statements, each tied to requirements), `deps`, `paths` (the
-   globs it may touch), `kind` (code | test | docs | config), `risk` (low |
-   high: migrations, deletes, security, public API), and an estimate.
+   - *owner's, and it blocks everything*: ask now;
+   - *owner's, and it blocks only some rows*: those rows wait as
+     `blocked` with the `Q-nn`, and the rest proceeds.
+
+   On a repo that already has the folder, only new or changed sources
+   are processed.
+4. **Plan** (`plan_flow`, `--json-schema`).
+   - **W1:** the whole card DAG.
+   - **W2:** epics over the rows, the dependencies between epics, one
+     architecture note, then the first `ready_depth` cards.
+
+   Each card has:
+   - a title and intent;
+   - the rows it serves;
+   - acceptance criteria in EARS form, each tied to a row;
+   - `deps`, and `paths` (the globs it may touch);
+   - `kind` (code | test | docs | config);
+   - `risk` (low | high: migrations, deletes, security, public API);
+   - its doc obligations;
+   - an estimate.
 5. **Plan review.** A fresh session (reviewer model) checks for missing
-   requirements, untestable criteria, wrong dependencies, oversized tasks,
-   and overlapping paths that ought to be dependencies. The engine also
+   rows, untestable criteria, wrong dependencies, oversized cards, and
+   overlapping paths that ought to be dependencies. The engine also
    checks mechanically:
    - the graph is acyclic and every dependency exists;
-   - every requirement is covered by at least one criterion;
+   - every target row is covered by at least one criterion;
    - paths are inside the repo;
-   - the task count is at most `max_tasks` (default 25).
+   - at most `max_cards` cards are open at once (default 25).
 
    There are at most 2 revise rounds. After that, the plan with its
    unresolved review notes goes to you instead of looping.
 6. **Approval** (one tap by default, §2 decision 12).
-7. **Execute** (§5, §6): tasks run as their dependencies merge.
-8. **Final verification** (`final_flow`):
+7. **Examiner** (V2 only). The held-out tests are written from the rows
+   by a separate session into the mission folder, outside the repo,
+   before any implementation.
+8. **Execute** (§7, §8). Cards run, by push (W1) or pull (W2), and the
+   replenisher details new cards as the Ready column drains (W2).
+9. **Final verification** (`final_flow`):
    - the full checks on the integration branch against the baseline;
+   - the held-out tests (V2);
+   - `forge brd check`;
    - one review of the whole mission diff, looking at integration
-     problems that no single task saw;
-   - the traceability matrix: requirement → criteria → tasks → commits →
-     the tests that passed.
+     problems that no single card saw;
+   - the matrix rows of the scope, each with its evidence.
 
-   A gap re-opens the responsible task (bounded, §6.4).
-9. **Deliver.** The integration branch, `DELIVERY.md` (what was built,
-   evidence, assumptions taken, decisions you made, known limits, cost)
-   and a PR description. A push or PR is an approval (§2, decision 11).
+   A gap re-opens the responsible card (bounded, §8.4).
+10. **Deliver.** The integration branch with the updated BRD folder,
+    `DELIVERY.md` (what was built, evidence per row, assumptions taken,
+    `Q-nn` you decided, known limits, cost) and a PR description. A push
+    or PR is an approval (§2, decision 11).
 
-**Replanning.** A task that fails for good, or a "revise" from you, can
-change the part of the DAG that has not started yet. That is at most 2
-replans per mission. Done tasks are never redone. Questions on tasks that
-were replaced become `superseded` (§7.5).
+**Replanning.** A card that fails for good, a "revise" from you, or a
+changed source can change the part of the plan that has not started
+yet. That is at most 2 replans per mission, besides W2's ordinary
+just-in-time detailing. Done cards are never redone. Questions on cards
+that were replaced become `superseded` (§9.5).
 
 ---
 
-## 5. A task: the rounds inside `task_flow`
+## 7. A task: the rounds inside `task_flow`
 
 One task attempt is one journalled run of this module-level graph. The
 code below is a sketch; P3 builds and tests the real one.
@@ -445,9 +842,9 @@ Its `next` output loops back (`fix`), parks (`ask`) or ends the run:
 | the same failure signature 3 rounds in a row | **revise approach** once: a new implementer session gets a summary of what failed; then escalate |
 | blocker or major findings | fix: the session resumes with the findings |
 | a finding with the same fingerprint again after a fix | arbitration: one third session sees both sides; if still unresolved, escalate |
-| the implementer reports `needs_human` | triage (§7.1): answered from evidence, back to fix; or **ask** |
+| the implementer reports `needs_human` | triage (§9.1): answered from evidence, back to fix; or **ask** |
 | `max_rounds` (6) or the task budget is reached | escalate with a choice: "keep trying with X / skip / stop", never a silent loop |
-| a rate limit on the coder | pause the mission until the reset time (§8) |
+| a rate limit on the coder | pause the mission until the reset time (§10) |
 | an infra error (the binary is gone, the disk is full) | the task fails with the reason; dependents are blocked |
 
 A round inside a task is never retried blindly. Each repeat carries new
@@ -458,9 +855,9 @@ same-signature repeats, arbitrations, revisions, budget).
 
 ---
 
-## 6. The scheduler
+## 8. The scheduler
 
-### 6.1 States
+### 8.1 States
 
 **Task**
 
@@ -480,7 +877,7 @@ same-signature repeats, arbitrations, revisions, budget).
 
 | state | meaning |
 |---|---|
-| `discovering`, `planning`, `awaiting_approval`, `running` | the lifecycle stages (§4) |
+| `discovering`, `planning`, `awaiting_approval`, `running` | the lifecycle stages (§6) |
 | `waiting_human` | nothing can run, at least one question is open |
 | `paused` | you paused it, or a rate limit; it can carry a `resume_at` |
 | `done` | delivered |
@@ -492,7 +889,7 @@ Every transition is one function in `store.py`. It checks that the
 transition is legal (a table), writes the event row, and is unit-tested.
 An illegal transition raises.
 
-### 6.2 Running the DAG
+### 8.2 Running the DAG
 
 - **Waves** are only for display (depth in the DAG). Scheduling is
   dynamic: a task starts as soon as its last dependency is `done`, not
@@ -514,20 +911,20 @@ An illegal transition raises.
 
   There are at most 2 integration re-opens per task.
 
-### 6.3 Budgets and stopping
+### 8.3 Budgets and stopping
 
 | Budget | Default | When it runs out |
 |---|---|---|
 | `max_usd` (from Claude's `total_cost_usd`; notional on Max) | 30 | 80 %: one heads-up message; 100 %: `budget_exhausted` and a question (extend / stop) |
 | `max_hours` (wall clock while running; waiting for you does not count) | 8 | same |
-| per task: `max_rounds`, `max_usd` | 6, 5 | escalate (§5) |
+| per task: `max_rounds`, `max_usd` | 6, 5 | escalate (§7) |
 | `max_questions` you get per mission without a digest | 5 | further questions are batched into one digest message |
 | `max_replans`, `max_tasks`, plan-review rounds | 2, 25, 2 | ask |
 
 Each coder call also gets `--max-budget-usd` and a wall-clock timeout, so
 a single runaway session is cut by Claude Code itself.
 
-### 6.4 Why it ends
+### 8.4 Why it ends
 
 A mission ends because each loop draws on a finite counter: task rounds,
 plan reviews, replans, integration re-opens, budgets. When the counters
@@ -535,11 +932,42 @@ run out, a question goes to you rather than another attempt. The
 scheduler itself only acts on events (a run ended, a command arrived, a
 timer fired). It never spins.
 
+
+### 8.5 The board: cards, columns, pull and WIP limits
+
+A card's state (§8.1) maps onto a board column:
+
+| Column | Card states | WIP limit (default) |
+|---|---|---|
+| Backlog | rows in scope with no card yet (W2), or cards whose dependencies are open | — |
+| Ready | `ready` | `ready_depth` = 2 × slots (W2 tops it up) |
+| In progress | `running` (the implement step) | `max_parallel` (2) |
+| Review | `running`, in its review step | 2 |
+| QA | `running`, in its checks / held-out step; `verified` waiting for the merge lock | 2 |
+| Waiting on you | `waiting_human` | none: a question never waits for a slot |
+| Done | `done` (W2: its rows `implemented_verified`) | — |
+| Blocked / Failed | `blocked`, `failed` | — |
+
+- **Pull (W2):**
+  - a free implement slot takes the highest-priority Ready card whose
+    paths are free;
+  - priority comes from the plan (epic order, then risk first, then
+    unblocking count);
+  - a full Review or QA column stops new implement starts, so finished
+    work is verified before more is started: kanban's flow rule, which
+    keeps work-in-progress (and merge conflicts) small.
+- **Push (W1):** the same columns, with no column limits beyond
+  `max_parallel`.
+- **The replenisher (W2)** runs when Ready drops below `ready_depth`. It
+  is one planning call that details the next cards from the epic plan
+  and what the finished cards recorded. It is bounded by `max_cards` and
+  by the plan's own stopping rule (no rows left in scope).
+
 ---
 
-## 7. You in the loop: Telegram, durable waiting, exact resumption
+## 9. You in the loop: Telegram, durable waiting, exact resumption
 
-### 7.1 Asking only when it must
+### 9.1 Asking only when it must
 
 Before any question reaches you, **triage** runs. It is a short,
 read-only session with the repo, the brief, the goal and the mission's
@@ -549,20 +977,20 @@ decisions so far. It gets the question and must do one of:
   back to the implementer as a decision, and you never see it;
 - **decide it as routine** (reversible, local, low risk). The engine
   records an *assumption*, which is listed in `DELIVERY.md`;
-- **escalate.** It writes the message (§7.2). Escalation is allowed only
+- **escalate.** It writes the message (§9.2). Escalation is allowed only
   for these categories:
   - ambiguous or conflicting requirements;
   - a consequential trade-off: architecture, public API, data migration;
   - credentials or access that are missing;
   - authorization: anything irreversible or outward-facing;
-  - repeated failure (§5);
+  - repeated failure (§7);
   - budget.
 
 Questions are also bounded: a digest after `max_questions`, and never the
 same question twice. The fingerprint of task, category and question
 deduplicates them.
 
-### 7.2 The message
+### 9.2 The message
 
 ```
 🧩 commit-guard · T4 Office documents — needs your decision
@@ -591,17 +1019,17 @@ through a redactor (operonx-agents' `redact` plus secret patterns), and
 it is cut to Telegram's 4096 characters, with a "details" link to the
 studio when a link exists.
 
-### 7.3 Waiting, durably
+### 9.3 Waiting, durably
 
 1. The `InterruptOp` in `task_flow` parks the run. The journal holds the
    question and the run ends `interrupted`.
 2. The scheduler sees the parked run and creates the interaction (id =
-   `interrupt_id`, plus its `context_hash`, §7.5). The task becomes
+   `interrupt_id`, plus its `context_hash`, §9.5). The task becomes
    `waiting_human` and the message is sent. The ids of the sent messages
    are stored in the interaction.
 3. Nothing waits in memory: no process, model or timer belongs to this
    task. A daemon restart, a reboot or a deploy changes nothing.
-4. Your reply (§7.4) → `submit_answer` → a `resume` command on the queue
+4. Your reply (§9.4) → `submit_answer` → a `resume` command on the queue
    → the scheduler calls `engine.resume(run_id, answers={iid: answer})`.
    The journal replays everything that had ended, and the `InterruptOp`
    returns your answer. The next `round_` resumes the *same* Claude
@@ -611,7 +1039,7 @@ studio when a link exists.
 5. The interaction becomes `delivered`. The Telegram message is edited to
    "✅ Answered: A, with your note, at 14:02; T4 resumed".
 
-### 7.4 Matching a reply to a question
+### 9.4 Matching a reply to a question
 
 - **A button** is a `callback_query`. Its `callback_data` is
   `a:<iid 8 hex>:<option>:<version>` (at most 64 bytes, checked). The
@@ -631,7 +1059,7 @@ studio when a link exists.
   - `/cancel <id>`, which needs a second confirmation tap;
   - `/budget <id> +10`.
 
-### 7.5 Late, duplicate and stale replies; delivery failures
+### 9.5 Late, duplicate and stale replies; delivery failures
 
 - **Duplicate:** each Telegram `update_id` is processed once (a
   processed-ids table; also the `offset` ack). A second answer to an
@@ -657,7 +1085,7 @@ studio when a link exists.
   start. Resuming is idempotent: a run that is no longer parked is
   refused with 409 and recorded.
 
-### 7.6 Security
+### 9.6 Security
 
 - **Allowlist:** Telegram user ids *and* chat ids, from config. Anything
   else is dropped, and logged with the user id only. The bot never
@@ -669,17 +1097,17 @@ studio when a link exists.
   `submit_answer` and command functions the CLI uses. An approval that
   the policy does not allow is refused there, not in the Telegram code.
 - **Approvals are tied to their context.** An approval of plan v2 cannot
-  approve plan v3 (§7.5).
+  approve plan v3 (§9.5).
 - **Outbound content** passes through the redactor. Repo content is
-  untrusted (§9), so the message shows evidence as quoted text, never as
+  untrusted (§11), so the message shows evidence as quoted text, never as
   instructions to you.
 
 ---
 
-## 8. Reliability and economics
+## 10. Reliability and economics
 
 **Crash matrix.** The daemon is killed with `kill -9` at each point. All
-of these are tested in P8.
+of these are tested in P9.
 
 | Killed while | On restart |
 |---|---|
@@ -720,75 +1148,83 @@ implement / checks / review` as `child()` steps. Coder transcripts
 
 ---
 
-## 9. Security boundaries
+## 11. Security boundaries
 
 | Boundary | How |
 |---|---|
-| Files the implementer can write | `cwd` = its worktree. Claude file tools are confined to it (`--restricted` + `--tools` naming Bash for the implementer only). Paths are guarded per task (§5, step 3). |
+| Files the implementer can write | `cwd` = its worktree. Claude file tools are confined to it (`--restricted` + `--tools` naming Bash for the implementer only). Paths are guarded per task (§7, step 3). |
 | The implementer's shell | **D2:** bubblewrap sandbox (no network, writes only in the worktree), or no boundary on a trusted repo, said plainly |
 | Check commands | `docker run --rm --network none -v <worktree>:/work`, an image named in the mission policy (host execution is opt-in for trusted repos) |
 | Credentials | the child environment is scrubbed (the studio's `base_env`: no `ANTHROPIC_*`, `CLAUDE*`, no project `.env`); deny rules `Read(**/.env*)`, `Read(~/.claude/**)`, `Read(<forge state>/**)` |
 | Git | the engine owns branches; the coder's `git push`, `git remote`, `git config`, `reset --hard` on other branches are denied; push or merge to a base branch only by approval |
 | Untrusted repo content | file contents and tool output are data: the role prompts say so, the reviewer's and triage's tools are read-only, and nothing a repo file says can change the mission policy (policy lives in `forge.db`, set by you) |
-| Telegram | §7.6 |
+| Telegram | §9.6 |
 | Studio | the studio's login is the boundary; its Missions tab calls the `forge` CLI under the workspace's interpreter, so the same checks apply |
 
 ---
 
-## 10. The studio: a Missions tab
+## 12. The studio: a Missions tab with a board
 
 **Why the studio and not a separate UI.** It already has the shell (tabs,
-themes, auth, phone layout), run pages for each task attempt, the diff
+themes, auth, phone layout), run pages for each card attempt, the diff
 view, live runs, the answer card and Monitor. A separate app would
 rebuild all of that. The engine stays usable without the studio: the
 CLI, Telegram and `DELIVERY.md` cover everything.
 
 **How it reads and acts.**
-- **Reads** go straight to `forge.db`, read-only. Its schema is
-  documented and versioned (`schema_version`), the way the studio already
-  reads run stores.
-- **Actions** (answer, approve, pause, resume, cancel) run `forge api
-  <json>` under the workspace's interpreter, so validation lives in one
-  place, the same as the playground bridge.
-- Updates arrive by cursor, like the assistant and the playground. The
-  tunnel cuts long responses, so no single long request is used.
+- **Reads** go straight to `forge.db`, read-only, and to the target
+  repo's BRD folder. The schema is documented and versioned
+  (`schema_version`), the way the studio already reads run stores.
+- **Actions** (answer, approve, pause, resume, cancel, reprioritize a
+  card) run `forge api <json>` under the workspace's interpreter, so
+  validation lives in one place, the same as the playground bridge.
+- Updates arrive by cursor, like the assistant and the playground.
 
-**Screens.** Wireframe:
+**Three views of one mission**, because they answer three different
+questions:
+- **Board** (default): what is moving, and what is stuck?
+- **Checklist**: which requirements are met, with what evidence?
+- **Graph**: what depends on what, and which waves?
 
 ```
-Missions ▸ commit-guard                         running · 3/6 done · $4.10 / $30 · 1h12m
-┌ Decisions waiting (1) ───────────────────────────────────────────────────────────┐
-│ T4 Office documents — allowlist templates or block everywhere?   [A] [B] [C] [✏️] │
-└───────────────────────────────────────────────────────────────────────────────────┘
- Wave 1            Wave 2                 Wave 3
- ┌──────────┐     ┌───────────────┐     ┌──────────────┐
- │T1 CLI ✓  │──┬─▶│T2 archives ●  │──┬─▶│T6 installer ○│
- └──────────┘  │  └───────────────┘  │  └──────────────┘
-               ├─▶│T3 secrets ●   │──┤
-               │  └───────────────┘  │
-               └─▶│T4 office ?    │──┘     ✓ done ● running ? waiting on you
-                  └───────────────┘        ✗ failed ⊘ blocked ○ pending
- Task T2 · archives      round 2 of 6
-   criteria  3/4 met (R2.1 ✓ R2.2 ✓ R2.3 ✓ R2.4 ✗ test_tar_gz_detected)
+Missions ▸ commit-guard          W2 · running · rows 9/14 verified · $4.10 / $30 · 1h12m
+[ Board ] [ Checklist ] [ Graph ]
+┌ Waiting on you (1) ─────────────────────────────────────────────────────────────────┐
+│ Q-01 conflict · C4 Office documents — allowlist templates or block everywhere? [A][B][C][✏️]│
+└──────────────────────────────────────────────────────────────────────────────────────┘
+ Backlog (2)   Ready (2/4)    In progress (2/2)  Review (1/2)   QA (0/2)   Done (3)
+ ┌─────────┐   ┌──────────┐   ┌──────────────┐   ┌──────────┐              ┌─────────┐
+ │C6 inst. │   │C5 size   │   │C2 archives   │   │C3 secrets│              │C1 CLI ✓ │
+ │ needs C4│   │ R-07     │   │ round 2 · ✗1 │   │ 2 findings│             │ R-01,02 │
+ └─────────┘   └──────────┘   └──────────────┘   └──────────┘              └─────────┘
+ Card C2 · archives · rows R-03, R-04 · round 2 of 6
+   criteria  3/4 (EARS: "When a staged file is a .tar.gz, the hook shall refuse…" ✗)
    rounds    1: implement → checks ✗ (1 failing) → fix   2: implement → checks …
-   review    —       QA  pytest 41 passed, 1 failed   diff +184 −3 (4 files)
-   [open run trace] [transcript] [diff]
+   held-out  —        QA  pytest 41 passed, 1 failed     diff +184 −3 (4 files)
+   docs      feature file ✓  matrix row ✓  changelog —
+   [open run trace] [transcript] [diff] [rows in checklist]
 ```
 
-It also has: the plan and its review notes (v1 → v2), the traceability
-matrix, retries with their reasons, events, and budget charts (reusing
-Monitor's chart conventions, dataviz). It is built on a studio branch,
-with screenshots on desktop and phone after each change (your UI rule).
-The DAG uses the studio's plain-wire conventions. The task graph is drawn
-fresh; it does not change any existing canvas edges.
+**Checklist** is the matrix: one line per row, its status, its card, and
+the cited tests with pass or fail from the last run. Filters are
+not-verified, blocked by a `Q-nn`, or changed by a new source. **Graph**
+is the card DAG in waves (§8.2), drawn with the studio's plain-wire
+conventions; the task graph is drawn fresh and changes no existing canvas
+edges.
+
+It also has: the plan and its review notes (v1 → v2), `Q-nn` with
+resolutions and ADRs, retries with their reasons, events, and budget
+charts (Monitor's chart conventions, dataviz). It is built on a studio
+branch, with screenshots on desktop and phone after each change (your UI
+rule).
 
 ---
 
-## 11. The proof of concept
+## 13. The proof of concept, and the bake-off inputs
 
-**The mission:** `commit-guard`, a real, small, useful tool. A
-pre-commit hook and CLI (`pip install`, `commit-guard install`) that stops
-a commit from leaking into a public repo:
+**S: `commit-guard`, a real, small, useful tool.** A pre-commit hook and
+CLI (`pip install`, `commit-guard install`) that stops a commit from
+leaking into a public repo:
 - archives (`.zip`, `.tar.*`, `.7z`), office documents, `.env*`;
 - private keys and token patterns;
 - files over a size limit.
@@ -796,57 +1232,81 @@ a commit from leaking into a public repo:
 It is tested with pytest on real temporary git repos. It answers a real
 incident: your zips leaked to a public repo through `git add -A`.
 
-**The target repo** is `/home/thanglq/forge-poc/commit-guard`, a new
-folder with its own `git init`, outside every existing repo. It is seeded
-with a README stub, a `CONTRIBUTING.md` that says the team commits
+The target repo is `/home/thanglq/forge-poc/commit-guard`, a new folder
+with its own `git init`, outside every existing repo. It is seeded with a
+README stub, a `CONTRIBUTING.md` saying the team commits
 `docs/templates/*.docx`, and three such templates. That seed makes the
 office-documents rule a **genuine conflict between the goal and the
-repo**: the goal says block, and the repo's own workflow needs those
-files. No evidence settles it, so it is your call. That is the T4 example
-at the top.
+repo** (`Q-01`): no evidence settles it, so it is your call.
 
-Whether the engine actually escalates it is itself a test of §7.1. If
-triage "decides" it silently, the run shows that the policy is wrong, and
-the escalation rule (conflicting instructions → ask) is fixed and re-run.
-I will not soften the scenario to make the run pass.
+Whether the engine actually escalates it is itself a test of §9.1. If
+triage "decides" it silently, the run shows that the policy is wrong; the
+rule is fixed and the run repeated. I will not soften the scenario to
+make the run pass. **Held-out tests** for S are written by me from the
+goal before the first run, committed outside the target repo, and hashed
+in §17.
 
-**What it demonstrates:**
-- goal → plan with requirements, criteria and a DAG of about 6 tasks in
-  3 waves;
-- 2 tasks running in parallel in worktrees;
-- real code and real pytest;
-- at least one review → fix round from a real finding;
-- a real check failure → fix;
-- the Telegram question while other tasks continue;
+**M: a replay of a finished OneWealth phase** (§5.6), on a local copy.
+- The repo is checked out before the phase; the BRD folder is as it was.
+- The scope is that phase's rows; the held-out tests are the tests that
+  phase really added.
+- It is a brownfield repo with a real BRD (Vietnamese source quotes, a
+  `.docx` that must stay out of git), so it also exercises §4 on real
+  input.
+
+**E0: an extraction check on OneWealth's original BRD** (the `.docx`,
+read locally, never copied into git). `brd_flow` runs on it alone, and
+its output is compared with the reviewed extraction in
+`mr-finance/docs/brd/requirements/`:
+- recall of the 61 numbered requirements and 7 KPIs (they have codes, so
+  this is exact);
+- recall of the 97 rules (matched by a judge on meaning and section,
+  with 20 matches checked by hand);
+- quotes that are not in the source (must be 0);
+- false requirements (inventions).
+
+It costs one requirements session, and it measures the stage that no
+other test does.
+
+**What the runs demonstrate, all together:**
+- input in any form → a living BRD → checklist → board, and goal → spec
+  → DAG;
+- parallel cards in worktrees, real code, real pytest;
+- review → fix rounds from real findings, and a real check failure → fix;
+- held-out tests catching what visible tests missed;
+- the Telegram question (`Q-01`) while other cards continue;
 - a daemon restart while waiting;
-- the answer → the exact resume → the task done;
-- integration plus regression;
-- final verification, `DELIVERY.md`, and the Missions tab showing all of
-  it.
+- the answer → the exact resume → the card done;
+- integration and regression;
+- the matrix verified by the checker;
+- `DELIVERY.md`;
+- the board, checklist and graph showing all of it.
 
-**A second mission** (P9) runs on an existing repo: one of the open
-findings catalogued in Operon's HANDOFF.md, delivered as a branch for
-your review, never merged by the engine.
+**A further real mission** (P10) runs with the winning mode on a live
+backlog: OneWealth rows still `planned`, or an Operon finding, whichever
+you choose then. It is delivered as a branch for your review and never
+merged by the engine.
 
 ---
 
-## 12. Phases, gates and verification
+## 14. Phases, gates and verification
 
 Each phase is one branch and one PR (your rule: one branch per phase,
 batched commits), merged when its gate passes. The commands and results
-of each gate go into §14.
+of each gate go into §17.
 
-**P1. Store, model, DAG, scheduler (no LLM)**
+**P1. Store, model, cards, scheduler (no LLM)**
 - **Builds:** the package skeleton in `packages/operonx-forge`, the CI
-  matrix entries, the mission store with its transition table, `dag.py`,
-  and the scheduler driven by fake task runners.
+  matrix entries, the mission store with its transition table, cards
+  with dependencies, the board columns and WIP limits, the knobs of
+  §5.5, and the scheduler driven by fake card runners.
 - **Gate:**
   - unit tests of every transition, waves, the ready set, blocked
-    propagation, path locks and budgets;
+    propagation, path locks, push vs pull, the column limits and budgets;
   - **a property test**: on random DAGs with random durations and
-    failures, a task never starts before its dependencies are done,
-    `max_parallel` is never exceeded, overlapping paths never run
-    together, every task ends in a final state or blocked-with-reason,
+    failures, under both policies, a card never starts before its
+    dependencies are done, no limit is exceeded, overlapping paths never
+    run together, every card ends in a final state or blocked-with-reason,
     and the scheduler's step count is bounded.
 
 **P2. Coder, git, checks**
@@ -854,48 +1314,74 @@ of each gate go into §14.
   - `ClaudeCodeCoder`, ported from the studio: stream-json, the session
     id at `init`, `--json-schema` output, cost, timeouts, cancel (process
     group), rate-limit detection;
-  - `gitops`: worktrees, commits, merge under a lock, conflicts;
+  - `gitops`: worktrees, commits, merge under a lock, conflicts, the
+    private-source guard;
   - `checks`: host and docker runs, the baseline.
 - **Gate:**
   - the adapter's tests against a scripted fake `claude` executable (a
     test double, labelled);
   - git tests on real temporary repos;
-  - **one paid smoke** with the real Claude Code: a session that
-    creates a file, then is resumed, then returns `--json-schema`
-    output. It checks the event shapes we parse, about $0.10 notional.
+  - **one paid smoke** with the real Claude Code: a session that creates
+    a file, is resumed, and returns `--json-schema` output. It checks the
+    event shapes we parse, about $0.10 notional.
 
 **P3. `task_flow` and the decision table**
-- **Builds:** the graph (§5), `round_`, `decide()`, guards, the test
-  author, integration.
+- **Builds:** the graph (§7), `round_`, `decide()`, guards, the test
+  author, the examiner hook (V2), integration.
 - **Gate:**
-  - with a scripted coder: the task passes; it fails then fixes; review
+  - with a scripted coder: the card passes; it fails then fixes; review
     findings lead to a fix; a repeated finding leads to arbitration and
     escalation; the same failure 3 times leads to a revise and then an
-    escalation;
+    escalation; a held-out failure returns only names and messages;
   - `max_rounds` is honoured;
-  - the guard rejects an edited acceptance test;
+  - the guard rejects an edited acceptance test and a private source;
   - a park → resume through the journal with a new engine instance;
   - **`kill -9` mid-round** → resume, with no completed round re-run (by
     counting calls);
   - a merge conflict leads to a rebase round.
 
-**P4. Lifecycle, daemon, CLI**
-- **Builds:** discover (with the baseline), clarify, plan and plan
-  review with the mechanical checks, approval, final verification, the
-  traceability matrix, `DELIVERY.md`, the daemon (lease, recovery pass,
-  command queue) and the CLI.
+**P4. Requirements: the living BRD (§4), and E0**
+- **Builds:**
+  - readers for `.docx`, PDF, images, zip and text;
+  - the source register (hashes, private sources);
+  - `brd_flow`, with the quote, coverage and ID checks and the
+    miss-hunter;
+  - the `Q-nn` writer;
+  - the generalized template (`forge brd init`) and checker
+    (`forge brd check`);
+  - diffing a new source version.
 - **Gate:**
-  - the whole lifecycle with the scripted coder;
+  - unit tests of each reader on real files (a `.docx` with tables and
+    figures, a scanned PDF page, a zip with an image);
+  - the checks catch a planted fake quote and a skipped section;
+  - the checker on OneWealth's real folder agrees with
+    `check_brd_docs.py`;
+  - **E0 (paid, one session):** recall of numbered requirements and
+    KPIs ≥ 95 %, of rules ≥ 80 %, with 0 quotes not in the source. These
+    are first targets; the measured numbers go into §17 whatever they
+    are.
+
+**P5. Lifecycle, both modes, daemon, CLI**
+- **Builds:**
+  - discover (with the baseline), requirements, plan in both modes
+    (whole DAG; epics plus the replenisher);
+  - plan review with the mechanical checks, approval;
+  - the examiner, final verification, `DELIVERY.md`;
+  - the daemon (lease, recovery pass, command queue) and the CLI.
+- **Gate:**
+  - the whole lifecycle in both modes with the scripted coder;
   - the plan-review cap;
-  - replanning keeps done tasks;
+  - the replenisher keeps Ready at its depth and stops when no rows are
+    left;
+  - replanning keeps done cards;
   - the recovery pass covers each crash-matrix row that P3 does not;
   - `forge status` and `forge show` are accurate against the store.
 
-**P5. Interactions and messaging (Telegram still mocked)**
-- **Builds:** the interaction lifecycle, `submit_answer`, triage,
-  rendering, the redactor, expiry and reminders, the `Messenger` protocol,
-  `TelegramMessenger`, `FakeBotAPI` (a real HTTP server on localhost),
-  and commands.
+**P6. Interactions and messaging (Telegram still mocked)**
+- **Builds:** the interaction lifecycle as `Q-nn`, `submit_answer`,
+  triage, rendering, the redactor, expiry and reminders, the `Messenger`
+  protocol, `TelegramMessenger`, `FakeBotAPI` (a real HTTP server on
+  localhost), and commands.
 - **Gate (against `FakeBotAPI`, labelled as a test double):**
   - a button answer, a reply-to answer, an unthreaded answer with exactly
     one question open and with two open;
@@ -906,52 +1392,56 @@ of each gate go into §14.
   - a send failure → retry → `forge answer` still works;
   - the token never appears in logs (grep in the test).
 
-**P6. The first real end-to-end mission (paid, Telegram still the fake
-server)**
-- **Builds:** `commit-guard` from goal to delivery, with real Claude Code,
-  real pytest, real worktrees and a real daemon. I act as you through the
-  fake server's "user says" endpoint, and that is recorded as such. The
-  daemon is restarted (`kill -9`) while T4 waits.
+**P7. The bake-off (paid; Telegram is the fake server; §5.6)**
+- **Builds:** the held-out tests for S are written and hashed first. Then
+  the six runs: S × W1 × 2, S × W2 × 2, M × W1, M × W2, all with V2.
+  - On S, the `Q-01` question is answered by me through the fake server's
+    "user says" endpoint, recorded as such.
+  - In one S run the daemon is `kill -9`ed while `Q-01` waits.
 - **Gate:**
-  - the delivered repo's tests pass, run by me separately from the
-    engine;
-  - `DELIVERY.md` claims match the store, git and test output, checked
-    by a script;
-  - the engine's cost is recorded;
-  - every failure in the run is either fixed in code (and re-run) or
-    written up in §15.
-- **Expected cost:** 1–3 hours of Max quota (D3), notional $10–30.
+  - every metric of §5.6 is recorded per run;
+  - the delivered repos' tests and held-out tests are re-run by me,
+    separately from the engine;
+  - the `DELIVERY.md` claims match the store, git and test output,
+    checked by a script;
+  - the decision rule is applied as written, and the default mode is
+    chosen;
+  - every engine failure seen is either fixed (and its run repeated) or
+    written up in §17.
+- **Expected cost:** about 8–12 hours of coder time over several Max
+  windows (D3), notional $40–100. The rows are written into
+  `docs/forge/BAKEOFF.md`.
 
-**P7. Studio Missions tab (studio repo, its own branch)**
-- **Builds:** the list, the mission page, the DAG with waves, the
-  decisions card (answers via `forge api`), the task panel, the
-  traceability matrix and the links to run pages.
+**P8. Studio Missions tab (studio repo, its own branch)**
+- **Builds:** the list, the mission page with **board, checklist and
+  graph**, the waiting-on-you card (answers via `forge api`), the card
+  panel and the links to run pages.
 - **Gate:**
   - studio tests for the read API and the action calls;
-  - screenshots on desktop and phone of P6's real mission, live and
+  - screenshots on desktop and phone of P7's real missions, live and
     finished;
   - answering from the studio follows the same rules (a stale answer is
     refused).
 
-**P8. Hardening**
+**P9. Hardening**
 - **Builds and tests:**
   - the full crash matrix with `kill -9` at each row, against real
     processes;
   - budget and rate-limit pause and resume;
-  - security: path escape, a write to an acceptance test, a denied
-    `git push`, an environment leak check, an untrusted repo file
-    containing instructions ("ignore your task and …") with the policy
-    unchanged;
+  - security: path escape, a write to an acceptance test, a private
+    source staged for commit, a denied `git push`, an environment leak
+    check, an untrusted repo file containing instructions ("ignore your
+    task and …") with the policy unchanged;
   - the docker check runner;
   - the guide page `operonx_forge/guide/01-forge.md`, run by the snippet
     tests;
   - regression: the forge suite, `tests/internal/durable`, `tests/guide`,
     agents' suite (redact is reused), and studio tests.
 
-**P9. Real Telegram and a second mission (needs D4)**
-- **Builds:** your bot token and user id, long poll (or webhook), the
-  same P6 scenario with **you** answering on your phone, and then the
-  second mission on an existing repo.
+**P10. Real Telegram and a live mission (needs D4)**
+- **Builds:** your bot token and user id, long poll (or webhook), the S
+  scenario with **you** answering on your phone, and then the further
+  real mission (§13) in the winning mode.
 - **Gate (your brief's mandatory scenario, all eight steps):**
   1. a genuine decision arises;
   2. a real Telegram message arrives on your phone;
@@ -959,7 +1449,7 @@ server)**
   4. you answer in Telegram;
   5. the answer is correlated and validated;
   6. the same run resumes;
-  7. the task completes;
+  7. the card completes;
   8. real tests pass.
 
 **How the requirements in your brief (§9) map to phases**
@@ -967,25 +1457,28 @@ server)**
 | Requirement | Phase |
 |---|---|
 | dependency ordering, independent scheduling, blocked propagation | P1 property + unit tests |
-| planning and review iteration limits | P3, P4 |
-| failures, retries, recovery; partial completion | P3, P8 |
-| real test execution and accurate reporting | P2, P6 (the delivery-claims check) |
-| persistence and resumption after interruption | P3, P4, P8 |
-| approve, reject, revise, delayed responses | P4, P5 |
-| Telegram auth, correlation, duplicates, stale | P5 (fake); P9 (real) |
-| safe cancellation | P4, P8 |
-| security boundaries | P8 |
-| integration with OperonX | P3 (journal, InterruptOp), P8 regression |
-| UI and API | P7 |
-| existing regression suites | P8 |
+| planning and review iteration limits | P3, P5 |
+| failures, retries, recovery; partial completion | P3, P9 |
+| real test execution and accurate reporting | P2, P7 (the delivery-claims check, re-runs by me) |
+| persistence and resumption after interruption | P3, P5, P9 |
+| approve, reject, revise, delayed responses | P5, P6 |
+| Telegram auth, correlation, duplicates, stale | P6 (fake); P10 (real) |
+| safe cancellation | P5, P9 |
+| security boundaries | P9 |
+| integration with OperonX | P3 (journal, InterruptOp), P9 regression |
+| UI and API | P8 |
+| existing regression suites | P9 |
+| requirements from any input; traceability | P4 (E0), P7 (M) |
+| choosing the workflow by evidence | P7 |
 
 **Not counted as proof:** a mocked coder for anything about code quality,
-the fake Bot API for the live Telegram integration, and the
-compilation, typing or happy path alone.
+the fake Bot API for the live Telegram integration, visible tests alone
+for quality (held-out tests are the measure), and the compilation,
+typing or happy path alone.
 
 ---
 
-## 13. Not building, or later
+## 15. Not building, or later
 
 - **A general workflow runtime, or a "graph of missions".** The DAG is
   scheduler data, as Jobs' steps are.
@@ -993,28 +1486,33 @@ compilation, typing or happy path alone.
   and shell tools). This is later: it would make review vendor-independent
   and run where there is no Claude login. The `Coder` protocol leaves room
   for it.
+- **More workflow candidates** (an agent per role à la BMAD, Spec Kit's
+  constitution file). §5.3 says why not now; P7's numbers can re-open it.
 - **Missions across several repos**, running the same task in several
   worktrees, and choosing the best.
 - **Postgres** for the mission store. SQLite holds one workspace on one
   machine. The store sits behind a small interface, as the journal does.
 - **Slack or e-mail messengers.** The `Messenger` protocol leaves room
   for them.
-- **Core changes.** None are expected. Any gap P1–P8 finds goes upstream
+- **Core changes.** None are expected. Any gap P1–P9 finds goes upstream
   as its own PR, with a failing test first (for example, loop ops'
   outputs not reaching the run's outputs, if it turns out to matter).
 
-## 14. Risks
+## 16. Risks
 
 | Risk | What I do about it |
 |---|---|
 | Claude Code's stream-json or `--json-schema` shapes change between versions | they are parsed in one module; the P2 smoke runs per version; the version is recorded on every round |
 | The reviewer approves bad code | the commands decide, not the reviewer alone; acceptance tests are written first by another session; the final whole-diff review |
-| Triage escalates too much, or too little | P6 measures both: every question asked and every assumption taken is listed in `DELIVERY.md`; the rules are tuned on that evidence |
-| The Max quota runs out mid-mission | the rate-limit pause (§8); D3 |
+| Triage escalates too much, or too little | P7 measures both: every question asked and every assumption taken is listed in `DELIVERY.md`; the rules are tuned on that evidence |
+| The Max quota runs out mid-mission | the rate-limit pause (§10); D3 |
 | A shared host (staging callbot) is slowed | `max_parallel` = 2; checks in docker with CPU limits |
 | Merge conflicts between parallel tasks | path locks, then the rebase round, then at most 2 re-opens, then you |
+| The bake-off's N is tiny (6 runs) | a pre-registered rule; the result is labelled directional; both modes kept unless one wins clearly |
+| The replay (input M) leaks the answer: the agent finds the later code | a fresh clone truncated at the phase's base commit (no later objects, no remote), and the BRD folder at that commit |
+| Extraction is good on OneWealth only | E0 is one data point; P4's reader tests use other files; the first BRD of a new kind is reviewed by you once |
 
-## 15. Progress log
+## 17. Progress log
 
 (empty: filled in phase by phase with commands run and their results)
 
