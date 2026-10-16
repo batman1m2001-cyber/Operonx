@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.29.0] - 2026-10-16
+
+### Added
+
+- **Middleware around every listener: `Application(..., middleware=[...])`** (or `[project] middleware = ["module:attr"]`). ASGI middleware, outermost first, each called `entry(app=app)` — a Starlette middleware class or a function returning the wrapped app — around each listener's whole app: the services' routes, a mounted app and `/healthz` alike, in every worker. Before, a project could wrap only its own mounted app, so what every response must carry (security headers, `Cache-Control` on client data) missed the services' own routes. Guide 05, docs guide 08.
+
 ## [1.28.0] - 2026-10-16
 
 ### Added

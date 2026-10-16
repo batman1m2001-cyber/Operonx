@@ -46,6 +46,38 @@ def other_flow():
 
 
 inner = Job("inner", graph=score_flow, items=[{"call_id": "z", "text": "a b"}], key="call_id")
+
+
+class Stamp:
+    # an ASGI middleware: a header on every HTTP response
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        async def stamped(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), (b"x-stamp", b"1")]}
+            await send(message)
+
+        await self.app(scope, receive, stamped)
+
+
+def outer(app):
+    # a function middleware, outside Stamp: its header goes on after
+
+    async def wrapped(scope, receive, send):
+        async def tagged(message):
+            if message["type"] == "http.response.start":
+                message = {**message, "headers": [*message.get("headers", []), (b"x-outer", b"1")]}
+            await send(message)
+
+        await app(scope, receive, tagged if scope["type"] == "http" else send)
+
+    return wrapped
 """
 
 CALLS = [{"call_id": "c1", "text": "one two three"}, {"call_id": "c2", "text": "four"}]
@@ -228,6 +260,44 @@ def test_asgi_gives_one_listeners_app(project):
         app.asgi(port=9999)
     # a listener that leaves the startup hooks to another process
     assert app.asgi(port=8123, startup=False).router.lifespan_context is not None
+
+
+def test_middleware_wraps_the_whole_listener_from_the_toml_or_python(project, monkeypatch):
+    pytest.importorskip("starlette")
+    from starlette.testclient import TestClient
+
+    from operonx.app import Service, http
+
+    name, root = project
+    toml = root / "operonx.toml"
+    toml.write_text(
+        toml.read_text().replace(
+            'name = "demo"', f'name = "demo"\nmiddleware = ["{name}:Stamp"]', 1
+        )
+    )
+    app = Application.find(root)
+    assert app.manifest.middleware == (f"{name}:Stamp",)
+    with TestClient(app.asgi(port=8123)) as client:
+        r = client.post("/score", json={"call_id": "x", "text": "a b"})
+        assert r.json()["words"] == 2 and r.headers["x-stamp"] == "1"  # a service's route
+        assert client.get("/healthz").headers["x-stamp"] == "1"  # and the listener's own
+
+    monkeypatch.syspath_prepend(str(root))
+    mod = __import__(name)
+    declared = Application(
+        "demo",
+        services=[Service("echo", http("POST", "/echo", port=8124), graph=mod.other_flow)],
+        middleware=[mod.outer, mod.Stamp],
+        root=root,
+        resources=None,
+    )
+    with TestClient(declared.asgi(port=8124)) as client:
+        r = client.post("/echo", json="hi")
+        assert r.json() == "hi" and r.headers["x-stamp"] == "1" and r.headers["x-outer"] == "1"
+
+    toml.write_text(toml.read_text().replace(f'["{name}:Stamp"]', '["not an entry"]'))
+    with pytest.raises(ManifestError, match="middleware"):
+        Application.find(root)
 
 
 def test_the_graph_ref_compiles_like_a_served_graph(project):

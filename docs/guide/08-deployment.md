@@ -54,6 +54,12 @@ the object.
   that listener's workers only — the model warmed for the call workers is
   not warmed again for the admin port. `on_startup=` on the
   `Application` runs for every listener.
+- **What every response passes through is middleware.** `middleware=[...]`
+  on the `Application` (or `[project] middleware` in `operonx.toml`):
+  ASGI middleware, outermost first, each called `entry(app=app)` — a
+  Starlette middleware class or a function returning the wrapped app. It
+  wraps each listener whole, the services' routes and a mounted app alike,
+  so a security header cannot miss a door.
 - **A pooled listener's connections are spread evenly.** Each worker
   accepts only while it holds no more connections than the least loaded
   one, so 20 calls on 4 workers are 5 each (the kernel alone put 10 on one

@@ -416,6 +416,7 @@ def manifest_from(
     description: str,
     trace: Optional[Sequence[Any]] = None,
     jobs: Sequence[Any] = (),
+    middleware: Sequence[Any] = (),
 ) -> Any:
     """The :class:`Manifest` a Python declaration amounts to — the same
     record ``operonx.toml`` parses to, so nothing downstream knows which
@@ -442,6 +443,7 @@ def manifest_from(
         resources_overlay=overlay,
         source=None,
         on_startup=tuple(on_startup),
+        middleware=tuple(middleware),
         src=tuple(src),
         base=root,
     )

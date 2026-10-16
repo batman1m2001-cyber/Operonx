@@ -298,15 +298,19 @@ def build_app(
     engines: Optional[Dict[str, Any]] = None,
     on_startup: Tuple[Any, ...] = (),
     startup: bool = True,
+    middleware: Tuple[Any, ...] = (),
 ) -> Any:
     """One ASGI app carrying every endpoint bound to a single listener.
 
     `on_startup` hooks run once, before any endpoint accepts, because
     warming a model after the first caller has arrived is the same as not
-    warming it.
+    warming it. `middleware` wraps the whole listener, outermost first —
+    the services' routes, a mounted app and `/healthz` alike — each entry
+    called ``entry(app=app)`` (Starlette's convention).
     """
     try:
         from starlette.applications import Starlette
+        from starlette.middleware import Middleware
         from starlette.responses import JSONResponse
         from starlette.routing import Mount, Route, WebSocketRoute
     except ImportError as exc:  # pragma: no cover
@@ -429,7 +433,8 @@ def build_app(
 
         routes.insert(0, Route(HEALTH_PATH, healthz, methods=["GET"]))
 
-    app = Starlette(routes=routes, lifespan=lifespan)
+    wrap = [Middleware(resolve_ref(m, field="middleware")) for m in middleware]
+    app = Starlette(routes=routes, lifespan=lifespan, middleware=wrap)
     app.state.operonx_runners = runners
     app.state.operonx_engines = engines
     return app
@@ -668,7 +673,7 @@ def _ws_endpoint(spec: ServeSpec, transport: WebSocketTransport):
 def build_apps(manifest: Manifest) -> Dict[Tuple[str, int], Any]:
     """One app per listener the manifest declares."""
     return {
-        addr: build_app(specs, on_startup=manifest.on_startup)
+        addr: build_app(specs, on_startup=manifest.on_startup, middleware=manifest.middleware)
         for addr, specs in manifest.listeners().items()
     }
 
@@ -779,7 +784,7 @@ def serve_manifest(
         servers = []
         for (lhost, lport), group, _ in here:
             bhost, bport = bind(lhost, lport)
-            app = build_app(group, on_startup=manifest.on_startup)
+            app = build_app(group, on_startup=manifest.on_startup, middleware=manifest.middleware)
             config = uvicorn.Config(app, host=bhost, port=bport, log_level="info")
             servers.append(uvicorn.Server(config).serve())
             LOGGER.info(

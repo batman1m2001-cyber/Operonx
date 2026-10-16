@@ -78,6 +78,7 @@ class Application:
         services: Sequence[ServeSpec] = (),
         jobs: Sequence[Any] = (),
         on_startup: Sequence[Any] = (),
+        middleware: Sequence[Any] = (),  # ASGI, around each listener, outermost first
         root: Union[str, Path, None] = None,
         src: Sequence[str] = ("src", "."),
         resources: Optional[str] = "resources.yaml",
@@ -95,6 +96,7 @@ class Application:
                 services=services,
                 jobs=jobs,
                 on_startup=on_startup,
+                middleware=middleware,
                 root=base,
                 src=src,
                 resources=resources,
@@ -203,23 +205,21 @@ class Application:
         """One listener's ASGI app — for a process that runs uvicorn itself, or
         a test client. By *port*, or the only one. ``startup=False`` leaves the
         ``on_startup`` hooks — the application's and the services' — to
-        another process."""
+        another process; ``middleware`` wraps it either way."""
         from .serve.app import build_app
 
         self.bootstrap()
         self.jobs  # settled (tracing, record folder) before a clock runs one
         specs = [s for s in self.services if s.kind != "asgi" or s.app]
-        if only:
-            specs = [s for s in specs if s.name in set(only)]
-        if port is not None:
-            specs = [s for s in specs if s.port == port]
+        specs = [s for s in specs if (not only or s.name in only) and port in (None, s.port)]
         listeners = {s.listener for s in specs}
         if len(listeners) != 1:
             raise ManifestError(
                 f"asgi() needs exactly one listener; {self.name} has "
                 f"{sorted(listeners) or 'none'} — pass port= or only="
             )
-        return build_app(tuple(specs), on_startup=self.manifest.on_startup, startup=startup)
+        m = self.manifest
+        return build_app(specs, on_startup=m.on_startup, startup=startup, middleware=m.middleware)
 
     async def run(self, name: str, *, resume: bool = False) -> Any:
         """Run a job once and return its record."""
