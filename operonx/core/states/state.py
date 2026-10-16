@@ -422,6 +422,12 @@ class MemoryState:
           or a failure an error edge (``op.on_error``) takes. It is still
           recorded, so it is seen; it does not fail the run
           (:func:`unhandled`). One unhandled failure of the op clears it.
+        * ``http_status`` — present when the exception carries an
+          ``http_status`` of 400–499: the caller's fault, said to the
+          caller. A served request whose run failed on it answers that
+          status with the exception's text (``reason``) instead of ``500``
+          (``operonx.app.serve``); the text is the exception's message, not
+          the traceback.
 
         Args:
             op: The op's full name, ``"<graph>.<op>"``.
@@ -446,12 +452,19 @@ class MemoryState:
             message = str(error)
             head = message.split(":", 1)[0]
             kind = head if head.isidentifier() else "Error"
+        status = getattr(error, "http_status", None)
+        said = (
+            {"http_status": status, "reason": str(error)}
+            if isinstance(status, int) and 400 <= status < 500
+            else {}
+        )
         self._op_errors[op] = {
             "type": kind,
             "message": message,
             "count": 1,
             "first_ctx": format_ctx(ctx) if ctx is not None else None,
             **({"handled": True} if handled else {}),
+            **said,
         }
 
     def resume_interrupt(self, interrupt_id: str, value: Any) -> bool:

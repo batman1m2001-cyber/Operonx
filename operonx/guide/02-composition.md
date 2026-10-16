@@ -295,7 +295,10 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   a field that is not a parameter, a required parameter nobody gave, a name
   in both the query and the body. A body that is not an object goes to the
   graph's one required parameter. A run that fails answers `500` with its
-  `trace_id`, never the error text.
+  `trace_id`, never the error text — unless the op raised an exception with
+  an `http_status` of 400–499 (`class Forbidden(PermissionError):
+  http_status = 403`): that status, with the exception's message as
+  `error`.
 - `input="payload"` hands the whole body to that one parameter instead: for a
   payload someone else shapes (a mail server's webhook), whose fields the
   graph does not declare.
