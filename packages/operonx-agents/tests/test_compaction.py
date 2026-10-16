@@ -128,6 +128,22 @@ class TestPersistence:
         assert check["stable"], check["diverged"]
         assert after[1]["content"].startswith(SUMMARY_MARKER)
 
+    async def test_a_conversation_of_answers_without_tools_compacts(self, hub):
+        """Each run one request: the answer that crossed the threshold
+        compacts before its run commits, so the next run starts from the
+        summary (the threshold is per request; a run that ends never got
+        a next request of its own)."""
+        script = [says(f"answer {i}", prompt_tokens=900 if i == 2 else 100) for i in range(4)]
+        agent, llm, summarizer = build(hub, script, keep_recent=2)
+        session = InMemorySession()
+        for i in range(4):
+            await Runner.run(agent, f"question {i}", session=session)
+        assert summarizer.calls == 1
+        sent = llm.requests[3]["messages"]
+        assert sent[1]["content"] == f"{SUMMARY_MARKER}\nnotes so far"
+        assert [m["content"] for m in sent[2:]] == ["question 2", "answer 2", "question 3"]
+        assert view(await session.get_items())[-1]["content"] == "answer 3"
+
     async def test_the_view_of_the_session_is_what_the_run_ended_with(self, hub):
         script = [
             asks(("echo", {"a": 0}), turn=0),
