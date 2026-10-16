@@ -5,6 +5,6 @@ Agents on operonx: an `Agent` spec, `Runner`, tools, approvals,
 (`../core/README.md`); every example here is tested against the installed
 operonx-agents.
 
-1. [Agents](01-agents.md): an agent and a tool, approvals, serving it with
-   `agent_service`, `AgentOp` in a graph, trajectory evals, a scripted
-   model in tests.
+1. [Agents](01-agents.md): an agent and a tool, approvals, long-term
+   memory, serving it with `agent_service`, `AgentOp` in a graph,
+   trajectory evals, a scripted model in tests.

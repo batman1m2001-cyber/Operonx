@@ -141,6 +141,51 @@ asyncio.run(main())
   a success that did not happen. The verdict is in the trace
   (`operonx.tool.verified`).
 
+## Long-term memory: a few items per person
+
+A session is what was said; a memory item is what is kept of it — a
+preference, a goal, a fact, a constraint — short, sourced, and listed to
+the person it is about so they can correct or delete it.
+
+```python
+import asyncio
+import time
+
+from operonx.agents import SQLiteMemoryStore, memory_tools
+from operonx.agents.memory import search
+
+
+async def main():
+    store = SQLiteMemoryStore("memory.db")  # beside the sessions: one shared connection
+    a = await store.add("ann", "preference", "Prefers short reports", source={"conversation": "c1"})
+    again = await store.add("ann", "preference", "prefers  SHORT reports")
+    assert again.id == a.id  # the same thing twice is one item, refreshed
+    await store.add("ann", "fact", "Renting until June", expires=time.time() + 180 * 86400)
+    await store.add("bob", "goal", "Buy a car")
+    assert [i.text for i in await search(store, "ann", "short report")] == ["Prefers short reports"]
+    assert len(await store.items("ann")) == 2 and await store.get("bob", a.id) is None
+
+    tools = memory_tools(
+        store,
+        owner=lambda ctx: ctx.deps,  # the run's person: never an argument the model fills
+        check=lambda text: "an amount" if any(c.isdigit() for c in text) else None,
+        confirm=True,  # remember / forget wait for the person's approval
+    )
+    assert [t.spec.name for t in tools] == ["recall", "remember", "forget"]
+
+
+asyncio.run(main())
+```
+
+- Every store call names its owner; an id is not a key to another owner's
+  item. `memory_tools` takes the owner from the run (`owner(ctx)`), so a
+  model cannot ask for someone else's.
+- `check(text)` is your rule on what may be kept; `remember` refuses with
+  its reason. `remember` and `forget` read their effect back (`verify`).
+- `expires` stops an item counting; `store.purge()` deletes the expired
+  ones (run it on a schedule). A `codec=` (`encode/decode(text, place)`)
+  seals the text at rest.
+
 ## Serve it: `agent_service`
 
 `agent_service(agent, listener, store=...)` is an operonx `Service`:
