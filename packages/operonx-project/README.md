@@ -60,6 +60,17 @@ dropped without a reply. In the chat: `/status`, `/pending`,
 reminded; after three it takes its safe default, if triage marked one, or
 is flagged in `status`.
 
+### In the studio
+
+A project the engine drives has a **Board** tab in operonx studio: the
+milestone's columns, the questions waiting on you (answered there with the
+same rules: a second or stale answer is refused), the requirements
+checklist from the milestone's branch, and the card graph in waves. Each
+card attempt opens as a run page, step by step: the engine traces every
+flow run to the project's run store, `.operonx/runs/` (outside git). The
+studio acts through `operonx project api <json>`, so it needs
+`operonx-project` installed where it runs (or `OPERONX_PROJECT_BIN`).
+
 ### Bounds and boundaries
 
 `--max-usd` and `--max-hours` bound a milestone (waiting for you does not

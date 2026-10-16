@@ -154,6 +154,10 @@ def _milestone_parsers(sub) -> None:
     p.add_argument("--telegram-chat", help="send the questions to this chat (the bot token: OPERONX_TELEGRAM_TOKEN)")
     p.add_argument("--telegram-user", action="append", default=[], help="a Telegram user id allowed to answer")
     p.add_argument("--telegram-api", default="https://api.telegram.org", help=argparse.SUPPRESS)
+    p = sub.add_parser("api", help="one action as JSON in, JSON out (for the studio): see operonx_project.api")
+    _repo_arg(p)
+    p.add_argument("request", help="the request as JSON, or - to read it from stdin")
+    p.add_argument("--actor", default="studio", help="who acts (recorded in the events)")
     p = sub.add_parser("pending", help="the questions waiting for you")
     _repo_arg(p)
     p.add_argument("--json", action="store_true")
@@ -361,6 +365,18 @@ def _milestones(args) -> int:
             if m["flagged"]:
                 out.write(f"    ⚑ expired with no answer and no safe default: {', '.join(m['flagged'])}\n")
         return 0
+    if args.cmd == "api":
+        from operonx_project.api import act
+
+        raw = sys.stdin.read() if args.request == "-" else args.request
+        try:
+            req = json.loads(raw)
+        except ValueError as exc:
+            out.write(json.dumps({"ok": False, "status": "invalid", "message": f"not JSON: {exc}"}) + "\n")
+            return 2
+        result = act(proj, req if isinstance(req, dict) else {}, actor=args.actor)
+        out.write(json.dumps(result) + "\n")
+        return 0 if result["ok"] else 1
     if args.cmd == "pending":
         data = pending_data(proj)
         if args.json:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from operonx_project.model import MilestoneState as M
@@ -26,6 +28,12 @@ def test_w1_whole_lifecycle(tmp_path):
     assert "DELIVERY.md" in git(integ, "log", "-1", "--name-only")
     base = life.store.ms_get("m1", "baseline")
     assert [c["name"] for c in base["checks"]] == ["tests"] and base["results"][0]["ok"]
+    # each flow run is a run page in the studio: the project's run store, out of git
+    traced = {d.name: json.loads((d / "meta.json").read_text())["status"]
+              for d in life.project.runs.glob("*/*/*/m1.*")}  # fmt: skip
+    assert traced == {"m1.discover.1": "ok", "m1.plan.1": "ok", "m1.C1.1": "ok", "m1.final.1": "ok"}, traced
+    assert life.store.get_card("m1", "C1").run_id == "m1.C1.1"
+    assert git(life.repo, "status", "--porcelain", "--ignored", ".operonx/runs").startswith("!!")
 
 
 def test_w2_whole_lifecycle_brd_to_verified_rows(tmp_path):

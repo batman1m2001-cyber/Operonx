@@ -2314,6 +2314,108 @@ typing or happy path alone.
     - operonx-agents (the redactor is reused): 609 passed, 4 skipped;
     - the studio: P9 changes no core code, so its suite was not re-run.
 
+### P8. Studio Board tabs (2026-10-17)
+
+- **Built:**
+  - **The engine** (`packages/operonx-project`, branch `feat/project-p8`,
+    stacked on P9):
+    - `operonx-project api [--repo] [--actor] <json | ->`
+      (`operonx_project/api.py`), the studio's one way to act. It
+      takes one request and prints one JSON answer, exiting 1 when the
+      request is refused.
+      - The ops are answer, approve, pause, unpause, cancel, replan,
+        retry and prioritize.
+      - An answer goes through `Interactions.submit_answer`, so a
+        second or stale answer is refused, and a stale one names the
+        questions still open.
+      - Approval goes through the plan's question when there is one.
+      - Prioritize moves only a card that has not started.
+      - Every other op is queued for the daemon.
+    - **Every flow run is traced** to the project's run store,
+      `<repo>/.operonx/runs/`. That covers each card attempt (whose run
+      id is the card's `run_id`, `m1.C2.1`), discovery, planning and the
+      final pass. The directory is excluded from git, like
+      `.operonx/project/` (`Lifecycle(trace_runs=True)`, operonx's
+      `LocalConsumer`).
+      - A parked run that is resumed keeps both halves in one trace:
+        12 executions while parked, 22 and `ok` after the answer.
+      - This is what makes §12's "run pages for each card attempt"
+        real. Before P8, nothing traced them.
+  - **The studio** (branch `feat/project-board`, stacked on studio#95):
+    - `projectboard.py` reads `project.db` read-only and checks
+      `schema_version`; a newer store is refused, not misread. It reads
+      the matrix and `open_questions.md` from `milestone/<mid>/main`,
+      and acts by running `operonx-project api`
+      (`OPERONX_PROJECT_BIN` or `PATH`). The responses are 200 when
+      done, 409 when the engine refuses, and 503 when the engine is not
+      installed.
+    - `board.js`: a **Board** tab, shown only for a project with a
+      store.
+      - It has a milestone switcher and a summary line (state, mode,
+        cards done, cost of budget, hours of max), plus Pause, Resume
+        and Cancel (Cancel asks to confirm).
+      - **Waiting on you** shows each open question with its option
+        buttons and a words box. A draft survives the redraws.
+      - **Board** shows the columns with their WIP limits. Empty
+        columns are narrow; on a phone the columns stack.
+      - The **card panel** has the intent, rows, dependencies, paths,
+        the acceptance tests, a count of held-out tests (never the
+        tests themselves), the last checks, cost, criteria and events.
+        It also has **Open the run** and **Run it sooner** (prioritize).
+      - **Checklist** is the matrix, with filters for all, not
+        verified, and blocked by a question, plus the BRD's questions.
+      - **Graph** shows the waves with plain wires; a wire to a card
+        that is done is green.
+      - It refreshes by event cursor: a cheap read every 3 s, and a
+        redraw only when something moved.
+- **Gate:**
+  - **Studio tests** (`tests/studio/test_board.py`, 7):
+    - the reader runs on a real engine store (`fixtures/project_board.sql`,
+      the engine's own `project.db` dumped as text);
+    - the checklist comes from a milestone branch;
+    - no store means no board, and a newer schema is refused;
+    - actions go through a fake engine, which checks the argv, the
+      actor `studio:<user>`, that the route's milestone wins, a 409, and
+      a 503 when the binary is missing. That last check found a 500
+      before the fix;
+    - with the **real engine**: one answer is taken and a second is
+      refused (409 `already`); a stale answer (its card cancelled) is
+      refused (409 `stale`); a started card cannot be moved.
+  - **Engine tests:**
+    - the api: two tests;
+    - `test_w1_whole_lifecycle` now asserts the four traced runs, the
+      card's `run_id`, and that git ignores `.operonx/runs`.
+  - **In the browser** (headless Chromium on a scratch studio, :8791;
+    never :8766): Board, a card, Checklist and Graph, desktop 1440 and
+    phone 390, light and dark, with no page errors.
+    - "Numbers only" answered Q-01 through the real engine, and the
+      question left the page.
+    - The same answer, sent again, got 409 `already answered (a, 06:25)`.
+    - **Open the run** opened `m1.C1.1` as a run page, with every round's
+      steps and their inputs and outputs.
+  - The screenshots are of a scripted W2 milestone (C1 done, C2 asking).
+    P7's real milestones are still blocked on the sandbox. Their
+    screenshots are part of P7's gate: the tab reads any store, and
+    nothing in it is specific to the demo.
+- **Not built** (from §12):
+  - **Each cited test's pass or fail from the last run.** The engine
+    keeps a pass or fail for each check (a whole pytest run), not for
+    each test. The matrix's status is the engine's verdict on those
+    tests (`implemented_verified` means they passed when the card was
+    verified). Per-test results need junit output from the checks: a
+    P9-sized engine change, deferred.
+  - The **"changed by a new source"** filter. The store has no
+    source-change marker yet; it comes when a second source arrives
+    (P4's living BRD).
+  - The plan's **v1 → v2 notes**, ADRs and **budget charts**. The
+    review notes show while a plan waits for approval; the rest is
+    later.
+- **Regression:**
+  - operonx-project, everything but the paid tests: **178 passed**, 3
+    skipped (P9's 176 plus the two api tests);
+  - the studio's full suite: **690 passed**, 4 skipped;
+  - no core code changed.
+
 ## Sources
 
 - Anthropic, *Effective harnesses for long-running agents*:
