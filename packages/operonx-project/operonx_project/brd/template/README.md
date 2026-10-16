@@ -1,0 +1,39 @@
+# {project}: the living product repository
+
+What the product must do, why, and how far it is. Versioned with the code; every milestone reads and updates it.
+Kept by the rules in [MAINTAINING.md](MAINTAINING.md) and checked by `operonx-project brd check`, which the test
+suite runs.
+
+## 1. Layers
+
+| Layer | Where | What |
+|---|---|---|
+| Sources | [`sources/`](sources/README.md) | Every document the requirements come from, registered with its hash. Never edited |
+| Requirements | [`requirements/`](requirements/) | Extracted from the sources with their original wording and location |
+| Features | [`features/`](features/README.md) | Behaviour: what the product does to meet the requirements (`FEAT-nn`) |
+| UX | [`ux/`](ux/screen_inventory.md) | Screens (`SCR-…`) and what each shows |
+| Decisions | [`decisions/`](decisions/README.md) | Architecture decision records (`ADR-nnnn`) |
+| Testing | [`testing/`](testing/regression_coverage.md) | Test runs and known defects (`DEF-nn`) |
+
+## 2. The traceability matrix
+
+[`requirements/requirements_traceability.md`](requirements/requirements_traceability.md) is the only place a
+requirement's status is stated: requirement → feature → screen → code / API → test → evidence.
+
+## 3. Questions
+
+[`requirements/open_questions.md`](requirements/open_questions.md): ambiguities, conflicts, divergences and gaps
+(`Q-nn`). A question is never deleted and never silently resolved.
+
+## 4. Status vocabulary
+
+| Status | Meaning |
+|---|---|
+| `implemented_verified` | Built, and at least one test cited by name exists and passed in the recorded run |
+| `implemented_unverified` | Built, with no test that shows it |
+| `partially_implemented` | Part of it is built; the row states the gap |
+| `planned` | Not built yet; the row names the milestone or card |
+| `not_implemented` | Not built, and not planned |
+| `blocked` | Cannot be built now; the row says what blocks it and who can unblock it |
+| `out_of_scope_demo` | Deliberately left out of this phase |
+| `not_applicable` | Does not apply to this product; the row says why |

@@ -434,9 +434,14 @@ automatic and general.
 | Input | How it is read |
 |---|---|
 | a goal in a sentence, a chat message | kept verbatim as a source (`sources/owner_requests/<date>_<slug>.md`) |
-| `.docx` | the standard library (`zipfile` + the document XML): text with headings, tables, and embedded figures saved as images. There is no pandoc or LibreOffice on this machine, and none is needed |
-| `.pdf`, images (mockups, screenshots, photos of whiteboards) | Claude Code reads both natively; `tesseract` (installed) for scanned pages whose text is needed for quoting |
-| a `.zip` kit | extracted into its own empty folder as untrusted data, then each file by its type |
+| `.docx` (also `.pptx`, `.xlsx`, HTML) | operonx-kb's stdlib parsers (`zipfile` + the Office XML): headings with levels, lists, tables as rows. Embedded figures are saved as images in document order, outside the repo, for a session to look at. There is no pandoc or LibreOffice on this machine, and none is needed |
+| `.pdf` | operonx-kb's PDF parser (docling-parse) for the text layer; a page without one is rendered and read by `tesseract` (`vie+eng`, installed) |
+| images (mockups, screenshots, photos of whiteboards) | `tesseract` for the text that quotes need; Claude Code looks at the image itself |
+| a `.zip` kit | extracted into its own empty folder as untrusted data (no absolute paths, no `..`, no links, bounded in size), then each file by its type |
+
+OCR misses accents ("cầu" read as "cau"), so a quote is compared with an
+OCR'd section with diacritics folded; with every other section it is
+compared exactly, after normalizing case, whitespace and punctuation.
 | Markdown, plain text | as is |
 
 **The source register** (`sources/README.md`): each source gets `SRC-nn`,
@@ -1854,6 +1859,101 @@ typing or happy path alone.
     - a regression is undone;
     - the scheduler takes two dependent cards to `done` through
       `FlowRunner` and `GitIntegrator`.
+
+### P4. Requirements: the living BRD, and E0 (2026-10-17)
+
+- **Built** (`packages/operonx-project`, branch `feat/project-p4`; it now
+  depends on `operonx-kb[ocr]`):
+  - `brd/readers.py`: `.docx`, `.pptx`, `.xlsx`, HTML, Markdown and text
+    through operonx-kb's parsers. A `.docx`'s figures are saved in
+    document order. PDF goes through docling-parse, with tesseract for
+    pages that have no text layer. Images go through tesseract. A `.zip`
+    is extracted safely, then each file is read. Every reader gives
+    sections with a heading path and a location (`§6.1 …`, `p. 3`,
+    `image …`).
+  - `brd/register.py`: `sources/README.md` rows (`SRC-nn`, role, SHA-256).
+    The same bytes register once. A private source is registered by path
+    and hash, its path goes into `.git/info/exclude`, and its hash feeds
+    the guard. An owner request is kept verbatim.
+  - `brd/records.py`:
+    - requirement files, one table per type;
+    - matrix rows, which never drop an ID (a retired one is marked
+      `superseded`);
+    - `Q-nn` entries with an index table, never added twice.
+  - `brd/extraction.py`: the §4.2 checks, from the source's own text:
+    - **quotes:** compared after normalizing; `…` allowed; loosely for
+      OCR'd sections;
+    - **coverage:** counts the section where the quote *was found*, not
+      the one the agent named;
+    - **IDs:** well formed, unique, kept, never reused.
+  - `flows/brd_flow/`: read → extract → hunt → write.
+    - **extract** is one session, a turn per chunk of about 12k
+      characters, then up to 2 turns that send back what failed. A record
+      that still fails is never written.
+    - **hunt** is the miss-hunter, a second session on another model.
+      Its finds pass the same checks.
+    - Each turn is checkpointed by the op's idempotency key.
+  - `brd/checker.py`: OneWealth's `check_brd_docs.py`, generalized. Its
+    constants move to `<brd>/brd.toml`; its messages are kept word for
+    word.
+  - `brd/folder.py`: `brd init` writes OneWealth's layout, generalized
+    (`brd/template/`), and never overwrites a file. The matrix summary is
+    recomputed after every write.
+  - `brd/diff.py`: sections matched by heading path (renumbering
+    ignored), then by title. Its outputs are the changed, added and
+    removed sections, the requirements they touch, and a mark on their
+    matrix rows.
+  - CLI: `operonx-project brd init | check | register | read | extract`.
+- **Gate:** **135 passed**, the paid tests aside (20 new).
+  - **Readers on real files**, made by the tests:
+    - a `.docx` with numbered headings, a table and an embedded PNG;
+    - a scanned PDF page with no text layer: OCR'd, and a Vietnamese
+      quote still matches it despite a dropped accent;
+    - a zip kit with an image, plus `..` and absolute-path members, which
+      are refused;
+    - OneWealth's private BRD (from a copy): 5 figures and all 61 codes.
+  - **The checks catch a planted fake quote and a skipped section.** The
+    flow sends both back in the same session. The hunter's fabricated
+    rule is rejected, and no unverified quote reaches the folder.
+  - **The checker agrees with OneWealth's** on a copy of its folder (the
+    live repo was never touched):
+    - on the real folder: the same 0 errors and the same report, the BRD
+      hash and 61 codes included;
+    - with 9 planted faults (a missing row, a status typo, a missing test,
+      Q-99, FEAT-99, a broken link, a missing anchor, an edited kit copy,
+      an unregistered asset): the same 9 errors.
+  - `brd init` → records → matrix → `brd check`: clean.
+  - Diffing finds a changed §3 and an added §4, and marks the one
+    requirement the change touches.
+- **E0 (paid, one session):** `brd_flow` on OneWealth's BRD with real
+  Claude Code (extractor `opus`, hunter `fable`), scored against
+  OneWealth's reviewed extraction:
+
+  | Measure | Target | Measured |
+  |---|---|---|
+  | numbered requirements (BR, FR, NFR), by ID | ≥ 95 % | **61 / 61** |
+  | success metrics (KPI) | ≥ 95 % | **7 / 7** |
+  | rules | ≥ 80 % | **95 / 97** (98 %) |
+  | quotes written that are not in the source | 0 | **0** |
+
+  - **The run:**
+    - 418 records written (OneWealth has 165 BRD rows: ours are finer
+      grained), 11 of them marked paraphrase;
+    - 4 sections marked descriptive;
+    - the hunter added 8 requirements;
+    - 30 minutes, **$27.68 notional** (Max login).
+  - **KPI and rule recall was judged:** a separate Sonnet session matched
+    each OneWealth item to ours by meaning ($0.46). The two misses are
+    both worked examples with illustrative numbers (§9.4, §10).
+  - **A bug E0 found, fixed after the run:** IDs had to end in `-nn`, so
+    the BRD's own codes F01–F27 (its findings table) were refused: 27
+    records with real quotes were not written. The ID patterns now accept
+    a source's letter codes (`BRD-F26`), and a section given as `[§20]`
+    is unbracketed. Re-checked offline, all 27 pass, so the run would
+    have written 445 records, still with 0 unverified quotes. A
+    regression test covers it.
+  - The measurement script (`e0.py`) and its output stay in the session
+    scratchpad, next to the private copy. Neither is committed.
 
 ## Sources
 
