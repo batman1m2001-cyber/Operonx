@@ -644,12 +644,19 @@ class ResourceHub:
             f"Resource '{key}' not found in {source}.\n  (No resources loaded — file may be empty.)"
         )
 
-    def register(self, config: YamlModel, registry_key: Optional[str] = None) -> str:
+    def register(
+        self, config: YamlModel, registry_key: Optional[str] = None, *, persist: bool = True
+    ) -> str:
         """Register new resource config.
 
         Args:
             config: Resource config object
             registry_key: Custom key (auto-generated if not provided)
+            persist: Write it to the hub's storage (for a hub loaded from
+                ``resources.yaml``, that file). ``False`` keeps it in this
+                process only: a resource the application derives at run time
+                (a per-tenant path, a test's temporary folder) without
+                rewriting the project's configuration.
 
         Returns:
             Registry key used
@@ -662,8 +669,9 @@ class ResourceHub:
         self._cache[registry_key] = CacheEntry(config=config, instance=instance)
 
         # Persist to storage (no type field needed - category is in the key)
-        config_dict = json.loads(config.model_dump_json(exclude_none=True))
-        self._storage.save(registry_key, config_dict)
+        if persist:
+            config_dict = json.loads(config.model_dump_json(exclude_none=True))
+            self._storage.save(registry_key, config_dict)
 
         LOGGER.debug("Registered: %s", registry_key)
         return registry_key

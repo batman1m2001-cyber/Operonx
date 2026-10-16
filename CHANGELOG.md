@@ -7,12 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.30.1] - 2026-10-17
+
 ### Added
 
+- **`ResourceHub.register(..., persist=False)`: a resource for this process only.** `register` always wrote the config to the hub's storage, which for a hub loaded from `resources.yaml` is that file: an application deriving a resource at run time (a per-tenant or per-test folder for a knowledge base's catalog) rewrote the project's configuration. With `persist=False` it lives in the hub's cache only; `get`, `has` and `get_config` find it, the file is untouched.
 - **operonx-agents 0.3.0: long-term memory, `operonx_agents.memory`.** A few typed items per owner (`preference`, `goal`, `fact`, `constraint` by default), each with its source, confidence and expiry: `MemoryItem`, the `MemoryStore` protocol, `InMemoryMemoryStore` and `SQLiteMemoryStore` (on the file's shared connection; a `codec=` seals the text at rest, bound to the item's id). Every call names its owner and never answers for another; adding what an owner already has (same kind, same text up to case, accents and spacing) refreshes that item instead of copying it; expired items stop counting and `purge()` deletes them; `search(store, owner, query)` ranks by shared words. `memory_tools(store, owner=..., check=..., expires=..., confirm=...)` gives an agent `recall`, `remember` and `forget`: the owner comes from the run, never from the model; `check(text)` is the application's rule on what may be kept; the writes read their effect back (`verify`) and, with `confirm=True`, wait for the person's approval. Guide page `agents/01-agents.md`.
 
 ### Fixed
 
+- **operonx-kb 0.2.6: a collection with only a lexical index takes documents.** `CollectionSpec(lexical=...)` without `dense=` was searchable but `add`, `delete` and `gc` refused it (“has no dense index”), so text that may not be sent to an embedding service, or a deployment without one, had no knowledge base. Ingest, delete and GC now run the same graphs with nothing to embed and no vector store: `embed_chunks` embeds nothing without an embedder, the vector ledger and writes are skipped, and the vector writes are the KB's own `upsert_vectors` / `delete_vectors` ops (they do `VectorUpsertOp`'s and `VectorDeleteOp`'s work, and nothing without a store). Search defaults to `lexical` there and refuses `dense`/`hybrid`; a collection with no index at all is refused before a run. Rebuilding a dense index still uses operonx's vector ops.
 - **operonx-agents 0.2.5: a conversation of answers without tools compacts.** `compact_next` was decided per run: a run of one request (an answer, no tools) whose prompt crossed `ContextPolicy.compact_at` ended before any next request of its own, and the next run started from scratch, so such a conversation never compacted however long it grew. Now, with a session, the answer that crossed the threshold compacts before its run commits, and the next run starts from the summary. The threshold is still the provider's counted tokens.
 - **operonx-agents 0.2.4: sessions and run stores on one SQLite file share one connection, and reads take no write lock.** Each `SQLiteSession` and `SQLiteStateStore` opened its own connection, and every operation — reads too — ran under `BEGIN IMMEDIATE`; an app with many conversations on one file raised `database is locked` (50 concurrent sessions: errors before, none now). Stores opened on the same file (by real path; `:memory:` is never shared) now share one connection and one lock, closed when the last one closes; `get_items` and a run's `load` begin a plain transaction. (`operonx_agents._storage`.)
 
@@ -3730,7 +3734,8 @@ Unreleased — folded into 0.7.0 above.
 - `Operon(graph, resources=...)` keyword argument — use `bootstrap(resources=...)`
   before constructing the engine.
 
-[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.23.1...HEAD
+[Unreleased]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.30.1...HEAD
+[1.30.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.30.0...v1.30.1
 [1.23.1]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.23.0...v1.23.1
 [1.23.0]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.4...v1.23.0
 [1.22.4]: https://github.com/batman1m2001-cyber/Operonx/compare/v1.22.3...v1.22.4

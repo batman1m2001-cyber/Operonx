@@ -140,24 +140,25 @@ def search_settings(
 @op(bound="cpu", show_keys="store")
 def index_settings(collection: str, catalog: str) -> dict:
     """What ingest and maintenance of ``collection`` write with: its dense index (the
-    embedder, the vector store and its collection, batch size, passage template), its
-    lexical index, and the models of its enrichment stages (``None`` when off)."""
+    embedder, the vector store and its collection, batch size, passage template; ``""``
+    for a lexical-only collection), its lexical index, and the models of its enrichment
+    stages (``None`` when off)."""
     coll = catalog_of(catalog).get_collection(collection)
     if coll is None:
         raise KBError(f"collection {collection!r} does not exist; create it with create_collection")
     spec = coll.spec
     dense, ctx, tree = spec.dense, spec.contextual, spec.tree
-    if dense is None:
+    if dense is None and spec.lexical is None:
         raise KBError(
-            f"collection {collection!r} has no dense index; set CollectionSpec(dense=...)"
+            f"collection {collection!r} has no index; set CollectionSpec(dense=...) or lexical=..."
         )
-    return {
-        "embedder": dense.embedder,
-        "store": dense.store,
-        "vector_collection": dense.collection,
-        "vcollection": dense.collection or "",
-        "batch_size": dense.batch_size,
-        "passage_template": dense.passage_template,
+    return {  # no dense index (lexical only): embedder and store "", those steps do nothing
+        "embedder": dense.embedder if dense else "",
+        "store": dense.store if dense else "",
+        "vector_collection": dense.collection if dense else None,
+        "vcollection": (dense.collection or "") if dense else "",
+        "batch_size": dense.batch_size if dense else 64,
+        "passage_template": dense.passage_template if dense else "{text}",
         "lexical": spec.lexical.model_dump(mode="json") if spec.lexical else None,
         "contextual_llm": ctx.llm if ctx else None,
         "contextual_max_tokens": ctx.max_tokens if ctx else None,
