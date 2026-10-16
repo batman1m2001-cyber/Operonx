@@ -4,7 +4,8 @@ Headless sessions cannot ask anyone, so the flags are the approval: a tool
 call that is not allowed here is refused, and the refusal is in the
 transcript. Every role runs ``--restricted``, which confines the file tools
 to the working directories and ignores the host's own settings, hooks and
-plugins; only the implementer gets a shell, and that shell is sandboxed.
+plugins; only the roles that write (implementer, test author, examiner) get a shell,
+and that shell is sandboxed.
 """
 
 from __future__ import annotations
@@ -21,6 +22,10 @@ ROLES: Dict[str, List[str]] = {
     "reviewer": list(_READ),  # reads the worktree on demand; never edits
     "planner": list(_READ),
     "triage": list(_READ),
+    "arbiter": list(_READ),  # a third reading of a disputed finding
+    # write tests before the code exists; run them to see them fail
+    "test_author": [*_READ, "Edit", "Write", "Bash"],
+    "examiner": [*_READ, "Edit", "Write", "Bash"],  # held-out tests, outside the repo
 }
 
 # The engine owns git: branches, commits and merges are its, never the coder's.

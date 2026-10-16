@@ -19,9 +19,9 @@ import os
 import re
 import signal
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from operonx.core.loggings import LOGGER
 
@@ -42,6 +42,7 @@ class Check:
     mode: str = "host"  # host | docker
     image: Optional[str] = None
     env: Dict[str, str] = field(default_factory=dict)
+    mounts: Dict[str, str] = field(default_factory=dict)  # docker: host dir → container dir, read-only
 
     def __post_init__(self) -> None:
         if self.mode not in ("host", "docker"):
@@ -63,6 +64,10 @@ class CheckResult:
     @property
     def signature(self) -> str:
         return failure_signature(self)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Plain data, for the journal and the store; ``CheckResult(**d)`` reads it back."""
+        return {**asdict(self), "duration_s": round(self.duration_s, 3)}
 
 
 # pytest's summary lines; unittest's; a generic "FAIL: name"
@@ -91,6 +96,8 @@ def _command(check: Check, cwd: Path) -> List[str]:
     uid = os.getuid() if hasattr(os, "getuid") else None
     if uid is not None:
         args += ["--user", f"{uid}:{os.getgid()}"]
+    for host, inside in check.mounts.items():
+        args += ["-v", f"{Path(host).resolve()}:{inside}:ro"]
     for k, v in check.env.items():
         args += ["-e", f"{k}={v}"]
     return args + [check.image or "", "sh", "-c", check.cmd]

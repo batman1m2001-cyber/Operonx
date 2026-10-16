@@ -155,9 +155,10 @@ class ClaudeCodeCoder:
             cmd += ["--max-budget-usd", f"{req.max_usd:.4f}"]
         for d in req.add_dirs:
             cmd += ["--add-dir", str(d)]
-        deny = base_deny(self.state_dirs) + list(req.deny)
+        hidden = [str(Path(d).expanduser().resolve()) for d in req.hide]
+        deny = base_deny([*self.state_dirs, *hidden]) + list(req.deny)
         if "Bash" in tools:
-            places = ["~/.claude", *self.state_dirs]
+            places = ["~/.claude", *self.state_dirs, *hidden]
             settings = sandbox_settings(req.allow_write, req.allowed_domains, places) if req.sandbox else {}
             if settings:
                 cmd += ["--settings", json.dumps(settings, separators=(",", ":"))]
