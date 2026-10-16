@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "operonx-kb"
-version = "0.2.6"
+version = "0.2.7"
 description = "Knowledge base and document intelligence on OperonX: versioned documents with span-level provenance"
 readme = "README.md"
 license = "Apache-2.0"

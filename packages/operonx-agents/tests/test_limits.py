@@ -108,6 +108,15 @@ async def test_cost_usd(hub):
     assert res.usage.cost_usd == pytest.approx(0.032)
 
 
+async def test_cost_usd_from_the_cost_the_provider_reported(hub):
+    """No declared price, but each answer reports 0.016: the second goes over 0.03."""
+    paid = [asks(("echo", {"a": i}), turn=i, cost=0.016) for i in range(10)]
+    agent, llm = make(hub, *paid, limits=UsageLimits(cost_usd=0.03))
+    res = await Runner.run(agent, "go")
+    assert (res.status, res.limit_hit, llm.calls) == ("limit", "cost_usd", 2)
+    assert res.usage.cost_usd == pytest.approx(0.032)
+
+
 async def test_cost_usd_on_an_unpriced_resource_fails_loudly(hub):
     agent, _ = make(hub, *looping(), limits=UsageLimits(cost_usd=0.03))
     res = await Runner.run(agent, "go")

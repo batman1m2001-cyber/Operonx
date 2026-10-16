@@ -121,7 +121,8 @@ def compile_graph(
         # Named after the graph, explicitly: built inside `Operon(...)` it
         # took the name of the local below, and every service run was
         # called `engine`.
-        graph_fn = graph_fn(name=graph_fn.__name__, **params)
+        # (`configure`, so a graph with an input called `name` still gets it)
+        graph_fn = graph_fn.configure(name=graph_fn.__name__)(**params)
         kwargs.pop("params", None)
     if durable is not None:
         from operonx.core.engine import _ingress_of
