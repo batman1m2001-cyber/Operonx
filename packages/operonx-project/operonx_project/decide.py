@@ -183,6 +183,7 @@ def decide(f: RoundFacts) -> Decision:
             msg.get("options") or f.needs_human.get("options") or [],
             tried=msg.get("tried", ""),
             recommended=msg.get("recommended"),
+            safe_default=bool(msg.get("safe_default")),
         )
         return Decision("ask", "the implementer needs a decision", question=q)
 

@@ -68,8 +68,9 @@ def test_start_queues_a_milestone_and_new_makes_an_empty_project(tmp_path):
     assert (ms.id, ms.state, ms.policy.horizon, ms.policy.approve_plan, ms.policy.budget.max_usd) == (
         "m1", M.CREATED, "all", "auto", 3.0)  # fmt: skip
     assert [c["kind"] for c in p.store.pending_commands()] == ["start"]
-    run("answer", "m1", "C1", "a", "--text", "and warn", "--repo", tmp_path / "fresh")
-    assert p.store.pending_commands()[-1]["payload"] == {"answer": {"choice": "a", "text": "and warn"}}
+    # no card waits on a question: the answer is refused here, not queued for the daemon to refuse
+    assert main(["answer", "m1", "C1", "a", "--text", "and warn", "--repo", str(tmp_path / "fresh")]) == 1
+    assert [c["kind"] for c in p.store.pending_commands()] == ["start"]
 
 
 def test_one_daemon_per_project(tmp_path):
