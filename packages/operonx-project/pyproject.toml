@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "operonx-project"
+version = "0.1.0"
+description = "Take a project's requirements to a verified branch: a living BRD, a board of cards, coding agents with independent review and real QA, owner questions that park and resume"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "Operon Team" }]
+dependencies = [
+    # 1.30.0: the journal's park/resume and retry_failed, Job(keep_runs=), the
+    # serve layer's middleware; the plan's evidence was measured on it.
+    "operonx>=1.30.0",
+    "httpx>=0.24",
+]
+
+[project.scripts]
+operonx-project = "operonx_project.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "hypothesis>=6.100",
+    "ruff>=0.5",
+]
+
+[tool.uv.sources]
+# Editable from this repo's own operonx (the package lives in packages/).
+operonx = { path = "../..", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["operonx_project"]
+
+[tool.hatch.build.targets.sdist]
+include = ["operonx_project", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# Paid tests (a real Claude Code session) run with `-m paid`.
+addopts = "-m 'not paid and not slow'"
+markers = [
+    "slow: correct but seconds-long (subprocesses, real sleeps)",
+    "paid: runs a real coding agent (Claude Code); spends quota",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
