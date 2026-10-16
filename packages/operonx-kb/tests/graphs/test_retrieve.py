@@ -71,8 +71,11 @@ def test_hydrated_text_is_the_canonical_text_at_the_hit_spans(loaded):
 def test_hybrid_runs_both_retrievers_and_keeps_both_scores(loaded):
     loaded.recorder.clear()
     out = run(loaded.search("docs", "annual leave days", mode="hybrid", k=5))
-    # the dense subgraph's vector search and the lexical subgraph's search both ran
-    assert loaded.recorder.runs("found") == 1 and loaded.recorder.runs("matched") == 1
+    # the dense subgraph's vector search and the lexical subgraph's search both ran, once each
+    # (the search graph's own step is also named "found": a subgraph node, not a second search)
+    vector = [n for t in loaded.recorder.traces for n in t.nodes
+              if n.op_name == "found" and n.op_type == "vector-search" and not n.is_yield]  # fmt: skip
+    assert len(vector) == 1 and loaded.recorder.runs("matched") == 1
     top = out["hits"][0]
     assert top["retriever"] == "hybrid" and set(top["scores"]) == {"dense", "lexical"}
 
