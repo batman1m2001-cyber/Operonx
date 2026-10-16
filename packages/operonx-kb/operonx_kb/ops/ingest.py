@@ -34,7 +34,7 @@ from operonx_kb.model.ids import sha256_bytes, sha256_text
 from operonx_kb.model.ids import vector_id as make_vector_id
 from operonx_kb.model.ids import version_id as make_version_id
 from operonx_kb.model.tree import TreeNode
-from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
+from operonx_kb.ops._resources import blobs_of, catalog_of, full_key, vector_store_of
 from operonx_kb.ops.enrich import pipeline_enrichers, stage_fingerprints
 from operonx_kb.parsing.base import ParsedDoc
 from operonx_kb.parsing.router import sniff_mime
@@ -48,6 +48,8 @@ __all__ = [
     "build_tree",
     "chunk_version",
     "stage_index_writes",
+    "upsert_vectors",
+    "delete_vectors",
     "commit_version",
     "removed_vector_ids",
     "forget_index_writes",
@@ -267,6 +269,8 @@ def stage_index_writes(
         vcollection: The collection inside the vector store (``""`` for its default).
         collection: The KB collection id.
     """
+    if not store:  # a lexical-only collection: no vectors, no ledger rows
+        return {"ids": [], "vectors": [], "metadata": [], "staged": 0}
     entries = [(c["id"], make_vector_id(c["id"]), c["document_id"]) for c in todo]
     catalog_of(catalog).record_index_entries(
         full_key(store, "vector_store"), vcollection, collection, entries
@@ -390,10 +394,34 @@ def forget_index_writes(
     removed: list, store: str, collection: str, catalog: str, deleted: Optional[int] = None
 ) -> dict:
     """Drop the ledger rows of vectors just deleted (after the delete, so the ledger still covers the index)."""
+    if not store:
+        return {"forgotten": 0}
     forgotten = catalog_of(catalog).forget_index_entries(
         full_key(store, "vector_store"), collection, removed
     )
     return {"forgotten": forgotten}
+
+
+@op(bound="io", exclude={"trace": ["ids", "vectors", "metadata"]}, show_keys="upserted")
+async def upsert_vectors(
+    store: str, ids: list, vectors: list, metadata: Optional[list] = None,
+    collection: Optional[str] = None,
+) -> dict:  # fmt: skip
+    """Write the staged vectors to the collection's store (``VectorUpsertOp``'s work); a
+    lexical-only collection has no store (``""``) and nothing to write."""
+    if not store or not ids:
+        return {"upserted": 0}
+    await vector_store_of(store).upsert(ids=ids, vectors=vectors, metadata=metadata,
+                                        collection=collection)  # fmt: skip
+    return {"upserted": len(ids)}
+
+
+@op(bound="io", exclude={"trace": ["ids"]}, show_keys="deleted")
+async def delete_vectors(store: str, ids: list, collection: Optional[str] = None) -> dict:
+    """Remove vectors by id (``VectorDeleteOp``'s work); nothing without a store or ids."""
+    if not store or not ids:
+        return {"deleted": 0}
+    return {"deleted": await vector_store_of(store).delete(ids=ids, collection=collection)}
 
 
 @op(bound="cpu", show_keys="result")

@@ -42,6 +42,8 @@ def tombstone_document(
     if cat.get_document(doc_id) is None:
         raise CatalogError(f"no document {key!r} in collection {collection!r}")
     cat.tombstone(doc_id)
+    if not store:  # lexical only: its entries go by document id (delete_document_lexical)
+        return {"document_id": doc_id, "chunk_ids": [], "vector_ids": []}
     entries = cat.index_entries(full_key(store, "vector_store"), vcollection, document_id=doc_id)
     return {
         "document_id": doc_id,
@@ -68,8 +70,8 @@ def finish_delete(
     """After the vectors and lexical entries are gone: drop the dense ledger rows, and with
     ``purge`` erase the document and prove nothing is left in either index's ledger."""
     cat = catalog_of(catalog)
-    store_key = full_key(store, "vector_store")
-    forgotten = cat.forget_index_entries(store_key, vcollection, chunk_ids)
+    store_key = full_key(store, "vector_store") if store else None
+    forgotten = cat.forget_index_entries(store_key, vcollection, chunk_ids) if store_key else 0
     report = {
         "document_id": document_id,
         "index_deleted": deleted,
@@ -81,7 +83,7 @@ def finish_delete(
         store_ = blobs_of(blobs)
         result = cat.purge(document_id)
         removed = sum(int(store_.delete(sha)) for sha in result.orphan_blobs)
-        indexes = [(store_key, vcollection)]
+        indexes = [(store_key, vcollection)] if store_key else []
         if lexical is not None:
             spec = LexicalIndexSpec.model_validate(lexical)
             indexes.append((full_key(spec.index, "kb_lexical"), spec.collection or ""))
@@ -97,6 +99,8 @@ def find_stale_entries(
 ) -> dict:
     """Ledger entries of the collection that no active version holds any more
     (with ``everything``, all of them: dropping a whole index generation)."""
+    if not store:
+        return {"chunk_ids": [], "vector_ids": [], "count": 0}
     cat = catalog_of(catalog)
     entries = cat.index_entries(
         full_key(store, "vector_store"), vcollection, collection_id=collection

@@ -3,8 +3,8 @@ and :mod:`operonx_kb.ops.lexical`).
 
 ::
 
-    delete:          tombstone_document ─► VectorDeleteOp ─► delete_document_lexical ─► finish_delete
-    gc:              find_stale_entries ─► VectorDeleteOp ─► forget_index_writes ─► collect_lexical
+    delete:          tombstone_document ─► delete_vectors ─► delete_document_lexical ─► finish_delete
+    gc:              find_stale_entries ─► delete_vectors ─► forget_index_writes ─► collect_lexical
                      ─► collect_blobs ─► gc_report
     rebuild:         plan_rebuild ─► embed_chunks (cache) ─► stage_index_writes ─► VectorUpsertOp
                      ─► finish_rebuild
@@ -23,7 +23,7 @@ from __future__ import annotations
 from operonx import END, START, graph
 from operonx.providers.ops import VectorDeleteOp, VectorUpsertOp
 
-from operonx_kb.ops import embed_chunks, forget_index_writes, stage_index_writes
+from operonx_kb.ops import delete_vectors, embed_chunks, forget_index_writes, stage_index_writes
 from operonx_kb.ops.lexical import (
     collect_lexical,
     delete_document_lexical,
@@ -57,8 +57,8 @@ def delete_document(collection, key, purge, catalog, blobs):
     s = index_settings(collection=collection, catalog=catalog)
     tomb = tombstone_document(collection=collection, key=key, store=s["store"],
                               vcollection=s["vcollection"], catalog=catalog)  # fmt: skip
-    delete = VectorDeleteOp.of(resource=s["store"], ids=tomb["vector_ids"],
-                               collection=s["vector_collection"])  # fmt: skip
+    delete = delete_vectors(store=s["store"], ids=tomb["vector_ids"],
+                            collection=s["vector_collection"])  # fmt: skip
     lex = delete_document_lexical(document_id=tomb["document_id"], catalog=catalog,
                                   lexical=s["lexical"])  # fmt: skip
     finish = finish_delete(
@@ -84,8 +84,8 @@ def collect_garbage(collection, blobs_enabled, grace_seconds, catalog, blobs):
     s = index_settings(collection=collection, catalog=catalog)
     stale = find_stale_entries(collection=collection, store=s["store"],
                                vcollection=s["vcollection"], catalog=catalog)  # fmt: skip
-    delete = VectorDeleteOp.of(resource=s["store"], ids=stale["vector_ids"],
-                               collection=s["vector_collection"])  # fmt: skip
+    delete = delete_vectors(store=s["store"], ids=stale["vector_ids"],
+                            collection=s["vector_collection"])  # fmt: skip
     forget = forget_index_writes(removed=stale["chunk_ids"], store=s["store"],
                                  collection=s["vcollection"], catalog=catalog,
                                  deleted=delete["deleted"])  # fmt: skip

@@ -5,18 +5,19 @@
     plan_ingest ─► if skip ─► skipped ─────────────────────────────────────────────────────────┐
                    else  ─► index_settings ─► parse_document ─► build_tree ─┬─► chunk_version   │
                                        ─► contextualize ─► embed_chunks ─► stage_index_writes   │
-                                       ─► VectorUpsertOp ─► write_lexical ─┐                    │
+                                       ─► upsert_vectors ─► write_lexical ─┐                    │
                                           contextualize ─► graph_concepts ─┤                    │
                                           build_tree ─► tree_index ────────┤                    │
                             commit_version ◄───────────────────────────────┘                    │
-                            ─► removed_vector_ids ─► VectorDeleteOp ─► forget_index_writes      │
+                            ─► removed_vector_ids ─► delete_vectors ─► forget_index_writes      │
                             ─► delete_lexical ─► report ◄──────────────────────────────────────┘
 
 Both indexes are written before the commit and cleaned after it (track5 §11.2).
 Defined once, at module level (operonx guide 05): the collection's embedder, vector
 store, lexical index and enrichment models are read by ``index_settings`` and wired
-in as values. A collection without a lexical index, contextual enrichment, a tree
-index or a concept graph runs the same graph: those steps have nothing to do.
+in as values. A collection without a dense index (lexical only), a lexical index,
+contextual enrichment, a tree index or a concept graph runs the same graph: those steps
+have nothing to do.
 
 :func:`ingest_document` is the per-document graph (``item``, ``collection``,
 ``catalog``, ``blobs`` → ``result``); :func:`ingest_flow` wraps it in doors, so
@@ -29,13 +30,13 @@ from __future__ import annotations
 from operonx import END, START, graph
 from operonx.app.serve import egress, ingress
 from operonx.core.ops import if_
-from operonx.providers.ops import VectorDeleteOp, VectorUpsertOp
 
 from operonx_kb.graphs.enrich import contextualize, tree_index
 from operonx_kb.ops import (
     build_tree,
     chunk_version,
     commit_version,
+    delete_vectors,
     embed_chunks,
     forget_index_writes,
     parse_document,
@@ -44,6 +45,7 @@ from operonx_kb.ops import (
     report,
     skipped,
     stage_index_writes,
+    upsert_vectors,
 )
 from operonx_kb.ops.graph import graph_concepts
 from operonx_kb.ops.lexical import delete_lexical, write_lexical
@@ -84,8 +86,8 @@ def ingest_document(item, collection, catalog, blobs):
         catalog=catalog,
         payloads=plan["payloads"],
     )
-    upsert = VectorUpsertOp.of(
-        resource=s["store"],
+    upsert = upsert_vectors(
+        store=s["store"],
         ids=stage["ids"],
         vectors=stage["vectors"],
         metadata=stage["metadata"],
@@ -106,8 +108,7 @@ def ingest_document(item, collection, catalog, blobs):
         mentions=concepts["mentions"],
     )
     gone = removed_vector_ids(removed=commit["removed"])
-    delete = VectorDeleteOp.of(resource=s["store"], ids=gone["ids"],
-                               collection=s["vector_collection"])  # fmt: skip
+    delete = delete_vectors(store=s["store"], ids=gone["ids"], collection=s["vector_collection"])
     forget = forget_index_writes(removed=commit["removed"], store=s["store"],
                                  collection=s["vcollection"], catalog=catalog,
                                  deleted=delete["deleted"])  # fmt: skip
