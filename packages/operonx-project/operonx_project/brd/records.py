@@ -30,6 +30,7 @@ __all__ = [
     "load_questions",
     "load_requirements",
     "matrix_status",
+    "set_matrix_row",
     "write_requirements",
 ]
 
@@ -215,6 +216,43 @@ def add_matrix_rows(brd: Path, reqs: Sequence[Requirement], section: str, card: 
         lines += ["", heading, "", _MATRIX_HEADER, *rows]
     f.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return [r.id for r in new]
+
+
+def set_matrix_row(brd: Path, rid: str, status: str, tests: Sequence[str] = (), code: str = "",
+                   evidence: str = "") -> bool:  # fmt: skip
+    """Set one matrix row's status, with the tests that prove it.
+
+    A row of the engine's nine columns gets its Code / API, Tests, Status
+    and Evidence cells. Any other layout (a folder written by hand) keeps
+    its columns: the one status cell is replaced, and the tests and the
+    evidence go in the last cell. Returns whether the row was found."""
+    if status not in STATUSES:
+        raise ValueError(f"status must be one of {STATUSES}, not {status!r}")
+    f = Path(brd) / MATRIX
+    if not f.exists():
+        return False
+    lines = f.read_text(encoding="utf-8").splitlines()
+    cited = "<br>".join(f"`{t}`" for t in tests)
+    for n, line in enumerate(lines):
+        m = _REQ_ROW.match(line)
+        if not m or m.group(1) != rid:
+            continue
+        cells = _split(line)
+        if len(cells) == 9:
+            cells[5] = code or cells[5]
+            cells[6] = cited or cells[6]
+            cells[7] = status
+            cells[8] = evidence or cells[8]
+        else:
+            at = [i for i, c in enumerate(cells) if c in STATUSES]
+            if len(at) != 1:
+                return False
+            cells[at[0]] = status
+            cells[-1] = " ".join(x for x in (cells[-1], cited, evidence) if x)
+        lines[n] = "| " + " | ".join(_cell(c) for c in cells) + " |"
+        f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return True
+    return False
 
 
 # ── questions ──────────────────────────────────────────────────────────────

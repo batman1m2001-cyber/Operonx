@@ -895,9 +895,10 @@ rules:
 - models are resources by key.
 
 `operonx lint` and the build check run on the package in CI. On a
-greenfield repo, `operonx project new` is `operonx init` plus `docs/brd/`
-and an empty board, so the studio opens the result like any other
-project.
+greenfield repo, `operonx project new` is a git repo with `docs/brd/` and
+an empty board; its first milestone's card C0 runs `operonx init` with the
+template the planner chose from the requirements (§17, P5), so the studio
+opens the result like any other project.
 ---
 
 ## 7. A task: the rounds inside `task_flow`
@@ -1954,6 +1955,169 @@ typing or happy path alone.
     regression test covers it.
   - The measurement script (`e0.py`) and its output stay in the session
     scratchpad, next to the private copy. Neither is committed.
+
+### P5. Lifecycle, both modes, daemon, CLI (2026-10-17)
+
+- **Built** (`packages/operonx-project`, branch `feat/project-p5`):
+  - `lifecycle.py`: `Lifecycle.drive(mid)` takes a milestone from
+    `discovering` to `done`, and stops wherever it needs the owner (a plan
+    to approve, a question, a pause) or a bound is reached. Every stage is
+    journalled and goes on from the journal after a crash: `_stage` runs
+    a flow, or resumes the run a dead process left (`running`,
+    `interrupted` or `ok` in the journal), or starts a new attempt after a
+    failure.
+  - `flows/discover_flow/`: survey (a read-only session writes the brief
+    and lists the repo's own commands) → baseline (the commands run on the
+    untouched integration tip). A command that is not found or cannot run
+    is dropped and recorded as `missing` (in `DELIVERY.md`'s known
+    limits). An operonx target always gets operonx's checks (§6.1):
+    pytest, `operonx lint --build` (which is also the build check) and
+    `operonx guide --check`. An empty repo is not surveyed.
+  - **Requirements**: each intake source is registered and extracted
+    (`brd_flow`) into the BRD folder on the integration branch, and
+    committed there. Already-extracted sources (by hash) are skipped. The
+    scope is every row not verified, not out of scope and not superseded.
+    A `needs_clarification` row is held back with its `Q-nn`, and the rest
+    proceeds.
+  - `flows/plan_flow/`: draft ↔ review, at most `plan_reviews` = 2 revise
+    rounds, then the plan goes to the owner with what the review still
+    says.
+    - **W1** plans the whole DAG; **W2** plans epics, one architecture
+      note, and the first `ready_depth` cards.
+    - `plan.py` holds the mechanical checks: acyclic, dependencies exist,
+      every target row covered (by a criterion under W1, by an epic under
+      W2), each criterion tied to a row of its card, paths inside the
+      repo, at most `max_cards`, and ids not already used (a replan).
+    - The reviewer (another model) is told what the checks found, and
+      which cards' paths overlap with no dependency between them.
+    - **Approval**: `approve_plan = "ask"` (one tap), or `"auto"` when the
+      review passed and no card is risky. A plan that still fails the
+      engine's checks cannot be approved: the command is refused and says
+      why.
+  - **Execute**: the P1 scheduler, with `FlowRunner` (task_flow) and
+    `InitRunner` behind one `Runners`, the `GitIntegrator`, and (W2) a
+    replenisher. That is one planning call that details new cards for
+    the rows no card serves, checked like the plan; a card that fails
+    the checks is dropped and noted.
+    - `rows_left` counts a failed card's rows as covered: they wait for a
+      replan, not for another card by themselves.
+    - Outcomes map to milestone states. `stuck` with failed cards → a
+      **replan** (at most `max_replans` = 2).
+  - **Replanning**: done cards are kept and never redone. Pending, ready
+    and blocked cards are cancelled as "replaced by a replan", and so are
+    failed cards. That needed one new transition, `failed → cancelled`,
+    and the scheduler's `complete` now ignores cancelled cards. The
+    planner gets the done cards, the failed ones with their reasons, and
+    the ids already taken.
+  - `flows/final_flow/`: full checks against the baseline (an empty
+    repo's baseline is empty, so every failure is new) → every card's
+    held-out tests → one review of the whole milestone diff → the rows
+    (`implemented_verified` when every card serving the row is done and
+    its acceptance tests pass on the integration branch, citing them;
+    committed) → `brd check` → the verdict.
+    - A gap that names a card re-opens it (`done → ready`, bounded by
+      `max_reopens`), and its next run is a rebase round with the gap.
+    - A gap that names no card fails the milestone with the reason.
+  - **Deliver**: `DELIVERY.md` at the integration branch's root (what was
+    built, each row with its status and cards, assumptions taken, the
+    owner's decisions, known limits, the checks, the cost), committed;
+    the PR description in `.operonx/project/delivery/<mid>/PR.md`.
+    Nothing is pushed.
+  - **The greenfield path** (§6.1): `operonx project new DIR` is a git
+    repo with `docs/brd/` and an empty board.
+    - The first milestone's planner chooses `init` (template, `--uv` or
+      `--pip`, name). The engine adds card `C0` (kind `init`), and every
+      card without dependencies depends on it.
+    - `InitRunner` runs `operonx init` in C0's worktree (the coder never
+      writes the layout), commits it, and runs the operonx checks on it.
+  - `daemon.py`: the lease (one daemon per project, TTL 30 s); the
+    recovery pass (kills a stage's orphaned `claude` process group); the
+    command loop. A command leaves the queue only once it was applied.
+    The queue is a table other processes write, so the daemon polls it
+    every 0.5 s; inside a drive, everything is event-driven.
+  - The scheduler's recovery hook: a card found `running` when it starts
+    gets its orphaned process group killed, but only if the group's leader
+    is still a `claude` process (a pgid is reused after a reboot). Its run
+    then goes on from the journal. An answer is kept on the card until
+    its run reaches an outcome, so a crash between the answer and the
+    resume loses nothing.
+  - `store.py`: the command queue (`enqueue`, `pending_commands`,
+    `finish_command`) and per-milestone records (`ms_get` / `ms_put`:
+    intake, survey, baseline, context, plan, epics, final, runs).
+  - CLI: `operonx-project new | start | daemon | status | show | approve |
+    answer | replan | pause | unpause | cancel | retry`, and, in core
+    (branch `feat/cli-project`, stacked on #195), `operonx project …`
+    handed off like `operonx studio`. Like `lint`, it never syncs the
+    guide copy first.
+- **Decided while building** (each the smaller reading of the plan, said
+  here):
+  - §6.2 says `operonx project new` is "`operonx init` plus `docs/brd/`";
+    §6.1 says the template is the planner's choice, from the requirements.
+    Both hold: `new` makes the repo and the BRD folder, and card C0 runs
+    `operonx init` once the requirements are known.
+  - **A greenfield project's checks run in the engine's environment.**
+    `operonx init` writes files only, and the template needs
+    `operonx[serve]`. So operonx-project now depends on `operonx[serve]`,
+    and the checks use the target's `.venv` when it has one. Making a
+    per-project environment from its toolchain is P9.
+  - `max_hours` is not enforced yet; the dollar budget is. That is P9.
+- **Gate:** **147 passed**, 3 skipped, the paid tests aside (12 new).
+  - **The whole lifecycle in both modes**, scripted coder:
+    - **W1** (a goal, no BRD): start → survey and baseline → plan →
+      approve → C1 → final verification → `DELIVERY.md` committed.
+    - **W2** (a Markdown BRD):
+      - extraction (quotes checked) → 2 rows → epics plus the first card,
+        auto-approved;
+      - the replenisher details C2 when Ready runs dry;
+      - both rows end `implemented_verified`, citing
+        `tests/acceptance/C2/test_c2_double.py::test_double`;
+      - `brd check` is clean on the delivered folder.
+  - **Greenfield**:
+    - `new` → no survey → the baseline's checks are pytest,
+      `operonx lint --build` and `operonx guide --check`;
+    - C0 runs `operonx init --template hello --pip`;
+    - C1's QA ran all three on that project, green;
+    - `app/main.py`, `operonx.toml`, `AGENTS.md` and `.operonx/guide/`
+      are on the branch.
+  - **Plan-review cap**: a reviewer that always says "revise" gets 3
+    drafts and 3 reviews, then the owner. Its notes are in the record,
+    and the owner may approve. A plan with a self-dependency stays
+    unapprovable: the approve command is refused with the reason, and no
+    card is created.
+  - **The replenisher keeps Ready at its depth** (depth 2, 3 rows): it is
+    asked for exactly one card, twice, each time with only the rows still
+    without a card, and is never asked again once no rows are left.
+  - **Replanning keeps done cards**: C2 fails (infra) → replan 1 →
+    C2 cancelled with its failure in the reason, C1 still done → the
+    new C3 runs → done. There was one implementer session each for C1,
+    C2 and C3: C1 was never redone.
+  - **The crash matrix rows P3 does not cover**, each with the daemon in
+    its own process, `kill -9`'d, and restarted once a 1 s lease expired:
+    - **killed while planning:** the stage resumes from its journal. The
+      survey ran once; the killed plan call ran again, once.
+    - **waiting for you:** a restart calls no one and changes nothing.
+    - **between the answer and the resume:** the answer is applied, the
+      resumed round dies, and the restart resumes with it. The next
+      implementer prompt carries "The owner's decision: plus", and both
+      commands end `done`.
+    - **merging:** a check kills the daemon right after C1's merge
+      commit. The restart re-baselines the merged tip, the merge is
+      empty, and the card is done: one merge commit, no second
+      implementer session. (A half-written `MERGE_HEAD` is P2's test.)
+  - **`status` and `show` are accurate against the store**: state, cost,
+    the card count, the Done column, every card's state and cost, every
+    event's seq. A card's held-out tests show as a count only. A command
+    that does not apply (approve with no plan) is refused, and says why.
+  - Lease: a second daemon on a leased project raises `DaemonBusy`.
+  - Core: `operonx project` hands its command line over untouched, never
+    syncs the guide, and says how to install operonx-project when it is
+    missing. The core CLI suite: 172 passed.
+  - Also fixed:
+    - a P1 timing flake in the rate-limit test (about 1 run in 6 failed by
+      ~10 ms). It measured from after the hold was set; it now checks the
+      reset time itself;
+    - a P2 test that ran `python` from PATH; it passed only inside an
+      activated venv, and now runs `sys.executable`.
 
 ## Sources
 

@@ -58,7 +58,7 @@ __all__ = ["BrdConfig", "check", "default_requirement_id"]
 _NOT_REQ = "(?!(?:FEAT|SCR|ADR|Q|DEF|SRC)-)"
 default_requirement_id = _NOT_REQ + r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[A-Z]{0,3}\d{2,4}"
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)|!\[[^\]]*\]\(([^)\s]+)\)")
-TEST_REF = re.compile(r"tests/((?:\w+/)?test_\w+\.py)::(test_\w+)")
+TEST_REF = re.compile(r"tests/((?:[\w.-]+/)*test_\w+\.py)::(test_\w+)")  # nested: tests/acceptance/C1/
 
 
 @dataclass

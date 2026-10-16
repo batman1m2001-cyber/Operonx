@@ -13,9 +13,12 @@ decides what that means.
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 
 from operonx.core.loggings import LOGGER
@@ -74,6 +77,10 @@ class CardRunner(Protocol):
 
     async def resume(self, card: Card, answer: Any, stage: Callable[[Stage], None]) -> CardOutcome: ...
 
+    # optional: ``recover(card, stage)`` continues a run whose process died
+    # (a card found ``running`` when the scheduler starts); without it, the
+    # card's run starts again with ``run``.
+
 
 class Integrator(Protocol):
     async def integrate(self, card: Card) -> Integrated: ...
@@ -109,6 +116,22 @@ class Stats:
     replenished: int = 0
     max_running: int = 0
     log: List[str] = field(default_factory=list)
+
+
+def _kill_group(pgid: int) -> None:
+    """Kill a coder's process group left by a dead engine: only when its
+    leader is still a ``claude`` process (a pgid is reused after a reboot)."""
+    try:
+        cmdline = Path(f"/proc/{pgid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+    except OSError:
+        return
+    if "claude" not in cmdline:
+        return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+        LOGGER.warning(f"killed the orphaned coder process group {pgid}")
+    except (ProcessLookupError, PermissionError):
+        pass
 
 
 class Scheduler:
@@ -164,6 +187,7 @@ class Scheduler:
         for ev in self._pending_cmds:
             self._events.put_nowait(ev)
         self._pending_cmds.clear()
+        self._recover()
         while True:
             self.stats.steps += 1
             self._apply_refresh()
@@ -179,6 +203,20 @@ class Scheduler:
 
     def _cards(self) -> List[Card]:
         return self.store.cards(self.mid)
+
+    def _recover(self) -> None:
+        """Cards left ``running`` by a process that died: their orphaned coder
+        process group is killed, and their run goes on from the journal."""
+        for card in self._cards():
+            if card.state != CardState.RUNNING or card.id in self._tasks:
+                continue
+            pgid = card.detail.get("pgid")
+            if pgid:
+                _kill_group(int(pgid))
+            again = getattr(self.runner, "recover", None) or self.runner.run
+            self.store.note(self.mid, "card.recover", {"run_id": card.run_id, "pgid": pgid}, card=card.id)
+            self._spawn(card.id, again(card, self._stage(card.id)))
+            self.stats.resumes += 1
 
     def _apply_refresh(self) -> None:
         # to a fixed point: blocking a card can block the cards behind it
@@ -361,7 +399,8 @@ class Scheduler:
         cards = self._cards()
         if self._cancelled:
             return Outcome.CANCELLED
-        if cards and all(c.state == CardState.DONE for c in cards) and not self.rows_left():
+        live = [c for c in cards if c.state != CardState.CANCELLED]  # a replan's retired cards
+        if live and all(c.state == CardState.DONE for c in live) and not self.rows_left():
             return Outcome.COMPLETE
         if self._paused:
             return Outcome.PAUSED

@@ -10,6 +10,7 @@ name by default), and the run goes on with that process's objects.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -43,6 +44,12 @@ DEFAULT_MODELS: Dict[str, Optional[str]] = {
     "triage": "sonnet",
     "test_author": "sonnet",
     "examiner": "fable",
+    # the milestone's stages
+    "surveyor": "sonnet",
+    "planner": "opus",
+    "plan_reviewer": "fable",
+    "replenisher": "opus",
+    "milestone_reviewer": "fable",
 }
 
 
@@ -69,6 +76,7 @@ class Runtime:
     sandbox: bool = True
     env: Optional[Dict[str, str]] = None  # for the checks; default the engine's, without bytecode
     key: str = ""
+    python: str = sys.executable  # runs the operonx checks when the target has no .venv of its own
     stages: Dict[Tuple[str, str], Callable[[Stage], None]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -101,6 +109,19 @@ class Runtime:
             cb(stage)
         except Exception as exc:  # noqa: BLE001 — the board column is display; the run goes on
             LOGGER.warning(f"card {cid}: could not show stage {stage.value}: {exc}")
+
+    def target_python(self) -> Path:
+        """The target's own interpreter when it has a ``.venv``, else the engine's."""
+        own = Path(self.git.repo) / ".venv" / "bin" / "python"
+        return own if own.exists() else Path(self.python)
+
+    def operonx_argv(self) -> List[str]:
+        """How to run ``operonx`` for the target (``python -m operonx`` does not exist)."""
+        py = self.target_python()
+        exe = py.parent / "operonx"
+        if exe.exists():
+            return [str(exe)]
+        return [str(py), "-c", "from operonx.cli.main import main; raise SystemExit(main())"]
 
     def heldout_dir(self, mid: str, cid: str) -> Path:
         return self.heldout_root / self.git.project / mid / cid

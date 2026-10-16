@@ -76,6 +76,7 @@ class BudgetPolicy:
     max_replans: int = 2
     max_cards: int = 25
     max_reopens: int = 2  # integration conflicts / regressions per card
+    plan_reviews: int = 2  # revise rounds before the plan goes to the owner with its notes
 
 
 @dataclass
@@ -94,6 +95,7 @@ class Policy:
     max_parallel: int = 2  # coder slots: the In progress column's limit
     wip: Dict[str, int] = field(default_factory=lambda: {"review": 2, "qa": 2})
     ready_depth: Optional[int] = None  # default 2 × max_parallel
+    approve_plan: str = "ask"  # "ask": one tap; "auto": when the review passed and no card is risky
     budget: BudgetPolicy = field(default_factory=BudgetPolicy)
 
     def __post_init__(self) -> None:
@@ -103,6 +105,8 @@ class Policy:
             raise ValueError(f"start must be 'push' or 'pull', not {self.start!r}")
         if self.done_unit not in ("task", "row"):
             raise ValueError(f"done_unit must be 'task' or 'row', not {self.done_unit!r}")
+        if self.approve_plan not in ("ask", "auto"):
+            raise ValueError(f"approve_plan must be 'ask' or 'auto', not {self.approve_plan!r}")
         if self.max_parallel < 1:
             raise ValueError("max_parallel must be at least 1")
         if isinstance(self.budget, dict):
@@ -138,7 +142,7 @@ class Card:
     criteria: List[str] = field(default_factory=list)  # EARS statements, each tied to a row
     deps: List[str] = field(default_factory=list)
     paths: List[str] = field(default_factory=list)  # globs it may touch
-    kind: str = "code"  # code | test | docs | config
+    kind: str = "code"  # code | test | docs | config | init (greenfield: `operonx init`, run by the engine)
     risk: str = "low"  # low | high
     priority: int = 0  # lower runs first
     epic: str = ""

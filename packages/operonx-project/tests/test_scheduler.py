@@ -139,9 +139,8 @@ async def test_the_budget_stops_new_starts(tmp_path):
 async def test_a_rate_limit_holds_new_starts_until_its_reset_by_a_timer(tmp_path):
     hold = CardOutcome("requeue", "rate limited", not_before=time.time() + 0.3)
     store, runner, integ, sched = setup(tmp_path, {"c1": {}}, scripts={"c1": [hold, "verified"]})
-    t0 = time.time()
     assert await sched.run() == Outcome.COMPLETE
-    assert time.time() - t0 >= 0.25 and runner.runs["c1"] == 2
+    assert time.time() >= hold.not_before - 0.02 and runner.runs["c1"] == 2  # not before the reset (clock slack)
     assert sched.stats.steps < 20  # it slept on the timer, it did not spin
 
 

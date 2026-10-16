@@ -13,7 +13,7 @@ authors = [{ name = "Operon Team" }]
 dependencies = [
     # 1.30.0: the journal's park/resume and retry_failed, Job(keep_runs=), the
     # serve layer's middleware; the plan's evidence was measured on it.
-    "operonx>=1.30.0",
+    "operonx[serve]>=1.30.0",  # a greenfield target is an operonx service: its checks run here
     "httpx>=0.24",
     # the BRD's readers (P4): docx/pptx/xlsx/html with the stdlib, PDF text by
     # docling-parse, scanned pages and images by tesseract (a system binary)
