@@ -42,11 +42,17 @@ from operonx_agents.errors import ToolDefinitionError
 from operonx_agents.run.context import RunContext
 from operonx_agents.tools._docstring import parse_docstring
 
-__all__ = ["Tool", "ToolSpec", "tool"]
+__all__ = ["Tool", "ToolSpec", "Verify", "tool"]
 
 #: Who decides whether a call runs without a human: never asked, always
 #: asked, or a function of the context and the validated arguments.
 Approval = Union[Literal["never", "always"], Callable[[RunContext, Dict[str, Any]], bool]]
+
+#: ``verify(ctx, args, result)`` (sync or async), run after a call that
+#: succeeded: ``True`` when the effect is confirmed (read back), a string
+#: saying what is not. Anything else — ``False``, ``None``, an exception —
+#: also means not confirmed: a check that forgot to answer must not pass.
+Verify = Callable[[RunContext, Dict[str, Any], Any], Any]
 
 
 @dataclass(frozen=True)
@@ -72,6 +78,11 @@ class ToolSpec:
             a file as if it were whole.
         readonly: It changes nothing. Read by the policy and by MCP.
         destructive: It deletes, spends or sends. Read by the policy.
+        verify: ``(ctx, args, result) -> True | str``, run after the call
+            succeeds, within the same ``timeout``: whether its effect is
+            really there (the row written, the status changed). Not
+            confirmed, the model reads an error saying the call ran but
+            did not take effect, with the reason — never a success.
     """
 
     name: str
@@ -84,6 +95,7 @@ class ToolSpec:
     max_result_chars: int = 100_000
     readonly: bool = False
     destructive: bool = False
+    verify: Optional[Verify] = field(default=None, repr=False, compare=False)
 
     def definition(self) -> Dict[str, Any]:
         """The tool as a Chat Completions ``tools=[...]`` entry (the
@@ -175,6 +187,7 @@ def tool(
     max_result_chars: int = 100_000,
     readonly: bool = False,
     destructive: bool = False,
+    verify: Optional[Verify] = None,
 ) -> Any:
     """Make a function a :class:`Tool`. Use bare (``@tool``) or with
     arguments (``@tool(readonly=True)``); they are :class:`ToolSpec`'s.
@@ -209,6 +222,7 @@ def tool(
             max_result_chars=max_result_chars,
             readonly=readonly,
             destructive=destructive,
+            verify=verify,
         )
 
     return build(function) if function is not None else build
@@ -229,6 +243,11 @@ def _build(fn: Callable[..., Any], *, name, description, schema, approval, **spe
         raise ToolDefinitionError(
             f"tool {tool_name!r}: approval={approval!r} is not 'never', 'always' or a function "
             "(ctx, args) -> bool. A typo here must not quietly mean 'never ask'."
+        )
+    if spec_kwargs.get("verify") is not None and not callable(spec_kwargs["verify"]):
+        raise ToolDefinitionError(
+            f"tool {tool_name!r}: verify={spec_kwargs['verify']!r} is not a function "
+            "(ctx, args, result)."
         )
     summary, arg_docs = parse_docstring(inspect.getdoc(fn))
     text = description if description is not None else summary
