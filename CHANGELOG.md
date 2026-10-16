@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.28.0] - 2026-10-16
+
+### Added
+
+- **Guards on resources: `ResourceHub.guard(prefix, check)`.** `check(key, method, args, kwargs)` — plain or async — runs before every call of every resource whose key starts with `prefix` (each public async method; a stream before its first item), whichever op makes it: `LLMOp`, an agent's model, a tool, a hand-written op. What it raises is what the caller gets, and the call is not made; it runs before the call waits for a `rate_limit:` slot, so a refused call takes none. For the whole process, and for instances already handed out; returns a function that removes it. Before, a project's rule about what may leave for a provider — client data never to an outside model — had to be repeated in every op that calls one, and a new call site could skip it. Guide 05. (`operonx.core.registry.guards`.)
+
 ## [1.27.0] - 2026-10-16
 
 ### Added

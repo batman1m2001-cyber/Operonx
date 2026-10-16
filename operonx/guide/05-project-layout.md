@@ -215,6 +215,10 @@ operonx run score_calls
   `rate_limit: {concurrency: 8, per_minute: 500}` (or `per_second`) — every
   op and run calling that key waits its turn; a stream holds its slot until
   it ends.
+  A rule about what may be sent to a resource, for every op that calls it,
+  is a guard: `ResourceHub.guard("llm:", check)` in `app/main.py`, with
+  `check(key, method, args, kwargs)` raising to refuse — the call is never
+  made (an `LLMOp` reports the error, like a provider's).
 - **An eval** is a `datasets/<name>.jsonl` and an `Eval(...)` (a kind of
   job) in `app/main.py`; `operonx run <eval>` gates CI.
 - **What a run opens and closes** (a call's per-call objects, its record) are

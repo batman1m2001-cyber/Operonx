@@ -312,6 +312,21 @@ class ResourceHub:
         """Clear the global singleton. For tests only."""
         cls._instance = None
 
+    @classmethod
+    def guard(cls, prefix: str, fn: Any) -> Any:
+        """Run ``fn(key, method, args, kwargs)`` before every call of every resource whose key starts with
+        *prefix* — whichever op makes it; raising refuses the call (``operonx.core.registry.guards``). For the
+        whole process, and for instances already handed out. Returns a function that removes the guard."""
+        from .guards import add_guard, guard_instance
+
+        remove = add_guard(prefix, fn)
+        hub = cls._instance
+        if hub is not None:
+            for key, entry in hub._cache.items():
+                if entry.instance is not None and key.startswith(prefix):
+                    guard_instance(entry.instance, key=key)
+        return remove
+
     # ========================================================================
     # Load Config (Lazy)
     # ========================================================================
@@ -584,6 +599,10 @@ class ResourceHub:
             from .rate_limit import limit_instance
 
             limit_instance(instance, limit, key=key)
+        from .guards import guard_instance, guards_for
+
+        if guards_for(key):  # outside the limit: a refused call takes no slot
+            guard_instance(instance, key=key)
         self._cache[key].instance = instance
         LOGGER.debug("Lazy loaded resource: %s", key)
 
