@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **operonx-kb 0.2.7: `operonx_kb.__version__` is the installed version.** It still said 0.2.3 through 0.2.4–0.2.6. A test now holds each package's `__version__` to its `pyproject.toml`.
+- **A served graph with an input called `name` gets that input.** The serve layer named the graph by calling `graph_fn(name=graph_fn.__name__, **params)`, so a graph whose function takes `name` had its input taken as the run's name — fine in a script, broken only once served. It now names it with `graph_fn.configure(name=...)` (`operonx/app/serve/app.py`).
 - **operonx-agents 0.3.1: a model's cost is known where the provider reports it.** `Usage.cost_usd` was the resource's declared prices times the counts, and `None` when a resource declared none — so an agent on OpenRouter, which reports each request's cost in `usage.cost`, had no cost at all: no cost per turn, and `UsageLimits(cost_usd=...)` failed the run. Now an unpriced resource takes the cost the provider reported for the request (a number only); declared prices still win where they are set. `operonx_agents.testing.completion(cost=...)` scripts it. (`operonx_agents/model/usage.py`.)
 
 ## [1.30.1] - 2026-10-17

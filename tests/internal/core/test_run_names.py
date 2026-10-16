@@ -75,3 +75,16 @@ async def test_a_job_trace_is_named_after_its_graph(tmp_path):
 def test_a_served_graph_is_named_after_its_graph():
     engine = compile_graph(f"{__name__}:enrich_one")
     assert engine.name == "enrich_one"
+
+
+@graph
+def greet(name):
+    d = double(x=name)
+    START >> d >> END
+
+
+async def test_a_served_graph_with_an_input_called_name_gets_it():
+    engine = compile_graph(f"{__name__}:greet")
+    assert engine.name == "greet"
+    out = await engine.run(inputs={"name": 3})
+    assert out["result"] == 6
