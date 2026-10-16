@@ -51,6 +51,7 @@ def completion(
     logprobs: Optional[List[tuple]] = None,
     refusal: Optional[str] = None,
     reasoning: Optional[str] = None,
+    cost: Optional[float] = None,
 ) -> ChatCompletion:
     """A completion as the SDK builds one from a live body: constructed,
     not validated, since gateways send values outside the SDK's Literals
@@ -96,6 +97,8 @@ def completion(
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
+            # a provider that reports the request's cost (OpenRouter)
+            **({"cost": cost} if cost is not None else {}),
         },
     }
     return ChatCompletion.construct(**body)

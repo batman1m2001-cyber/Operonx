@@ -22,8 +22,10 @@ class Usage:
     cached_input_tokens: Prompt tokens served from the provider's cache.
     reasoning_tokens: Completion tokens spent thinking.
     requests: Model requests made (a re-ask or a fallback is one more).
-    cost_usd: The resources' declared prices times the counts; ``None``
-        when a resource used declares no price.
+    cost_usd: The resources' declared prices times the counts; where a
+        resource declares none, the cost the provider reported for the
+        request (OpenRouter's ``usage.cost``); ``None`` when neither is
+        known.
     """
 
     input_tokens: int = 0
@@ -71,6 +73,10 @@ class Usage:
             if price_in is None or price_out is None
             else input_tokens * price_in + output_tokens * price_out
         )
+        if cost is None:  # no declared price: the provider's own figure, when it sends one
+            reported = get(usage, "cost")
+            if isinstance(reported, (int, float)) and not isinstance(reported, bool):
+                cost = float(reported)
         return cls(
             input_tokens=input_tokens,
             output_tokens=output_tokens,

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **operonx-agents 0.3.1: a model's cost is known where the provider reports it.** `Usage.cost_usd` was the resource's declared prices times the counts, and `None` when a resource declared none — so an agent on OpenRouter, which reports each request's cost in `usage.cost`, had no cost at all: no cost per turn, and `UsageLimits(cost_usd=...)` failed the run. Now an unpriced resource takes the cost the provider reported for the request (a number only); declared prices still win where they are set. `operonx_agents.testing.completion(cost=...)` scripts it. (`operonx_agents/model/usage.py`.)
+
 ## [1.30.1] - 2026-10-17
 
 ### Added
