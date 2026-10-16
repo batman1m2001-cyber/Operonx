@@ -146,7 +146,7 @@ class SQLiteSession:
                 "WHERE session_id = ? ORDER BY seq DESC LIMIT ?) ORDER BY seq"
             )
             args = (self.session_id, limit)
-        rows = await self._db.run(lambda db: db.execute(sql, args).fetchall())
+        rows = await self._db.run(lambda db: db.execute(sql, args).fetchall(), write=False)
         return [json.loads(r[0]) for r in rows]
 
     async def add_items(self, items: List[Dict[str, Any]]) -> None:
