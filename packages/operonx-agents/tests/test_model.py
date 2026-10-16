@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -187,6 +188,21 @@ class TestUsage:
 
     def test_cost_is_none_when_unpriced(self):
         assert Usage(cost_usd=None) + Usage(cost_usd=1.0) == Usage(cost_usd=None)
+
+    def test_an_unpriced_resource_takes_the_cost_the_provider_reported(self):
+        from openai.types import CompletionUsage
+
+        sdk = CompletionUsage.model_validate(
+            {"prompt_tokens": 900, "completion_tokens": 120, "total_tokens": 1020, "cost": 0.0011}
+        )
+        assert sdk.__pydantic_extra__ == {"cost": 0.0011}  # as the SDK parses OpenRouter's body
+        for usage in (sdk, {"prompt_tokens": 900, "completion_tokens": 120, "cost": 0.0011}):
+            assert Usage.from_completion(usage).cost_usd == 0.0011
+        assert Usage.from_completion({"prompt_tokens": 9, "cost": "0.1"}).cost_usd is None
+        assert Usage.from_completion({"prompt_tokens": 9, "cost": True}).cost_usd is None
+        priced = SimpleNamespace(cost_per_input_token=1e-6, cost_per_output_token=1e-6)
+        # declared prices win over the reported cost
+        assert Usage.from_completion(sdk, priced).cost_usd == pytest.approx(1020e-6)
 
     async def test_retries_and_fallbacks_add_up(self, hub):
         hub(
