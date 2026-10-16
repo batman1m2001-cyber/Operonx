@@ -137,6 +137,7 @@ def _milestone_parsers(sub) -> None:
     p.add_argument("--constraints", default="")
     p.add_argument("--auto-approve", action="store_true", help="no tap when the plan review passed, no card risky")
     p.add_argument("--max-usd", type=float, default=None)
+    p.add_argument("--max-hours", type=float, default=None, help="hours of running (waiting for you does not count)")
     p.add_argument("--max-parallel", type=int, default=None)
     p.add_argument("--no-heldout", action="store_true")
     p = sub.add_parser("daemon", help="drive the project's milestones and run the queued commands")
@@ -147,6 +148,9 @@ def _milestone_parsers(sub) -> None:
     p.add_argument("--model", action="append", default=[], metavar="ROLE=MODEL")
     p.add_argument("--python", help="the interpreter the target's checks run with (default: its .venv, else this)")
     p.add_argument("--poll", type=float, default=0.5)
+    p.add_argument("--check-mode", choices=("host", "docker"), default="host",
+                   help="the acceptance and held-out tests: on the host, or in docker with no network")  # fmt: skip
+    p.add_argument("--check-image", help="docker: an image with the project's interpreter and pytest")
     p.add_argument("--telegram-chat", help="send the questions to this chat (the bot token: OPERONX_TELEGRAM_TOKEN)")
     p.add_argument("--telegram-user", action="append", default=[], help="a Telegram user id allowed to answer")
     p.add_argument("--telegram-api", default="https://api.telegram.org", help=argparse.SUPPRESS)
@@ -187,6 +191,7 @@ def _milestone_parsers(sub) -> None:
     _repo_arg(p)
     p.add_argument("milestone")
     p.add_argument("--usd", type=float, default=None)
+    p.add_argument("--hours", type=float, default=None)
 
 
 def _open(args):
@@ -299,6 +304,8 @@ def _milestones(args) -> int:
         policy = Policy.w1(**kw) if args.mode == "w1" else Policy.w2(**kw)
         if args.max_usd is not None:
             policy.budget.max_usd = args.max_usd
+        if args.max_hours is not None:
+            policy.budget.max_hours = args.max_hours
         sources = [{"path": str(p)} for p in args.source] + [{"path": str(p), "private": True} for p in args.private]
         ms = create_milestone(proj, args.title, goal=args.goal, mode=args.mode, sources=sources, rows=args.rows,
                               policy=policy, prefix=args.prefix, constraints=args.constraints)  # fmt: skip
@@ -310,8 +317,11 @@ def _milestones(args) -> int:
         from operonx_project.lifecycle import Lifecycle
 
         models = dict(m.split("=", 1) for m in args.model)
+        if args.check_mode == "docker" and not args.check_image:
+            sys.stderr.write("error: --check-mode docker needs --check-image\n")
+            return 2
         life = Lifecycle(proj, _coder(proj.state), models=models or None, sandbox=not args.no_sandbox,
-                         python=args.python)  # fmt: skip
+                         python=args.python, check_mode=args.check_mode, check_image=args.check_image)  # fmt: skip
         from operonx_project.interactions import Interactions
 
         inter = Interactions(proj.store, project=proj)
@@ -409,8 +419,8 @@ def _milestones(args) -> int:
         payload = {"answer": answer}
     elif args.cmd == "replan":
         payload = {"notes": args.notes}
-    elif args.cmd == "retry" and args.usd is not None:
-        payload = {"usd": args.usd}
+    elif args.cmd == "retry":
+        payload = {k: v for k, v in (("usd", args.usd), ("hours", args.hours)) if v is not None}
     proj.store.get_milestone(args.milestone)
     seq = proj.store.enqueue(args.milestone, args.cmd, payload, card=card)
     out.write(f"queued {args.cmd} for {args.milestone} (#{seq}); the daemon runs it\n")

@@ -17,6 +17,7 @@ is reached the milestone stops for the owner instead of trying again.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -83,8 +84,10 @@ class Lifecycle:
         call_max_usd: float = 2.0,
         python: Optional[str] = None,
         runtime: Optional[Dict[str, Any]] = None,
+        hold_max_s: float = 120.0,  # a rate limit resetting later than this pauses the milestone (§10)
     ):
         self.p = project
+        self.hold_max_s = hold_max_s
         self.coder = coder
         self.models = models
         self.opts: Dict[str, Any] = {"sandbox": sandbox, "check_mode": check_mode, "check_image": check_image,
@@ -362,6 +365,8 @@ class Lifecycle:
             GitIntegrator(rt),
             replenisher=self._replenisher(mid) if ms.policy.horizon == "ready_depth" else None,
             rows_left=lambda: len(self.rows_left(mid)),
+            deadline=time.time() + max(0.0, ms.policy.budget.max_hours * 3600 - self.store.running_seconds(mid)),
+            hold_max_s=self.hold_max_s,
         )
         for cid, answer in self._queued.pop(mid, []):
             sched.answer(cid, answer)
@@ -382,8 +387,19 @@ class Lifecycle:
             self._move(mid, M.PAUSED, "paused by the owner", actor="owner")
         elif out == Outcome.CANCELLED:
             self._move(mid, M.CANCELLED, "cancelled by the owner", actor="owner")
+        elif out == Outcome.RATE_LIMITED:
+            when = time.strftime("%H:%M", time.localtime(sched.resume_at))
+            self.store.update_milestone(mid, resume_at=sched.resume_at)
+            self._move(mid, M.PAUSED, f"rate limited: the coder's limit resets at {when}; it goes on by itself")
+            self.store.note(mid, "notice", {"text": f"⏸ {ms.title} ({mid}) paused: the coder's rate limit resets at "
+                                                    f"{when}, and it goes on by itself then."})  # fmt: skip
         elif out == Outcome.BUDGET:
-            self._move(mid, M.BUDGET_EXHAUSTED, f"spent ${ms.policy.budget.max_usd:.2f} with work left")
+            if sched.over_time():
+                hours = self.store.running_seconds(mid) / 3600
+                self._move(mid, M.BUDGET_EXHAUSTED, f"ran {hours:.1f} h of {ms.policy.budget.max_hours:g} h "
+                                                    "with work left")  # fmt: skip
+            else:
+                self._move(mid, M.BUDGET_EXHAUSTED, f"spent ${ms.policy.budget.max_usd:.2f} with work left")
         else:
             failed = [c for c in cards if c.state == CardState.FAILED]
             why = "; ".join(f"{c.id} failed: {c.reason[:200]}" for c in failed) or "nothing can run"
@@ -515,6 +531,9 @@ class Lifecycle:
             if sched is not None:
                 sched.pause()
                 return "pausing: running cards finish their round"
+            if ms.state == M.PAUSED and ms.resume_at:  # paused by a rate limit: now the owner holds it
+                self.store.update_milestone(mid, resume_at=None, reason="paused by the owner", actor=actor)
+                return "paused (it no longer goes on by itself at the rate limit's reset)"
             if M.PAUSED not in MILESTONE_MOVES[ms.state]:
                 raise Refused(f"{mid} is {ms.state.value}")
             self._move(mid, M.PAUSED, "paused by the owner", actor=actor)
@@ -525,6 +544,8 @@ class Lifecycle:
                 return "unpaused"
             if ms.state != M.PAUSED:
                 raise Refused(f"{mid} is {ms.state.value}, not paused")
+            if ms.resume_at:
+                self.store.update_milestone(mid, resume_at=None, actor=actor)
             self._move(mid, self.store.prior_state(mid) or M.RUNNING, "unpaused", actor=actor)
             return "unpaused"
         if kind == "cancel":
@@ -541,12 +562,20 @@ class Lifecycle:
             return "cancelled"
         if kind == "retry":
             if ms.state == M.BUDGET_EXHAUSTED:
-                extra = float(payload.get("usd") or ms.policy.budget.max_usd)
                 policy = ms.policy
-                policy.budget.max_usd = ms.cost_usd + extra
+                hours = self.store.running_seconds(mid) / 3600
+                out_of_time = hours >= policy.budget.max_hours
+                if payload.get("hours") or (out_of_time and not payload.get("usd")):
+                    extra_h = float(payload.get("hours") or policy.budget.max_hours)
+                    policy.budget.max_hours = hours + extra_h
+                    said = f"{extra_h:g} more hours"
+                else:
+                    extra = float(payload.get("usd") or policy.budget.max_usd)
+                    policy.budget.max_usd = ms.cost_usd + extra
+                    said = f"${extra:.2f} more"
                 self.store.update_milestone(mid, policy=policy, actor=actor)
-                self._move(mid, M.RUNNING, f"budget extended by ${extra:.2f}", actor=actor)
-                return "budget extended"
+                self._move(mid, M.RUNNING, f"budget extended: {said}", actor=actor)
+                return f"budget extended: {said}"
             if ms.state != M.FAILED:
                 raise Refused(f"{mid} is {ms.state.value}, not failed")
             for c in self.store.cards(mid):

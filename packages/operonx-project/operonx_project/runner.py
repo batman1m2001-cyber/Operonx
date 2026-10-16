@@ -192,6 +192,10 @@ class InitRunner:
         if proc.returncode != 0:
             return CardOutcome("failed", f"`operonx init` exited {proc.returncode}: {text[-800:]}")
         sha = rt.git.commit(wt, f"{mid}/{card.id}: operonx init --template {template} --{toolchain}")
+        if rt.store.get_milestone(mid).policy.env == "own":
+            failed = await self._own_env(mid, card.id, wt, toolchain)
+            if failed:
+                return failed
         stage(Stage.QA)
         results = await run_checks(rt.checks, wt, rt.env)
         bad = [r for r in results if not r.ok]
@@ -199,6 +203,36 @@ class InitRunner:
             tails = "\n".join(f"$ {r.name}\n{r.tail[-800:]}" for r in bad)
             return CardOutcome("failed", f"the new project fails its checks: {', '.join(r.name for r in bad)}\n{tails}")
         return CardOutcome("verified", f"operonx init --template {template} at {(sha or '')[:10]}; checks pass")
+
+    async def _own_env(self, mid: str, cid: str, wt: Path, toolchain: str) -> Optional[CardOutcome]:
+        """Make the project's environment from its toolchain; its operonx checks run with it from now on."""
+        import asyncio
+        from dataclasses import asdict
+
+        from operonx_project.envs import make_env
+        from operonx_project.flows.discover_flow.ops import operonx_checks
+
+        rt = self.rt
+        ok, log = await make_env(rt.venv, wt, toolchain, rt.python, rt.env, timeout_s=max(self.timeout_s, 900.0))
+        rt.store.note(mid, "env.made", {"ok": ok, "venv": str(rt.venv), "toolchain": toolchain, "tail": log[-1500:]},
+                      card=cid)  # fmt: skip
+        if not ok:
+            return CardOutcome("failed", f"could not make the project's environment ({toolchain}): {log[-800:]}")
+        # `operonx init` ran in the engine's environment and copied the guides of every operonx package
+        # installed there; the project's guide copy is the one its own environment has
+        proc = await asyncio.create_subprocess_exec(*rt.operonx_argv(), "guide", str(wt), cwd=str(wt), env=rt.env,
+                                                    stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.STDOUT)  # fmt: skip
+        out, _ = await proc.communicate()
+        if proc.returncode != 0:
+            return CardOutcome("failed", f"`operonx guide` in the project's environment exited {proc.returncode}: "
+                                         f"{out.decode(errors='replace')[-800:]}")  # fmt: skip
+        rt.git.commit(wt, f"{mid}/{cid}: the guide copy of the project's own environment")
+        fresh = {c.name: c for c in operonx_checks(rt)}
+        rt.checks = [fresh.get(c.name, c) for c in rt.checks] or list(fresh.values())
+        base = rt.store.ms_get(mid, "baseline") or {}
+        rt.store.ms_put(mid, "baseline", {**base, "checks": [asdict(c) for c in rt.checks], "env": str(rt.venv)})
+        return None
 
     async def resume(self, card: Card, answer: Any, stage: Callable[[Stage], None]) -> CardOutcome:
         return await self.run(card, stage)

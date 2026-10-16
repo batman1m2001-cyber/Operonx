@@ -98,7 +98,8 @@ def _command(check: Check, cwd: Path) -> List[str]:
         args += ["--user", f"{uid}:{os.getgid()}"]
     for host, inside in check.mounts.items():
         args += ["-v", f"{Path(host).resolve()}:{inside}:ro"]
-    for k, v in check.env.items():
+    # the worktree is mounted read-write: no bytecode in it, which the host's checks would then import
+    for k, v in {"PYTHONDONTWRITEBYTECODE": "1", **check.env}.items():
         args += ["-e", f"{k}={v}"]
     return args + [check.image or "", "sh", "-c", check.cmd]
 

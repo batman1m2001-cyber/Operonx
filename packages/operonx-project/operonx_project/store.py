@@ -200,6 +200,25 @@ class Store:
             self._event(db, mid, None, "milestone.state", actor, {"from": frm.value, "to": to.value, "reason": reason})
         return self.get_milestone(mid)
 
+    def running_seconds(self, mid: str, now: Optional[float] = None) -> float:
+        """Wall-clock seconds the milestone has spent in a working stage (``max_hours``):
+        read from its state events, so a restart does not reset it; waiting for the
+        owner, a plan to approve, a pause do not count."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT at, data FROM events WHERE milestone=? AND kind='milestone.state' ORDER BY seq", (mid,)
+            ).fetchall()
+        total, since = 0.0, None
+        for at, data in rows:
+            to = MilestoneState(json.loads(data)["to"])
+            if to in _STAGES and since is None:
+                since = at
+            elif to not in _STAGES and since is not None:
+                total, since = total + (at - since), None
+        if since is not None:
+            total += (time.time() if now is None else now) - since
+        return total
+
     def update_milestone(self, mid: str, actor: str = "engine", **values: Any) -> Milestone:
         if "state" in values:
             raise ValueError("change a milestone's state with move_milestone")

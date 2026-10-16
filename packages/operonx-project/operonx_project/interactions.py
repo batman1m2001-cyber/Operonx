@@ -117,7 +117,8 @@ class Interactions:
             n = ((self.store.ms_get(ms.id, "runs") or {}).get("plan") or {}).get("n")
             return _hash("plan", n, ms.replans) if ms.state == M.AWAITING_APPROVAL else None
         if inter["kind"] == "budget":
-            return _hash("budget", ms.policy.budget.max_usd) if ms.state == M.BUDGET_EXHAUSTED else None
+            b = ms.policy.budget
+            return _hash("budget", b.max_usd, b.max_hours) if ms.state == M.BUDGET_EXHAUSTED else None
         return None
 
     def current(self, inter: Dict[str, Any]) -> bool:
@@ -206,12 +207,20 @@ class Interactions:
                     self._add(iid, ms.id, None, "approval", payload, version=n)
                     changed.append(iid)
             if ms.state == M.BUDGET_EXHAUSTED:
-                iid = f"budget:{ms.id}:{ms.policy.budget.max_usd:g}"
+                b = ms.policy.budget
+                iid = f"budget:{ms.id}:{b.max_usd:g}:{b.max_hours:g}"
                 if iid not in have:
-                    extra = ms.policy.budget.max_usd
-                    payload = {"problem": f"{ms.title} spent ${ms.cost_usd:.2f} of ${ms.policy.budget.max_usd:.2f} "
-                                          "with work left", "extra": extra,
-                               "options": [{"key": "extend", "label": f"Extend by ${extra:g}"},
+                    hours = self.store.running_seconds(ms.id) / 3600
+                    if hours >= b.max_hours:
+                        what, extra = "hours", b.max_hours
+                        problem = f"{ms.title} ran {hours:.1f} h of {b.max_hours:g} h with work left"
+                        label = f"Extend by {extra:g} h"
+                    else:
+                        what, extra = "usd", b.max_usd
+                        problem = f"{ms.title} spent ${ms.cost_usd:.2f} of ${b.max_usd:.2f} with work left"
+                        label = f"Extend by ${extra:g}"
+                    payload = {"problem": problem, "extra": extra, "what": what,
+                               "options": [{"key": "extend", "label": label},
                                            {"key": "stop", "label": "Stop (cancel the milestone)"}]}  # fmt: skip
                     self._add(iid, ms.id, None, "budget", payload, version=1)
                     changed.append(iid)
@@ -306,9 +315,11 @@ class Interactions:
         if k == "budget":
             if choice == "stop":
                 return "cancel", {"why": "the owner stopped it at the budget"}, None
-            usd = (inter["payload"] or {}).get("extra")
-            m = re.search(r"\+?\$?(\d+(?:\.\d+)?)", text or "")
-            return "retry", {"usd": float(m.group(1)) if m and choice is None else usd}, None
+            p = inter["payload"] or {}
+            m = re.search(r"\+?\$?(\d+(?:\.\d+)?)\s*(h|hours?)?\b", text or "", re.I)
+            if m and choice is None:  # words: "+20", "$20", "+3h"
+                return "retry", {"hours" if m.group(2) else "usd": float(m.group(1))}, None
+            return "retry", {"hours" if p.get("what") == "hours" else "usd": p.get("extra")}, None
         return None, {"why": f"unknown kind {k}"}, None
 
     # ── time ───────────────────────────────────────────────────────────────
