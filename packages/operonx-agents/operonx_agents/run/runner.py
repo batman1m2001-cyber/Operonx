@@ -631,6 +631,7 @@ class _Run:
         s = self.state
         if self.shape is None:
             s.output = await self._output(reply.content)
+            items, convo = await self._compact_at_end(items, convo)
             await self._commit(items, convo, reply)
             return _Stop("limit", final) if final is not None else _Stop("completed")
         raw, error = read_answer(reply, "tool" if self.strategy == "tool" else "native")
@@ -641,6 +642,7 @@ class _Run:
                 error = validation_errors(exc)
         if error is None:
             s.output = await self._output(s.output)
+            items, convo = await self._compact_at_end(items, convo)
             await self._commit(items, convo, reply)
             return _Stop("limit", final) if final is not None else _Stop("completed")
         fix = {"role": "user", "content": REASK.format(error=error)}
@@ -729,6 +731,23 @@ class _Run:
         if hooks is not None and hooks.after_model:
             reply = await hooks.model_response(self.ctx, reply)
         return reply
+
+    async def _compact_at_end(
+        self, items: List[dict], convo: List[dict]
+    ) -> Tuple[List[dict], List[dict]]:
+        """The answer's prompt crossed the threshold: compact now, before the
+        commit, when a session carries the conversation on. The flag is per
+        run, so a conversation whose runs are one request each (answers with
+        no tools) would otherwise never compact."""
+        if not (
+            self.state.compact_next and self.agent.context is not None and self.session is not None
+        ):
+            return items, convo
+        compacted = await self._compact(convo)
+        if compacted is None:
+            return items, convo
+        summary, convo = compacted
+        return items + [summary], convo
 
     async def _compact(self, convo: List[dict]) -> Optional[Tuple[dict, List[dict]]]:
         policy = self.agent.context

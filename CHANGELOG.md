@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **operonx-agents 0.2.5: a conversation of answers without tools compacts.** `compact_next` was decided per run: a run of one request (an answer, no tools) whose prompt crossed `ContextPolicy.compact_at` ended before any next request of its own, and the next run started from scratch, so such a conversation never compacted however long it grew. Now, with a session, the answer that crossed the threshold compacts before its run commits, and the next run starts from the summary. The threshold is still the provider's counted tokens.
 - **operonx-agents 0.2.4: sessions and run stores on one SQLite file share one connection, and reads take no write lock.** Each `SQLiteSession` and `SQLiteStateStore` opened its own connection, and every operation — reads too — ran under `BEGIN IMMEDIATE`; an app with many conversations on one file raised `database is locked` (50 concurrent sessions: errors before, none now). Stores opened on the same file (by real path; `:memory:` is never shared) now share one connection and one lock, closed when the last one closes; `get_items` and a run's `load` begin a plain transaction. (`operonx_agents._storage`.)
 
 ### Added
