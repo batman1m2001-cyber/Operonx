@@ -8,16 +8,17 @@
     operonx serve ...               # serve the services     (operonx.cli.serve)
     operonx play ...                # drive a served door    (operonx.app.play)
     operonx eval ...                # experiments: run, compare, report (operonx.cli.eval)
+    operonx lint [DIR] [--build]    # check the project's conventions  (operonx.cli.lint)
     operonx studio [DIR]            # open the project in operonx-studio (operonx.cli.studio)
 
-``run``, ``serve``, ``play``, ``eval`` and ``studio`` are handed the rest of the
+``run``, ``serve``, ``play``, ``eval``, ``lint`` and ``studio`` are handed the rest of the
 command line untouched: each is its module's own ``main(argv)`` (for the
 first three, the one the deprecated ``operonx-<name>`` alias calls too),
 so there is one parser per command and two spellings cannot differ.
 
 Inside a project whose ``.operonx/guide/`` is stale — an operonx package
 was added, removed or upgraded — any command first syncs it and says so
-in one line on stderr.
+in one line on stderr. ``lint`` does not: a checker never writes.
 """
 
 from __future__ import annotations
@@ -38,8 +39,18 @@ DELEGATED = {
     "serve": ("operonx.cli.serve", "serve the application's services"),
     "play": ("operonx.app.play", "the playground bridge: drive a service's doors over JSON lines"),
     "eval": ("operonx.cli.eval", "run experiments, compare and report them, size them"),
+    "lint": (
+        "operonx.cli.lint",
+        "check the project against the operonx conventions (its AGENTS.md rules)",
+    ),
     "studio": ("operonx.cli.studio", "open this project in operonx-studio (starts it if needed)"),
 }
+
+
+#: Delegated subcommands that never write to the project, not even its guide
+#: copy: a checker that changes what it checks (and, run from another
+#: environment, deletes the guide pages of packages that environment lacks).
+READ_ONLY = {"lint"}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -202,7 +213,8 @@ def _autosync() -> None:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in DELEGATED:
-        _autosync()
+        if argv[0] not in READ_ONLY:
+            _autosync()
         return importlib.import_module(DELEGATED[argv[0]][0]).main(argv[1:])
     parser = _parser()
     args = parser.parse_args(argv)
