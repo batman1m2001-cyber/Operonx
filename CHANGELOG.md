@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **operonx-agents 0.2.3: tool verifiers, `@tool(verify=...)`.** `verify(ctx, args, result)` runs after a call that succeeded, within the tool's `timeout`, and checks its effect is really there. Only `True` confirms: the tool message then ends "Verified: …". A reason string, `False`, `None`, an exception or a timeout makes the message an error — "ran, but its effect could not be confirmed: <reason>. Do not report it as done" — with what the tool returned. A write that answered but did not land can no longer read to the model as a success. The verdict is on the call's trace record as `operonx.tool.verified`. Guide page `agents/01-agents.md`. (`operonx_agents.tools.Verify`; the stale `operonx_agents.__version__` now matches the package.)
+
 ## [1.30.0] - 2026-10-16
 
 ### Added

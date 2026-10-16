@@ -133,6 +133,13 @@ asyncio.run(main())
   reason. An interruption left unanswered keeps waiting with the same id.
 - `approval="always"` asks for every call; a `ToolPolicy` can `ask` or
   `deny` per tool. A policy's `deny` never reaches a human.
+- `verify=(ctx, args, result) -> True | str` checks a call's effect after it
+  runs (the row written, the status changed): `@tool(verify=lambda ctx, args,
+  result: orders.status(args["order_id"]) == "refunded" or "not refunded")`.
+  Only `True` confirms; a reason, an exception or a timeout reaches the model
+  as an error saying the call ran but did not take effect, so it cannot report
+  a success that did not happen. The verdict is in the trace
+  (`operonx.tool.verified`).
 
 ## Serve it: `agent_service`
 

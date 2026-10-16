@@ -1,8 +1,8 @@
 """Run a model turn's tool calls: one tool message per call, always.
 
 For each call, in this order: policy, unknown tool, arguments, the
-``before_tool`` hooks, approval, run, the ``after_tool`` hooks,
-truncation. Every outcome — success, :class:`~operonx_agents.ModelRetry`,
+``before_tool`` hooks, approval, run, the tool's verifier, the
+``after_tool`` hooks, truncation. Every outcome — success, :class:`~operonx_agents.ModelRetry`,
 invalid arguments, a timeout, an exception, a refusal, an unknown tool —
 is one ``role: "tool"`` message answering that call's id. A provider
 rejects a conversation where a call has no answer, so nothing here raises
@@ -83,6 +83,11 @@ NO_APPROVER = (
     "Blocked: {name!r} needs a human's approval and this run has no way to ask one. " + DO_NOT_RETRY
 )
 #: A hook's ``Deny``: a refusal with the hook's reason, never a question.
+VERIFIED = "{content}\n\nVerified: the effect of this {name!r} call was checked after it ran."
+NOT_VERIFIED = (
+    "Error: tool {name!r} ran, but its effect could not be confirmed: {reason}. "
+    "Do not report it as done; say what is unconfirmed. What it returned: {content}"
+)
 HOOK_DENIED = "Blocked: {reason} This is not a transient failure; do not retry {name!r}."
 
 _UNSAFE = re.compile(r"[.\[\]#]")
@@ -250,7 +255,10 @@ async def _one(call, toolset, ctx, policy, gate, hooks, redact, on_start) -> Uni
                 "gen_ai.tool.call.id": call_id,
             }
         )
-        outcome = await _answer(call, found, toolset, ctx, policy, gate, hooks, on_start)
+        seen: Dict[str, Any] = {}
+        outcome = await _answer(call, found, toolset, ctx, policy, gate, hooks, on_start, seen)
+        if "verified" in seen:
+            rec.attrs["operonx.tool.verified"] = seen["verified"]
         if isinstance(outcome, Paused):
             rec.outputs = {"interrupted": [i.id for i in outcome.interruptions]}
         else:
@@ -267,8 +275,10 @@ async def _answer(
     gate: Gate,
     hooks: Optional[HookSet],
     on_start: Optional[OnStart],
+    seen: Optional[Dict[str, Any]] = None,
 ) -> Union[dict, Paused]:
     call_id, name, raw = call["id"], call["name"], call["args"]
+    seen = {} if seen is None else seen
 
     def say(content: str, *, error: bool = False) -> dict:
         limit = found.spec.max_result_chars if found is not None else 0
@@ -300,7 +310,8 @@ async def _answer(
         return say(BAD_ARGS.format(name=name, error=_field_errors(exc)), error=True)
 
     call_ctx = ctx
-    if found.takes_context or not isinstance(found.spec.approval, str) or hooks:
+    per_call = found.takes_context or found.spec.verify is not None
+    if per_call or not isinstance(found.spec.approval, str) or hooks:
         call_ctx = copy.copy(ctx)  # per call; deps and the meter are shared
         call_ctx.tool_call_id = call_id
     the_call = ToolCall(call_id, name, args)
@@ -333,6 +344,14 @@ async def _answer(
             timeout = found.spec.timeout
             result = await (asyncio.wait_for(result, timeout) if timeout else result)
         content, error = _render(result), False
+        if found.spec.verify is not None:
+            reason = await _verify(found.spec, call_ctx, args, result)
+            seen["verified"] = reason is None
+            if reason is None:
+                content = VERIFIED.format(content=content, name=name)
+            else:
+                content = NOT_VERIFIED.format(name=name, reason=reason, content=content)
+                error = True
     except asyncio.TimeoutError:
         content = TIMEOUT.format(name=name, timeout=found.spec.timeout)
     except ModelRetry as retry:
@@ -346,6 +365,26 @@ async def _answer(
         # Before truncation: a redaction must see the whole text.
         content = await hooks.tool_content(call_ctx, the_call, content)
     return say(content, error=error)
+
+
+async def _verify(
+    spec: ToolSpec, ctx: RunContext, args: Dict[str, Any], result: Any
+) -> Optional[str]:
+    """``None`` when the verifier confirms the call's effect, else why not.
+    Its own failure is a "not confirmed", never the tool's: the tool ran."""
+    try:
+        verdict = spec.verify(ctx, args, result)
+        if inspect.isawaitable(verdict):
+            verdict = await (asyncio.wait_for(verdict, spec.timeout) if spec.timeout else verdict)
+    except asyncio.TimeoutError:
+        return f"the check timed out after {spec.timeout}s"
+    except Exception as exc:  # noqa: BLE001 - a check that fails confirms nothing
+        return f"the check failed ({type(exc).__name__}: {exc})"
+    if verdict is True:
+        return None
+    if isinstance(verdict, str) and verdict.strip():
+        return verdict.strip().rstrip(".")
+    return f"the check answered {verdict!r}, not True"
 
 
 async def _before_tool(hooks: HookSet, ctx: RunContext, call: ToolCall, found: Tool) -> Any:

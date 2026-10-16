@@ -15,7 +15,15 @@ import time
 import pytest
 from operonx import END, START, Operon, graph, op
 
-from operonx_agents import ModelRetry, RunContext, ToolPolicy, Toolset, dispatch, tool
+from operonx_agents import (
+    ModelRetry,
+    RunContext,
+    ToolDefinitionError,
+    ToolPolicy,
+    Toolset,
+    dispatch,
+    tool,
+)
 
 SPANS: list = []
 
@@ -277,3 +285,121 @@ class TestTracing:
         handle = Operon(odd_name).start({})
         out = await handle.result()
         assert "no tool named 'a.b[0]'" in out["m"][0]["content"]
+
+
+LEDGER: dict = {}
+
+
+def _in_ledger(ctx, args, result):
+    if LEDGER.get(args["key"]) == args["value"]:
+        return True
+    return f"{args['key']} is not {args['value']!r} after the write"
+
+
+@tool(verify=_in_ledger)
+async def put(key: str, value: str) -> str:
+    """Write a value."""
+    if key != "lost":  # a write that answers but does not land
+        LEDGER[key] = value
+    return "written"
+
+
+async def _checked_late(ctx, args, result):
+    await asyncio.sleep(5)
+    return True
+
+
+@tool(timeout=0.05, verify=_checked_late)
+async def slow_check() -> str:
+    """Its check never answers."""
+    return "done"
+
+
+@tool(verify=lambda ctx, args, result: None)
+def forgot() -> str:
+    """Its check forgets to answer."""
+    return "done"
+
+
+def _broken(ctx, args, result):
+    raise KeyError("status")
+
+
+@tool(verify=_broken)
+def broken_check() -> str:
+    """Its check raises."""
+    return "done"
+
+
+@tool(verify=lambda ctx, args, result: ctx.tool_call_id == "c1" and result == "seen")
+def sees_call(ctx: RunContext) -> str:
+    """Its check reads the call's context and result."""
+    return "seen"
+
+
+@tool(verify=lambda ctx, args, result: True)
+def fails() -> str:
+    """Raises before any check."""
+    raise RuntimeError("no")
+
+
+CHECKED = Toolset([put, slow_check, forgot, broken_check, sees_call, fails])
+
+
+async def checked(c):
+    (msg,) = await dispatch([c], CHECKED, ctx=RunContext())
+    return msg
+
+
+class TestVerify:
+    async def test_a_confirmed_call_says_it_was_checked(self):
+        msg = await checked(call("put", {"key": "a", "value": "1"}))
+        assert msg["status"] == "success"
+        assert msg["content"].startswith("written\n\nVerified:")
+
+    async def test_a_call_that_did_not_take_effect_is_an_error_with_the_reason(self):
+        msg = await checked(call("put", {"key": "lost", "value": "1"}))
+        assert msg["status"] == "error"
+        said = "ran, but its effect could not be confirmed: lost is not '1' after the write"
+        assert said in msg["content"]
+        assert "Do not report it as done" in msg["content"] and msg["content"].endswith("written")
+
+    @pytest.mark.parametrize(
+        "name, reason",
+        [
+            ("slow_check", "the check timed out after 0.05s"),
+            ("forgot", "the check answered None, not True"),
+            ("broken_check", "the check failed (KeyError: 'status')"),
+        ],
+    )
+    async def test_a_check_that_does_not_say_true_confirms_nothing(self, name, reason):
+        msg = await checked(call(name, {}))
+        assert msg["status"] == "error" and reason in msg["content"]
+
+    async def test_the_check_reads_the_context_and_the_result(self):
+        assert (await checked(call("sees_call", {})))["status"] == "success"
+
+    async def test_a_failed_call_is_not_checked(self):
+        msg = await checked(call("fails", {}))
+        assert msg["content"] == "Error: tool 'fails' failed: RuntimeError: no"
+
+    def test_a_check_must_be_a_function(self):
+        with pytest.raises(ToolDefinitionError, match="verify='yes' is not a function"):
+            tool(lambda: 1, name="x", description="X.", verify="yes")
+
+    async def test_the_verdict_is_in_the_trace(self):
+        handle = Operon(verified_graph).start({})
+        await handle.result()
+        rec = next(n for n in handle.trace.nodes if n.op_type == "tool")
+        assert rec.attrs["operonx.tool.verified"] is False
+
+
+@op
+async def verified_turn() -> dict:
+    return {"m": await dispatch([call("put", {"key": "lost", "value": "2"})], CHECKED)}
+
+
+@graph
+def verified_graph():
+    t = verified_turn()
+    START >> t >> END
