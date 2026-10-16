@@ -114,3 +114,48 @@ def test_redis_needs_a_connection():
         RedisSession("s")
     with pytest.raises(ValueError, match="not both"):
         RedisStateStore(object(), url="redis://x")
+
+
+async def test_sessions_and_stores_on_one_file_share_one_connection(tmp_path):
+    db = tmp_path / "chat.db"
+    a, b, store = SQLiteSession("a", db), SQLiteSession("b", str(db)), SQLiteStateStore(db)
+    other = SQLiteSession("c", tmp_path / "other.db")
+    assert a._db._file is b._db._file is store._db._file and other._db._file is not a._db._file
+    a.close()
+    await b.add_items(ITEMS)  # one closing leaves the others open
+    assert await b.get_items() == ITEMS
+    b.close(), store.close(), other.close()
+    assert a._db._file.users == 0
+
+
+async def test_many_sessions_writing_at_once_never_hit_a_locked_database(tmp_path):
+    import asyncio
+
+    db = tmp_path / "chat.db"
+    sessions = [SQLiteSession(f"user{k}", db) for k in range(50)]
+
+    async def talk(s):
+        for t in range(10):
+            await s.get_items(limit=40)
+            await s.add_items([{"role": "user", "content": f"{s.session_id} {t}"}])
+
+    await asyncio.gather(*(talk(s) for s in sessions))
+    assert [len(await s.get_items()) for s in sessions] == [10] * 50
+    for s in sessions:
+        s.close()
+
+
+async def test_a_read_takes_no_write_lock(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "chat.db"
+    s = SQLiteSession("s1", db)
+    await s.add_items(ITEMS)
+    writer = sqlite3.connect(db, isolation_level=None)  # another process writing
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        assert await s.get_items() == ITEMS  # a write lock would wait 10 s, then fail
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()
+        s.close()

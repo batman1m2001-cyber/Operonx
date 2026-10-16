@@ -115,7 +115,8 @@ class SQLiteStateStore:
         row = await self._db.run(
             lambda db: db.execute(
                 "SELECT state FROM operonx_agents_runs WHERE run_id = ?", (run_id,)
-            ).fetchone()
+            ).fetchone(),
+            write=False,
         )
         return RunState.loads(row[0]) if row else None
 
