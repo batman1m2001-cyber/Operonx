@@ -270,6 +270,10 @@ class Manifest:
     resources_overlay: Optional[str]
     source: Optional[Path]
     on_startup: Tuple[Any, ...] = ()
+    #: ASGI middleware around every listener's app, outermost first:
+    #: ``module:attr`` strings or the objects, each called ``entry(app=app)``
+    #: (a Starlette middleware class, or a function returning the wrapped app).
+    middleware: Tuple[Any, ...] = ()
     # `[project] src = ["src"]`: the import roots, relative to `root`.
     # A project that keeps its packages under `src/` says so once here
     # instead of in every entry point.
@@ -369,6 +373,13 @@ class Manifest:
         for hook in on_startup:
             if not _ENTRY_RE.match(hook):
                 raise ManifestError(f"{where}: on_startup {hook!r} is not `module:function`")
+        # what every response passes through: security headers, a request
+        # id, compression — around the whole listener, the services' routes
+        # and a mounted app alike
+        middleware = tuple(str(m) for m in _as_list(project.get("middleware")))
+        for entry in middleware:
+            if not _ENTRY_RE.match(entry):
+                raise ManifestError(f"{where}: middleware {entry!r} is not `module:attr`")
         app_entry = project.get("app")
         if app_entry is not None and not _ENTRY_RE.match(str(app_entry)):
             raise ManifestError(f"{where}: [project] app {app_entry!r} is not `module:attr`")
@@ -444,6 +455,7 @@ class Manifest:
             resources_overlay=overlay,
             source=source,
             on_startup=on_startup,
+            middleware=middleware,
             src=src,
             tracing=tracing,
             queues=queues,

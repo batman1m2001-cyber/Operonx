@@ -219,6 +219,11 @@ operonx run score_calls
   is a guard: `ResourceHub.guard("llm:", check)` in `app/main.py`, with
   `check(key, method, args, kwargs)` raising to refuse — the call is never
   made (an `LLMOp` reports the error, like a provider's).
+- **What every response passes through** — security headers, a request id —
+  is ASGI middleware: `Application(..., middleware=[SecurityHeaders])` (or
+  `[project] middleware = ["app.http:SecurityHeaders"]`), outermost first,
+  each called `entry(app=app)`. It wraps the whole listener: the services'
+  routes, a mounted app, `/healthz`.
 - **An eval** is a `datasets/<name>.jsonl` and an `Eval(...)` (a kind of
   job) in `app/main.py`; `operonx run <eval>` gates CI.
 - **What a run opens and closes** (a call's per-call objects, its record) are
