@@ -526,9 +526,35 @@ class ServeRunner:
         finally:
             _in_flight[0] -= 1
             if failed:
+                self._said_to_caller(session, handle)
                 await self._report_failure(session)
             await self._close_one(session, handle)
             await self._finish(session, failed)
+
+    def _said_to_caller(self, session: Session, handle: Any) -> None:
+        """A run that failed on an exception with a 4xx ``http_status`` (a
+        refusal the project raised: not signed in, not allowed, not found)
+        answers that status and the exception's text, not the ``500`` of a
+        run that produced nothing. Only when nothing was sent: a reply
+        already started is not taken back."""
+        refuse = getattr(session, "refuse", None)
+        if refuse is None or handle is None or getattr(session, "replies", None):
+            return
+        said = next(
+            (
+                r
+                for r in unhandled(handle.errors).values()
+                if isinstance(r, dict) and r.get("http_status")
+            ),
+            None,
+        )
+        if said is None:
+            return
+        body = {"error": said["reason"], "endpoint": self.spec.name}
+        trace_id = getattr(session, "trace_id", None)
+        if trace_id:
+            body["trace_id"] = trace_id
+        refuse(said["http_status"], body)
 
     async def _finish(self, session: Session, failed: bool) -> None:
         """The run is over (its op after END included): a transport that

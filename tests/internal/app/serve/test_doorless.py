@@ -55,6 +55,26 @@ def failing_flow(question):
     START >> b >> END
 
 
+class NotAllowed(PermissionError):
+    http_status = 403
+
+
+@op
+def guarded(question: str) -> dict:
+    SEEN.append(question)
+    if question == "secret":
+        raise NotAllowed("only the owner reads this")
+    if question == "odd":
+        raise ValueError("a bug, not a refusal")
+    return {"answer": question}
+
+
+@graph
+def guarded_flow(question):
+    g = guarded(question=question)
+    START >> g >> END
+
+
 @op
 def stamp() -> dict:
     SEEN.append("tick")
@@ -186,6 +206,26 @@ def test_a_failing_run_is_a_500_with_its_trace_id_and_no_detail():
     assert reply.json()["trace_id"] == reply.headers["x-operonx-trace-id"]
     assert "sk-live-1" not in reply.text
     assert SEEN == ["hi"]
+
+
+def test_a_run_that_refuses_with_an_http_status_answers_it():
+    """An op raising an exception with a 4xx ``http_status`` is the
+    project refusing the caller: that status and the exception's text, not
+    the 500 of a run that failed — and the run is still recorded."""
+    service = Service("g", http("POST", "/g", port=8904), graph=guarded_flow)
+    with TestClient(_app(service)) as client:
+        refused = client.post("/g", json={"question": "secret"})
+        streamed = client.post(
+            "/g", json={"question": "secret"}, headers={"accept": "text/event-stream"}
+        )
+        bug = client.post("/g", json={"question": "odd"})
+        fine = client.post("/g", json={"question": "hi"})
+    assert refused.status_code == 403 and streamed.status_code == 403
+    assert refused.json()["error"] == "only the owner reads this"
+    assert refused.json()["trace_id"] == refused.headers["x-operonx-trace-id"]
+    assert "Traceback" not in refused.text
+    assert bug.status_code == 500 and "a bug" not in bug.text  # no status: still a 500, no detail
+    assert fine.status_code == 200 and fine.json() == {"answer": "hi"}
 
 
 def test_a_stream_reader_gets_exactly_one_event_the_outputs():

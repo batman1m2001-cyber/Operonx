@@ -511,7 +511,11 @@ async def _stream_reply(
         first = await frames.__anext__()
     except StopAsyncIteration:
         if session.refusal is not None:
-            return JSONResponse(session.refusal[1], status_code=session.refusal[0])
+            return JSONResponse(
+                session.refusal[1],
+                status_code=session.refusal[0],
+                headers=_trace_headers(session.trace_id),
+            )
         return _no_output(spec, session.trace_id, JSONResponse)
 
     async def body():
@@ -576,7 +580,7 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
         headers = _trace_headers(session.trace_id)
 
         if session.refusal is not None:
-            return JSONResponse(session.refusal[1], status_code=session.refusal[0])
+            return JSONResponse(session.refusal[1], status_code=session.refusal[0], headers=headers)
         if not session.replies:
             return _no_output(spec, session.trace_id, JSONResponse)
         return JSONResponse(session.reply, headers=headers)

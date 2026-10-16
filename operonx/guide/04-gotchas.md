@@ -53,7 +53,10 @@ the cause shows beside whatever failed downstream of it.
 
 `handle.errors` is the same dict on a started run. Over HTTP a failed run
 is a `500 {"error": "the graph produced no output", "trace_id": ...}`; the
-traceback stays in the log and the trace, which that id finds.
+traceback stays in the log and the trace, which that id finds. A refusal
+is not a failure to the caller: raise an exception whose class has
+`http_status = 403` (any 400–499) and the reply is that status with the
+exception's message; `$errors` keeps `http_status` and `reason`.
 
 ## Return a dict literal; name dynamic keys where the op is used
 

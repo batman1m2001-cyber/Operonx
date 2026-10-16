@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.27.0] - 2026-10-16
+
+### Added
+
+- **A served run can refuse with a status.** An op that raises an exception whose class has `http_status` 400–499 (`class Forbidden(PermissionError): http_status = 403`) makes the request answer that status with the exception's message as `error` (and the run's `trace_id`), on a JSON or a streamed reply, instead of the `500` of a run that produced nothing. Before, a project refusing a caller — not signed in, not allowed — could only answer 500, which reads as a crash and hides the reason. Any other exception is still a 500 with no detail; the record in `$errors` keeps `http_status` and `reason`. A refusal reply now carries `x-operonx-trace-id` when a run was started. Guides 02 and 04.
+
 ## [1.26.0] - 2026-10-15
 
 ### Added
