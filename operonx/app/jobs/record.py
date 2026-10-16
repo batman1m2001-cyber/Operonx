@@ -23,6 +23,7 @@ holds every result, wherever it was computed.
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,7 @@ __all__ = [
     "done_keys",
     "last_run",
     "load_results",
+    "prune",
     "runs_of",
 ]
 
@@ -346,6 +348,23 @@ def runs_of(root: str | Path, job: str) -> List[Path]:
     if not base.is_dir():
         return []
     return sorted(p for p in base.iterdir() if p.is_dir() and (p / "run.json").exists())
+
+
+def prune(root: str | Path, job: str, keep: int) -> int:
+    """Remove *job*'s oldest finished runs so that *keep* remain; a run
+    still going is never touched. Returns how many were removed."""
+    finished = []
+    for path in runs_of(root, job):
+        try:
+            status = json.loads((path / "run.json").read_text(encoding="utf-8"))["status"]
+        except (OSError, ValueError, KeyError):
+            continue  # half-written or foreign: not ours to delete
+        if status != RUN_RUNNING:
+            finished.append(path)
+    gone = finished[: max(len(finished) - keep, 0)]
+    for path in gone:
+        shutil.rmtree(path, ignore_errors=True)
+    return len(gone)
 
 
 def last_run(root: str | Path, job: str) -> Optional[JobRun]:

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.30.0] - 2026-10-16
+
+### Added
+
+- **`Job(keep_runs=N)`: a job keeps only its newest N finished runs.** After each run the oldest finished run directories are removed so N remain; a run still going is never touched. Default unchanged: every run is kept. Before, a job on a short clock had no bound — a worker polling every 5 s left 17,000 run directories (about 200 MB) a day under `.operonx/jobs`. Docs guide 10. (`operonx.app.jobs.record.prune`.)
+
 ## [1.29.0] - 2026-10-16
 
 ### Added

@@ -168,7 +168,16 @@ One directory per run:
 ```
 
 Runs go under `.operonx/jobs` at the project root; `[jobs] dir` in
-`operonx.toml` or `record_dir=` moves them. Per-item statuses:
+`operonx.toml` or `record_dir=` moves them. Every run is kept unless the job
+says otherwise: a job on a short clock — a worker polling every few seconds —
+sets `keep_runs=N`, and after each run its oldest finished runs are removed so
+N remain (a run still going is never touched):
+
+```python
+Job("agent_worker", graph=worker, schedule=schedule(every="5s", port=8030), keep_runs=200)
+```
+
+Per-item statuses:
 
 | status    | meaning                                                                 |
 |-----------|-------------------------------------------------------------------------|
