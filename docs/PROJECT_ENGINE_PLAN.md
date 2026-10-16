@@ -285,13 +285,25 @@ No new database server, queue, service or language is needed.
   the operonx CLI, the way `operonx studio` is) plus an `operonx-project`
   script.
 
-  The clash is fixed on the studio's side. The studio's internal module of
-  the same name (manifest, extract, lint, scaffold; about 30 references,
-  3 entry points, 14 test files) is injected into every project's
-  interpreter (`daemon.py:217-242`), so two `operonx_project`s would
-  shadow each other. It becomes `operonx_studio_toolkit` in a studio PR
-  in P1, before the new package is installed anywhere. The entry-point
-  names stay the same.
+  The clash is fixed on the studio's side, by **splitting** the studio's
+  module of the same name. That module was once meant to be a headless
+  `operonx-project` distribution (the studio's docstring still says it
+  "reads the Project IR produced by `operonx-project`"), and it is
+  injected into every project's interpreter (`daemon.py:217-242`), so two
+  `operonx_project`s would shadow each other. Its 4,081 lines split by
+  where each part belongs:
+
+  | Part | Lines | Goes |
+  |---|---|---|
+  | `manifest.py` | 450 | **replaced** by core's `operonx.app.manifest`; its extras (`resources.base`, `[graph.bind]`) are used by none of the 40 `operonx.toml` on this machine |
+  | `scaffold.py`, `templates.py` | 819 | **replaced** by `operonx init`; the scaffold is an old layout (pinned at 1.5.0, `[[serve]]`), the starters are pinned at 1.17.1. A starter that core lacks moves into `operonx init --template` only if it builds on current operonx |
+  | `lint.py`, `buildcheck.py` | ~500 | **moved to core** as `operonx lint` (§6.1) |
+  | `extract.py`, `pyedit.py`, `edit.py`, `apply.py` | ~2,000 | **stay** (canvas IR, typed edits from the UI), renamed `operonx_studio_toolkit` |
+
+  It is **not merged** into the engine. That would make the engine carry
+  the canvas code and the studio depend on the engine. After the split,
+  the engine needs only core.
+
 - **D2. Install `bubblewrap` in P2,** when the implementer first runs, so
   that Claude Code's bash sandbox confines the implementer's shell to its
   worktree with no network. It is one system package, `apt install
@@ -1366,9 +1378,7 @@ of each gate go into §17.
 - **Builds:** the package skeleton in `packages/operonx-project`, the CI
   matrix entries, the mission store with its transition table, cards
   with dependencies, the board columns and WIP limits, the knobs of
-  §5.5, and the scheduler driven by fake card runners. In the studio
-  repo, a PR renames its internal `operonx_project` module to
-  `operonx_studio_toolkit` (D1), and its suite passes.
+  §5.5, and the scheduler driven by fake card runners.
 - **Gate:**
   - unit tests of every transition, waves, the ready set, blocked
     propagation, path locks, push vs pull, the column limits and budgets;
@@ -1388,6 +1398,14 @@ of each gate go into §17.
   - `checks`: host and docker runs, the baseline;
   - in core, `operonx lint` (moved from the studio) with the new rules
     C7–C12 (§6.1), as its own PR;
+  - in the studio, right after it, one PR that splits its
+    `operonx_project` module (D1):
+    - core's manifest and `operonx init` replace the studio's own;
+    - lint and build check come from core;
+    - extract and the edits are renamed `operonx_studio_toolkit`.
+
+    It lands before any project with operonx-project installed is opened
+    in the studio (P5);
   - `apt install bubblewrap` and Claude Code's bash sandbox (D2).
 - **Gate:**
   - the adapter's tests against a scripted fake `claude` executable (a
@@ -1395,7 +1413,8 @@ of each gate go into §17.
   - git tests on real temporary repos;
   - `operonx lint`: each new rule has a failing case and a passing case;
     it runs clean on the `operonx init` templates and on OneWealth; the
-    studio's lint tests pass on the alias;
+    studio's whole suite passes after the split, and its "New project"
+    creates the same tree as `operonx init`;
   - the sandbox refuses a write outside the worktree and a network call,
     and both refusals show up in the round's record;
   - **one paid smoke** with the real Claude Code: a session that creates
