@@ -334,6 +334,21 @@ def test_without_kept_results_nothing_is_written(tmp_path):
     assert not (run.path / "results.jsonl").exists()
 
 
+def test_keep_runs_keeps_the_newest_finished_runs_and_never_one_still_going(tmp_path):
+    from operonx.app.jobs.record import runs_of
+
+    job = Job("j", graph=sq, items=[{"n": 1}], key="n", keep_runs=2)
+    ids = [_run(job, tmp_path).run_id for _ in range(4)]
+    assert [p.name for p in runs_of(tmp_path / "rec", "j")] == ids[-2:]
+    going = tmp_path / "rec" / "j" / "20000101T000000-000000"  # the oldest name, still running
+    going.mkdir()
+    (going / "run.json").write_text(json.dumps({"status": "running"}))
+    last = _run(job, tmp_path).run_id
+    assert [p.name for p in runs_of(tmp_path / "rec", "j")] == [going.name, ids[-1], last]
+    with pytest.raises(ValueError, match="keep_runs"):
+        Job("j", graph=sq, keep_runs=0)
+
+
 # -- failures -----------------------------------------------------------------
 
 

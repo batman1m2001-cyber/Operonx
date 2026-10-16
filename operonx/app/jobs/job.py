@@ -140,6 +140,10 @@ class Job:
         keep_results: Keep each result in the record's ``results.jsonl``.
             ``False`` for results too big to keep; ``reduce`` then has
             nothing to read and is refused.
+        keep_runs: Keep only this job's newest N finished runs, removing
+            older ones after each run. Default: every run is kept. For a
+            job on a short clock (a worker polling every few seconds), whose
+            runs would otherwise pile up without end.
         on_item: Called with each item's ``ItemResult`` as it is recorded
             (sync or async): progress lines, events for a host. It never
             breaks the run. ``run(on_item=...)`` replaces it for that run.
@@ -182,6 +186,7 @@ class Job:
         steps: Optional[Sequence["Job"]] = None,
         trace: Any = None,
         keep_results: bool = True,
+        keep_runs: Optional[int] = None,
         record_dir: Union[str, Path, None] = None,
         on_item: Optional[Callable[[Any], Any]] = None,
         description: str = "",
@@ -250,6 +255,9 @@ class Job:
         self.preflight: List[str] = list(preflight or [])
         self.trace = trace
         self.keep_results = bool(keep_results)
+        if keep_runs is not None and (isinstance(keep_runs, bool) or int(keep_runs) < 1):
+            raise ValueError(f"job {name!r}: keep_runs= is at least 1 (or None: keep every run)")
+        self.keep_runs: Optional[int] = int(keep_runs) if keep_runs is not None else None
         #: Where runs are recorded (``<record_dir>/<name>/<run>``). ``None``
         #: is the project's: see :func:`default_record_dir`.
         self.record_dir: Optional[Path] = Path(record_dir) if record_dir is not None else None
@@ -366,6 +374,7 @@ class Job:
         says what started it (a schedule's tick), kept in the record."""
         from operonx.app.manifest import check_transient
 
+        from .record import prune
         from .runner import TRIGGER, run_job, run_steps
 
         check_transient()  # a `[retry] transient` typo fails here, not in an item
@@ -377,8 +386,12 @@ class Job:
         token = TRIGGER.set(dict(trigger)) if trigger else None
         try:
             if self.steps is not None:
-                return await run_steps(self, resume=resume, record_dir=record_dir)
-            return await run_job(self, resume=resume)
+                run = await run_steps(self, resume=resume, record_dir=record_dir)
+            else:
+                run = await run_job(self, resume=resume)
+            if self.keep_runs is not None:
+                prune(self.records(), self.name, self.keep_runs)
+            return run
         finally:
             self.record_dir, self.on_item = kept
             if token is not None:
