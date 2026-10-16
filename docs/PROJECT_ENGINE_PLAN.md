@@ -1742,10 +1742,22 @@ typing or happy path alone.
 - **Open in P2:**
   - **The sandbox gate item is blocked** on the owner's AppArmor decision
     (see D2). The refusal path is tested with the real error text.
-  - **The studio split** (D1) needs #195 released for the lint alias. Its
-    manifest is the studio's own project view (`[[graph]]` with `bind`,
-    `src`, resource base/overlay) and is replaced by core's `Application`,
-    so it is a refactor of the studio repo in its own PR.
+  - **The studio split** (D1) is done as **operonx-studio#95**. It merges
+    after #195, since it pins operonx ≥ 1.31.0.
+    - `operonx_project` is renamed `operonx_studio_toolkit`.
+    - Lint and the build check are core's `operonx lint`, and the scaffold
+      is core's `operonx init`; `operonx-lint` and `operonx-new` remain as
+      aliases.
+    - The manifest is parsed by core, while the studio keeps its view types.
+      `[resources] base` and `[graph.bind]` are gone; no project used them.
+    - The studio suite: 684 passed. A copy of the callbot (operonx 1.26)
+      extracts to an identical IR before and after.
+    - **One deliberate deviation from D1:** the studio's four *example*
+      templates (http-api, batch-scorer, rag-qa, voice-agent) are kept.
+      They are listed after core's four `operonx init` templates, which
+      "New project" writes byte-for-byte as `operonx init` does. Their job
+      (a green run and an eval in the first minutes) has no core
+      equivalent, so replacing them would have removed it.
 - **Incident:** a lint run with its working directory in OneWealth (which
   another agent is refactoring) let the delegated CLI's guide autosync
   rewrite its `.operonx/guide/` and `AGENTS.md` from an environment without
