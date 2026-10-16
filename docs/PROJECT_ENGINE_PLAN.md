@@ -19,13 +19,17 @@ going, and your reply resumes that exact run in any process, even after a
 restart. It ends with a branch, a PR description and the evidence behind
 every claim.
 
-**One example.** Goal: *"Build `commit-guard`, a pre-commit hook that stops
-commits that would leak archives, office documents, `.env` files or keys
-into a public repo."*
-1. The engine writes `docs/brd/` in the repo: the goal as source SRC-01,
-   14 requirement rows, and `Q-01 (conflict)`. The goal says "block office
-   documents", but the repo commits `.docx` templates in
-   `docs/templates/`.
+**One example.** Goal: *"Build `leak-watch`: every morning it scans our git
+repos for files that must not be public (archives, office documents,
+`.env`, keys, big files), and a pre-commit hook stops them before they
+leak. Our repos follow `policy/CONTRIBUTING.md`."*
+1. The engine creates the project with `operonx init --template hello`,
+   so it has the standard layout, `AGENTS.md` and the guide. It then
+   writes `docs/brd/` in the repo:
+   - the goal as source SRC-01, and the policy file as SRC-02;
+   - 14 requirement rows;
+   - `Q-01 (conflict)`: the goal says "flag office documents", but the
+     policy commits `.docx` templates in `docs/templates/` on purpose.
 2. It plans 6 cards. The rows of `Q-01` wait, while cards C1–C3 and C5
    move across the board.
 3. You get *"Block all office files, or allow `docs/templates/`? I
@@ -33,8 +37,8 @@ into a public repo."*
    warn".
 4. Card C4 resumes in the same Claude session with your answer. A
    reviewer session that never saw C4's reasoning checks the diff, pytest
-   runs on real temporary git repos, and held-out tests the implementer
-   never saw run too.
+   runs on real temporary git repos, held-out tests the implementer never
+   saw run too, and so do the operonx convention checks.
 5. C4's rows turn `implemented_verified` in the checklist.
 
 ---
@@ -216,7 +220,7 @@ No new database server, queue, service or language is needed.
      to cite a file in the diff and a line that exists. If it does not,
      it is kept as *unverified* and does not block.
 6. **Parallel tasks never share a working tree.** Each task gets a git
-   worktree on `forge/<mission>/<task>`, branched from the integration
+   worktree on `mission/<mission>/<task>`, branched from the integration
    branch once its dependencies have merged. Tasks whose declared `paths`
    overlap do not run at the same time. Merges into the integration branch
    take one lock and are followed by the full checks (regression against
@@ -274,71 +278,56 @@ No new database server, queue, service or language is needed.
 17. **"Card" is the board's name for a task.** The two words mean the
     same thing in this document.
 
-### Open: yours to decide
+### Decided on your go-ahead (2026-10-17: "you decide yourself")
 
-- **D1. The name.** `operonx-project` would import as `operonx_project`,
-  which the studio already ships into project environments: same name,
-  different code. Options:
-  - **(a) `operonx-forge` (recommended).** It imports as `operonx_forge`,
-    the CLI is `forge`, and nothing breaks.
-  - (b) Keep `operonx-project` and rename the studio's module (to
-    `operonx_studio_project`). That touches the studio's CLI entry points,
-    `install.sh`, and every project environment it seeded.
+- **D1. The name stays `operonx-project`.** It imports as
+  `operonx_project`, and its CLI is `operonx project <cmd>` (handed off by
+  the operonx CLI, the way `operonx studio` is) plus an `operonx-project`
+  script.
 
-  This plan uses `operonx-forge` / `forge` from here on.
-- **D2. A real sandbox for the implementer's shell.** Claude Code's bash
-  sandbox needs `bubblewrap`, which is not installed. Without it, the
-  implementer's Bash runs as this user on this host, which is the same
-  box as the staging callbot. Options:
-  - **(a) Install `bubblewrap` (recommended).** It is a system package on
-    a shared server, so it is your call. The implementer's Bash is then
-    confined to its worktree with no network.
-  - (b) Proceed without it. Mitigations: a worktree as the working
-    directory, a scrubbed environment, deny rules, and check commands run
-    in `docker --network none`. The docs then say plainly that this is not
-    a boundary, so missions only run on repos you trust.
-
-  Check commands run in Docker either way.
-- **D3. Quota.** Missions run on this machine's Claude Max login, the
-  same quota as your own interactive Claude Code sessions. A busy mission
-  can use up the 5-hour window you also work in. Options:
-  - **(a) Max login with `max_parallel = 2` (recommended for the PoC).**
-    The engine pauses on a rate-limit reply and resumes at the reset time.
-    The bake-off (P7) needs about 8–12 coder hours. I would run it in
-    windows you are not using, overnight for example.
-  - (b) An `ANTHROPIC_API_KEY` with a hard spend cap, kept separate from
-    your usage.
-- **D4. Telegram, at the end** (P10):
-  - a bot token (BotFather) and your Telegram user id;
-  - long poll (recommended) or webhook through your ngrok domain.
-
-  Nothing before P10 needs them.
-- **D5. OneWealth as test input M.** The bake-off replays a finished
-  OneWealth phase on a **local copy** (never pushed; the private `.docx`
-  stays out of git, ADR-0001), and E0 reads your original BRD `.docx`
-  locally. Recommended: yes. The alternative is to find a public project
-  with a spec and history, which is weaker: no real BRD, no Vietnamese
-  sources, and no rows to score against.
+  The clash is fixed on the studio's side. The studio's internal module of
+  the same name (manifest, extract, lint, scaffold; about 30 references,
+  3 entry points, 14 test files) is injected into every project's
+  interpreter (`daemon.py:217-242`), so two `operonx_project`s would
+  shadow each other. It becomes `operonx_studio_toolkit` in a studio PR
+  in P1, before the new package is installed anywhere. The entry-point
+  names stay the same.
+- **D2. Install `bubblewrap` in P2,** when the implementer first runs, so
+  that Claude Code's bash sandbox confines the implementer's shell to its
+  worktree with no network. It is one system package, `apt install
+  bubblewrap`. If the sandbox fails on this kernel, the fallback is the
+  mitigations listed in §11, with the docs saying plainly that it is not
+  a boundary. Check commands run in Docker either way.
+- **D3. The Max login, with `max_parallel = 2`.** The engine pauses on a
+  rate-limit reply and resumes at the reset time. The bake-off (P7)
+  needs about 8–12 coder hours, so it runs in windows you are not using,
+  overnight.
+- **D4. Telegram at the end (P10), by long poll.** The bot token and your
+  Telegram user id will be needed then. A webhook through the ngrok
+  domain stays an option. Nothing before P10 needs them.
+- **D5. OneWealth is test input M** and the E0 source. It runs on a
+  local copy that is never pushed, and the private `.docx` is read
+  locally and never committed (ADR-0001).
 
 ---
 
 ## 3. Architecture
 
 ```
-            you ── Telegram ──┐          studio Missions tab ──┐        forge CLI ──┐
+            you ── Telegram ──┐          studio Missions tab ──┐        `operonx project` CLI ──┐
                               ▼                                ▼                    ▼
                     ┌───────────────────── commands (SqliteQueue) ─────────────────────┐
                     │  submit_answer · pause · resume · cancel · approve · revise      │
                     └──────────────────────────────┬───────────────────────────────────┘
                                                    ▼
-   ┌───────────────────────────── forge daemon (one per workspace) ─────────────────────────────┐
+   ┌───────────────────────────── project daemon (one per workspace) ─────────────────────────────┐
    │  MissionRunner: lifecycle (§6) · Scheduler: DAG, waves, locks, budgets (§8)               │
    │  Messenger: outbound questions, inbound updates (§9) · Recovery on start (§10)             │
    └───────┬──────────────────────────────┬──────────────────────────────────┬──────────────────┘
            │ one journalled Operon run     │ git worktree per task            │ reads / writes
            ▼ per stage / task attempt      ▼                                  ▼
-   discover_flow · plan_flow ·      <repo>/.git  ── forge/<m>/<task>    forge.db (mission store)
-   task_flow · integrate_flow ·        integration: forge/<m>           journal.db (forge's own)
+   discover_flow · plan_flow ·      <repo>/.git  ── mission/<m>/<task>    missions.db (mission store)
+   task_flow · integrate_flow ·        integration: mission/<m>           journal.db (its own)      
    final_flow                                                           .operonx/runs (traces)
            │ each round's stages call
            ▼
@@ -346,13 +335,13 @@ No new database server, queue, service or language is needed.
    Checks (subprocess or docker: the repo's own test / lint / type commands)
 ```
 
-**The workspace** is a folder made by `forge init`. It holds an
+**The workspace** is a folder made by `operonx project init`. It holds an
 `operonx.toml`, so the studio opens it like any operonx project, and it
-has `.operonx/forge/{forge.db, journal.db, missions/<id>/…}`. The **target
+has `.operonx/project/{missions.db, journal.db, missions/<id>/…}`. The **target
 repo** is anywhere. A mission names it, and its worktrees live under the
 mission folder.
 
-**Package layout** (`packages/operonx-forge/operonx_forge/`):
+**Package layout** (`packages/operonx-project/operonx_project/`):
 
 | Module | What |
 |---|---|
@@ -360,7 +349,7 @@ mission folder.
 | `model.py` | `Mission`, `Task`, `Round`, `Finding`, `CheckResult`, `Interaction` dataclasses and their state enums |
 | `dag.py` | validation (acyclic, deps exist, coverage), waves, ready set, blocked propagation, path locks |
 | `board.py` | columns, WIP limits, pull and push policies, the replenisher's trigger (§8.5) |
-| `brd/` | readers (`.docx`, PDF, images, zip, text), the source register, extraction checks, `Q-nn`, the template, `forge brd init / check` (§4) |
+| `brd/` | readers (`.docx`, PDF, images, zip, text), the source register, extraction checks, `Q-nn`, the template, `operonx project brd init / check` (§4) |
 | `examiner.py` | held-out tests: written outside the repo, run at card done and at the end; failures reported by name and message only (§5.4) |
 | `scheduler.py` | the asyncio loop: start ready tasks under limits, react to run ends and commands |
 | `flows/` | the module-level graphs: `discover_flow`, `plan_flow`, `task_flow`, `integrate_flow`, `final_flow` |
@@ -369,7 +358,7 @@ mission folder.
 | `gitops.py` | worktrees, branches, commits, merges under a lock, conflict detection, diff for review |
 | `interact/` | `Interaction` lifecycle, `submit_answer`, escalation triage, message rendering, expiry |
 | `messengers/` | `Messenger` protocol, `TelegramMessenger`, `FakeBotAPI` (test server), `ConsoleMessenger` |
-| `daemon.py`, `cli.py` | `forge init / new / up / status / pending / answer / pause / resume / cancel / show` |
+| `daemon.py`, `cli.py` | `operonx project init / new / up / status / pending / answer / pause / resume / cancel / show` |
 | `guide/` | the package's tested guide page, like agents and kb |
 
 ---
@@ -446,7 +435,7 @@ Then the engine checks what an agent tends to get wrong:
 - A real BRD gets the three layers (requirements, features, UX),
   architecture notes and ADRs.
 
-  The template is OneWealth's layout, generalized (`forge brd init`), with
+  The template is OneWealth's layout, generalized (`operonx project brd init`), with
   its `MAINTAINING.md` rules.
 
 ### 4.3 Questions are `Q-nn`
@@ -463,8 +452,8 @@ of §9.1, so a Telegram question *is* a `Q-nn`. Your answer becomes its
 resolution, and an ADR when it shapes the design. A question is never
 deleted and never silently resolved.
 
-The commit-guard conflict in the first example is `Q-01 (conflict)`: the
-goal's "block office documents" against `CONTRIBUTING.md`'s templates.
+The leak-watch conflict in the first example is `Q-01 (conflict)`: the
+goal's "flag office documents" against the policy's committed templates.
 
 ### 4.4 The checklist is the traceability matrix
 
@@ -487,7 +476,7 @@ The status uses OneWealth's vocabulary:
 This matrix is the **definition of done** for a mission:
 - the mission's target rows end `implemented_verified`, or end in a
   status with the reason stated;
-- the checker (`forge brd check`, generalized from `check_brd_docs.py`:
+- the checker (`operonx project brd check`, generalized from `check_brd_docs.py`:
   links, IDs, coverage, cited tests exist and passed) is one of the QA
   commands of every card;
 - a card's done includes its **doc obligations** from `MAINTAINING.md`:
@@ -656,7 +645,7 @@ rather than whoever reads them. The rule I break otherwise is
 
 **Inputs**
 
-- **S, small greenfield:** commit-guard (§13). A one-paragraph goal, a
+- **S, small greenfield:** leak-watch (§13), created with `operonx init`. A one-paragraph goal, a
   seeded repo, one genuine conflict.
 - **M, medium brownfield, a replay:** a finished OneWealth phase, for
   example F8 (newsletter, #48) or F7 (alerts, #47), picked by size in P7.
@@ -775,7 +764,7 @@ not mechanically.
 9. **Final verification** (`final_flow`):
    - the full checks on the integration branch against the baseline;
    - the held-out tests (V2);
-   - `forge brd check`;
+   - `operonx project brd check`;
    - one review of the whole mission diff, looking at integration
      problems that no single card saw;
    - the matrix rows of the scope, each with its evidence.
@@ -792,6 +781,72 @@ yet. That is at most 2 replans per mission, besides W2's ordinary
 just-in-time detailing. Done cards are never redone. Questions on cards
 that were replaced become `superseded` (§9.5).
 
+
+### 6.1 A new project is an operonx project, made with `operonx init`
+
+In this ecosystem a new product is an operonx project. So when the
+mission is greenfield, the first card is fixed: **create the project with
+`operonx init`**. The planner chooses the template from the requirements:
+- `hello`: a job and an HTTP service;
+- `http`: a doors graph;
+- `chat`: one LLMOp;
+- `agent`: operonx-agents.
+
+It also chooses `--uv` or `--pip` (your rule: banks have no uv). The
+engine runs the command itself; the coder does not hand-write the
+layout. That gives every card the same footing:
+- `AGENTS.md` / `CLAUDE.md` and `.operonx/guide/`, which Claude Code reads
+  on its own, since its working directory is the worktree;
+- the standard layout: `app/main.py` holding the `Application`, and
+  `src/<feature>/graph.py` with `ops.py`;
+- `operonx.toml`, `resources.yaml` and `.env.example`.
+
+The role prompts add one line for operonx targets: *read
+`.operonx/guide/README.md` and the page for any API before using it; never
+write an operonx API from memory*. That is the rule `AGENTS.md` itself
+states. On an existing operonx repo (OneWealth, the callbot), its
+`AGENTS.md` is the convention, and `operonx guide --check` tells whether
+its copy of the guide is stale.
+
+**The conventions are checked, not hoped for.** For an operonx target
+every card's QA runs:
+
+| Check | What it enforces | Today |
+|---|---|---|
+| `pytest` | the project's tests and the acceptance tests | exists |
+| build check: `operonx serve --list`, `operonx run --list`, and every graph built | the `Application` resolves, and every `@graph` builds (C1, C2) | exists (studio `buildcheck`) |
+| `operonx lint` | op names from variables, no tuple unpacking (C3); no ops built or wired in loops (C5); resources by key, no credentials in code (C6) | exists as the studio's `operonx-lint`, **not on this machine's PATH** |
+| `operonx lint`, new rules | no `@graph` inside a function (C7); no `print()` (C8); no retry loop in an op (C9); no logic, I/O or Python `if` in `graph.py` (C10); explicit `START >> … >> END` edges (C11); a new secret name missing from `.env.example` (C12) | **new**: the `AGENTS.md` rules a reviewer would otherwise have to remember |
+| `operonx guide --check` | the project's guide copy matches the installed operonx | exists |
+| the reviewer | the rest of `AGENTS.md`: one feature per folder, imports go one way, fake models in tests, `@op(retry=False)` for side effects | a checklist item in the review prompt |
+
+**Where the linter lives.** The rules are core's: core's `operonx init`
+writes them into `AGENTS.md`. The engine needs them in any target
+environment, and today they are only in the studio repo. So P2 **moves
+the static linter into core as `operonx lint`** (`lint.py` is
+dependency-free AST code, about 330 lines) and adds C7–C12 with a failing
+test first each. The studio's `operonx-lint` becomes a thin alias of it.
+This is upstream work in core, done as its own PR, in line with "operonx
+is upstream".
+
+### 6.2 The engine follows the same conventions
+
+operonx-project is itself operonx code, and it is held to the same
+rules:
+- its flows are module-level graphs, one feature per folder
+  (`operonx_project/flows/<flow>/graph.py` + `ops.py`): wiring in
+  `graph.py`, logic in `ops.py`;
+- settings are graph inputs, and the edges are explicit;
+- logging goes through `LOGGER`, never `print`;
+- retry comes from `Retry`/`retry_call`, never hand loops, and side
+  effects (a commit, a merge, a send) are `@op(retry=False)`;
+- models are resources by key.
+
+`operonx lint` and the build check run on the package in CI. The
+workspace that `operonx project init` makes is an ordinary operonx
+project: it calls `operonx init` and then adds its `[project]` block, so
+the studio opens it like any other, and its runs land in the project's
+trace store.
 ---
 
 ## 7. A task: the rounds inside `task_flow`
@@ -828,7 +883,7 @@ Its `next` output loops back (`fix`), parks (`ask`) or ends the run:
    outside the task's `paths`, it is rejected with that as the finding.
    Outside paths are allowed, with a warning, when declared shared, such
    as `pyproject.toml`.
-4. **checks:** the baseline commands plus the acceptance tests, run in
+4. **checks:** the baseline commands plus the acceptance tests, and for an operonx target the convention checks of §6.1, run in
    the worktree, give exit codes and output tails.
 5. **review:** only when the checks pass. A fresh reviewer session gets
    the diff, the criteria and the check results. Its findings go through
@@ -902,7 +957,7 @@ An illegal transition raises.
   you**, the tasks downstream of it stay `pending` ("waiting on T4's
   decision"), and **independent tasks keep running**.
 - **Integration** happens in order under one lock:
-  1. merge the task branch into `forge/<m>`;
+  1. merge the task branch into `mission/<m>`;
   2. on a conflict, the task gets a new round "rebase onto the
      integration tip", with the conflict as input, then review and checks
      again;
@@ -993,14 +1048,14 @@ deduplicates them.
 ### 9.2 The message
 
 ```
-🧩 commit-guard · T4 Office documents — needs your decision
+🧩 leak-watch · C4 Office documents · Q-01 — needs your decision
 
-The goal says "block office documents", but the repo's own templates live in
-docs/templates/*.docx (3 files, committed weekly per CONTRIBUTING.md). Blocking
-all .docx would block those commits too.
+The goal says "flag office documents", but policy/CONTRIBUTING.md (SRC-02) says
+the .docx templates in docs/templates/ are committed on purpose. Flagging all
+.docx would block those commits in every repo that follows the policy.
 
-Tried: read CONTRIBUTING.md and the git log of docs/templates (12 commits since July).
-Nothing in the goal or the repo says which wins.
+Tried: read both sources, and searched for a rule that ranks them. Neither the
+goal nor the policy says which wins.
 
 A) ✅ Allow docs/templates/ only, block .docx elsewhere — recommended:
    keeps the templates workflow, still blocks stray documents.
@@ -1008,7 +1063,7 @@ B) Warn on office files everywhere, never block — no workflow breaks, weaker g
 C) Block everywhere; templates move out of the repo — strongest, breaks the workflow.
 
 Reply to this message in your own words, or tap a button.
-Other tasks continue: T2, T3, T5 are running. T6 waits for this.
+Other cards continue: C2, C3, C5 are moving. C6 waits for this.
 [ A (recommended) ] [ B ] [ C ] [ ✏️ Other… ]
 ```
 
@@ -1077,8 +1132,8 @@ studio when a link exists.
     flags it.
 - **Delivery failure:** sends retry with backoff (`retry_call`, the
   `TRANSIENT` classifier). The interaction keeps `delivery: pending |
-  sent | failed`. The question still stands, and `forge pending`, the
-  studio and `forge answer` work without Telegram.
+  sent | failed`. The question still stands, and `operonx project pending`, the
+  studio and `operonx project answer` work without Telegram.
 - **Restart in the middle of an answer:** the answer is in the store
   before the queue item is acknowledged. A daemon that dies after
   `submit_answer` and before the resume finds the `resume` command on
@@ -1118,7 +1173,7 @@ of these are tested in P9.
 | between `submit_answer` and the resume | the `resume` command is found in the queue and run |
 | merging | merges are atomic per command; a half-written merge (`MERGE_HEAD` present) is aborted and redone under the lock |
 
-**Single daemon.** A lease in `forge.db` stops two daemons from driving
+**Single daemon.** A lease in `missions.db` stops two daemons from driving
 one workspace. A stale lease expires after 30 s.
 
 **Rate limits.** A Claude rate-limit reply carries its reset time. The
@@ -1155,11 +1210,11 @@ implement / checks / review` as `child()` steps. Coder transcripts
 | Files the implementer can write | `cwd` = its worktree. Claude file tools are confined to it (`--restricted` + `--tools` naming Bash for the implementer only). Paths are guarded per task (§7, step 3). |
 | The implementer's shell | **D2:** bubblewrap sandbox (no network, writes only in the worktree), or no boundary on a trusted repo, said plainly |
 | Check commands | `docker run --rm --network none -v <worktree>:/work`, an image named in the mission policy (host execution is opt-in for trusted repos) |
-| Credentials | the child environment is scrubbed (the studio's `base_env`: no `ANTHROPIC_*`, `CLAUDE*`, no project `.env`); deny rules `Read(**/.env*)`, `Read(~/.claude/**)`, `Read(<forge state>/**)` |
+| Credentials | the child environment is scrubbed (the studio's `base_env`: no `ANTHROPIC_*`, `CLAUDE*`, no project `.env`); deny rules `Read(**/.env*)`, `Read(~/.claude/**)`, `Read(<project state>/**)` |
 | Git | the engine owns branches; the coder's `git push`, `git remote`, `git config`, `reset --hard` on other branches are denied; push or merge to a base branch only by approval |
-| Untrusted repo content | file contents and tool output are data: the role prompts say so, the reviewer's and triage's tools are read-only, and nothing a repo file says can change the mission policy (policy lives in `forge.db`, set by you) |
+| Untrusted repo content | file contents and tool output are data: the role prompts say so, the reviewer's and triage's tools are read-only, and nothing a repo file says can change the mission policy (policy lives in `missions.db`, set by you) |
 | Telegram | §9.6 |
-| Studio | the studio's login is the boundary; its Missions tab calls the `forge` CLI under the workspace's interpreter, so the same checks apply |
+| Studio | the studio's login is the boundary; its Missions tab calls the `operonx project` CLI under the workspace's interpreter, so the same checks apply |
 
 ---
 
@@ -1172,11 +1227,11 @@ rebuild all of that. The engine stays usable without the studio: the
 CLI, Telegram and `DELIVERY.md` cover everything.
 
 **How it reads and acts.**
-- **Reads** go straight to `forge.db`, read-only, and to the target
+- **Reads** go straight to `missions.db`, read-only, and to the target
   repo's BRD folder. The schema is documented and versioned
   (`schema_version`), the way the studio already reads run stores.
 - **Actions** (answer, approve, pause, resume, cancel, reprioritize a
-  card) run `forge api <json>` under the workspace's interpreter, so
+  card) run `operonx project api <json>` under the workspace's interpreter, so
   validation lives in one place, the same as the playground bridge.
 - Updates arrive by cursor, like the assistant and the playground.
 
@@ -1187,7 +1242,7 @@ questions:
 - **Graph**: what depends on what, and which waves?
 
 ```
-Missions ▸ commit-guard          W2 · running · rows 9/14 verified · $4.10 / $30 · 1h12m
+Missions ▸ leak-watch            W2 · running · rows 9/14 verified · $4.10 / $30 · 1h12m
 [ Board ] [ Checklist ] [ Graph ]
 ┌ Waiting on you (1) ─────────────────────────────────────────────────────────────────┐
 │ Q-01 conflict · C4 Office documents — allowlist templates or block everywhere? [A][B][C][✏️]│
@@ -1222,22 +1277,34 @@ rule).
 
 ## 13. The proof of concept, and the bake-off inputs
 
-**S: `commit-guard`, a real, small, useful tool.** A pre-commit hook and
-CLI (`pip install`, `commit-guard install`) that stops a commit from
-leaking into a public repo:
-- archives (`.zip`, `.tar.*`, `.7z`), office documents, `.env*`;
-- private keys and token patterns;
-- files over a size limit.
+**S: `leak-watch`, a real, small, useful operonx project.** The engine
+creates it with `operonx init leak-watch --template hello`, the template
+for "a pure-compute feature, run as a job and served over HTTP", which
+is exactly its shape. It has:
+- a Job `scan_repos` with one item per git repo under a root. For each
+  repo it classifies the tracked files: archives (`.zip`, `.tar.*`,
+  `.7z`), office documents, `.env*`, private keys and token patterns, and
+  files over a size limit. Its `reduce=` writes one report, and it runs
+  with `schedule=schedule(at="07:00")`;
+- a Service `POST /check` that classifies a list of paths;
+- `leak-watch install`, which writes a pre-commit hook that runs the same
+  graph locally, so a commit is stopped before it leaks;
+- pytest on real temporary git repos, and the operonx conventions checked
+  (§6.1).
 
-It is tested with pytest on real temporary git repos. It answers a real
-incident: your zips leaked to a public repo through `git add -A`.
+It answers a real incident: your zips leaked to a public repo through
+`git add -A`.
 
-The target repo is `/home/thanglq/forge-poc/commit-guard`, a new folder
-with its own `git init`, outside every existing repo. It is seeded with a
-README stub, a `CONTRIBUTING.md` saying the team commits
-`docs/templates/*.docx`, and three such templates. That seed makes the
-office-documents rule a **genuine conflict between the goal and the
-repo** (`Q-01`): no evidence settles it, so it is your call.
+There are **two sources**, as a BRD often has:
+- SRC-01, the goal paragraph;
+- SRC-02, the team's `CONTRIBUTING.md` (seeded under
+  `/home/thanglq/project-poc/policy/`), which says that `.docx` templates
+  in `docs/templates/` are committed on purpose.
+
+That makes "flag office documents" a **genuine conflict between two
+sources** (`Q-01`): no evidence settles it, so it is your call. The target
+repo, `/home/thanglq/project-poc/leak-watch`, starts empty with its own
+`git init`, outside every existing repo.
 
 Whether the engine actually escalates it is itself a test of §9.1. If
 triage "decides" it silently, the run shows that the policy is wrong; the
@@ -1296,10 +1363,12 @@ batched commits), merged when its gate passes. The commands and results
 of each gate go into §17.
 
 **P1. Store, model, cards, scheduler (no LLM)**
-- **Builds:** the package skeleton in `packages/operonx-forge`, the CI
+- **Builds:** the package skeleton in `packages/operonx-project`, the CI
   matrix entries, the mission store with its transition table, cards
   with dependencies, the board columns and WIP limits, the knobs of
-  §5.5, and the scheduler driven by fake card runners.
+  §5.5, and the scheduler driven by fake card runners. In the studio
+  repo, a PR renames its internal `operonx_project` module to
+  `operonx_studio_toolkit` (D1), and its suite passes.
 - **Gate:**
   - unit tests of every transition, waves, the ready set, blocked
     propagation, path locks, push vs pull, the column limits and budgets;
@@ -1316,11 +1385,19 @@ of each gate go into §17.
     group), rate-limit detection;
   - `gitops`: worktrees, commits, merge under a lock, conflicts, the
     private-source guard;
-  - `checks`: host and docker runs, the baseline.
+  - `checks`: host and docker runs, the baseline;
+  - in core, `operonx lint` (moved from the studio) with the new rules
+    C7–C12 (§6.1), as its own PR;
+  - `apt install bubblewrap` and Claude Code's bash sandbox (D2).
 - **Gate:**
   - the adapter's tests against a scripted fake `claude` executable (a
     test double, labelled);
   - git tests on real temporary repos;
+  - `operonx lint`: each new rule has a failing case and a passing case;
+    it runs clean on the `operonx init` templates and on OneWealth; the
+    studio's lint tests pass on the alias;
+  - the sandbox refuses a write outside the worktree and a network call,
+    and both refusals show up in the round's record;
   - **one paid smoke** with the real Claude Code: a session that creates
     a file, is resumed, and returns `--json-schema` output. It checks the
     event shapes we parse, about $0.10 notional.
@@ -1347,8 +1424,8 @@ of each gate go into §17.
   - `brd_flow`, with the quote, coverage and ID checks and the
     miss-hunter;
   - the `Q-nn` writer;
-  - the generalized template (`forge brd init`) and checker
-    (`forge brd check`);
+  - the generalized template (`operonx project brd init`) and checker
+    (`operonx project brd check`);
   - diffing a new source version.
 - **Gate:**
   - unit tests of each reader on real files (a `.docx` with tables and
@@ -1368,14 +1445,19 @@ of each gate go into §17.
   - plan review with the mechanical checks, approval;
   - the examiner, final verification, `DELIVERY.md`;
   - the daemon (lease, recovery pass, command queue) and the CLI.
+- **Also builds:** the greenfield path (§6.1): the `operonx init` card,
+  the template choice, and the operonx QA commands.
 - **Gate:**
   - the whole lifecycle in both modes with the scripted coder;
+  - a greenfield mission creates its project with `operonx init`, and
+    its QA runs pytest, the build check, `operonx lint` and
+    `operonx guide --check`;
   - the plan-review cap;
   - the replenisher keeps Ready at its depth and stops when no rows are
     left;
   - replanning keeps done cards;
   - the recovery pass covers each crash-matrix row that P3 does not;
-  - `forge status` and `forge show` are accurate against the store.
+  - `operonx project status` and `operonx project show` are accurate against the store.
 
 **P6. Interactions and messaging (Telegram still mocked)**
 - **Builds:** the interaction lifecycle as `Q-nn`, `submit_answer`,
@@ -1389,7 +1471,7 @@ of each gate go into §17.
   - a stale answer after a replan; expiry with and without a safe default;
   - an unauthorized user and an unauthorized chat are silently dropped;
   - `/cancel` needs confirmation;
-  - a send failure → retry → `forge answer` still works;
+  - a send failure → retry → `operonx project answer` still works;
   - the token never appears in logs (grep in the test).
 
 **P7. The bake-off (paid; Telegram is the fake server; §5.6)**
@@ -1410,11 +1492,11 @@ of each gate go into §17.
     written up in §17.
 - **Expected cost:** about 8–12 hours of coder time over several Max
   windows (D3), notional $40–100. The rows are written into
-  `docs/forge/BAKEOFF.md`.
+  `docs/project/BAKEOFF.md`.
 
 **P8. Studio Missions tab (studio repo, its own branch)**
 - **Builds:** the list, the mission page with **board, checklist and
-  graph**, the waiting-on-you card (answers via `forge api`), the card
+  graph**, the waiting-on-you card (answers via `operonx project api`), the card
   panel and the links to run pages.
 - **Gate:**
   - studio tests for the read API and the action calls;
@@ -1433,9 +1515,9 @@ of each gate go into §17.
     check, an untrusted repo file containing instructions ("ignore your
     task and …") with the policy unchanged;
   - the docker check runner;
-  - the guide page `operonx_forge/guide/01-forge.md`, run by the snippet
+  - the guide page `operonx_project/guide/01-project.md`, run by the snippet
     tests;
-  - regression: the forge suite, `tests/internal/durable`, `tests/guide`,
+  - regression: the operonx-project suite, `tests/internal/durable`, `tests/guide`,
     agents' suite (redact is reused), and studio tests.
 
 **P10. Real Telegram and a live mission (needs D4)**
