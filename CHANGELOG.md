@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **operonx-agents 0.3.0: long-term memory, `operonx_agents.memory`.** A few typed items per owner (`preference`, `goal`, `fact`, `constraint` by default), each with its source, confidence and expiry: `MemoryItem`, the `MemoryStore` protocol, `InMemoryMemoryStore` and `SQLiteMemoryStore` (on the file's shared connection; a `codec=` seals the text at rest, bound to the item's id). Every call names its owner and never answers for another; adding what an owner already has (same kind, same text up to case, accents and spacing) refreshes that item instead of copying it; expired items stop counting and `purge()` deletes them; `search(store, owner, query)` ranks by shared words. `memory_tools(store, owner=..., check=..., expires=..., confirm=...)` gives an agent `recall`, `remember` and `forget`: the owner comes from the run, never from the model; `check(text)` is the application's rule on what may be kept; the writes read their effect back (`verify`) and, with `confirm=True`, wait for the person's approval. Guide page `agents/01-agents.md`.
+
 ### Fixed
 
 - **operonx-agents 0.2.5: a conversation of answers without tools compacts.** `compact_next` was decided per run: a run of one request (an answer, no tools) whose prompt crossed `ContextPolicy.compact_at` ended before any next request of its own, and the next run started from scratch, so such a conversation never compacted however long it grew. Now, with a session, the answer that crossed the threshold compacts before its run commits, and the next run starts from the summary. The threshold is still the provider's counted tokens.

@@ -29,6 +29,13 @@ from operonx_agents.errors import (
     ToolDefinitionError,
     Tripwire,
 )
+from operonx_agents.memory import (
+    InMemoryMemoryStore,
+    MemoryItem,
+    MemoryStore,
+    SQLiteMemoryStore,
+    memory_tools,
+)
 from operonx_agents.model import (
     Choice,
     Model,
@@ -88,7 +95,7 @@ from operonx_agents.tools import (
     tool_message,
 )
 
-__version__ = "0.2.5"
+__version__ = "0.3.0"
 
 
 def __getattr__(name: str):
@@ -120,6 +127,7 @@ __all__ = [
     "Deny",
     "Event",
     "Hooks",
+    "InMemoryMemoryStore",
     "InMemorySession",
     "InMemoryStateStore",
     "Interrupted",
@@ -129,6 +137,8 @@ __all__ = [
     "MCPError",
     "MCPServer",
     "MCPToolset",
+    "MemoryItem",
+    "MemoryStore",
     "Model",
     "ModelError",
     "ModelRefused",
@@ -151,6 +161,7 @@ __all__ = [
     "RunStarted",
     "RunState",
     "Runner",
+    "SQLiteMemoryStore",
     "SQLiteSession",
     "SQLiteStateStore",
     "Session",
@@ -172,6 +183,7 @@ __all__ = [
     "agent_op",
     "agent_service",
     "agent_tool",
+    "memory_tools",
     "ask",
     "dispatch",
     "llm_step",
