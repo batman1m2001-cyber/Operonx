@@ -145,8 +145,11 @@ async def test_guard_rejects_an_edited_acceptance_test(tmp_path):
     assert not (wt / "notes.md").exists()
     second = env.coder.of("implementer")[1]["prompt"]
     assert "protected acceptance file" in second and "outside the card's paths" in second
-    log = env.git.git("log", "-p", "--all", cwd=wt)
-    assert "assert True" not in log.split("acceptance tests")[0] and "outside the card's paths" not in log
+    # no commit on any branch ever held the cheat (by file: commits made in one
+    # second have no reliable order in `git log`, so a position split is flaky)
+    acceptance = env.git.git("log", "-p", "--all", "--", "tests/acceptance/C1/test_c1_add.py", cwd=wt)
+    assert "assert True" not in acceptance and "assert add(2, 3) == 5" in acceptance
+    assert env.git.git("log", "--all", "--oneline", "--", "notes.md", cwd=wt).strip() == ""
 
 
 async def test_guard_rejects_a_private_source(tmp_path):
