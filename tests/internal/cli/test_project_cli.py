@@ -24,6 +24,8 @@ def test_hands_the_rest_of_the_command_line_over_and_never_syncs(monkeypatch):
     fake = types.ModuleType("operonx_project.cli")
     fake.main = lambda argv: got.append(argv) or 0
     monkeypatch.setitem(sys.modules, "operonx_project.cli", fake)
-    monkeypatch.setattr(cli_main, "_autosync", lambda: (_ for _ in ()).throw(AssertionError("synced")))
+    monkeypatch.setattr(
+        cli_main, "_autosync", lambda: (_ for _ in ()).throw(AssertionError("synced"))
+    )
     assert main(["project", "show", "m1", "C2", "--json"]) == 0
     assert got == [["show", "m1", "C2", "--json"]]
