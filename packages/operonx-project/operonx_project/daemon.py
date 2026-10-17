@@ -1,0 +1,112 @@
+"""The daemon: one per project, by lease; it runs the owner's commands and drives milestones.
+
+The CLI, the studio and (later) Telegram never drive a milestone: they
+queue a command in the store (:meth:`~operonx_project.store.Store.enqueue`).
+The daemon takes the lease (a stale one expires after its TTL, so a killed
+daemon is replaced within 30 s), runs the recovery pass, and then loops:
+commands first, then a drive task for every milestone in an active state.
+A command leaves the queue only once it was applied, so a daemon killed
+between an answer and the resume finds the answer still queued, or on the
+card (crash matrix, plan §10).
+
+The queue is a SQLite table written by other processes, so the loop polls
+it (``poll_s``, default 0.5 s); everything inside a drive is event-driven.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import socket
+import uuid
+from typing import Dict, Optional
+
+from operonx.core.loggings import LOGGER
+
+from operonx_project.lifecycle import ACTIVE, Lifecycle, Refused
+from operonx_project.scheduler import _kill_group
+
+__all__ = ["Daemon", "DaemonBusy"]
+
+
+class DaemonBusy(RuntimeError):
+    """Another daemon holds the project's lease."""
+
+
+class Daemon:
+    def __init__(self, life: Lifecycle, owner: Optional[str] = None, poll_s: float = 0.5, lease_ttl: float = 30.0):
+        self.life = life
+        self.store = life.store
+        self.owner = owner or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
+        self.poll_s = poll_s
+        self.ttl = lease_ttl
+        self.drives: Dict[str, asyncio.Task] = {}
+
+    def recover(self) -> None:
+        """The recovery pass: kill the coder sessions a dead daemon left in a
+        stage (the cards' are the scheduler's); the journals do the rest when
+        each active milestone is driven again."""
+        for ms in self.store.milestones():
+            if ms.state not in ACTIVE:
+                continue
+            for name in ("survey", "plan-1", "plan-2", "plan-3", "milestone-review"):
+                s = self.store.ms_get(ms.id, f"session:{name}") or {}
+                if s.get("pgid"):
+                    _kill_group(int(s["pgid"]))
+            self.store.note(ms.id, "daemon.recover", {"state": ms.state.value, "owner": self.owner})
+
+    async def _lease(self) -> None:
+        while True:
+            await asyncio.sleep(self.ttl / 3)
+            if not self.store.acquire_lease(self.owner, self.ttl):
+                LOGGER.error("the daemon lost its lease; stopping")
+                for t in self.drives.values():
+                    t.cancel()
+                return
+
+    async def _commands(self) -> int:
+        n = 0
+        for cmd in self.store.pending_commands():
+            n += 1
+            try:
+                result = await self.life.apply(cmd)
+                self.store.finish_command(cmd["seq"], "done", result)
+            except (Refused, KeyError, ValueError) as exc:
+                self.store.finish_command(cmd["seq"], "refused", str(exc))
+                self.store.note(cmd["milestone"], "command.refused", {"kind": cmd["kind"], "why": str(exc)[:500]})
+        return n
+
+    def _drive_active(self) -> None:
+        for ms in self.store.milestones():
+            if ms.state in ACTIVE and (ms.id not in self.drives or self.drives[ms.id].done()):
+                self.drives[ms.id] = asyncio.ensure_future(self.life.drive(ms.id))
+
+    async def serve(self, once: bool = False, stop: Optional[asyncio.Event] = None) -> None:
+        """Run until *stop* is set; with *once*, until nothing is active and no command is queued."""
+        if not self.store.acquire_lease(self.owner, self.ttl):
+            raise DaemonBusy("another daemon is driving this project (its lease has not expired)")
+        lease = asyncio.ensure_future(self._lease())
+        try:
+            self.recover()
+            while not (stop and stop.is_set()):
+                await self._commands()
+                self._drive_active()
+                for mid, t in list(self.drives.items()):
+                    if t.done():
+                        self.drives.pop(mid)
+                        if t.exception() is not None:
+                            LOGGER.error(f"{mid}: the drive raised {t.exception()!r}")
+                if once and not self.drives and not self.store.pending_commands():
+                    if not any(m.state in ACTIVE for m in self.store.milestones()):
+                        return
+                waiting = [*self.drives.values()]
+                if waiting:
+                    await asyncio.wait(waiting, timeout=self.poll_s, return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await asyncio.sleep(self.poll_s)
+        finally:
+            lease.cancel()
+            for t in self.drives.values():
+                t.cancel()
+            await asyncio.gather(*self.drives.values(), return_exceptions=True)
+            self.store.release_lease(self.owner)

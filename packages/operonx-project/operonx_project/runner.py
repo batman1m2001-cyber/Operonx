@@ -28,7 +28,7 @@ from operonx_project.model import Card, Stage
 from operonx_project.runtime import Runtime, register
 from operonx_project.scheduler import CardOutcome, Integrated
 
-__all__ = ["FlowRunner", "GitIntegrator"]
+__all__ = ["FlowRunner", "GitIntegrator", "InitRunner", "Runners", "runner_for"]
 
 
 def _outcome(out: Dict[str, Any], run_id: str) -> CardOutcome:
@@ -88,24 +88,32 @@ class FlowRunner:
         iid = q.get("interrupt_id")
         if not card.run_id or not iid:
             return CardOutcome("failed", "no parked run to resume", run_id=card.run_id)
+        # kept until the run reaches its next outcome: a crash between the answer and
+        # the resume (crash matrix) finds it here, and the recovery resumes with it
+        self.rt.set_detail(card.milestone, card.id, answering={"interrupt_id": iid, "answer": answer})
         self.rt.stages[(card.milestone, card.id)] = stage
         try:
             handle = await self.engine.resume(card.run_id, answers={iid: answer})
             out = await handle.result()
         finally:
             self.rt.stages.pop((card.milestone, card.id), None)
+        self.rt.set_detail(card.milestone, card.id, answering=None)
         return _outcome(out, card.run_id)
 
     async def recover(self, card: Card, stage: Callable[[Stage], None]) -> CardOutcome:
         """Continue a run whose process died mid-round."""
         if not card.run_id:
             return await self.run(card, stage)
+        answering = card.detail.get("answering") or {}
+        answers = {answering["interrupt_id"]: answering["answer"]} if answering.get("interrupt_id") else None
         self.rt.stages[(card.milestone, card.id)] = stage
         try:
-            handle = await self.engine.resume(card.run_id)
+            handle = await self.engine.resume(card.run_id, answers=answers)
             out = await handle.result()
         finally:
             self.rt.stages.pop((card.milestone, card.id), None)
+        if answering:
+            self.rt.set_detail(card.milestone, card.id, answering=None)
         return _outcome(out, card.run_id)
 
 
@@ -149,3 +157,71 @@ class GitIntegrator:
 def runner_for(rt: Runtime, journal: Optional[Union[str, Path]] = None) -> FlowRunner:
     """The runner with its journal beside the project's store."""
     return FlowRunner(rt, journal or Path(rt.data_dir) / "runs.db")
+
+
+class InitRunner:
+    """Card ``C0`` of a greenfield milestone: the engine runs ``operonx init``
+    in the card's worktree (the coder does not hand-write the layout),
+    commits it, and runs the operonx checks on it (plan §6.1)."""
+
+    def __init__(self, rt: Runtime, timeout_s: float = 300.0):
+        self.rt = rt
+        self.timeout_s = timeout_s
+
+    async def run(self, card: Card, stage: Callable[[Stage], None]) -> CardOutcome:
+        import asyncio
+
+        rt, mid = self.rt, card.milestone
+        spec = dict(card.detail.get("init") or {})
+        template, toolchain, name = spec.get("template") or "hello", spec.get("toolchain") or "uv", spec.get("name")
+        rt.git.ensure_integration(mid)
+        wt = rt.git.ensure_card(mid, card.id)
+        stage(Stage.IMPLEMENT)
+        argv = [*rt.operonx_argv(), "init", str(wt), "--template", template, f"--{toolchain}"]
+        if name:
+            argv += ["--name", name]
+        proc = await asyncio.create_subprocess_exec(*argv, cwd=str(wt), stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.STDOUT, env=rt.env)  # fmt: skip
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(), self.timeout_s)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return CardOutcome("failed", f"`operonx init` ran past {self.timeout_s:.0f} s")
+        text = out.decode(errors="replace")
+        rt.store.note(mid, "init.ran", {"argv": argv[-6:], "exit": proc.returncode, "tail": text[-1500:]}, card=card.id)
+        if proc.returncode != 0:
+            return CardOutcome("failed", f"`operonx init` exited {proc.returncode}: {text[-800:]}")
+        sha = rt.git.commit(wt, f"{mid}/{card.id}: operonx init --template {template} --{toolchain}")
+        stage(Stage.QA)
+        results = await run_checks(rt.checks, wt, rt.env)
+        bad = [r for r in results if not r.ok]
+        if bad:
+            tails = "\n".join(f"$ {r.name}\n{r.tail[-800:]}" for r in bad)
+            return CardOutcome("failed", f"the new project fails its checks: {', '.join(r.name for r in bad)}\n{tails}")
+        return CardOutcome("verified", f"operonx init --template {template} at {(sha or '')[:10]}; checks pass")
+
+    async def resume(self, card: Card, answer: Any, stage: Callable[[Stage], None]) -> CardOutcome:
+        return await self.run(card, stage)
+
+    async def recover(self, card: Card, stage: Callable[[Stage], None]) -> CardOutcome:
+        return await self.run(card, stage)  # init keeps the files it wrote; the commit has nothing new
+
+
+class Runners:
+    """One card runner for the scheduler: ``init`` cards to :class:`InitRunner`, the rest to ``task_flow``."""
+
+    def __init__(self, flow: FlowRunner, init: InitRunner):
+        self.flow = flow
+        self.init = init
+
+    def _of(self, card: Card):
+        return self.init if card.kind == "init" else self.flow
+
+    async def run(self, card: Card, stage: Callable[[Stage], None]) -> CardOutcome:
+        return await self._of(card).run(card, stage)
+
+    async def resume(self, card: Card, answer: Any, stage: Callable[[Stage], None]) -> CardOutcome:
+        return await self._of(card).resume(card, answer, stage)
+
+    async def recover(self, card: Card, stage: Callable[[Stage], None]) -> CardOutcome:
+        return await self._of(card).recover(card, stage)

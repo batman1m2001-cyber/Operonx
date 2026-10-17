@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -37,7 +38,7 @@ async def test_a_timeout_kills_the_whole_group(tmp_path):
 
 async def test_pytest_failures_are_named(tmp_path):
     (tmp_path / "test_x.py").write_text("def test_a():\n    assert 1\n\ndef test_b():\n    assert 0\n")
-    r = await run_check(Check("pytest", "python -m pytest -q -p no:cacheprovider"), tmp_path)
+    r = await run_check(Check("pytest", f"{sys.executable} -m pytest -q -p no:cacheprovider"), tmp_path)
     assert not r.ok and r.failures == ["test_x.py::test_b"]
 
 

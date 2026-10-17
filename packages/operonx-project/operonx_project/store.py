@@ -40,7 +40,7 @@ CARD_MOVES: Dict[CardState, frozenset] = {
     C.VERIFIED: frozenset({C.DONE, C.READY, C.FAILED, C.CANCELLED}),
     # done → ready: a final-verification gap or a changed source re-opens it
     C.DONE: frozenset({C.READY}),
-    C.FAILED: frozenset({C.READY}),  # the owner retries it, or a replan does
+    C.FAILED: frozenset({C.READY, C.CANCELLED}),  # the owner retries it; a replan retires it
     C.BLOCKED: frozenset({C.PENDING, C.CANCELLED}),
     C.CANCELLED: frozenset(),
 }
@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_by_milestone ON events (milestone, seq);
 CREATE TABLE IF NOT EXISTS lease (name TEXT PRIMARY KEY, owner TEXT, until REAL);
 CREATE TABLE IF NOT EXISTS steps (key TEXT PRIMARY KEY, at REAL, data TEXT);
+CREATE TABLE IF NOT EXISTS commands (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, milestone TEXT, card TEXT, kind TEXT,
+    payload TEXT, actor TEXT, status TEXT, result TEXT, done_at REAL);
 """
 
 _JSON_CARD = ("rows", "criteria", "deps", "paths", "detail")
@@ -318,6 +321,40 @@ class Store:
     def save_checkpoint(self, key: str, data: Dict[str, Any]) -> None:
         with self._tx() as db:
             db.execute("INSERT OR REPLACE INTO steps VALUES (?, ?, ?)", (key, time.time(), json.dumps(data)))
+
+    # ── a milestone's records: its brief, baseline, plan, stage runs ─────────
+    def ms_get(self, mid: str, key: str) -> Optional[Dict[str, Any]]:
+        return self.checkpoint(f"ms:{mid}:{key}")
+
+    def ms_put(self, mid: str, key: str, data: Dict[str, Any]) -> None:
+        self.save_checkpoint(f"ms:{mid}:{key}", data)
+
+    # ── the command queue: the CLI, the studio and Telegram write; the daemon runs ──
+    COMMANDS = ("start", "approve", "answer", "pause", "unpause", "cancel", "replan", "retry")
+
+    def enqueue(self, mid: str, kind: str, payload: Optional[Dict[str, Any]] = None, card: Optional[str] = None,
+                actor: str = "owner") -> int:  # fmt: skip
+        """Queue a command; it survives a crash until the daemon runs it."""
+        if kind not in self.COMMANDS:
+            raise ValueError(f"unknown command {kind!r}; one of {self.COMMANDS}")
+        with self._tx() as db:
+            cur = db.execute(
+                "INSERT INTO commands (at, milestone, card, kind, payload, actor, status) VALUES (?,?,?,?,?,?,?)",
+                (time.time(), mid, card, kind, json.dumps(payload or {}), actor, "pending"),
+            )
+            self._event(db, mid, card, "command", actor, {"kind": kind, "seq": cur.lastrowid})
+            return int(cur.lastrowid)
+
+    def pending_commands(self, mid: Optional[str] = None) -> List[Dict[str, Any]]:
+        sql = "SELECT * FROM commands WHERE status='pending'" + (" AND milestone=?" if mid else "") + " ORDER BY seq"
+        with self._lock:
+            rows = self._db.execute(sql, (mid,) if mid else ()).fetchall()
+        return [{**dict(r), "payload": json.loads(r["payload"] or "{}")} for r in rows]
+
+    def finish_command(self, seq: int, status: str = "done", result: str = "") -> None:
+        with self._tx() as db:
+            db.execute("UPDATE commands SET status=?, result=?, done_at=? WHERE seq=?",
+                       (status, result, time.time(), seq))  # fmt: skip
 
     # ── the daemon's lease: one daemon drives a project ─────────────────────
     def acquire_lease(self, owner: str, ttl: float = 30.0, name: str = "daemon") -> bool:
