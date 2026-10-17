@@ -30,6 +30,7 @@ __all__ = [
     "load_questions",
     "load_requirements",
     "matrix_status",
+    "resolve_question",
     "set_matrix_row",
     "write_requirements",
 ]
@@ -337,3 +338,34 @@ def add_questions(brd: Path, questions: Sequence[Question]) -> List[Question]:
     lines += [""] + [q.entry() for q in added]
     f.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return added
+
+
+def resolve_question(brd: Path, qid: str, resolution: str, state: str = "resolved") -> bool:
+    """Record a question's resolution: its index row's state, and a
+    ``**Resolution:**`` line in its entry. The entry is never removed."""
+    f = Path(brd) / QUESTIONS
+    if not f.exists():
+        return False
+    lines = f.read_text(encoding="utf-8").splitlines()
+    found = False
+    for n, line in enumerate(lines):
+        if re.match(rf"^\|\s*{re.escape(qid)}\s*\|", line):
+            cells = _split(line)
+            if len(cells) >= 4:
+                cells[3] = state
+                lines[n] = "| " + " | ".join(_cell(c) for c in cells) + " |"
+        elif line.startswith(f"### {qid} "):
+            found = True
+            end = n + 1
+            while end < len(lines) and not lines[end].startswith("### "):
+                end += 1
+            body = lines[n + 1 : end]
+            body = [re.sub(r"\*\*State:\*\* \w+", f"**State:** {state}", b) for b in body]
+            while body and not body[-1].strip():
+                body.pop()
+            body += ["", f"**Resolution:** {_cell(resolution)}", ""]
+            lines[n + 1 : end] = body
+            break
+    if found:
+        f.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return found

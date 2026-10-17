@@ -121,6 +121,10 @@ TRIAGE_SCHEMA: Dict[str, Any] = {
                 "tried": {"type": "string"},
                 "options": {"type": "array", "items": {"type": "object"}},
                 "recommended": {"type": "string"},
+                "safe_default": {
+                    "type": "boolean",
+                    "description": "the recommended option is reversible: taken if the owner never answers",
+                },
             },
         },
     },

@@ -18,6 +18,8 @@ dependencies = [
     # the BRD's readers (P4): docx/pptx/xlsx/html with the stdlib, PDF text by
     # docling-parse, scanned pages and images by tesseract (a system binary)
     "operonx-kb[ocr]>=0.2.6",
+    # the redactor every owner message passes through (P6)
+    "operonx-agents>=0.3.0",
     "tomli>=2.0; python_version < '3.11'",
 ]
 
@@ -36,6 +38,7 @@ dev = [
 # Editable from this repo's own operonx (the package lives in packages/).
 operonx = { path = "../..", editable = true }
 operonx-kb = { path = "../operonx-kb", editable = true }
+operonx-agents = { path = "../operonx-agents", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["operonx_project"]

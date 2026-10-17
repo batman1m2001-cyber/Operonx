@@ -2119,6 +2119,83 @@ typing or happy path alone.
     - a P2 test that ran `python` from PATH; it passed only inside an
       activated venv, and now runs `sys.executable`.
 
+### P6. Interactions and messaging, Telegram mocked (2026-10-17)
+
+- **Built** (`packages/operonx-project`, branch `feat/project-p6`):
+  - `interactions.py`: one record per thing that waits on the owner: a
+    card's question (its id is the run's `interrupt_id`), a plan version
+    to approve, an exhausted budget. Each gets a `Q-nn`.
+    - A card's own question (kind `human`) is written to the BRD's
+      `open_questions.md` on the integration branch (committed under the
+      merge lock), and the answer is its resolution once applied.
+    - `submit_answer` is the one way in (CLI, studio, Telegram): the
+      answer and the command it queues are one transaction.
+    - A question no longer current (its `context_hash` no longer
+      matches: replanned, the card moved on) is superseded, and an answer
+      to it is `stale` and names what is current.
+    - `tick`: a reminder after `remind_after_s` (a day); at expiry
+      (three days) the recommended option when triage set `safe_default`,
+      else flagged in `status`.
+  - `messages.py`: §9.2 rendering, redacted (operonx-agents' patterns plus
+    a bot-token pattern), cut to 4096. Buttons carry
+    `a:<id8>:<option>:<version>`, checked to be ≤ 64 bytes.
+  - `telegram/`:
+    - `TelegramMessenger`: the Bot API on stdlib `urllib`. httpx logs
+      request URLs, and the token is in every URL. It logs method names
+      only, and its `repr` hides the token.
+    - `TelegramBridge`: sends and edits, the long poll (the offset is kept
+      in the store), the commands, and the confirming tap for `/cancel`.
+    - `FakeBotAPI` (a test double, in the package for P7).
+  - The daemon syncs the questions every loop and runs the bridge's poll
+    beside it. The CLI gains `pending`; `answer` takes a `Q-nn`; and
+    `daemon --telegram-chat/--telegram-user` (with
+    `OPERONX_TELEGRAM_TOKEN`).
+- **Decided:**
+  - **Answer labelling is deterministic, not a model session:** a key, a
+    key with words (`a) and warn`) or an option's exact label is a choice,
+    and anything else is the owner's words. The implementer always gets
+    the exact words, so a session to label them would add cost and a
+    failure mode for nothing.
+  - A Telegram send that fails is retried at once for a transient error
+    (`retry_call`), then again on later loops with a backoff; the question
+    waits in the store meanwhile.
+  - A plan revision by button needs words; the owner is told to reply
+    with them.
+- **Gate passed** (`tests/test_telegram.py`, `tests/test_interactions.py`,
+  against `FakeBotAPI`):
+  - a button tap through a real daemon: the card parks, the tap resumes it
+    to done, the next implementer prompt carries "The owner's decision:
+    minus", and the message is edited to "✅ Answered: b … C1 resumed";
+  - a reply-to answer (the words verbatim, the label `b`); unthreaded
+    words with one question open (taken, and says which) and with two
+    open (asks which; nothing queued);
+  - a duplicate `update_id` is handled once; a second answer is "already
+    answered" and queues nothing; the answered message is edited once;
+  - an answer after a replan is stale, names `Q-02 (approval)`, and the
+    old message is edited to "No longer current". The plan's Approve
+    button queues `approve`; Revise by button asks for words, and a reply
+    queues `replan` with them;
+  - expiry: reminders reply to the original; with a safe default, the
+    recommended answer is queued as answered by `default`; without one,
+    the question is flagged once and shows in `status`;
+  - an unknown user and the owner in another chat are dropped with no
+    reply, and the log has the user id and not the words;
+  - `/cancel` queues nothing until the confirming tap; a second tap is
+    expired; "keep it" queues nothing. `/status`, `/pending`,
+    `/milestone`, `/pause`, `/resume` and `/budget +5` work, and an
+    unknown command gets the help;
+  - a send failing once is retried at once; failing every attempt, the
+    question waits as `failed`, and `operonx-project pending` and
+    `answer m1 Q-01 b` still work (a second `answer` exits 1);
+  - the token is in neither the DEBUG log, the events nor the sent text
+    (a question quoting it reads `[redacted:telegram-token]`); a wrong
+    token is a permanent 401 that does not echo the token;
+  - a W2 card question becomes a BRD `Q-nn`, and is resolved with the
+    owner's words once the answer is applied; the BRD check stays clean.
+  - the CLI answers a card whose question the daemon has not opened yet
+    (queued on the card, as in P5); an answer to no question exits 1.
+  - The package suite: 157 passed, 3 skipped (paid and slow deselected).
+
 ## Sources
 
 - Anthropic, *Effective harnesses for long-running agents*:

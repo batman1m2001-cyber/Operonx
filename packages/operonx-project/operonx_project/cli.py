@@ -147,6 +147,12 @@ def _milestone_parsers(sub) -> None:
     p.add_argument("--model", action="append", default=[], metavar="ROLE=MODEL")
     p.add_argument("--python", help="the interpreter the target's checks run with (default: its .venv, else this)")
     p.add_argument("--poll", type=float, default=0.5)
+    p.add_argument("--telegram-chat", help="send the questions to this chat (the bot token: OPERONX_TELEGRAM_TOKEN)")
+    p.add_argument("--telegram-user", action="append", default=[], help="a Telegram user id allowed to answer")
+    p.add_argument("--telegram-api", default="https://api.telegram.org", help=argparse.SUPPRESS)
+    p = sub.add_parser("pending", help="the questions waiting for you")
+    _repo_arg(p)
+    p.add_argument("--json", action="store_true")
     for name in ("status",):
         p = sub.add_parser(name, help="every milestone: state, board, cost, what waits for you")
         _repo_arg(p)
@@ -167,10 +173,10 @@ def _milestone_parsers(sub) -> None:
         p = sub.add_parser(name, help=what)
         _repo_arg(p)
         p.add_argument("milestone")
-    p = sub.add_parser("answer", help="answer the question a card waits on")
+    p = sub.add_parser("answer", help="answer a question: a card's, a plan's, a budget's")
     _repo_arg(p)
     p.add_argument("milestone")
-    p.add_argument("card")
+    p.add_argument("card", help="the card, or the question's Q-nn")
     p.add_argument("answer", help="an option's key, or words")
     p.add_argument("--text", default="", help="words to go with the option")
     p = sub.add_parser("replan", help="revise a waiting plan, or replan a stopped milestone")
@@ -208,6 +214,7 @@ def status_data(project) -> List[dict]:
     from operonx_project.board import columns
 
     out = []
+    flagged = [i for i in project.store.interactions(states=["open"]) if i.get("flagged")]
     for ms in project.store.milestones():
         cards = project.store.cards(ms.id)
         cols = columns(cards)
@@ -220,8 +227,33 @@ def status_data(project) -> List[dict]:
             "mode": "w1" if ms.policy.horizon == "all" else "w2", "cost_usd": round(ms.cost_usd, 4),
             "budget_usd": ms.policy.budget.max_usd, "cards": len(cards),
             "columns": {k: len(v) for k, v in cols.items()}, "waiting": waiting,
+            "flagged": [i["qid"] for i in flagged if i["milestone"] == ms.id],
         })  # fmt: skip
     return out
+
+
+def pending_data(project) -> List[dict]:
+    from operonx_project.interactions import Interactions
+
+    out = []
+    for i in Interactions(project.store).open():
+        p = i.get("payload") or {}
+        out.append({"id": i["id"], "short": i["short"], "qid": i["qid"], "milestone": i["milestone"],
+                    "card": i.get("card"), "kind": i["kind"], "question": p.get("problem") or p.get("reason") or "",
+                    "options": [o.get("key") for o in p.get("options") or [] if isinstance(o, dict)],
+                    "recommended": p.get("recommended"), "flagged": bool(i.get("flagged")),
+                    "delivery": i["delivery"], "since": i["created"]})  # fmt: skip
+    return out
+
+
+def _unsynced(store, mid: str, ref: str, inter: Optional[dict]) -> bool:
+    """The card waits on a question the daemon has not made an interaction for yet."""
+    try:
+        card = store.get_card(mid, ref)
+    except KeyError:
+        return False
+    iid = (card.detail.get("question") or {}).get("interrupt_id")
+    return card.state.value == "waiting_human" and (inter is None or inter["id"] != iid)
 
 
 def show_data(project, mid: str, cid: Optional[str], events: int) -> dict:
@@ -280,8 +312,23 @@ def _milestones(args) -> int:
         models = dict(m.split("=", 1) for m in args.model)
         life = Lifecycle(proj, _coder(proj.state), models=models or None, sandbox=not args.no_sandbox,
                          python=args.python)  # fmt: skip
+        from operonx_project.interactions import Interactions
+
+        inter = Interactions(proj.store, project=proj)
+        bridge = None
+        if args.telegram_chat:
+            import os
+
+            from operonx_project.telegram import TelegramBridge, TelegramMessenger
+
+            token = os.environ.get("OPERONX_TELEGRAM_TOKEN", "")
+            if not token or not args.telegram_user:
+                sys.stderr.write("error: Telegram needs OPERONX_TELEGRAM_TOKEN and at least one --telegram-user\n")
+                return 2
+            bridge = TelegramBridge(proj.store, inter, TelegramMessenger(token, api=args.telegram_api),
+                                    args.telegram_chat, args.telegram_user, project_name=proj.repo.name)  # fmt: skip
         try:
-            asyncio.run(Daemon(life, poll_s=args.poll).serve(once=args.once))
+            asyncio.run(Daemon(life, poll_s=args.poll, interactions=inter, bridge=bridge).serve(once=args.once))
         except DaemonBusy as exc:
             sys.stderr.write(f"error: {exc}\n")
             return 3
@@ -301,6 +348,23 @@ def _milestones(args) -> int:
             out.write("    " + " · ".join(f"{k} {v}" for k, v in m["columns"].items()) + "\n")
             for w in m["waiting"]:
                 out.write(f"    waits on you: {w['card']} — {str(w['question'])[:160]}\n")
+            if m["flagged"]:
+                out.write(f"    ⚑ expired with no answer and no safe default: {', '.join(m['flagged'])}\n")
+        return 0
+    if args.cmd == "pending":
+        data = pending_data(proj)
+        if args.json:
+            out.write(json.dumps(data, indent=1) + "\n")
+            return 0
+        if not data:
+            out.write("nothing waits on you\n")
+        for q in data:
+            where = q["milestone"] + (f"/{q['card']}" if q["card"] else "")
+            opts = f"  [{' | '.join(map(str, q['options']))}]" if q["options"] else ""
+            flag = "  ⚑ expired" if q["flagged"] else ""
+            out.write(f"{q['qid']}  {where:<10} {q['kind']:<9} {str(q['question'])[:110]}{opts}{flag}\n")
+        if data:
+            out.write("answer: operonx-project answer <milestone> <card or Q-nn> <option or words>\n")
         return 0
     if args.cmd == "show":
         data = show_data(proj, args.milestone, args.card, args.events)
@@ -329,8 +393,20 @@ def _milestones(args) -> int:
     payload = {}
     card = None
     if args.cmd == "answer":
-        card = args.card
-        payload = {"answer": {"choice": args.answer, "text": args.text} if args.text else args.answer}
+        from operonx_project.interactions import Interactions
+
+        answer = {"choice": args.answer, "text": args.text} if args.text else args.answer
+        proj.store.get_milestone(args.milestone)
+        got = Interactions(proj.store).submit_answer(args.card, answer, actor="owner", via="cli", mid=args.milestone)
+        if got.ok:
+            out.write(f"{got.message}; the daemon applies it\n")
+            return 0
+        if not (got.status in ("unknown", "already", "stale") and _unsynced(proj.store, args.milestone, args.card,
+                                                                            got.interaction)):  # fmt: skip
+            sys.stderr.write(f"error: {got.message}\n")
+            return 1
+        card = args.card  # the daemon has not opened this question yet: queue the answer on the card
+        payload = {"answer": answer}
     elif args.cmd == "replan":
         payload = {"notes": args.notes}
     elif args.cmd == "retry" and args.usd is not None:

@@ -11,6 +11,10 @@ card (crash matrix, plan §10).
 
 The queue is a SQLite table written by other processes, so the loop polls
 it (``poll_s``, default 0.5 s); everything inside a drive is event-driven.
+Each loop also brings the owner's questions up to date
+(:class:`~operonx_project.interactions.Interactions`) and, with a
+:class:`~operonx_project.telegram.TelegramBridge`, sends them; the bridge's
+long poll runs beside the loop.
 """
 
 from __future__ import annotations
@@ -19,10 +23,11 @@ import asyncio
 import os
 import socket
 import uuid
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from operonx.core.loggings import LOGGER
 
+from operonx_project.interactions import Interactions
 from operonx_project.lifecycle import ACTIVE, Lifecycle, Refused
 from operonx_project.scheduler import _kill_group
 
@@ -34,9 +39,12 @@ class DaemonBusy(RuntimeError):
 
 
 class Daemon:
-    def __init__(self, life: Lifecycle, owner: Optional[str] = None, poll_s: float = 0.5, lease_ttl: float = 30.0):
+    def __init__(self, life: Lifecycle, owner: Optional[str] = None, poll_s: float = 0.5, lease_ttl: float = 30.0,
+                 interactions: Optional[Interactions] = None, bridge: Any = None):  # fmt: skip
         self.life = life
         self.store = life.store
+        self.interactions = interactions or Interactions(life.store, project=life.p)
+        self.bridge = bridge
         self.owner = owner or f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:6]}"
         self.poll_s = poll_s
         self.ttl = lease_ttl
@@ -76,6 +84,17 @@ class Daemon:
                 self.store.note(cmd["milestone"], "command.refused", {"kind": cmd["kind"], "why": str(exc)[:500]})
         return n
 
+    async def _questions(self) -> None:
+        """The owner's questions: opened, closed, reminded; sent when a bridge is on."""
+        try:
+            if self.bridge is not None:
+                await self.bridge.sync()
+            else:
+                self.interactions.sync()
+                self.interactions.tick()
+        except Exception as exc:  # a question that cannot be sent must not stop the milestones
+            LOGGER.error(f"the questions' sync raised {type(exc).__name__}: {exc}")
+
     def _drive_active(self) -> None:
         for ms in self.store.milestones():
             if ms.state in ACTIVE and (ms.id not in self.drives or self.drives[ms.id].done()):
@@ -86,10 +105,12 @@ class Daemon:
         if not self.store.acquire_lease(self.owner, self.ttl):
             raise DaemonBusy("another daemon is driving this project (its lease has not expired)")
         lease = asyncio.ensure_future(self._lease())
+        polling = asyncio.ensure_future(self.bridge.run(stop)) if self.bridge is not None else None
         try:
             self.recover()
             while not (stop and stop.is_set()):
                 await self._commands()
+                await self._questions()
                 self._drive_active()
                 for mid, t in list(self.drives.items()):
                     if t.done():
@@ -98,6 +119,7 @@ class Daemon:
                             LOGGER.error(f"{mid}: the drive raised {t.exception()!r}")
                 if once and not self.drives and not self.store.pending_commands():
                     if not any(m.state in ACTIVE for m in self.store.milestones()):
+                        await self._questions()  # the last closes: "answered", "no longer current"
                         return
                 waiting = [*self.drives.values()]
                 if waiting:
@@ -106,6 +128,8 @@ class Daemon:
                     await asyncio.sleep(self.poll_s)
         finally:
             lease.cancel()
+            if polling is not None:
+                polling.cancel()
             for t in self.drives.values():
                 t.cancel()
             await asyncio.gather(*self.drives.values(), return_exceptions=True)

@@ -25,7 +25,7 @@ from operonx_project.model import Card, CardState, Milestone, MilestoneState, Po
 
 __all__ = ["CARD_MOVES", "IllegalTransition", "MILESTONE_MOVES", "SCHEMA_VERSION", "Store"]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: commands, interactions, updates
 
 C = CardState
 #: Legal card moves. A running card's stage (implement → review → qa) is not
@@ -90,6 +90,12 @@ CREATE TABLE IF NOT EXISTS steps (key TEXT PRIMARY KEY, at REAL, data TEXT);
 CREATE TABLE IF NOT EXISTS commands (
     seq INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, milestone TEXT, card TEXT, kind TEXT,
     payload TEXT, actor TEXT, status TEXT, result TEXT, done_at REAL);
+CREATE TABLE IF NOT EXISTS interactions (
+    id TEXT PRIMARY KEY, short TEXT UNIQUE, milestone TEXT, card TEXT, kind TEXT, qid TEXT,
+    version INTEGER, context_hash TEXT, payload TEXT, state TEXT, answer TEXT, answered_by TEXT,
+    answered_at REAL, command INTEGER, delivery TEXT, messages TEXT, shown TEXT, created REAL,
+    reminded_at REAL, expires_at REAL, flagged INTEGER, updated REAL);
+CREATE TABLE IF NOT EXISTS updates (update_id INTEGER PRIMARY KEY, at REAL);
 """
 
 _JSON_CARD = ("rows", "criteria", "deps", "paths", "detail")
@@ -116,6 +122,8 @@ class Store:
                 self._db.execute("INSERT INTO meta VALUES ('schema_version', ?)", (str(SCHEMA_VERSION),))
             elif int(got[0]) > SCHEMA_VERSION:
                 raise RuntimeError(f"{self.path} has schema {got[0]}; this operonx-project reads {SCHEMA_VERSION}")
+            elif int(got[0]) < SCHEMA_VERSION:  # the new tables are made above; nothing else changed
+                self._db.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
 
     def close(self) -> None:
         with self._lock:
@@ -355,6 +363,90 @@ class Store:
         with self._tx() as db:
             db.execute("UPDATE commands SET status=?, result=?, done_at=? WHERE seq=?",
                        (status, result, time.time(), seq))  # fmt: skip
+
+    def command(self, seq: int) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM commands WHERE seq=?", (seq,)).fetchone()
+        return None if row is None else {**dict(row), "payload": json.loads(row["payload"] or "{}")}
+
+    # ── interactions: the questions the owner is asked (plan §9) ─────────────
+    _JSON_INTER = ("payload", "answer", "messages", "shown")
+
+    def _inter(self, row: sqlite3.Row) -> Dict[str, Any]:
+        d = dict(row)
+        for k in self._JSON_INTER:
+            d[k] = json.loads(d[k]) if d[k] else ({} if k in ("payload", "shown") else None if k == "answer" else [])
+        return d
+
+    def add_interaction(self, inter: Dict[str, Any], actor: str = "engine") -> Dict[str, Any]:
+        row = {k: (json.dumps(v) if k in self._JSON_INTER else v) for k, v in inter.items()}
+        with self._tx() as db:
+            db.execute(f"INSERT INTO interactions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
+                       list(row.values()))  # fmt: skip
+            self._event(db, inter["milestone"], inter.get("card"), "interaction.open", actor,
+                        {"id": inter["id"], "qid": inter.get("qid"), "kind": inter.get("kind")})  # fmt: skip
+        return self.get_interaction(inter["id"])
+
+    def get_interaction(self, iid: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._db.execute("SELECT * FROM interactions WHERE id=? OR short=?", (iid, iid)).fetchone()
+        return None if row is None else self._inter(row)
+
+    def interactions(self, mid: Optional[str] = None, states: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
+        sql, args = "SELECT * FROM interactions WHERE 1=1", []
+        if mid:
+            sql, args = sql + " AND milestone=?", args + [mid]
+        states = list(states or [])
+        if states:
+            sql, args = sql + f" AND state IN ({', '.join('?' * len(states))})", args + states
+        with self._lock:
+            rows = self._db.execute(sql + " ORDER BY created", args).fetchall()
+        return [self._inter(r) for r in rows]
+
+    def update_interaction(self, iid: str, actor: str = "engine", **values: Any) -> Dict[str, Any]:
+        enc = {k: (json.dumps(v) if k in self._JSON_INTER else v) for k, v in values.items()}
+        with self._tx() as db:
+            row = db.execute("SELECT milestone, card, state FROM interactions WHERE id=?", (iid,)).fetchone()
+            db.execute(f"UPDATE interactions SET {', '.join(f'{k}=?' for k in enc)}, updated=? WHERE id=?",
+                       [*enc.values(), time.time(), iid])  # fmt: skip
+            if "state" in values and row is not None and values["state"] != row["state"]:
+                self._event(db, row["milestone"], row["card"], "interaction.state", actor,
+                            {"id": iid, "from": row["state"], "to": values["state"]})  # fmt: skip
+        return self.get_interaction(iid)
+
+    def answer_interaction(self, iid: str, answer: Any, actor: str, kind: str, payload: Dict[str, Any],
+                           card: Optional[str] = None) -> Optional[int]:  # fmt: skip
+        """Record the answer and queue its command in one transaction: the
+        answer is in the store before anything acts on it (plan §9.5).
+        ``None`` when the interaction was no longer open."""
+        now = time.time()
+        with self._tx() as db:
+            row = db.execute("SELECT milestone, state FROM interactions WHERE id=?", (iid,)).fetchone()
+            if row is None or row["state"] != "open":
+                return None
+            mid = row["milestone"]
+            cur = db.execute(
+                "INSERT INTO commands (at, milestone, card, kind, payload, actor, status) VALUES (?,?,?,?,?,?,?)",
+                (now, mid, card, kind, json.dumps({**payload, "interaction": iid}), actor, "pending"),
+            )
+            db.execute("UPDATE interactions SET state='answered', answer=?, answered_by=?, answered_at=?, command=?, "
+                       "updated=? WHERE id=?", (json.dumps(answer), actor, now, cur.lastrowid, now, iid))  # fmt: skip
+            self._event(db, mid, card, "interaction.answered", actor, {"id": iid, "command": cur.lastrowid})
+            return int(cur.lastrowid)
+
+    def find_interaction_by_message(self, chat: Any, message_id: int) -> Optional[Dict[str, Any]]:
+        for inter in self.interactions():
+            if any(str(m.get("chat")) == str(chat) and m.get("id") == message_id for m in inter["messages"]):
+                return inter
+        return None
+
+    def first_update(self, update_id: int) -> bool:
+        """``True`` the first time an update id is seen: each is handled once."""
+        with self._tx() as db:
+            if db.execute("SELECT 1 FROM updates WHERE update_id=?", (update_id,)).fetchone():
+                return False
+            db.execute("INSERT INTO updates VALUES (?, ?)", (update_id, time.time()))
+            return True
 
     # ── the daemon's lease: one daemon drives a project ─────────────────────
     def acquire_lease(self, owner: str, ttl: float = 30.0, name: str = "daemon") -> bool:

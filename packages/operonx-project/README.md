@@ -34,3 +34,28 @@ default, plans epics and details cards as the board drains (a real BRD).
 The result is the branch `milestone/m1/main`, with `DELIVERY.md` and the
 updated `docs/brd/`. Nothing is pushed: a push or a PR is yours to approve.
 `operonx-project …` is the same command without core.
+
+### Questions, and Telegram
+
+Whatever waits on you (a card's question, a plan to approve, a budget
+that ran out) is one question, `Q-nn`; a card's own question is also an
+entry in `docs/brd/requirements/open_questions.md`, and your answer is
+its resolution. `operonx project pending` lists them; `answer` takes a
+card or a `Q-nn`, an option's key or your own words.
+
+With Telegram, the daemon also sends each question with its buttons, and
+takes your tap, your reply to the question, or your words when only one
+question is open:
+
+```bash
+export OPERONX_TELEGRAM_TOKEN=…   # from @BotFather; never logged
+operonx project daemon --repo ../my-service --telegram-chat <chat id> --telegram-user <your user id>
+```
+
+Only the listed users, in the listed chat, are heard; anyone else is
+dropped without a reply. In the chat: `/status`, `/pending`,
+`/milestone m1`, `/pause`, `/resume`, `/cancel m1` (asks you to confirm),
+`/budget m1 +20`. If Telegram is down, the questions wait and
+`operonx project answer` works as ever. A question unanswered for a day is
+reminded; after three it takes its safe default, if triage marked one, or
+is flagged in `status`.
