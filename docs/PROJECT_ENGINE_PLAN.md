@@ -897,21 +897,25 @@ project.
 
 ## 7. A task: the rounds inside `task_flow`
 
-One task attempt is one journalled run of this module-level graph. The
-code below is a sketch; P3 builds and tests the real one.
+One task attempt is one journalled run of this module-level graph, as
+built in P3 (`operonx_project/flows/task_flow/graph.py`). The inputs are
+plain JSON; the ops find the store, git, coder and checks through a runtime
+registered under `key`.
 
 ```python
 @graph
-def task_flow(mission_id, task_id):
-    PARENT.declare(answers=[], outcome=None, reducers={"answers": operator.add})
-    p = prepare(mission_id=mission_id, task_id=task_id)       # worktree, test author (once)
-    r = round_(mission_id=mission_id, task_id=task_id, answers=PARENT["answers"])
-    ask = InterruptOp(payload=r["question"])                   # parks; you answer on Telegram
+def task_flow(key, mid, cid, reopen):
+    PARENT.declare(state={}, answers=[], outcome=None, reducers={"answers": operator.add})
+    p = prepare(key=key, mid=mid, cid=cid, reopen=reopen)   # worktree, baseline, test author, examiner (once)
+    p["state"] >> PARENT["state"]
+    r = round_(key=key, mid=mid, cid=cid, state=PARENT["state"], answers=PARENT["answers"])
+    r["state"] >> PARENT["state"]
+    r["outcome"] >> PARENT["outcome"]
+    ask = InterruptOp(payload=r["question"])                 # parks; you answer on Telegram
     k = keep(response=ask["response"])
     k["answers"] >> PARENT["answers"]
-    r["outcome"] >> PARENT["outcome"]
     START >> p >> r >> if_(r["next"] == "ask", ask).if_(r["next"] == "fix", r).else_(END)
-    ask >> k >> r                                              # resume → next round, with the answer
+    ask >> k >> r                                            # resume → next round, with the answer
 ```
 
 **One `round_` execution is one round**: an op with `child()` steps, so
@@ -923,12 +927,14 @@ Its `next` output loops back (`fix`), parks (`ask`) or ends the run:
    session; later rounds `--resume` it with only the new information
    (failing check tails, review findings, your answer). The session id is
    stored as soon as Claude's `init` event names it.
-2. **commit** whatever changed (`gitops`). An empty diff on a code task is
+2. **guard**, before anything is committed: a change to the protected
+   acceptance tests, to a path outside the task's `paths`, or a copy of a
+   private source is reverted in the worktree and becomes the finding, so
+   it never reaches the branch's history. Outside paths are allowed, with
+   a warning, when declared shared, such as `pyproject.toml`. Files that
+   still hold conflict markers hold the commit back.
+3. **commit** what is left (`gitops`). An empty diff on a code task is
    one retry with that fact, then a failure.
-3. **guard:** if the diff touches protected acceptance tests or paths
-   outside the task's `paths`, it is rejected with that as the finding.
-   Outside paths are allowed, with a warning, when declared shared, such
-   as `pyproject.toml`.
 4. **checks:** the baseline commands plus the acceptance tests, and for an operonx target the convention checks of §6.1, run in
    the worktree, give exit codes and output tails.
 5. **review:** only when the checks pass. A fresh reviewer session gets
@@ -1764,6 +1770,90 @@ typing or happy path alone.
   operonx-agents. Fixed upstream (lint is read-only, #195). The four files
   in OneWealth are left for the owner to restore. Engine probes run on
   copies only.
+
+### P3. `task_flow` and the decision table (2026-10-17)
+
+- **Built** (`packages/operonx-project`, branch `feat/project-p3`):
+  - `decide.py`: §7's table as one pure function from `RoundFacts` to a
+    `Decision` (verified, fix, revise, ask, failed, requeue). Every `fix`
+    or `revise` passes through the round and card-budget bounds; every
+    `ask` carries a question with its options.
+  - `flows/task_flow/`: the graph of §7 (wiring only) and its ops.
+    - `prepare`: the worktree, the baseline checks, the test author's
+      acceptance tests (committed, then protected by hash) and the
+      examiner's held-out tests (outside the repo, hidden from every other
+      role through the coder's new `hide` list). It keeps what it made in
+      the card's `detail`, so it does each step once across runs.
+    - `round_`: implement → guard → commit → checks → review →
+      arbitration → held-out → decide, each a `child()` step.
+  - `review.py`:
+    - the citation check: a blocker or major finding must cite a changed
+      file and a line it has, or it is unverified;
+    - fingerprints, with `same_as` so a reworded repeat is still
+      recognised;
+    - held-out failures cut to `name: message`, with the directory
+      stripped.
+  - `prompts.py`: the role prompts and their JSON schemas.
+  - `runtime.py`: the store, git, coder and checks, registered under a
+    key, so the graph's inputs stay JSON and a resuming process brings its
+    own objects.
+  - `runner.py`:
+    - `FlowRunner` is the scheduler's `CardRunner` on
+      `SqliteJournal(durability="sync")`, with `run`, `resume` and
+      `recover` (after a crash);
+    - `GitIntegrator` merges under the lock, runs the full checks
+      against an integration baseline, and undoes a merge that regresses.
+- **Changes from the sketch, each for a reason:**
+  - **The guard runs before the commit.** A refused change is reverted
+    in the worktree, so an edited acceptance test or a copied private
+    source never enters the branch's history. Files that still hold
+    conflict markers hold the commit back.
+  - **Steps inside a round are checkpointed.** A round re-run after a
+    crash skips the coder sessions that had already ended (the store's
+    `steps` table, keyed by the round's idempotency key). §10 only
+    required not re-running completed rounds; this goes further.
+  - **Costs go on the card and the milestone as each call ends**, not on
+    the outcome. A crash loses no spend, and the scheduler's budget check
+    sees it at once.
+  - **Waiving a finding costs no implementer call.** The next round
+    re-runs the checks and the review without one.
+  - **A rate limit ends the run as `requeue`.** The next run resumes the
+    stored session; prepare's work is not redone.
+  - **A reviewer that errors is tried once more, then the card fails
+    with `infra`.** The reviewer's failure is not the card's.
+- **Gate:** `packages/operonx-project`: **117 passed** (47 new). The run
+  included the slow and the two paid P2 tests.
+  - With the scripted coder:
+    - pass in one round;
+    - fail, then fix in the same session (resumed with only the failure);
+    - findings lead to a fix (an unverified one does not block);
+    - a repeated finding goes to arbitration, then the owner (waive
+      re-checks without an implementer call);
+    - the same failure 3 times leads to a revision in a new session,
+      then 3 more to an ask;
+    - a held-out failure returns `test_negative: AssertionError: add
+      handles negative numbers` and nothing of the test or its path;
+    - `max_rounds=2` asks keep/skip/stop, and skip fails the card;
+    - the guard reverts an edited acceptance test, an outside path and a
+      private source's copy, none of them in `git log -p`;
+    - triage answers from evidence without asking;
+    - rate limit → requeue → same session; infra → failed; an empty diff
+      retries once, then fails.
+  - **Park → resume** from a new store, runtime and engine on the same
+    journal: the owner's answer reaches the resumed implementer session.
+  - **`kill -9`** in a real subprocess, counted from the coder's call
+    log:
+    - mid-implement in round 3: rounds 1 and 2 are not re-run, and
+      neither are the test author and examiner; round 3 runs again on its
+      stored session;
+    - mid-review: that round's ended implement is not run again.
+  - **Integration:**
+    - a conflict is aborted cleanly, and the re-opened card's rebase
+      round resolves it and merges;
+    - unresolved markers are never committed;
+    - a regression is undone;
+    - the scheduler takes two dependent cards to `done` through
+      `FlowRunner` and `GitIntegrator`.
 
 ## Sources
 

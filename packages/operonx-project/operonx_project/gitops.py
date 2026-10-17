@@ -28,7 +28,7 @@ import os
 import re
 import subprocess
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Sequence
@@ -41,6 +41,7 @@ __all__ = [
     "GuardFinding",
     "Merge",
     "card_branch",
+    "conflict_markers",
     "guard",
     "integration_branch",
     "sha256_file",
@@ -247,13 +248,14 @@ class GitOps:
             return True
         return False
 
-    def merge_card(self, milestone: str, card: str, message: Optional[str] = None) -> Merge:
+    def merge_card(self, milestone: str, card: str, message: Optional[str] = None, lock: bool = True) -> Merge:
         """Merge the card's branch into the integration branch (``--no-ff``).
         A conflict is aborted, so the integration branch is never left
-        half-merged; the result names the files."""
+        half-merged; the result names the files. ``lock=False`` when the
+        caller holds :meth:`merge_lock` already (merge, check, maybe undo)."""
         integ = self.ensure_integration(milestone)
         branch = card_branch(milestone, card)
-        with self.merge_lock():
+        with self.merge_lock() if lock else nullcontext():
             self._abort_half_merge(integ)
             if self.dirty(integ):
                 raise GitError(["merge"], 1, f"the integration worktree {integ} has uncommitted changes")
@@ -300,6 +302,47 @@ class GitOps:
 
     def conflicted(self, worktree: Path) -> List[str]:
         return [f for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=worktree).splitlines() if f]
+
+    def reset_integration(self, milestone: str, sha: str) -> None:
+        """Move the integration branch back to *sha*: a merge whose checks
+        regressed is undone (call it under :meth:`merge_lock`)."""
+        integ = self.ensure_integration(milestone)
+        self._abort_half_merge(integ)
+        self.git("reset", "-q", "--hard", sha, cwd=integ)
+        LOGGER.warning(f"integration branch of {milestone} reset to {sha[:10]}")
+
+    def revert(self, worktree: Path, paths: Iterable[str]) -> None:
+        """Undo uncommitted changes to *paths*: a tracked file goes back to
+        HEAD, a new one is deleted. The guard refuses a change this way, so
+        it never reaches a commit."""
+        tracked = set(self.git("ls-tree", "-r", "--name-only", "HEAD", cwd=worktree).splitlines())
+        for path in paths:
+            if path in tracked:
+                self.git("checkout", "-q", "HEAD", "--", path, cwd=worktree)
+            else:
+                f = worktree / path
+                self.git("rm", "-q", "--cached", "--ignore-unmatch", "--", path, cwd=worktree)
+                if f.is_file() or f.is_symlink():
+                    f.unlink()
+
+    def head(self, worktree: Path) -> str:
+        return self.rev("HEAD", cwd=worktree)
+
+
+_MARKER = re.compile(rb"^(<{7} |>{7} |={7}$)", re.M)
+
+
+def conflict_markers(worktree: Path, paths: Iterable[str]) -> List[str]:
+    """The files among *paths* that still hold merge conflict markers."""
+    out = []
+    for path in paths:
+        f = worktree / path
+        try:
+            if f.is_file() and _MARKER.search(f.read_bytes()):
+                out.append(path)
+        except OSError:
+            continue
+    return out
 
 
 # ── guards ──

@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS events (
     kind TEXT, actor TEXT, data TEXT);
 CREATE INDEX IF NOT EXISTS events_by_milestone ON events (milestone, seq);
 CREATE TABLE IF NOT EXISTS lease (name TEXT PRIMARY KEY, owner TEXT, until REAL);
+CREATE TABLE IF NOT EXISTS steps (key TEXT PRIMARY KEY, at REAL, data TEXT);
 """
 
 _JSON_CARD = ("rows", "criteria", "deps", "paths", "detail")
@@ -304,6 +305,19 @@ class Store:
                 "SELECT * FROM events WHERE milestone=? AND seq>? ORDER BY seq LIMIT ?", (mid, after, limit)
             ).fetchall()
         return [{**dict(r), "data": json.loads(r["data"])} for r in rows]
+
+    # ── step checkpoints ─────────────────────────────────────────────────────
+    def checkpoint(self, key: str) -> Optional[Dict[str, Any]]:
+        """What a step saved under *key* (a run's idempotency key and the
+        step's name), or ``None``: a round re-run after a crash skips the
+        steps that had ended, such as a finished coder session."""
+        with self._lock:
+            row = self._db.execute("SELECT data FROM steps WHERE key=?", (key,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def save_checkpoint(self, key: str, data: Dict[str, Any]) -> None:
+        with self._tx() as db:
+            db.execute("INSERT OR REPLACE INTO steps VALUES (?, ?, ?)", (key, time.time(), json.dumps(data)))
 
     # ── the daemon's lease: one daemon drives a project ─────────────────────
     def acquire_lease(self, owner: str, ttl: float = 30.0, name: str = "daemon") -> bool:

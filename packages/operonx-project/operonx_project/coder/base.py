@@ -55,6 +55,7 @@ class CoderRequest:
     allow_write: List[str] = field(default_factory=list)  # extra writable paths for the sandboxed shell
     allowed_domains: List[str] = field(default_factory=list)  # network the sandboxed shell may reach
     deny: List[str] = field(default_factory=list)  # extra permission deny rules
+    hide: List[Path] = field(default_factory=list)  # directories this session may not read (held-out tests)
     add_dirs: List[Path] = field(default_factory=list)  # more directories the file tools may use
     tags: Dict[str, str] = field(default_factory=dict)  # milestone, card, round: for logs only
 
