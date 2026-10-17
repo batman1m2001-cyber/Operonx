@@ -360,6 +360,50 @@ class TestGuide:
         guide.sync(tmp_path)
         assert (tmp_path / "AGENTS.md").read_text() == text
 
+    def test_a_new_project_has_the_marked_commands(self, tmp_path):
+        for toolchain in ("uv", "pip"):
+            files = plan("hello", "p", toolchain=toolchain)
+            assert guide.commands_block(toolchain) in files["AGENTS.md"].decode()
+
+    def test_an_older_projects_commands_get_the_new_ones(self, tmp_path):
+        """A project from before `operonx lint` (its section unmarked, without
+        the lint line) gets the marked block; nothing else in the file moves."""
+        old = (
+            "# p\n\n## Commands\n\n```bash\n"
+            "pytest                 # the tests: keep them green\n"
+            "operonx serve --list   # every service, and where it listens\n"
+            "operonx run --list     # every job\n"
+            "```\n\n## Rules\n\n- mine\n"
+        )
+        (tmp_path / "AGENTS.md").write_text(old)
+        guide.sync(tmp_path)  # no uv.lock: pip
+        text = (tmp_path / "AGENTS.md").read_text()
+        assert guide.commands_block("pip") in text and "operonx lint" in text
+        assert text.startswith("# p\n\n## Commands\n\n<!-- operonx:commands -->")
+        assert "<!-- /operonx:commands -->\n\n## Rules\n\n- mine\n" in text
+        guide.sync(tmp_path)
+        assert (tmp_path / "AGENTS.md").read_text() == text
+
+    def test_a_commands_section_someone_edited_is_left_alone(self, tmp_path):
+        mine = "## Commands\n\n```bash\npytest\nmake deploy   # ours\n```\n\n## Rules\n"
+        (tmp_path / "AGENTS.md").write_text(mine)
+        guide.sync(tmp_path)
+        text = (tmp_path / "AGENTS.md").read_text()
+        assert text.startswith(mine) and guide.COMMANDS_BEGIN not in text
+
+    def test_a_marked_block_is_rewritten_and_the_rest_kept(self, tmp_path):
+        (tmp_path / "uv.lock").write_text("")
+        stale = f"# p\n\n## Commands\n\n{guide.COMMANDS_BEGIN}\nold\n{guide.COMMANDS_END}\n\nmake deploy\n"
+        (tmp_path / "AGENTS.md").write_text(stale)
+        guide.sync(tmp_path)
+        text = (tmp_path / "AGENTS.md").read_text()
+        assert (
+            guide.commands_block("uv") in text
+            and "old" not in text
+            and "uv run operonx lint" in text
+        )
+        assert "\n\nmake deploy\n" in text
+
     def test_another_command_syncs_a_stale_copy(self, tmp_path, capsys, monkeypatch):
         from operonx.cli import main as cli
 

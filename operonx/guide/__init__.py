@@ -17,8 +17,12 @@ folder per package, plus a generated ``README.md`` index::
 :func:`sync` writes it — ``operonx init``, ``operonx guide``, and any
 ``operonx`` command run inside a project whose copy is stale. The copy is
 generated: a package that is no longer installed loses its folder. It also
-keeps a marked block in the project's ``AGENTS.md`` current; the rest of
-that file is the user's.
+keeps two marked blocks in the project's ``AGENTS.md`` current — the
+guides, and the commands under "## Commands" (``operonx init``'s, with the
+project's toolchain) — and the rest of that file is the user's. A project
+made before the commands were marked gets the marked block when its
+"## Commands" section holds nothing the block does not (an older copy of
+it); a section someone edited is left alone.
 """
 
 from __future__ import annotations
@@ -32,9 +36,12 @@ from typing import Dict, List, Optional, Union
 __all__ = [
     "AGENTS_BEGIN",
     "AGENTS_END",
+    "COMMANDS_BEGIN",
+    "COMMANDS_END",
     "COPY_DIR",
     "Guide",
     "agents_block",
+    "commands_block",
     "toolchain_of",
     "changes",
     "files",
@@ -52,6 +59,10 @@ GROUP = "operonx.guides"
 #: The marked block of AGENTS.md that :func:`sync` rewrites.
 AGENTS_BEGIN = "<!-- operonx:guide -->"
 AGENTS_END = "<!-- /operonx:guide -->"
+#: The marked block under AGENTS.md's "## Commands" that :func:`sync` rewrites.
+COMMANDS_BEGIN = "<!-- operonx:commands -->"
+COMMANDS_END = "<!-- /operonx:commands -->"
+_COMMANDS = re.compile(r"^## Commands\n(.*?)(?=^## |\Z)", re.M | re.S)
 
 _HEADER = re.compile(r"<!--\s*operonx-guide\s*(.*?)\s*-->")
 
@@ -221,7 +232,32 @@ def agents_block(guides: Optional[List[Guide]] = None, toolchain: str = "uv") ->
     )
 
 
-def _sync_agents_md(project: Path, block: str) -> bool:
+def commands_block(toolchain: str = "uv") -> str:
+    """The marked block :func:`sync` keeps under AGENTS.md's "## Commands":
+    ``operonx init``'s, naming *toolchain*'s commands."""
+    from operonx.cli.init import COMMON, TEMPLATE_DIR, TOOLCHAINS, _align, _render
+
+    text = (TEMPLATE_DIR / COMMON / "AGENTS.md.tmpl").read_text(encoding="utf-8")
+    begin, end = text.index(COMMANDS_BEGIN), text.index(COMMANDS_END) + len(COMMANDS_END)
+    return _align(_render(text[begin:end], TOOLCHAINS[toolchain]))
+
+
+def _words(text: str) -> set:
+    return {" ".join(line.split()) for line in text.splitlines() if line.strip()}
+
+
+def _sync_commands(text: str, block: str) -> str:
+    begin, end = text.find(COMMANDS_BEGIN), text.find(COMMANDS_END)
+    if begin != -1 and end > begin:
+        return text[:begin] + block + text[end + len(COMMANDS_END) :]
+    # unmarked: an older init's section is replaced, never one someone added to
+    found = _COMMANDS.search(text)
+    if found is None or not _words(found.group(1)) or not _words(found.group(1)) <= _words(block):
+        return text
+    return text[: found.start(1)] + "\n" + block + "\n\n" + text[found.end(1) :]
+
+
+def _sync_agents_md(project: Path, block: str, commands: Optional[str] = None) -> bool:
     agents = project / "AGENTS.md"
     if not agents.is_file():
         return False
@@ -231,6 +267,8 @@ def _sync_agents_md(project: Path, block: str) -> bool:
         new = text[:begin] + block + text[end + len(AGENTS_END) :]
     else:
         new = text.rstrip("\n") + "\n\n## operonx guides\n\n" + block + "\n"
+    if commands is not None:
+        new = _sync_commands(new, commands)
     if new == text:
         return False
     agents.write_text(new, encoding="utf-8")
@@ -239,7 +277,7 @@ def _sync_agents_md(project: Path, block: str) -> bool:
 
 def sync(project: Union[str, Path], toolchain: Optional[str] = None) -> List[str]:
     """Make ``<project>/.operonx/guide/`` the installed guides, and AGENTS.md's
-    block name them, with *toolchain*'s commands (default: the project's,
+    blocks name them and the commands, with *toolchain*'s (default: the project's,
     :func:`toolchain_of`). Returns what changed (:func:`changes`); running
     it twice changes nothing."""
     project = Path(project)
@@ -264,7 +302,7 @@ def sync(project: Union[str, Path], toolchain: Optional[str] = None) -> List[str
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.is_file() or target.read_bytes() != data:
                 target.write_bytes(data)
-    _sync_agents_md(project, agents_block(guides, toolchain))
+    _sync_agents_md(project, agents_block(guides, toolchain), commands_block(toolchain))
     return done
 
 
