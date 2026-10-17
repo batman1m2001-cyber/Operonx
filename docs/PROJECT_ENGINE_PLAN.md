@@ -1641,7 +1641,32 @@ typing or happy path alone.
 
 ## 17. Progress log
 
-(empty: filled in phase by phase with commands run and their results)
+**P1. Store, model, cards, scheduler (2026-10-17, branch `feat/project-p1`)**
+- **Built:**
+  - `packages/operonx-project`: `model.py`, `store.py` (SQLite in WAL
+    mode, with a transition table for cards and milestones, an event per
+    move, and a lease), `dag.py`, `board.py` (columns, pull and push, WIP
+    limits, the replenish need) and `scheduler.py`, which is event-driven
+    and uses a timer for rate-limit holds;
+  - CI: a `packages.yaml` job.
+  - **Not** added to `publish.yaml`: a version on main auto-publishes, and
+    no release was asked for.
+- **Gate:** `cd packages/operonx-project && uv run pytest -q` → **36
+  passed** (64 s). That includes:
+  - every legal and illegal card and milestone move;
+  - the scheduler: order, blocking, park → resume in a new scheduler,
+    path locks, pull WIP, re-opens, a runner crash, cancel, pause, the
+    budget, the rate-limit timer (fewer than 20 loop steps for a 0.3 s
+    hold), the replenisher;
+  - **the property test** on 150 random DAGs × {W1, W2} × 1–3 slots.
+- **Found by the property test, both fixed:**
+  1. Blocking propagated one level per loop pass, so a grandchild of a
+     failed card could be left `pending` when the loop ended. Refresh now
+     runs to a fixed point.
+  2. A ready card that overlaps a parked card's paths stays `ready` until
+     the question is answered. That is intended, because the parked work
+     is unmerged; the property now states it.
+- `ruff check` and `ruff format` are clean.
 
 ## Sources
 
