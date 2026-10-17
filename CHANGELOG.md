@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.0] - 2026-10-17
+
+### Added
+
+- **`operonx lint`: a project's conventions, checked.** The static linter moves into core from operonx-studio's `operonx-lint` (C3 names from plain assignments, C5 no ops or edges built in loops, C6 resources by key), with six new rules from the `AGENTS.md` that `operonx init` writes: **C7** no `@graph` inside a function or class; **C8** no `print()` outside tests and terminal tools (`scripts/`, `bench/`); **C9** no retry loop in an op (a handler that sleeps, or a `while`/`range` loop whose whole job is a `try`, not a loop that skips a bad item or a timer tick); **C10** a graph's body only wires (no Python `if`, `try`, `with`, `await` or I/O; a helper function in `graph.py` warns); **C11** a graph that builds ops writes `START >> … >> END`; **C12** every `${NAME}` in `resources.yaml` and every credential the code reads is listed in `.env.example`. `--build` loads the application and builds every graph with the network blocked (C1, C2); names `.env.example` lists but the shell lacks hold a placeholder for the build only. `--rules` lists them; `# operonx: allow[C8]` opts one line out. Exit 1 on any error. Every `operonx init` template lints and builds clean, and its `AGENTS.md` names the command. Unlike the other delegated commands, `lint` never syncs the project's guide copy first: a checker does not write to what it checks (run from an environment without operonx-agents, the sync deleted that package's guide pages). Guide pages 05 and 09.
+
+### Fixed
+
 - **operonx-kb 0.2.7: `operonx_kb.__version__` is the installed version.** It still said 0.2.3 through 0.2.4–0.2.6. A test now holds each package's `__version__` to its `pyproject.toml`.
 - **A served graph with an input called `name` gets that input.** The serve layer named the graph by calling `graph_fn(name=graph_fn.__name__, **params)`, so a graph whose function takes `name` had its input taken as the run's name — fine in a script, broken only once served. It now names it with `graph_fn.configure(name=...)` (`operonx/app/serve/app.py`).
 - **operonx-agents 0.3.1: a model's cost is known where the provider reports it.** `Usage.cost_usd` was the resource's declared prices times the counts, and `None` when a resource declared none — so an agent on OpenRouter, which reports each request's cost in `usage.cost`, had no cost at all: no cost per turn, and `UsageLimits(cost_usd=...)` failed the run. Now an unpriced resource takes the cost the provider reported for the request (a number only); declared prices still win where they are set. `operonx_agents.testing.completion(cost=...)` scripts it. (`operonx_agents/model/usage.py`.)

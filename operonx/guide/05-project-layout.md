@@ -201,9 +201,16 @@ def test_the_flow_scores_every_call():
 
 ```bash run
 python -m pytest tests -q
+operonx lint
 operonx serve --list
 operonx run score_calls
 ```
+
+`operonx lint` checks the conventions of this page and of the project's
+`AGENTS.md` (no `print()`, no graph inside a function, no logic in a
+graph's body, the edges written out, every secret in `.env.example`, ...);
+`operonx lint --rules` lists them, and `operonx lint --build` also loads the
+application and builds every graph with the network blocked.
 
 ## Growing it
 
