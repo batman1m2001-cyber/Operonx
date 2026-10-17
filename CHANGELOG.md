@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.31.1] - 2026-10-17
+
 ### Added
 
 - **`operonx guide` keeps AGENTS.md's commands current.** `operonx init` writes a "## Commands" section once, so a project made before a new command (`operonx lint` in 1.31.0) never listed it. The section is now a marked block (`<!-- operonx:commands -->`) that `operonx guide` — and any `operonx` command in a project whose guide copy is stale — rewrites with the project's toolchain, like the guides block. An older project's unmarked section is replaced only when every line in it is one the new block has (an older copy of it); a section someone edited is left alone. (`operonx/guide/__init__.py`: `commands_block`.)
