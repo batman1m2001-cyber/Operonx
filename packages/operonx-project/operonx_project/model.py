@@ -96,6 +96,7 @@ class Policy:
     wip: Dict[str, int] = field(default_factory=lambda: {"review": 2, "qa": 2})
     ready_depth: Optional[int] = None  # default 2 × max_parallel
     approve_plan: str = "ask"  # "ask": one tap; "auto": when the review passed and no card is risky
+    env: str = "own"  # a greenfield project's checks: "own" (its venv, made after init) | "engine" (the engine's)
     budget: BudgetPolicy = field(default_factory=BudgetPolicy)
 
     def __post_init__(self) -> None:
@@ -107,6 +108,8 @@ class Policy:
             raise ValueError(f"done_unit must be 'task' or 'row', not {self.done_unit!r}")
         if self.approve_plan not in ("ask", "auto"):
             raise ValueError(f"approve_plan must be 'ask' or 'auto', not {self.approve_plan!r}")
+        if self.env not in ("own", "engine"):
+            raise ValueError(f"env must be 'own' or 'engine', not {self.env!r}")
         if self.max_parallel < 1:
             raise ValueError("max_parallel must be at least 1")
         if isinstance(self.budget, dict):

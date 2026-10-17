@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from operonx_project.model import MilestoneState as M
 from operonx_project.model import Policy
 from tests.flow_env import RIGHT, git
@@ -50,7 +52,8 @@ def test_w2_whole_lifecycle_brd_to_verified_rows(tmp_path):
     assert f"| {DOUBLE_ROW} | implemented_verified | C2 |" in delivery
 
 
-def test_greenfield_milestone_creates_its_project_with_operonx_init(tmp_path):
+@pytest.mark.parametrize("env", ["engine", pytest.param("own", marks=pytest.mark.slow)])  # own: PyPI, ~1 min
+def test_greenfield_milestone_creates_its_project_with_operonx_init(tmp_path, env):
     from operonx_project.project import new_project
     from tests.life_env import card_json, plan
 
@@ -64,7 +67,7 @@ def test_greenfield_milestone_creates_its_project_with_operonx_init(tmp_path):
         "examiner": [{"output": {"files": []}}],
         "implementer": [{"write": {"src/extra/__init__.py": "def triple(x):\n    return 3 * x\n"}}],
     }  # fmt: skip
-    life = Life(tmp_path, script, mode="w1", repo=proj.repo, goal="a triple function")
+    life = Life(tmp_path, script, mode="w1", repo=proj.repo, goal="a triple function", policy=Policy.w1(env=env))
     life.command("start")
     assert life.serve() == M.AWAITING_APPROVAL
     assert not life.coder.of("planner:survey")  # an empty repo is not surveyed
@@ -83,6 +86,14 @@ def test_greenfield_milestone_creates_its_project_with_operonx_init(tmp_path):
         assert (integ / f).exists(), f
     log = git(integ, "log", "--format=%s")
     assert "m1/C0: operonx init --template hello --pip" in log
+    if env == "engine":
+        return
+    # the project's own environment, made with its toolchain after init; C1's checks ran with it
+    assert "m1/C0: the guide copy of the project's own environment" in log
+    [made] = [e for e in life.store.events("m1", limit=100_000) if e["kind"] == "env.made"]
+    venv = life.project.state / "venv"
+    assert made["data"]["ok"] and (venv / "bin" / "python").exists()
+    assert str(venv / "bin" / "python") in life.store.ms_get("m1", "baseline")["checks"][0]["cmd"]
 
 
 def test_plan_review_is_capped_and_the_notes_go_to_the_owner(tmp_path):

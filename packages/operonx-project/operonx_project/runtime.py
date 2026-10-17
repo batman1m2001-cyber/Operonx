@@ -10,6 +10,7 @@ name by default), and the run goes on with that process's objects.
 from __future__ import annotations
 
 import os
+import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,7 +75,7 @@ class Runtime:
     call_max_usd: float = 2.0  # --max-budget-usd per coder call (capped by what the card has left)
     call_timeout_s: float = 1800.0
     sandbox: bool = True
-    env: Optional[Dict[str, str]] = None  # for the checks; default the engine's, without bytecode
+    env: Optional[Dict[str, str]] = None  # for the checks; default the engine's minus credentials, no bytecode
     key: str = ""
     python: str = sys.executable  # runs the operonx checks when the target has no .venv of its own
     stages: Dict[Tuple[str, str], Callable[[Stage], None]] = field(default_factory=dict)
@@ -84,7 +85,9 @@ class Runtime:
         self.heldout_root = Path(self.heldout_root).expanduser()
         self.data_dir = Path(self.data_dir or self.git.lock_dir)
         if self.env is None:
-            self.env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+            from operonx_project.safety import scrub_env
+
+            self.env = {**scrub_env(os.environ), "PYTHONDONTWRITEBYTECODE": "1"}
 
     # ── helpers the ops share ──
 
@@ -110,10 +113,17 @@ class Runtime:
         except Exception as exc:  # noqa: BLE001 — the board column is display; the run goes on
             LOGGER.warning(f"card {cid}: could not show stage {stage.value}: {exc}")
 
+    @property
+    def venv(self) -> Path:
+        """A greenfield project's own environment (made after ``operonx init``), outside git."""
+        return Path(self.data_dir) / "venv"
+
     def target_python(self) -> Path:
-        """The target's own interpreter when it has a ``.venv``, else the engine's."""
-        own = Path(self.git.repo) / ".venv" / "bin" / "python"
-        return own if own.exists() else Path(self.python)
+        """The project's environment: the one the engine made, else the repo's ``.venv``, else the engine's."""
+        for own in (self.venv / "bin" / "python", Path(self.git.repo) / ".venv" / "bin" / "python"):
+            if own.exists():
+                return own
+        return Path(self.python)
 
     def operonx_argv(self) -> List[str]:
         """How to run ``operonx`` for the target (``python -m operonx`` does not exist)."""
@@ -132,6 +142,9 @@ class Runtime:
         return d / f"{name}.jsonl"
 
     def test_check(self, name: str, cmd: str, mounts: Optional[Dict[str, str]] = None) -> Check:
+        if self.check_mode == "host" and cmd.startswith("python "):
+            # on the host, the project's interpreter: a bare `python` is whatever PATH has, or nothing
+            cmd = f"{shlex.quote(str(self.target_python()))} {cmd[len('python ') :]}"
         return Check(
             name=name,
             cmd=cmd,

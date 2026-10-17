@@ -85,10 +85,14 @@ def base_env(*, keep_anthropic: bool = False) -> Dict[str, str]:
     - ``ANTHROPIC_*``: the host's own API key (kept only when asked);
     - ``VIRTUAL_ENV`` and its ``bin`` on PATH: the engine's own environment,
       which is not the product's (``uv run`` in the worktree would warn and
-      may pick the wrong one).
+      may pick the wrong one);
+    - every other credential (:func:`operonx_project.safety.scrub_env`): the
+      session's shell runs code the engine did not write.
 
     HOME survives: the sign-in lives under it.
     """
+    from operonx_project.safety import scrub_env
+
     env = {
         k: v
         for k, v in os.environ.items()
@@ -96,6 +100,7 @@ def base_env(*, keep_anthropic: bool = False) -> Dict[str, str]:
         and k not in ("CLAUDECODE", "AI_AGENT")
         and (keep_anthropic or not k.startswith("ANTHROPIC"))
     }
+    env = scrub_env(env, keep=[k for k in env if keep_anthropic and k.startswith("ANTHROPIC")])
     venv = env.pop("VIRTUAL_ENV", None)
     if venv and env.get("PATH"):
         bin_dir = str(Path(venv) / "bin")

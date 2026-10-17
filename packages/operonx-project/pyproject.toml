@@ -26,6 +26,9 @@ dependencies = [
 [project.scripts]
 operonx-project = "operonx_project.cli:main"
 
+[project.entry-points."operonx.guides"]
+project = "operonx_project.guide"
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

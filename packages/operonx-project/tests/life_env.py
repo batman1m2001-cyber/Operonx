@@ -59,7 +59,7 @@ def base_script(**over: Any) -> Dict[str, List[Any]]:
 class Life:
     def __init__(self, root: Path, script: Dict[str, List[Any]], mode: str = "w1", policy: Optional[Policy] = None,
                  sources=(), repo: Optional[Path] = None, log: Optional[Path] = None, goal: str = "calc.add adds",
-                 prefix: str = "CALC"):  # fmt: skip
+                 prefix: str = "CALC", runtime: Optional[Dict[str, Any]] = None, **life_kw: Any):  # fmt: skip
         self.root = root
         self.repo = repo or make_repo(root)
         self.coder = ScriptedCoder(script, log=log)
@@ -73,11 +73,14 @@ class Life:
             self.coder,
             sandbox=False,
             heldout_root=root / "heldout",
-            runtime={
+            runtime=runtime
+            if runtime is not None
+            else {
                 "acceptance_cmd": f"{PY} -m pytest -q -p no:cacheprovider {{dir}}",
                 "heldout_cmd": f"{PY} -m pytest -q --tb=no -rfE --assert=plain -p no:cacheprovider {{dir}}",
                 "check_timeout_s": 120.0,
             },
+            **life_kw,
         )
 
     def command(self, kind: str, **kw: Any) -> int:

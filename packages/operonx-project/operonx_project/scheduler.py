@@ -97,7 +97,8 @@ class Outcome(str, Enum):
     STUCK = "stuck"  # nothing can run; something failed or is blocked
     PAUSED = "paused"
     CANCELLED = "cancelled"
-    BUDGET = "budget"  # the milestone's budget ran out with work left
+    BUDGET = "budget"  # the milestone's budget (dollars or hours) ran out with work left
+    RATE_LIMITED = "rate_limited"  # the coder's limit resets later than a hold is worth: see resume_at
 
 
 @dataclass
@@ -143,6 +144,8 @@ class Scheduler:
         integrator: Integrator,
         replenisher: Optional[Replenisher] = None,
         rows_left: Callable[[], int] = lambda: 0,
+        deadline: Optional[float] = None,  # epoch seconds: max_hours runs out; no new start after it
+        hold_max_s: float = 120.0,  # a rate limit resetting later than this pauses the milestone instead
     ):
         self.store = store
         self.mid = milestone
@@ -150,6 +153,9 @@ class Scheduler:
         self.integrator = integrator
         self.replenisher = replenisher
         self.rows_left = rows_left
+        self.deadline = deadline
+        self.hold_max_s = hold_max_s
+        self.resume_at: Optional[float] = None  # set with Outcome.RATE_LIMITED
         self.policy = store.get_milestone(milestone).policy
         self.stats = Stats()
         self._events: Optional[asyncio.Queue] = None
@@ -227,11 +233,18 @@ class Scheduler:
             for cid, (to, reason) in moves.items():
                 self.store.move_card(self.mid, cid, to, reason)
 
+    def over_time(self) -> bool:
+        return self.deadline is not None and time.time() >= self.deadline
+
     def _over_budget(self) -> bool:
-        return self.store.get_milestone(self.mid).cost_usd >= self.policy.budget.max_usd
+        return self.store.get_milestone(self.mid).cost_usd >= self.policy.budget.max_usd or self.over_time()
+
+    def _rate_limited(self) -> bool:
+        return self.resume_at is not None and time.time() < self.resume_at
 
     def _can_start(self) -> bool:
-        return not (self._paused or self._cancelled or self._over_budget() or time.time() < self._hold_until)
+        return not (self._paused or self._cancelled or self._over_budget() or self._rate_limited()
+                    or time.time() < self._hold_until)  # fmt: skip
 
     async def _replenish(self) -> None:
         if self.replenisher is None:
@@ -351,7 +364,10 @@ class Scheduler:
             )
         else:  # requeue
             self.store.move_card(self.mid, cid, CardState.READY, out.reason or "requeued", **extra)
-            if out.not_before and out.not_before > self._hold_until:
+            if out.not_before and out.not_before - time.time() > self.hold_max_s:
+                # a long wait: running cards end their round, then the milestone pauses until the reset
+                self.resume_at = max(self.resume_at or 0.0, out.not_before)
+            elif out.not_before and out.not_before > self._hold_until:
                 self._hold_until = out.not_before
                 delay = max(0.0, out.not_before - time.time())
                 if self._timer is not None:
@@ -404,6 +420,8 @@ class Scheduler:
             return Outcome.COMPLETE
         if self._paused:
             return Outcome.PAUSED
+        if self._rate_limited():
+            return Outcome.RATE_LIMITED
         open_ = [c for c in cards if c.state in (CardState.READY, CardState.PENDING)]
         if open_ and self._over_budget():
             return Outcome.BUDGET

@@ -55,7 +55,17 @@ operonx project daemon --repo ../my-service --telegram-chat <chat id> --telegram
 Only the listed users, in the listed chat, are heard; anyone else is
 dropped without a reply. In the chat: `/status`, `/pending`,
 `/milestone m1`, `/pause`, `/resume`, `/cancel m1` (asks you to confirm),
-`/budget m1 +20`. If Telegram is down, the questions wait and
+`/budget m1 +20` (or `+2h`). If Telegram is down, the questions wait and
 `operonx project answer` works as ever. A question unanswered for a day is
 reminded; after three it takes its safe default, if triage marked one, or
 is flagged in `status`.
+
+### Bounds and boundaries
+
+`--max-usd` and `--max-hours` bound a milestone (waiting for you does not
+count toward the hours); a long rate limit pauses it until the reset, and
+it goes on by itself. Coder sessions and checks never inherit a
+credential from the engine's environment. A greenfield project gets its
+own environment, made with its toolchain after `operonx init`. Checks run
+on the host by default, or with no network in docker
+(`check_mode="docker"`). See `operonx_project/guide/01-project.md`.

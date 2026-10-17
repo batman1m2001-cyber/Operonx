@@ -41,7 +41,8 @@ __all__ = ["TelegramBridge"]
 
 CONFIRM_TTL = 600.0
 HELP = ("/status — the milestones\n/pending — what waits on you\n/milestone <id> — one milestone's cards\n"
-        "/pause [id] · /resume [id]\n/cancel <id> — asks you to confirm\n/budget <id> +N — N more dollars\n\n"
+        "/pause [id] · /resume [id]\n/cancel <id> — asks you to confirm\n"
+        "/budget <id> +N — N more dollars (+Nh: hours)\n\n"
         "To answer a question: tap a button, or reply to its message in your own words.")  # fmt: skip
 
 
@@ -163,6 +164,25 @@ class TelegramBridge:
                 await self._close(inter)
         for iid, what in events:
             await self._tick(iid, what)
+        await self._notices()
+
+    async def _notices(self) -> None:
+        """Relay the engine's ``notice`` events (a rate-limit pause), each once, from the bridge's first sync on."""
+        seen = dict(self.store.checkpoint("telegram:notices") or {})
+        for ms in self.store.milestones():
+            after = seen.get(ms.id)
+            evs = self.store.events(ms.id, after=after or 0, limit=100_000)
+            if after is None:  # a bridge new to this milestone: from now on, not its history
+                seen[ms.id] = evs[-1]["seq"] if evs else 0
+                continue
+            for e in evs:
+                if e["kind"] == "notice":
+                    try:
+                        await self._send(self.chat, str(e["data"].get("text") or ""))
+                    except TelegramError as exc:
+                        LOGGER.warning(f"telegram: a notice was not sent ({exc}); it is in the events")
+                seen[ms.id] = e["seq"]
+        self.store.save_checkpoint("telegram:notices", seen)
 
     # ── in ─────────────────────────────────────────────────────────────────
     def _allowed(self, user: Any, chat: Any) -> bool:
@@ -323,19 +343,22 @@ class TelegramBridge:
             return "confirm"
         elif word == "/budget":
             mid, _, amount = rest.partition(" ")
+            amount = amount.strip().lstrip("+").lstrip("$").lower()
+            unit = "hours" if amount.endswith("h") else "usd"
             try:
-                usd = float(amount.strip().lstrip("+").lstrip("$"))
+                n = float(amount.rstrip("h"))
                 self.store.get_milestone(mid)
             except (ValueError, KeyError):
-                await self._reply(chat, "Usage: /budget <milestone> +N (dollars)", message_id)
+                await self._reply(chat, "Usage: /budget <milestone> +N (dollars) or +Nh (hours)", message_id)
                 return "invalid"
+            said = f"+{n:g}h" if unit == "hours" else f"+${n:g}"
             budget = [i for i in self.inter.open(mid) if i["kind"] == "budget"]
             if budget:
-                got = self.inter.submit_answer(budget[0]["id"], f"+{usd:g}", actor=actor, via="telegram")
+                got = self.inter.submit_answer(budget[0]["id"], said, actor=actor, via="telegram")
                 await self._reply(chat, self._said(got), message_id)
                 return got.status
-            seq = self.store.enqueue(mid, "retry", {"usd": usd}, actor=actor)
-            await self._reply(chat, f"Queued +${usd:g} for {mid} (#{seq}).", message_id)
+            seq = self.store.enqueue(mid, "retry", {unit: n}, actor=actor)
+            await self._reply(chat, f"Queued {said} for {mid} (#{seq}).", message_id)
         else:
             await self._reply(chat, HELP, message_id)
             return "help"
