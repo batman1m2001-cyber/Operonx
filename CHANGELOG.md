@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`operonx project`: hands its command line to operonx-project** (the engine that takes a project's requirements to a verified branch: milestones, a board, a living BRD), the way `operonx studio` hands off to the studio; without the package installed it says how to install it. Like `lint`, it never syncs the guide copy first: the engine changes a repo only on its own branches.
+
 ## [1.31.0] - 2026-10-17
 
 ### Added

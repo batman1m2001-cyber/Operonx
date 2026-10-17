@@ -57,3 +57,19 @@ jobs:
         run: uv run ruff check . && uv run ruff format --check . --exclude "*.md"
       - name: tests (Postgres and Qdrant conformance skip without their URLs)
         run: uv run pytest -q -m "not corpus"
+
+  operonx-project:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/operonx-project
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: lint
+        run: uv run ruff check . && uv run ruff format --check . --exclude "*.md"
+      - name: tests (no paid coding-agent runs)
+        run: uv run pytest -q
