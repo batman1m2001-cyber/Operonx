@@ -244,6 +244,17 @@ class TestResourceRegistration:
         assert key == "custom:my-service"
         assert hub.has("custom:my-service")
 
+    def test_register_without_persist_leaves_the_file_alone(self, hub, mock_config, tmp_path):
+        """A resource derived at run time lives in this process only: resources.yaml is not rewritten."""
+        config_file = tmp_path / "resources.yaml"
+        before = config_file.read_text() if config_file.exists() else None
+        key = hub.register(mock_config, registry_key="mockservice:runtime", persist=False)
+        assert hub.has(key) and hub.get(key).name == "test-service"
+        assert hub.get_config(key).name == "test-service"
+        after = config_file.read_text() if config_file.exists() else None
+        assert after == before
+        assert ResourceHub.from_yaml(config_file).declares(key) is False
+
     def test_get_config(self, hub, mock_config):
         """Test retrieving config object."""
         key = hub.register(mock_config)

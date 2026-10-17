@@ -5,6 +5,7 @@ from operonx_kb.ops.ingest import (
     build_tree,
     chunk_version,
     commit_version,
+    delete_vectors,
     forget_index_writes,
     parse_document,
     plan_ingest,
@@ -12,6 +13,7 @@ from operonx_kb.ops.ingest import (
     report,
     skipped,
     stage_index_writes,
+    upsert_vectors,
 )
 
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "report",
     "skipped",
     "stage_index_writes",
+    "upsert_vectors",
+    "delete_vectors",
 ]

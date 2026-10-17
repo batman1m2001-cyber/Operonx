@@ -34,13 +34,18 @@ def embedder_fingerprint(resource_key: str, backend: Any, template: str = "{text
 
 @op(exclude={"trace": ["chunks", "vectors"]}, show_keys="stats")
 async def embed_chunks(
-    chunks: list, embedder: str, catalog: str, batch_size: int = 64, template: str = "{text}"
+    chunks: list,
+    embedder: str,
+    catalog: str,
+    batch_size: int = 64,
+    template: str = "{text}",
 ) -> dict:
     """Embed chunks, cache first.
 
     Args:
         chunks: Chunk dumps (``Chunk.model_dump()``) to embed.
-        embedder: The embedder key; a bare name is ``embedding:<name>``.
+        embedder: The embedder key; a bare name is ``embedding:<name>``. ``""`` (a
+            lexical-only collection) embeds nothing.
         catalog: The catalog key holding the embedding cache.
         batch_size: Texts per embedder call.
         template: How a chunk's embed text is presented to the model
@@ -51,6 +56,8 @@ async def embed_chunks(
         ``vectors`` (``chunk_id -> vector``) and ``stats`` (``embedded`` sent to the
         model, ``cached`` cache hits, ``calls``).
     """
+    if not embedder:  # a lexical-only collection: nothing to embed
+        return {"vectors": {}, "stats": {"embedded": 0, "cached": 0, "calls": 0}}
     if "{text}" not in template:
         raise ValueError(f"embed_chunks template {template!r} must contain {{text}}")
     backend = resolve(embedder, "embedding")  # the hub caches the instance

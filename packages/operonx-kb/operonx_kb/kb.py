@@ -113,6 +113,14 @@ class KnowledgeBase:
             )
         return dense
 
+    def _indexed(self, collection_id: str) -> None:
+        """A collection with no index at all has nothing to ingest into."""
+        spec = self.collection(collection_id).spec
+        if spec.dense is None and spec.lexical is None:
+            raise CatalogError(
+                f"collection {collection_id!r} has no index; set CollectionSpec(dense=...) or lexical=..."
+            )
+
     def _engine(self, graph_: Any) -> Operon:
         """One engine per module-level graph, shared by every collection: what differs
         per collection arrives as the run's inputs."""
@@ -189,7 +197,7 @@ class KnowledgeBase:
                                 "mime": mime, "title": title, "tags": list(tags or []), "acl": list(acl or []),
                                 "metadata": metadata or {}}  # fmt: skip
         doc_key = key or (str(path) if path is not None else "")
-        self._dense(collection_id)  # no dense index: refused before a run
+        self._indexed(collection_id)  # no index at all: refused before a run
         try:
             return await self._run_graph(ingest_document, collection_id,
                                          {"item": item, "collection": collection_id}, "result")  # fmt: skip
@@ -314,16 +322,16 @@ class KnowledgeBase:
     # maintenance ----------------------------------------------------------------------------
 
     async def delete(self, collection_id: str, key: str, *, purge: bool = False) -> Dict[str, Any]:
-        """Tombstone a document and delete its vectors; with ``purge``, erase it and prove it."""
-        self._dense(collection_id)
+        """Tombstone a document and delete its index entries; with ``purge``, erase it and prove it."""
+        self._indexed(collection_id)
         return await self._run_graph(delete_document, collection_id,
                                      {"collection": collection_id, "key": key, "purge": purge}, "report")  # fmt: skip
 
     async def gc(
         self, collection_id: str, *, blobs: bool = False, blob_grace_seconds: float = 3600.0
     ) -> Dict[str, Any]:
-        """Delete vectors no active version holds; with ``blobs``, unreferenced blobs too."""
-        self._dense(collection_id)
+        """Delete index entries no active version holds; with ``blobs``, unreferenced blobs too."""
+        self._indexed(collection_id)
         return await self._run_graph(collect_garbage, collection_id,
                                      {"collection": collection_id, "blobs_enabled": blobs,
                                       "grace_seconds": blob_grace_seconds}, "report")  # fmt: skip

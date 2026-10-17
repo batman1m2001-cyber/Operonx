@@ -223,7 +223,7 @@ No new database server, queue, service or language is needed.
      to cite a file in the diff and a line that exists. If it does not,
      it is kept as *unverified* and does not block.
 6. **Parallel tasks never share a working tree.** Each task gets a git
-   worktree on `milestone/<milestone>/<task>`, branched from the integration
+   worktree on `milestone/<milestone>/card/<card>`, branched from the integration
    branch once its dependencies have merged. Tasks whose declared `paths`
    overlap do not run at the same time. Merges into the integration branch
    take one lock and are followed by the full checks (regression against
@@ -313,6 +313,16 @@ No new database server, queue, service or language is needed.
   bubblewrap`. If the sandbox fails on this kernel, the fallback is the
   mitigations listed in §11, with the docs saying plainly that it is not
   a boundary. Check commands run in Docker either way.
+  **P2 finding (2026-10-17):** bubblewrap and socat are installed, but on
+  this Ubuntu 24.04 host (`kernel.apparmor_restrict_unprivileged_userns=1`)
+  every sandboxed command fails before it runs: Claude Code's
+  `apply-seccomp` needs a nested user namespace, which AppArmor gives no
+  capabilities (`enableWeakerNestedSandbox` does not help). Ubuntu's fix is
+  an AppArmor profile granting `/usr/bin/bwrap` `userns`. That is a host
+  security change, so it is **the owner's decision**. Until then the coder
+  **fails closed**: a sandbox that cannot start ends the session as
+  `infra`, "sandbox unavailable", and never falls back silently. A
+  trusted repo can run with `sandbox=False`, said in its round record.
 - **D3. The Max login, with `max_parallel = 2`.** The engine pauses on a
   rate-limit reply and resumes at the reset time. The bake-off (P7)
   needs about 8–12 coder hours, so it runs in windows you are not using,
@@ -341,8 +351,8 @@ No new database server, queue, service or language is needed.
    └───────┬──────────────────────────────┬──────────────────────────────────┬──────────────────┘
            │ one journalled Operon run     │ git worktree per task            │ reads / writes
            ▼ per stage / task attempt      ▼                                  ▼
-   discover_flow · plan_flow ·      <repo>/.git  ── milestone/<m>/<card>  project.db (project store)
-   task_flow · integrate_flow ·        integration: milestone/<m>         journal.db (its own)      
+   discover_flow · plan_flow ·      <repo>/.git  ── milestone/<m>/card/<c>  project.db (project store)
+   task_flow · integrate_flow ·        integration: milestone/<m>/main    journal.db (its own)      
    final_flow                                                           .operonx/runs (traces)
            │ each round's stages call
            ▼
@@ -993,7 +1003,8 @@ An illegal transition raises.
   you**, the tasks downstream of it stay `pending` ("waiting on T4's
   decision"), and **independent tasks keep running**.
 - **Integration** happens in order under one lock:
-  1. merge the task branch into `milestone/<m>`;
+  1. merge the card branch into `milestone/<m>/main` (git refs are paths:
+     `milestone/<m>` and `milestone/<m>/<card>` cannot both exist);
   2. on a conflict, the task gets a new round "rebase onto the
      integration tip", with the conflict as input, then review and checks
      again;
@@ -1667,6 +1678,92 @@ typing or happy path alone.
      the question is answered. That is intended, because the parked work
      is unmerged; the property now states it.
 - `ruff check` and `ruff format` are clean.
+
+**P2. Coder, git, checks (2026-10-17, branch `feat/project-p2`, PR stacked on P1; lint PR #195)**
+- **Built:**
+  - `coder/` (`base.py`, `roles.py`, `claude.py`): `ClaudeCodeCoder`, ported
+    from the studio (`find_claude`, `base_env`, the stream-json events), with
+    what an unattended engine needs:
+    - the session id is chosen before the process starts
+      (`--session-id`), so a crash can always `--resume` it;
+    - `--fork-session` reports the new id at `init`;
+    - structured output: `--json-schema`, read from the result's
+      `structured_output`;
+    - `--max-budget-usd`;
+    - a timeout and task cancellation that stop the whole process group
+      (SIGINT, then SIGKILL after 3 s); `on_start` gives the pgid for orphan
+      cleanup after a crash;
+    - one status per session: ok, error, budget, rate_limited (with
+      `resets_at`), auth, timeout, cancelled, infra;
+    - tool errors, `permission_denials` and the plan's rate windows are
+      recorded.
+  - roles: every role runs `--restricted --strict-mcp-config
+    --permission-prompts none`. Only the implementer gets `Bash`, and it is
+    sandboxed. Deny rules cover `.env`, `~/.claude`, the engine's state
+    dirs, and the git commands the engine owns.
+  - `gitops.py`:
+    - worktrees under `~/.operonx/worktrees/<project>/<m>/<card>`, idempotent
+      after a crash, including a deleted directory;
+    - branches `milestone/<m>/main` and `milestone/<m>/card/<card>`;
+    - commits use the repo's identity, else the engine's;
+    - `--no-ff` merges under a thread and file lock;
+    - a conflict is aborted and named, and a half-written merge is aborted
+      first;
+    - `update_card` leaves conflict markers for the rebase round;
+    - `guard()`: protected files, outside paths (shared ones only warn),
+      private sources matched by content hash.
+  - `checks.py`:
+    - host or `docker --network none` runs, killed by process group on
+      timeout, keeping the output tail;
+    - pytest/unittest failure ids;
+    - `compare()` against the baseline (new, old, fixed);
+    - a `failure_signature` that is stable across times, addresses and
+      paths.
+  - core (PR #195, operonx 1.31.0): `operonx lint`, with C3/C5/C6 moved
+    from the studio and C7–C12 new, plus `--build` (C1/C2).
+    - Every `operonx init` template lints and builds clean.
+    - `lint` never syncs the guide copy it checks.
+- **Gate:**
+  - `packages/operonx-project`: **70 passed**, the slow docker test
+    included.
+    - 14 coder tests against a scripted fake `claude` that speaks the
+      captured 2.1.301 shapes; git tests on real temporary repos; check
+      tests on real processes.
+  - **Paid smoke**, `-m paid`, on Claude Code 2.1.301, Haiku, about $0.02 in
+    all:
+    - a session wrote a file, was resumed, and answered a JSON schema;
+    - a denied `.env` read came back in `permission_denials`;
+    - a $0.0001 cap ended as `error_max_budget_usd`.
+  - Core: the CLI, lint and guide suites: **227 passed**.
+  - `operonx lint` on real repos, after tuning:
+    - OneWealth: 1 real finding (`MF_DEMO_PASSWORD` is missing from
+      `.env.example`);
+    - callbot: has no `.env.example`.
+- **Open in P2:**
+  - **The sandbox gate item is blocked** on the owner's AppArmor decision
+    (see D2). The refusal path is tested with the real error text.
+  - **The studio split** (D1) is done as **operonx-studio#95**. It merges
+    after #195, since it pins operonx ≥ 1.31.0.
+    - `operonx_project` is renamed `operonx_studio_toolkit`.
+    - Lint and the build check are core's `operonx lint`, and the scaffold
+      is core's `operonx init`; `operonx-lint` and `operonx-new` remain as
+      aliases.
+    - The manifest is parsed by core, while the studio keeps its view types.
+      `[resources] base` and `[graph.bind]` are gone; no project used them.
+    - The studio suite: 684 passed. A copy of the callbot (operonx 1.26)
+      extracts to an identical IR before and after.
+    - **One deliberate deviation from D1:** the studio's four *example*
+      templates (http-api, batch-scorer, rag-qa, voice-agent) are kept.
+      They are listed after core's four `operonx init` templates, which
+      "New project" writes byte-for-byte as `operonx init` does. Their job
+      (a green run and an eval in the first minutes) has no core
+      equivalent, so replacing them would have removed it.
+- **Incident:** a lint run with its working directory in OneWealth (which
+  another agent is refactoring) let the delegated CLI's guide autosync
+  rewrite its `.operonx/guide/` and `AGENTS.md` from an environment without
+  operonx-agents. Fixed upstream (lint is read-only, #195). The four files
+  in OneWealth are left for the owner to restore. Engine probes run on
+  copies only.
 
 ## Sources
 
