@@ -27,6 +27,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         from operonx_project.cli import main as run
     except ImportError:
-        print(f"operonx project needs operonx-project, which is not installed here: {INSTALL}", file=sys.stderr)
+        print(
+            f"operonx project needs operonx-project, which is not installed here: {INSTALL}",
+            file=sys.stderr,
+        )
         return 2
     return run(list(sys.argv[1:] if argv is None else argv))

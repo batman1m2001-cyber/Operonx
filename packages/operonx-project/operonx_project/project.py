@@ -3,9 +3,9 @@
 The engine's state lives in the repo but outside git
 (``.operonx/project/``, listed in ``.git/info/exclude``): the store, the
 journals, the transcripts. The flows' traces go to ``.operonx/runs/``
-(excluded too), the project's local run store, where the studio reads them. Worktrees live in ``~/.operonx/worktrees`` and
-held-out tests in ``~/.operonx/heldout``, outside the repo, where no card's
-session looks.
+(excluded too), the project's local run store, where the studio reads
+them. Worktrees live in ``~/.operonx/worktrees`` and held-out tests in
+``~/.operonx/heldout``, outside the repo, where no card's session looks.
 
 :func:`new_project` is ``operonx project new``: an empty repository with the
 BRD folder, whose first milestone's card ``C0`` runs ``operonx init`` (the
