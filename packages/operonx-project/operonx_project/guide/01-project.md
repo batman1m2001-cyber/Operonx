@@ -70,7 +70,10 @@ assert m1["state"] == "created" and pending_data(project) == []
 `status --json` and `show m1 [C3] --json` print the same records. The
 engine's state is `<repo>/.operonx/project/` (outside git): `project.db`
 (milestones, cards, events, the command queue, the questions) and the
-stage journals.
+stage journals. Each flow run — a card's attempt (`m1.C3.2`, the card's
+`run_id`), discovery, planning, the final pass — is traced to the
+project's run store, `<repo>/.operonx/runs/` (outside git too): the
+studio's Runs tab shows it step by step, and its Board tab is this store.
 
 ## The owner's questions
 
@@ -87,7 +90,14 @@ operonx-project approve m1 --repo demo
 ```
 
 An answer to a question that is no longer current (the plan was replaced,
-the card moved on) changes nothing, and says which one is. With
+the card moved on) changes nothing, and says which one is. Another program
+(the studio) acts the same way, one JSON request in and one out, by
+`operonx-project api`:
+
+```bash norun
+echo '{"op": "answer", "milestone": "m1", "ref": "Q-03", "answer": "b"}' | operonx-project api --repo demo -
+# {"ok": true, "status": "accepted", ...}; a second one: {"ok": false, "status": "already", ...}, exit 1
+``` With
 `daemon --telegram-chat <id> --telegram-user <id>` and
 `OPERONX_TELEGRAM_TOKEN`, the questions also go to Telegram with buttons.
 

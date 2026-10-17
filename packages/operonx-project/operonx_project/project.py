@@ -2,7 +2,8 @@
 
 The engine's state lives in the repo but outside git
 (``.operonx/project/``, listed in ``.git/info/exclude``): the store, the
-journals, the transcripts. Worktrees live in ``~/.operonx/worktrees`` and
+journals, the transcripts. The flows' traces go to ``.operonx/runs/``
+(excluded too), the project's local run store, where the studio reads them. Worktrees live in ``~/.operonx/worktrees`` and
 held-out tests in ``~/.operonx/heldout``, outside the repo, where no card's
 session looks.
 
@@ -29,6 +30,7 @@ from operonx_project.store import Store
 __all__ = ["STATE_DIR", "Project", "create_milestone", "new_project"]
 
 STATE_DIR = ".operonx/project"
+RUNS_DIR = ".operonx/runs"  # the flows' traces: the studio's run pages
 
 
 def _exclude(repo: Path, line: str) -> None:
@@ -54,7 +56,13 @@ class Project:
         state = git.repo / STATE_DIR
         git.lock_dir = state
         _exclude(git.repo, f"/{STATE_DIR}/")
+        _exclude(git.repo, f"/{RUNS_DIR}/")
         return cls(repo=git.repo, state=state, store=Store(state / "project.db"), git=git)
+
+    @property
+    def runs(self) -> Path:
+        """Where the flows' traces go (``RUNS_DIR``): the project's local run store."""
+        return self.repo / RUNS_DIR
 
     def next_milestone_id(self) -> str:
         n = [int(m.id[1:]) for m in self.store.milestones() if re.fullmatch(r"m\d+", m.id)]

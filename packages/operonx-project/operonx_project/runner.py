@@ -53,7 +53,7 @@ class FlowRunner:
     the outcome: a crash then loses no spend, and the scheduler's budget
     check sees it at once."""
 
-    def __init__(self, rt: Runtime, journal: Union[str, Path], durability: str = "sync"):
+    def __init__(self, rt: Runtime, journal: Union[str, Path], durability: str = "sync", trace: Any = None):
         self.rt = register(rt)
         self.journal_path = Path(journal)
         self.journal_path.parent.mkdir(parents=True, exist_ok=True)
@@ -62,6 +62,7 @@ class FlowRunner:
             params={"key": None, "mid": None, "cid": None, "reopen": None},
             journal=SqliteJournal(str(self.journal_path)),
             durability=durability,
+            trace=trace,
         )
 
     def _inputs(self, card: Card, reopen: Dict[str, Any]) -> Dict[str, Any]:

@@ -402,3 +402,45 @@ def test_the_cli_answers_a_card_whose_question_the_daemon_has_not_opened_yet(tmp
     assert cli(["answer", "--repo", str(proj.repo), "m1", "C1", "b"]) == 0
     [cmd] = proj.store.pending_commands()
     assert (cmd["kind"], cmd["card"], cmd["payload"]) == ("answer", "C1", {"answer": "b"})
+
+
+# ── the studio's door: operonx-project api (P8) ────────────────────────────
+def _api(proj, req) -> dict:
+    import io
+    import json
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        code = cli(["api", "--repo", str(proj.repo), json.dumps(req)])
+    out = json.loads(buf.getvalue())
+    assert code == (0 if out["ok"] else 1)
+    return out
+
+
+def test_the_api_answers_with_the_same_rules(tmp_path):
+    proj = board(tmp_path, cards=("C1", "C2"))
+    Interactions(proj.store).sync()
+    got = _api(proj, {"op": "answer", "milestone": "m1", "ref": "Q-01", "answer": "b"})
+    assert got["ok"] and got["seq"]
+    again = _api(proj, {"op": "answer", "milestone": "m1", "ref": "Q-01", "answer": "a"})
+    assert not again["ok"] and again["status"] == "already"
+    # C2 moves on (a replan cancelled it): its question is stale, and the answer says what is current
+    proj.store.move_card("m1", "C2", CardState.CANCELLED)
+    stale = _api(proj, {"op": "answer", "milestone": "m1", "ref": "C2", "answer": "a"})
+    assert stale["status"] == "stale" and not stale["ok"]
+    assert [c["kind"] for c in proj.store.pending_commands()] == ["answer"]
+
+
+def test_the_api_queues_the_rest_and_moves_a_card_not_started(tmp_path):
+    proj = board(tmp_path, cards=("C1",))
+    proj.store.add_cards([Card("C9", "m1", "later")])
+    assert _api(proj, {"op": "pause", "milestone": "m1"})["status"] == "queued"
+    assert _api(proj, {"op": "retry", "milestone": "m1", "hours": 2})["ok"]
+    assert proj.store.pending_commands()[-1]["payload"] == {"hours": 2.0}
+    assert not _api(proj, {"op": "replan", "milestone": "m1", "notes": " "})["ok"]
+    assert _api(proj, {"op": "prioritize", "milestone": "m1", "card": "C9", "priority": -5})["ok"]
+    assert proj.store.get_card("m1", "C9").priority == -5
+    assert _api(proj, {"op": "prioritize", "milestone": "m1", "card": "C1", "priority": 1})["status"] == "refused"
+    assert _api(proj, {"op": "nope", "milestone": "m1"})["status"] == "invalid"
+    assert _api(proj, {"op": "pause", "milestone": "m7"})["status"] == "unknown"

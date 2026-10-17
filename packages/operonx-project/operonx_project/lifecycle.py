@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Sequence
 from operonx import Operon
 from operonx.core.loggings import LOGGER
 from operonx.durable import SqliteJournal
+from operonx.telemetry.consumers.local import LocalConsumer
 
 from operonx_project.brd.records import load_requirements, matrix_status
 from operonx_project.checks import Check
@@ -85,8 +86,12 @@ class Lifecycle:
         python: Optional[str] = None,
         runtime: Optional[Dict[str, Any]] = None,
         hold_max_s: float = 120.0,  # a rate limit resetting later than this pauses the milestone (§10)
+        trace_runs: bool = True,
     ):
         self.p = project
+        # every flow run (a card's attempt, discovery, planning, the final
+        # pass) is a run page in the studio: the project's own run store
+        self.trace = LocalConsumer(config={"root": str(project.runs)}) if trace_runs else None
         self.hold_max_s = hold_max_s
         self.coder = coder
         self.models = models
@@ -129,7 +134,7 @@ class Lifecycle:
 
     def _flow_runner(self, mid: str) -> FlowRunner:
         if mid not in self._runners:
-            self._runners[mid] = FlowRunner(self.rt(mid), self.p.state / "runs.db")
+            self._runners[mid] = FlowRunner(self.rt(mid), self.p.state / "runs.db", trace=self.trace)
         return self._runners[mid]
 
     def _engine(self, name: str) -> Operon:
@@ -141,7 +146,7 @@ class Lifecycle:
             }[name]
             self._engines[name] = Operon(flow, params={k: None for k in params},
                                          journal=SqliteJournal(str(self.p.state / f"{name}.db")),
-                                         durability="sync")  # fmt: skip
+                                         durability="sync", trace=self.trace)  # fmt: skip
         return self._engines[name]
 
     async def _stage(self, mid: str, name: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
