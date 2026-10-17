@@ -1,0 +1,7 @@
+# operonx-project brd check: settings for this folder. Every key is optional.
+# root = "../.."          # paths in messages are relative to this
+# tests = "../../tests"   # where cited tests (tests/<file>.py::<name>) live
+# required = []           # requirement ids that must be defined
+# [[groups]]              # rows of the matrix's summary table (default: one per id prefix)
+# name = "Requirements (R)"
+# pattern = 'R-'

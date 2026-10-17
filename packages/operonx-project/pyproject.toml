@@ -15,6 +15,10 @@ dependencies = [
     # serve layer's middleware; the plan's evidence was measured on it.
     "operonx>=1.30.0",
     "httpx>=0.24",
+    # the BRD's readers (P4): docx/pptx/xlsx/html with the stdlib, PDF text by
+    # docling-parse, scanned pages and images by tesseract (a system binary)
+    "operonx-kb[ocr]>=0.2.6",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.scripts]
@@ -31,6 +35,7 @@ dev = [
 [tool.uv.sources]
 # Editable from this repo's own operonx (the package lives in packages/).
 operonx = { path = "../..", editable = true }
+operonx-kb = { path = "../operonx-kb", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["operonx_project"]

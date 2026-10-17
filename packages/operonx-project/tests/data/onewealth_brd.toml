@@ -1,0 +1,49 @@
+# OneWealth's checker constants (scripts/check_brd_docs.py), restated as a brd.toml:
+# what the agreement test puts in a copy of OneWealth's docs/brd.
+root = "../.."
+tests = "../../tests"
+requirement_id = '(?:BRD-(?:BR-\d{2}|FR-\d{3}|NFR-\d{2}|KPI-\d{2}|RULE-[A-Z]+-\d{2})|(?:BRIEF|KIT|OWN)-[A-Z]+-\d{2})'
+skip = ["sources/redesign_kit"]
+screen_id = 'SCR-(?:CL|RM|CIO|CMP|PRO|ADM)-\d{2}'
+required = [
+  "BRD-BR-01", "BRD-BR-02", "BRD-BR-03", "BRD-BR-04", "BRD-BR-05", "BRD-BR-06", "BRD-BR-07", "BRD-BR-08",
+  "BRD-BR-09", "BRD-BR-10", "BRD-BR-11", "BRD-BR-12", "BRD-BR-13", "BRD-BR-14", "BRD-BR-15",
+  "BRD-FR-101", "BRD-FR-102", "BRD-FR-103", "BRD-FR-104", "BRD-FR-105", "BRD-FR-201", "BRD-FR-202",
+  "BRD-FR-203", "BRD-FR-204", "BRD-FR-301", "BRD-FR-302", "BRD-FR-303", "BRD-FR-304", "BRD-FR-305",
+  "BRD-FR-306", "BRD-FR-307", "BRD-FR-401", "BRD-FR-402", "BRD-FR-403", "BRD-FR-404", "BRD-FR-405",
+  "BRD-FR-406", "BRD-FR-501", "BRD-FR-502", "BRD-FR-503", "BRD-FR-601", "BRD-FR-602", "BRD-FR-603",
+  "BRD-FR-604", "BRD-FR-701", "BRD-FR-702", "BRD-FR-703", "BRD-FR-704", "BRD-FR-801",
+  "BRD-NFR-01", "BRD-NFR-02", "BRD-NFR-03", "BRD-NFR-04", "BRD-NFR-05", "BRD-NFR-06", "BRD-NFR-07",
+  "BRD-NFR-08", "BRD-NFR-09", "BRD-NFR-10", "BRD-NFR-11", "BRD-NFR-12",
+]
+
+[codes]
+pattern = '\b(BR-\d{2}|FR-\d{3}|NFR-\d{2})\b'
+prefix = "BRD-"
+
+[[groups]]
+name = "BRD numbered (BR, FR, NFR)"
+pattern = 'BRD-(?:BR|FR|NFR)-'
+[[groups]]
+name = "BRD success metrics (KPI)"
+pattern = 'BRD-KPI-'
+[[groups]]
+name = "BRD rules (RULE)"
+pattern = 'BRD-RULE-'
+[[groups]]
+name = "Original brief (BRIEF)"
+pattern = 'BRIEF-'
+[[groups]]
+name = "Redesign kit (KIT)"
+pattern = 'KIT-'
+[[groups]]
+name = "Owner requests (OWN)"
+pattern = 'OWN-'
+
+[copies]
+"sources/redesign_kit_2026-10-15/README.md" = "5852cd48bf98ddf03c2a0a968f795912795eea09bb037a3b875cb9416b2ae9b6"
+"sources/redesign_kit_2026-10-15/PROMPT_MASTER.md" = "2048f37c88041d39deeccd236fd9012a487fa13f0992e9fa584fcae03e0d9440"
+"sources/redesign_kit_2026-10-15/CHANGE_PROPOSAL.md" = "6789e498e628867a5abdfc03ba761ba984a58d8c1d34d60fa714c76431348b15"
+"sources/redesign_kit_2026-10-15/BRD_COVERAGE_AND_ACCEPTANCE.md" = "89654529fa9e92a49edb283742fcc4a26e1ce746ff711fbe0d067ab68eb525d1"
+"sources/redesign_kit_2026-10-15/PROMPT_FINANCIAL_INTELLIGENCE_GRAPH.md" = "6aabac67d031811f6a42aa72247cbfbfe588b85c651e4d28b845b49cb1d332c3"
+"sources/redesign_kit_2026-10-15/PROMPT_ONEWEALTH_COPILOT.md" = "1ea19e1d7dc36cdd8717fedf8c01099489ec1c8964171f462a094477338ef60e"
