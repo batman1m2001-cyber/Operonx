@@ -28,7 +28,7 @@ from operonx.core.loggings import LOGGER
 from operonx_project.checks import CheckResult, compare, run_checks
 from operonx_project.coder.base import CoderRequest, CoderResult, Started
 from operonx_project.decide import ESCALATION_CATEGORIES, Decision, RoundFacts, decide, question_fingerprint
-from operonx_project.gitops import conflict_markers, guard, integration_branch, sha256_file
+from operonx_project.gitops import conflict_markers, guard, sha256_file
 from operonx_project.model import Card, Stage
 from operonx_project.prompts import (
     ARBITER_SCHEMA,
@@ -82,6 +82,8 @@ async def _coder(
     def started(s: Started) -> None:
         if remember_session and s.session:
             rt.set_detail(mid, cid, session=s.session, pgid=s.pgid)
+
+    req.on_activity = rt.activity_for(mid, cid, req.role)
 
     async with child(name, inputs={"role": req.role, "session": req.session, "prompt": req.prompt[-4000:]},
                      op_type="coder") as step:  # fmt: skip
@@ -296,6 +298,12 @@ def _apply_answer(rt: Runtime, card: Card, st: Dict[str, Any], answer: Any) -> O
     note = f" The owner adds: {text}" if text else ""
     rt.store.note(card.milestone, "answer.applied", {"question": q.get("fingerprint"), "choice": choice,
                                                       "text": text}, card=card.id)  # fmt: skip
+    if q.get("kind") == "taken":  # the taker submitted (or gave the card back to the engine)
+        if isinstance(answer, dict) and answer.get("submitted"):
+            st["submitted"] = True
+            st["last_summary"] = str(answer.get("summary") or f"submitted by {q.get('taker')}")
+        st["feedback"] = ""
+        return None
     if choice == "stop":
         return _end(st, "failed", "stopped by the owner")
     if choice == "skip":
@@ -382,6 +390,7 @@ def _guard(rt: Runtime, card: Card, wt: Path) -> Tuple[List[str], List[str], boo
     dirty = rt.git.dirty(wt)
     acc = card.detail.get("acceptance") or {}
     protected = [acc["dir"]] if acc.get("dir") else []
+    protected.append("docs/brd/board/*")  # the engine writes the board (plan D1); a card never does
     findings = guard(wt, dirty, paths=card.paths, shared=rt.shared, protected=protected, private=rt.private)
     markers = conflict_markers(wt, dirty)
     blockers = [f.message for f in findings if f.severity == "blocker"]
@@ -401,7 +410,7 @@ def _guard(rt: Runtime, card: Card, wt: Path) -> Tuple[List[str], List[str], boo
 
 def _card_changed(rt: Runtime, card: Card, wt: Path) -> List[str]:
     acc = (card.detail.get("acceptance") or {}).get("dir")
-    changed = rt.git.changed(wt, integration_branch(card.milestone))
+    changed = rt.git.changed(wt, rt.git.integration_branch(card.milestone))
     return [p for p in changed if not (acc and p.startswith(acc + "/"))]
 
 
@@ -425,7 +434,7 @@ async def _review(
     rt: Runtime, card: Card, wt: Path, st: Dict[str, Any], ikey: str, results: List[CheckResult]
 ) -> Tuple[Optional[CoderResult], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """A fresh read-only reviewer; (failed coder result or None, blocking, other)."""
-    base = integration_branch(card.milestone)
+    base = rt.git.integration_branch(card.milestone)
     diff = rt.git.diff(wt, base)
     changed = rt.git.changed(wt, base)
     saved = rt.store.checkpoint(f"{ikey}:review")
@@ -453,7 +462,7 @@ async def _arbitrate(
     """A third session reads each finding that came back after a fix: does it stand?"""
     saved = rt.store.checkpoint(f"{ikey}:arbiter")
     if saved is None:
-        diff = rt.git.diff(wt, integration_branch(card.milestone))
+        diff = rt.git.diff(wt, rt.git.integration_branch(card.milestone))
         req = _request(rt, card, "arbiter", arbiter_prompt(card, diff, repeated, st["last_summary"]), wt,
                        f"r{st['round']}-arbiter", schema=ARBITER_SCHEMA)  # fmt: skip
         res = await _coder(rt, card, "arbiter", req)
@@ -514,6 +523,24 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
     skip = st.pop("skip_implement", False)
     st["skip_implement"] = False
     res: Optional[CoderResult] = None
+    taken = rt.card(mid, cid).detail.get("taken")
+    if not skip and taken:
+        # a person or an assistant works this card (plan D7): the run parks until they submit,
+        # and their submission is a round like the engine's, through the same gates
+        if not st.pop("submitted", False):
+            rt.stage(mid, cid, Stage.IMPLEMENT)
+            q = {
+                "kind": "taken",
+                "taker": taken.get("actor"),
+                "worktree": str(wt),
+                "round": st["round"],
+                "feedback": st["feedback"],
+                "reason": f"taken by {taken.get('actor')}: waits for their submit",
+            }
+            st["pending"] = q
+            return {"next": "ask", "question": q, "state": st, "outcome": None}
+        st["round"] += 1
+        skip = True
     if not skip:
         st["round"] += 1
         rt.stage(mid, cid, Stage.IMPLEMENT)

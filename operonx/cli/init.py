@@ -259,25 +259,6 @@ def brd_files(name: str, date: Optional[str] = None) -> Dict[str, bytes]:
     }
 
 
-#: AGENTS.md's section on the BRD folder (``{{brd}}``), when it is made.
-_BRD_SECTION = """
-## Requirements: docs/brd
-
-- `docs/brd/` is the living BRD: what the product must do, and how far it
-  is. `docs/brd/requirements/requirements_traceability.md` is the only
-  place a requirement's status is stated (one row per requirement, its
-  code, its test by name, its evidence); open questions are `Q-nn` in
-  `docs/brd/requirements/open_questions.md`, never deleted.
-- When a change meets or alters a requirement, update its row (status,
-  code, the test that shows it) and add one line to `docs/brd/CHANGELOG.md`.
-  The rules are in `docs/brd/MAINTAINING.md`.
-- `operonx-project` builds the open rows as milestones of cards
-  (`operonx-project start --title ... --rows <ID> ...`, then
-  `operonx-project daemon`); its state is `.operonx/project/`, outside git.
-  The studio's Board tab shows the checklist and the milestones.
-"""
-
-
 def plan(
     template: str,
     name: str,
@@ -291,6 +272,7 @@ def plan(
     its docs naming *toolchain*'s commands. With *editable*, the project's
     operonx is that checkout; with *brd*, it has a BRD folder (``docs/brd``)."""
     from operonx import __version__
+    from operonx.guide import builder_block
 
     if template not in TEMPLATES:
         raise InitError(f"no template {template!r} (have: {', '.join(TEMPLATES)})")
@@ -311,7 +293,7 @@ def plan(
         "summary": t.summary,
         "requires": "".join(f'\n    "{r}",' for r in t.requires),
         "sources": _sources(Path(root or "."), editable),
-        "brd": _BRD_SECTION if brd else "",
+        "brd": "\n" + builder_block() + "\n" if brd else "",
     }
     files: Dict[str, bytes] = {}
     for layer in (COMMON, template):

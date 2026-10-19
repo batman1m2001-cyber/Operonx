@@ -58,6 +58,8 @@ class CoderRequest:
     hide: List[Path] = field(default_factory=list)  # directories this session may not read (held-out tests)
     add_dirs: List[Path] = field(default_factory=list)  # more directories the file tools may use
     tags: Dict[str, str] = field(default_factory=dict)  # milestone, card, round: for logs only
+    #: told each tool call as it starts ("Edit src/x.py"): the board's live line (plan D10)
+    on_activity: Optional[Callable[[str], None]] = field(default=None, repr=False, compare=False)
 
 
 @dataclass

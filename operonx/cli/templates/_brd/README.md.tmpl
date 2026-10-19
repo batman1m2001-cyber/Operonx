@@ -14,6 +14,7 @@ suite runs.
 | UX | [`ux/`](ux/screen_inventory.md) | Screens (`SCR-…`) and what each shows |
 | Decisions | [`decisions/`](decisions/README.md) | Architecture decision records (`ADR-nnnn`) |
 | Testing | [`testing/`](testing/regression_coverage.md) | Test runs and known defects (`DEF-nn`) |
+| Board | [`board/`](board/README.md) | How it is built: every milestone and its cards (what each does, the rows it serves, its criteria, its dependencies, its files) and their status. Written by the engine |
 
 ## 2. The traceability matrix
 
@@ -48,5 +49,7 @@ operonx-project daemon                                            # plans the ca
 operonx-project status                                            # where every milestone is
 ```
 
-Its state lives in `.operonx/project/` (outside git); the BRD stays here, in git. Before the first milestone the
-studio's Board shows this folder's checklist.
+The plan and its status are written to [`board/`](board/README.md), one file per milestone, so a clone carries
+them; `.operonx/project/` (outside git) holds only what the running engine needs, and is rebuilt from `board/`
+when it is missing. `operonx-project start --from-board m1` builds a milestone's cards again, in another repo too.
+Before the first milestone the studio's Board shows this folder's checklist.

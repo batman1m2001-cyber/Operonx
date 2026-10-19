@@ -68,12 +68,46 @@ assert m1["state"] == "created" and pending_data(project) == []
 ```
 
 `status --json` and `show m1 [C3] --json` print the same records. The
-engine's state is `<repo>/.operonx/project/` (outside git): `project.db`
-(milestones, cards, events, the command queue, the questions) and the
-stage journals. Each flow run — a card's attempt (`m1.C3.2`, the card's
+running engine's state is `<repo>/.operonx/project/` (outside git):
+`project.db` (milestones, cards, events, the command queue, the questions)
+and the stage journals. Each flow run — a card's attempt (`m1.C3.2`, the card's
 `run_id`), discovery, planning, the final pass — is traced to the
 project's run store, `<repo>/.operonx/runs/` (outside git too): the
 studio's Runs tab shows it step by step, and its Board tab is this store.
+
+## Two layers: the BRD and the board
+
+A project is two folders in git, and one outside it:
+
+| Where | What | Who writes it |
+|---|---|---|
+| `docs/brd/` | what the product must do, and how far it is: the sources, the requirements, the checklist (`requirements/requirements_traceability.md`), the questions | the engine, and you |
+| `docs/brd/board/` | how it is built: one file per milestone, every card with its plan (intent, rows, criteria, dependencies, files) and its status | the engine only |
+| `.operonx/project/` | the running engine's state: events, leases, the command queue, journals, transcripts | the engine; outside git |
+
+The board files are rewritten on the milestone's branch when a plan is
+approved, a card ends and the milestone moves, so the branch's board is
+always the board of its code. A clone carries the plan; a PR shows how it
+changed. When `.operonx/project/` is missing (a fresh clone), the store is
+rebuilt from `docs/brd/board/`: a milestone that was moving comes back
+`paused`, a card that was mid-flight comes back `ready`, and `unpause`
+goes on.
+
+To build a milestone's cards again — in a fresh repo too, with the BRD
+copied there — seed a new milestone with them. The planner does not run;
+you still approve the plan:
+
+```bash norun
+operonx-project start --repo ../again --title "again" --from-board m1 --board ../demo/docs/brd
+```
+
+`operonx-project brd check` reads the board too: every card serves rows
+that are defined, and depends only on cards of its own milestone. A card's
+session cannot write `docs/brd/board/`; change a plan with `replan`.
+
+On a machine where the shell sandbox (bubblewrap) cannot run, say so once
+in `.operonx/project/settings.toml` (outside git, it is about the
+machine): `sandbox = false`. The daemon then runs the coders without it.
 
 ## The owner's questions
 
@@ -97,8 +131,9 @@ the card moved on) changes nothing, and says which one is. Another program
 ```bash norun
 echo '{"op": "answer", "milestone": "m1", "ref": "Q-03", "answer": "b"}' | operonx-project api --repo demo -
 # {"ok": true, "status": "accepted", ...}; a second one: {"ok": false, "status": "already", ...}, exit 1
-``` With
-`daemon --telegram-chat <id> --telegram-user <id>` and
+```
+
+With `daemon --telegram-chat <id> --telegram-user <id>` and
 `OPERONX_TELEGRAM_TOKEN`, the questions also go to Telegram with buttons.
 
 ## Bounds
@@ -124,4 +159,6 @@ The engine tells each session its part; the rules it enforces:
   engine owns the branches; no `.env`, no credentials (they are not in your
   environment either);
 - the BRD is the engine's: it records a row as verified with the test
-  that proves it, as `tests/<path>/test_x.py::test_name`.
+  that proves it, as `tests/<path>/test_x.py::test_name`; the board
+  (`docs/brd/board/`) is the engine's too, and a change to it fails the
+  round.

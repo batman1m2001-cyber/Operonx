@@ -357,7 +357,19 @@ class Store:
         self.save_checkpoint(f"ms:{mid}:{key}", data)
 
     # ── the command queue: the CLI, the studio and Telegram write; the daemon runs ──
-    COMMANDS = ("start", "approve", "answer", "pause", "unpause", "cancel", "replan", "retry")
+    COMMANDS = (
+        "start",
+        "approve",
+        "answer",
+        "pause",
+        "unpause",
+        "cancel",
+        "replan",
+        "retry",
+        "take",
+        "submit",
+        "release",
+    )
 
     def enqueue(self, mid: str, kind: str, payload: Optional[Dict[str, Any]] = None, card: Optional[str] = None,
                 actor: str = "owner") -> int:  # fmt: skip
@@ -382,6 +394,12 @@ class Store:
         with self._tx() as db:
             db.execute("UPDATE commands SET status=?, result=?, done_at=? WHERE seq=?",
                        (status, result, time.time(), seq))  # fmt: skip
+
+    def commands(self, mid: str) -> List[Dict[str, Any]]:
+        """Every command queued for *mid*, oldest first."""
+        with self._lock:
+            rows = self._db.execute("SELECT * FROM commands WHERE milestone=? ORDER BY seq", (mid,)).fetchall()
+        return [{**dict(r), "payload": json.loads(r["payload"] or "{}")} for r in rows]
 
     def command(self, seq: int) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -476,6 +494,12 @@ class Store:
                 return False
             db.execute("INSERT OR REPLACE INTO lease VALUES (?, ?, ?)", (name, owner, now + ttl))
             return True
+
+    def lease_holder(self, name: str = "daemon") -> Optional[str]:
+        """Who holds the lease now (a daemon driving the project), or ``None``."""
+        with self._lock:
+            row = self._db.execute("SELECT owner, until FROM lease WHERE name=?", (name,)).fetchone()
+        return row["owner"] if row is not None and row["until"] > time.time() else None
 
     def release_lease(self, owner: str, name: str = "daemon") -> None:
         with self._tx() as db:

@@ -26,6 +26,7 @@ from operonx.core.loggings import LOGGER
 from operonx.durable import SqliteJournal
 from operonx.telemetry.consumers.local import LocalConsumer
 
+from operonx_project.brd.board import write_board
 from operonx_project.brd.records import load_requirements, matrix_status
 from operonx_project.checks import Check
 from operonx_project.coder.base import Coder
@@ -33,7 +34,6 @@ from operonx_project.flows.discover_flow import discover_flow
 from operonx_project.flows.final_flow import final_flow
 from operonx_project.flows.plan_flow import plan_flow
 from operonx_project.flows.stage import stage_call, stage_request
-from operonx_project.gitops import integration_branch
 from operonx_project.model import Card, CardState, MilestoneState
 from operonx_project.plan import INIT_CARD, cards_from_plan, check_cards, covered_rows
 from operonx_project.project import Project
@@ -177,6 +177,28 @@ class Lifecycle:
 
     def _move(self, mid: str, to: MilestoneState, reason: str = "", actor: str = "engine") -> None:
         self.store.move_milestone(mid, to, reason, actor=actor)
+        self.board(mid, f"{mid} {to.value}")
+
+    def board(self, mid: str, why: str) -> Optional[str]:
+        """Rewrite ``docs/brd/board/`` on the milestone's branch and commit it
+        (plan D4): a plan approved, a card ended, the milestone moved. A
+        milestone with no cards yet has no board to write. Never raises: the
+        board file is a copy, and the store goes on without it."""
+        try:
+            if not self.store.cards(mid):
+                return None
+            rt = self.rt(mid)
+            rel = (self.store.ms_get(mid, "intake") or {}).get("brd") or "docs/brd"
+            board = [(m, self.store.cards(m.id)) for m in self.store.milestones()]
+            with rt.git.merge_lock():
+                integ = rt.git.ensure_integration(mid)
+                if not write_board(integ / rel, board):
+                    return None
+                rt.git.git("add", "--", f"{rel}/board", cwd=integ)
+                return rt.git.commit(integ, f"{mid}: board ({why})")
+        except Exception:  # noqa: BLE001
+            LOGGER.exception(f"{mid}: the board file could not be written")
+            return None
 
     # ── drive ──────────────────────────────────────────────────────────────
     async def drive(self, mid: str) -> MilestoneState:
@@ -267,6 +289,19 @@ class Lifecycle:
 
     # ── plan and approval ──────────────────────────────────────────────────
     async def _plan(self, mid: str) -> None:
+        if self.store.ms_get(mid, "rebuilt") and any(c.state != CardState.CANCELLED for c in self.store.cards(mid)):
+            self.store.ms_put(mid, "rebuilt", {})  # once: a later replan plans as usual
+            self._move(mid, M.RUNNING, "the board's cards go on (rebuilt from docs/brd/board)")
+            return
+        seed = self.store.ms_get(mid, "seeded") or {}
+        if seed.get("cards"):
+            # start --from-board (D6): another milestone's cards are the plan; no planner runs
+            self.store.ms_put(mid, "plan", {"plan": {"cards": seed["cards"]}, "passed": True, "problems": [],
+                                            "notes": [], "seeded_from": seed.get("from")})  # fmt: skip
+            self.store.ms_put(mid, "seeded", {})
+            self.store.note(mid, "plan.seeded", {"from": seed.get("from"), "cards": len(seed["cards"])})
+            self._ask_approval(mid)
+            return
         rt = self.rt(mid)
         notes = (self.store.ms_get(mid, "revise") or {}).get("notes", "")
         replan = self.store.ms_get(mid, "replan")
@@ -274,9 +309,12 @@ class Lifecycle:
             notes = (notes + "\n\n" if notes else "") + replan["notes"]
         self.store.ms_put(mid, "plan", {})  # this round's plan replaces the last
         await self._stage(mid, "plan", {"key": rt.key, "mid": mid, "notes": notes})
-        rec = self.store.ms_get(mid, "plan") or {}
-        if not rec:
+        if not self.store.ms_get(mid, "plan"):
             raise RuntimeError("plan_flow ended without a plan")
+        self._ask_approval(mid)
+
+    def _ask_approval(self, mid: str) -> None:
+        rec = self.store.ms_get(mid, "plan") or {}
         ms = self.store.get_milestone(mid)
         risky = [c.get("id") for c in rec["plan"].get("cards") or [] if c.get("risk") == "high"]
         if ms.policy.approve_plan == "auto" and rec.get("passed") and not risky:
@@ -372,6 +410,7 @@ class Lifecycle:
             rows_left=lambda: len(self.rows_left(mid)),
             deadline=time.time() + max(0.0, ms.policy.budget.max_hours * 3600 - self.store.running_seconds(mid)),
             hold_max_s=self.hold_max_s,
+            on_card_end=lambda cid: self.board(mid, f"{cid} {self.store.get_card(mid, cid).state.value}"),
         )
         for cid, answer in self._queued.pop(mid, []):
             sched.answer(cid, answer)
@@ -386,8 +425,18 @@ class Lifecycle:
         if out == Outcome.COMPLETE:
             self._move(mid, M.VERIFYING, "every card is done")
         elif out == Outcome.WAITING:
-            waiting = [c.id for c in cards if c.state == CardState.WAITING_HUMAN]
-            self._move(mid, M.WAITING_HUMAN, f"waiting on the owner: {', '.join(waiting)}")
+            waiting = [c for c in cards if c.state == CardState.WAITING_HUMAN]
+            owner = [c.id for c in waiting if (c.detail.get("question") or {}).get("kind") != "taken"]
+            takers = [f"{c.id} ({c.detail.get('taken', {}).get('actor')})" for c in waiting if c.id not in owner]
+            why = "; ".join(
+                x
+                for x in (
+                    f"waiting on the owner: {', '.join(owner)}" if owner else "",
+                    f"waiting on a submit: {', '.join(takers)}" if takers else "",
+                )
+                if x
+            )
+            self._move(mid, M.WAITING_HUMAN, why)
         elif out == Outcome.PAUSED:
             self._move(mid, M.PAUSED, "paused by the owner", actor="owner")
         elif out == Outcome.CANCELLED:
@@ -450,7 +499,7 @@ class Lifecycle:
         gaps = rec["gaps"]
         if not gaps:
             self.deliver(mid)
-            self._move(mid, M.DONE, f"delivered on {integration_branch(mid)}")
+            self._move(mid, M.DONE, f"delivered on {self.p.git.integration_branch(mid)}")
             return
         mine = [g for g in gaps if not g.get("card")]
         if mine:
@@ -492,6 +541,63 @@ class Lifecycle:
         self.store.note(mid, "delivered", {"commit": sha, "pr": str(out / "PR.md")})
         return integ / "DELIVERY.md"
 
+    # ── a card worked by a person or an assistant (plan D7) ─────────────────
+    def _taken(self, kind: str, mid: str, cid: Optional[str], payload: Dict[str, Any], actor: str,
+               sched: Optional[Scheduler]) -> str:  # fmt: skip
+        try:
+            card = self.store.get_card(mid, str(cid))
+        except KeyError:
+            raise Refused(f"no card {cid!r} in {mid}") from None
+        taken = card.detail.get("taken") or {}
+        parked = card.state == CardState.WAITING_HUMAN and (card.detail.get("question") or {}).get("kind") == "taken"
+        if kind == "take":
+            who = str(payload.get("actor") or actor)
+            if taken:
+                if taken.get("actor") == who:
+                    return f"{card.id} is already yours"
+                raise Refused(f"{card.id} is taken by {taken.get('actor')}")
+            if card.state not in (CardState.READY, CardState.PENDING):
+                raise Refused(f"{card.id} is {card.state.value}: only a card not started can be taken")
+            done = {c.id for c in self.store.cards(mid) if c.state == CardState.DONE}
+            if card.state == CardState.PENDING and set(card.deps) - done:
+                waits = ", ".join(sorted(set(card.deps) - done))
+                raise Refused(f"{card.id} waits for {waits}: take it when it is ready")
+            first = min([c.priority for c in self.store.cards(mid)] + [0]) - 1
+            self.store.update_card(mid, card.id, actor=actor, priority=first,
+                                   detail=dict(card.detail, taken={"actor": who, "at": time.time()}))  # fmt: skip
+            self.store.note(mid, "card.taken", {"actor": who}, card=card.id)
+            if sched is not None:
+                sched.wake()
+            elif self.store.get_milestone(mid).state == M.WAITING_HUMAN:
+                self._move(mid, M.RUNNING, f"{card.id} taken by {who}", actor=actor)
+            return f"{card.id} taken by {who}: it starts, then waits for their submit"
+        if not taken:
+            raise Refused(f"{card.id} is not taken")
+        if kind == "release":
+            self.store.update_card(mid, card.id, actor=actor, detail={k: v for k, v in card.detail.items()
+                                                                      if k != "taken"})  # fmt: skip
+            self.store.note(mid, "card.released", {"actor": actor}, card=card.id)
+            if parked:
+                self._answer(mid, card.id, {"released": True}, actor, sched)
+            return f"{card.id} released: the engine's implementer works it"
+        if not parked:
+            raise Refused(
+                f"{card.id} is {card.state.value}"
+                + (f" ({card.stage.value})" if card.stage else "")
+                + ": it is not waiting for a submit"
+            )
+        self.store.note(mid, "card.submitted", {"actor": actor, "summary": payload.get("summary", "")}, card=card.id)
+        self._answer(mid, card.id, {"submitted": True, "summary": str(payload.get("summary") or "")}, actor, sched)
+        return f"{card.id} submitted: checks, review and held-out tests run now"
+
+    def _answer(self, mid: str, cid: str, answer: Any, actor: str, sched: Optional[Scheduler]) -> None:
+        if sched is not None:
+            sched.answer(cid, answer)
+            return
+        self._queued.setdefault(mid, []).append((cid, answer))
+        if self.store.get_milestone(mid).state == M.WAITING_HUMAN:
+            self._move(mid, M.RUNNING, f"{cid} resumed", actor=actor)
+
     # ── owner commands ─────────────────────────────────────────────────────
     async def apply(self, cmd: Dict[str, Any]) -> str:
         """Run one queued command; raises :class:`Refused` when it does not apply."""
@@ -532,6 +638,8 @@ class Lifecycle:
                 if ms.state == M.WAITING_HUMAN:
                     self._move(mid, M.RUNNING, f"{cid} answered", actor=actor)
             return f"{cid} answered"
+        if kind in ("take", "submit", "release"):
+            return self._taken(kind, mid, cmd.get("card") or payload.get("card"), payload, actor, sched)
         if kind == "pause":
             if sched is not None:
                 sched.pause()
@@ -551,6 +659,11 @@ class Lifecycle:
                 raise Refused(f"{mid} is {ms.state.value}, not paused")
             if ms.resume_at:
                 self.store.update_milestone(mid, resume_at=None, actor=actor)
+            if self.store.ms_get(mid, "rebuilt") and not self.store.ms_get(mid, "survey"):
+                # rebuilt from the board files: the repo's brief and checks are found again first,
+                # then its cards go on (no new plan: _plan sees the cards)
+                self._move(mid, M.DISCOVERING, "unpaused: rebuilt from the board, discovering again", actor=actor)
+                return "unpaused (discovering the repo again, then its cards go on)"
             self._move(mid, self.store.prior_state(mid) or M.RUNNING, "unpaused", actor=actor)
             return "unpaused"
         if kind == "cancel":

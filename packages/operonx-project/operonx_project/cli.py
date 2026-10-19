@@ -4,8 +4,9 @@ The milestone commands queue a command in the project's store; the daemon
 (one per project) runs it and drives the milestone::
 
     operonx-project new DIR [--name N]                 # a repo with docs/brd/ and an empty board
+    operonx-project adopt [--repo .] [--prefix P]       # an existing project: its BRD and its baseline board
     operonx-project start --title T [--goal G] [--mode w1|w2] [--source FILE ...] [--private FILE ...]
-                          [--rows ID ...] [--auto-approve] [--max-usd N] [--repo .]
+                          [--rows ID ...] [--auto-approve] [--max-usd N] [--from-board MID [--board DIR]] [--repo .]
     operonx-project daemon [--repo .] [--once] [--no-sandbox] [--model ROLE=MODEL ...]
     operonx-project status [--repo .] [--json]
     operonx-project show MID [CARD] [--repo .] [--json]
@@ -13,6 +14,9 @@ The milestone commands queue a command in the project's store; the daemon
     operonx-project answer MID CARD ANSWER [--text WORDS]
     operonx-project replan MID --notes TEXT              # revise a waiting plan; replan a stopped milestone
     operonx-project retry MID [--usd N]                  # a failed milestone, or more budget
+    operonx-project take MID CARD [--as WHO] [--wait S]  # work a card yourself: prints its worktree, criteria
+    operonx-project submit MID CARD [--summary T] [--wait S]  # its checks, review and held-out tests decide
+    operonx-project release MID CARD                     # give it back to the engine's implementer
 
 The living BRD::
 
@@ -125,6 +129,13 @@ def _milestone_parsers(sub) -> None:
     p = sub.add_parser("new", help="a new project: a git repo with docs/brd/ and an empty board")
     p.add_argument("dir", type=Path)
     p.add_argument("--name")
+    p = sub.add_parser("adopt", help="an existing project: its BRD from its docs and tests, its baseline board")
+    _repo_arg(p)
+    p.add_argument("--prefix", default="", help="the requirement id prefix (default: from the project name)")
+    p.add_argument("--answer", type=Path, default=None, help="a recorded answer (JSON) instead of the session")
+    p.add_argument("--max-usd", type=float, default=2.0)
+    p.add_argument("--model", default=None)
+    p.add_argument("--python", default=None, help="the interpreter the cited tests run with (default: its .venv)")
     p = sub.add_parser("start", help="create a milestone from its sources and goal, and start it")
     _repo_arg(p)
     p.add_argument("--title", required=True)
@@ -140,6 +151,9 @@ def _milestone_parsers(sub) -> None:
     p.add_argument("--max-hours", type=float, default=None, help="hours of running (waiting for you does not count)")
     p.add_argument("--max-parallel", type=int, default=None)
     p.add_argument("--no-heldout", action="store_true")
+    p.add_argument("--from-board", metavar="MID",
+                   help="the plan is milestone MID's cards from a board (docs/brd/board, or --board DIR)")  # fmt: skip
+    p.add_argument("--board", type=Path, default=None, help="the BRD (or board) folder --from-board reads")
     p = sub.add_parser("daemon", help="drive the project's milestones and run the queued commands")
     _repo_arg(p)
     p.add_argument("--once", action="store_true", help="stop when nothing is left to drive")
@@ -191,6 +205,19 @@ def _milestone_parsers(sub) -> None:
     _repo_arg(p)
     p.add_argument("milestone")
     p.add_argument("--notes", required=True)
+    for name, what in (
+        ("take", "work a card yourself (an assistant, a person): its worktree and criteria"),
+        ("submit", "submit a taken card: checks, review and held-out tests decide"),
+        ("release", "give a taken card back to the engine's implementer"),
+    ):
+        p = sub.add_parser(name, help=what)
+        _repo_arg(p)
+        p.add_argument("milestone")
+        p.add_argument("card")
+        p.add_argument("--as", dest="actor", default=None, help="who takes it (default: you, $USER)")
+        p.add_argument("--summary", default="", help="what you did (submit)")
+        p.add_argument("--wait", type=float, default=600.0, help="seconds to wait for the engine (0: do not wait)")
+        p.add_argument("--json", action="store_true")
     p = sub.add_parser("retry", help="retry a failed milestone, or extend an exhausted budget")
     _repo_arg(p)
     p.add_argument("milestone")
@@ -298,6 +325,16 @@ def _milestones(args) -> int:
                   f"--repo {proj.repo} --title ... --source <requirements>\n")  # fmt: skip
         return 0
     proj = _open(args)
+    if args.cmd == "adopt":
+        from operonx_project.adopt import adopt, main_report
+
+        answer = json.loads(args.answer.read_text(encoding="utf-8")) if args.answer else None
+        report = asyncio.run(adopt(proj, _coder(proj.state), prefix=args.prefix, answer=answer,
+                                   python=[args.python] if args.python else None, max_usd=args.max_usd,
+                                   model=args.model))  # fmt: skip
+        out.write(main_report(report) + "\n")
+        out.write(f"Read {proj.repo / 'docs' / 'brd'} and commit it; the studio's Board shows it.\n")
+        return 0
     if args.cmd == "start":
         from operonx_project.model import Policy
         from operonx_project.project import create_milestone
@@ -311,8 +348,13 @@ def _milestones(args) -> int:
         if args.max_hours is not None:
             policy.budget.max_hours = args.max_hours
         sources = [{"path": str(p)} for p in args.source] + [{"path": str(p), "private": True} for p in args.private]
+        seed = None
+        if args.from_board:
+            from operonx_project.project import board_seed
+
+            seed = board_seed(args.board or proj.repo / "docs" / "brd", args.from_board)
         ms = create_milestone(proj, args.title, goal=args.goal, mode=args.mode, sources=sources, rows=args.rows,
-                              policy=policy, prefix=args.prefix, constraints=args.constraints)  # fmt: skip
+                              policy=policy, prefix=args.prefix, constraints=args.constraints, seed=seed)  # fmt: skip
         proj.store.enqueue(ms.id, "start")
         out.write(f"{ms.id} created and queued; the daemon starts it (operonx-project daemon --repo {proj.repo})\n")
         return 0
@@ -324,7 +366,10 @@ def _milestones(args) -> int:
         if args.check_mode == "docker" and not args.check_image:
             sys.stderr.write("error: --check-mode docker needs --check-image\n")
             return 2
-        life = Lifecycle(proj, _coder(proj.state), models=models or None, sandbox=not args.no_sandbox,
+        from operonx_project.project import load_settings
+
+        sandbox = not args.no_sandbox and bool(load_settings(proj.state).get("sandbox", True))
+        life = Lifecycle(proj, _coder(proj.state), models=models or None, sandbox=sandbox,
                          python=args.python, check_mode=args.check_mode, check_image=args.check_image)  # fmt: skip
         from operonx_project.interactions import Interactions
 
@@ -416,6 +461,8 @@ def _milestones(args) -> int:
         for e in data["events"]:
             out.write(f"  · {e['seq']:>5} {e['kind']:<22} {(e['card'] or ''):<6} {json.dumps(e['data'])[:110]}\n")
         return 0
+    if args.cmd in ("take", "submit", "release"):
+        return _taker(proj, args, out)
     payload = {}
     card = None
     if args.cmd == "answer":
@@ -440,6 +487,53 @@ def _milestones(args) -> int:
     proj.store.get_milestone(args.milestone)
     seq = proj.store.enqueue(args.milestone, args.cmd, payload, card=card)
     out.write(f"queued {args.cmd} for {args.milestone} (#{seq}); the daemon runs it\n")
+    return 0
+
+
+def _taker(proj, args, out) -> int:
+    """take / submit / release: queued through the api, then waited on until the
+    card is where its taker acts again (parked for a submit) or has ended."""
+    import getpass
+    import time
+
+    from operonx_project.api import act, taker_brief
+
+    actor = args.actor or f"cli:{getpass.getuser()}"
+    sent = act(proj, {"op": args.cmd, "milestone": args.milestone, "card": args.card, "summary": args.summary},
+               actor=actor)  # fmt: skip
+    if not sent["ok"]:
+        sys.stderr.write(f"error: {sent['message']}\n")
+        return 1
+    seq, deadline = sent["seq"], time.time() + max(0.0, args.wait)
+    brief: dict = {}
+    while True:
+        cmd = proj.store.command(seq)
+        if cmd and cmd["status"] not in ("pending",) and cmd["status"] != "done":
+            sys.stderr.write(f"error: {cmd.get('result') or cmd['status']}\n")
+            return 1
+        brief = taker_brief(proj, args.milestone, args.card)
+        settled = cmd and cmd["status"] == "done" and (
+            brief["waiting_for_submit"] or brief["state"] in ("verified", "done", "failed", "cancelled")
+            or args.cmd == "release")  # fmt: skip
+        if settled or time.time() >= deadline:
+            break
+        time.sleep(1.0)
+    if args.json:
+        out.write(json.dumps(brief) + "\n")
+        return 0
+    if brief["waiting_for_submit"]:
+        out.write(f"{brief['card']} · {brief['title']} — yours ({brief['taken']['actor']}), round {brief['round']}\n"
+                  f"  worktree  {brief['worktree']}  (branch {brief['branch']})\n"
+                  f"  rows      {', '.join(brief['rows']) or '—'}\n"
+                  f"  files     {', '.join(brief['paths']) or 'anywhere in the project'}\n"
+                  f"  tests     {brief['acceptance_tests'] or '—'} (written for you; do not change them)\n"
+                  "  criteria\n" + "".join(f"    - {c}\n" for c in brief["criteria"]))  # fmt: skip
+        if brief["feedback"]:
+            out.write("  the last round found\n" + "".join(f"    {ln}\n" for ln in brief["feedback"].splitlines()))
+        out.write(f"When the criteria pass there: operonx-project submit {args.milestone} {args.card}\n")
+    else:
+        out.write(f"{brief['card']}: {brief['state']}{' (' + brief['stage'] + ')' if brief['stage'] else ''}"
+                  f" — {brief['reason'] or sent['message']}\n")  # fmt: skip
     return 0
 
 

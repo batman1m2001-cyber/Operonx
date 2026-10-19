@@ -36,6 +36,8 @@ from typing import Dict, List, Optional, Union
 __all__ = [
     "AGENTS_BEGIN",
     "AGENTS_END",
+    "BUILDER_BEGIN",
+    "BUILDER_END",
     "COMMANDS_BEGIN",
     "COMMANDS_END",
     "COPY_DIR",
@@ -63,6 +65,31 @@ AGENTS_END = "<!-- /operonx:guide -->"
 COMMANDS_BEGIN = "<!-- operonx:commands -->"
 COMMANDS_END = "<!-- /operonx:commands -->"
 _COMMANDS = re.compile(r"^## Commands\n(.*?)(?=^## |\Z)", re.M | re.S)
+#: The marked block on building with the BRD and the board; :func:`sync`
+#: rewrites it, and adds it to a project that has ``docs/brd/`` but not it.
+BUILDER_BEGIN = "<!-- operonx:builder -->"
+BUILDER_END = "<!-- /operonx:builder -->"
+_BUILDER = """## Building it: docs/brd and the board
+
+- `docs/brd/` is the living BRD: what the product must do, and how far it
+  is. `docs/brd/requirements/requirements_traceability.md` is the
+  checklist, the only place a requirement's status is stated (its code, the
+  test that shows it, by name, and the evidence). Questions are `Q-nn` in
+  `docs/brd/requirements/open_questions.md`, never deleted.
+- `docs/brd/board/` is how it is built: one file per milestone, every card
+  with its plan (what it does, its rows, criteria, dependencies, files) and
+  its status. The engine (`operonx-project`) writes it. Never edit it by
+  hand: `operonx-project replan` changes a plan.
+- When a change meets or alters a requirement, update its row (status,
+  code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
+  `docs/brd/MAINTAINING.md`.
+- To work a card yourself: `operonx-project take <milestone> <card>` prints
+  its worktree, criteria and rows; make the criteria pass there, then
+  `operonx-project submit <milestone> <card>`. The review and the held-out
+  tests decide, as for the engine's own cards.
+- New work: rows in the checklist, then `operonx-project start --title ...
+  --rows <ID> ...` (or the studio's Board) and `operonx-project daemon`.
+  `.operonx/project/`, outside git, is only the running engine's state."""
 
 _HEADER = re.compile(r"<!--\s*operonx-guide\s*(.*?)\s*-->")
 
@@ -257,6 +284,23 @@ def _sync_commands(text: str, block: str) -> str:
     return text[: found.start(1)] + "\n" + block + "\n\n" + text[found.end(1) :]
 
 
+def builder_block() -> str:
+    """AGENTS.md's block on the BRD and the board, markers included."""
+    return f"{BUILDER_BEGIN}\n{_BUILDER}\n{BUILDER_END}"
+
+
+def _sync_builder(text: str, block: str, has_brd: bool) -> str:
+    begin, end = text.find(BUILDER_BEGIN), text.find(BUILDER_END)
+    if begin != -1 and end > begin:
+        return text[:begin] + block + text[end + len(BUILDER_END) :]
+    if not has_brd:
+        return text
+    at = text.find("\n## Commands\n")
+    if at == -1:
+        return text.rstrip("\n") + "\n\n" + block + "\n"
+    return text[: at + 1] + block + "\n\n" + text[at + 1 :]
+
+
 def _sync_agents_md(project: Path, block: str, commands: Optional[str] = None) -> bool:
     agents = project / "AGENTS.md"
     if not agents.is_file():
@@ -269,6 +313,7 @@ def _sync_agents_md(project: Path, block: str, commands: Optional[str] = None) -
         new = text.rstrip("\n") + "\n\n## operonx guides\n\n" + block + "\n"
     if commands is not None:
         new = _sync_commands(new, commands)
+    new = _sync_builder(new, builder_block(), (project / "docs" / "brd").is_dir())
     if new == text:
         return False
     agents.write_text(new, encoding="utf-8")
