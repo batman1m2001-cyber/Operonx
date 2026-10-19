@@ -7,10 +7,12 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
 
+from operonx_project.checks import run_checks
 from operonx_project.daemon import Daemon
 from operonx_project.interactions import Interactions
 from operonx_project.model import MilestoneState as M
@@ -184,3 +186,22 @@ def test_docker_checks_run_a_milestones_acceptance_and_heldout_tests(tmp_path):
     c1 = life.store.get_card("m1", "C1")
     assert c1.detail["heldout"]["files"] and life.cards() == {"C1": "done"}  # the held-out tests ran mounted
     assert not list(life.integ().rglob("__pycache__"))  # the container wrote no bytecode into the worktree
+
+
+def test_held_out_tests_outside_the_repo_read_the_projects_pytest_config(tmp_path):
+    # a src/ layout (what `operonx init` makes): its imports work only through pyproject's pythonpath
+    life = Life(tmp_path, base_script())
+    rt: Runtime = life.life.rt("m1")
+    wt, hdir = tmp_path / "wt", tmp_path / "heldout" / "m1" / "C1"
+    (wt / "src" / "pkg").mkdir(parents=True)
+    hdir.mkdir(parents=True)
+    (wt / "src" / "pkg" / "__init__.py").write_text("def one():\n    return 1\n")
+    (wt / "pyproject.toml").write_text('[tool.pytest.ini_options]\npythonpath = ["src"]\n')
+    (hdir / "test_hidden.py").write_text("from pkg import one\n\n\ndef test_one():\n    assert one() == 1\n")
+    rt.heldout_cmd = f"{sys.executable} -m pytest -q --tb=no -rfE --assert=plain -p no:cacheprovider {{dir}}"
+    check, inside = rt.heldout_check("heldout", hdir, wt)
+    assert inside == str(hdir) and "-c pyproject.toml --rootdir ." in check.cmd
+    (res,) = asyncio.run(run_checks([check], wt))
+    assert res.ok, res.tail
+    (wt / "pyproject.toml").write_text("[project]\nname = 'pkg'\n")  # no pytest config: the command is left alone
+    assert "-c " not in rt.heldout_check("heldout", hdir, wt)[0].cmd

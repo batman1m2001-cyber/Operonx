@@ -78,10 +78,7 @@ async def heldout_all(key: str, mid: str) -> dict:
         held = card.detail.get("heldout") or {}
         if not held.get("files"):
             continue
-        hdir = Path(held["dir"])
-        inside = "/heldout" if rt.check_mode == "docker" else str(hdir)
-        check = rt.test_check(f"heldout-{card.id}", rt.heldout_cmd.format(dir=inside),
-                              mounts={str(hdir): "/heldout"} if rt.check_mode == "docker" else None)  # fmt: skip
+        check, inside = rt.heldout_check(f"heldout-{card.id}", Path(held["dir"]), integ)
         async with child(f"heldout-{card.id}", inputs={"files": len(held["files"])}, op_type="checks") as step:
             (res,) = await run_checks([check], integ, rt.env)
             names = [] if res.ok else heldout_failures(res.tail, Path(inside))
