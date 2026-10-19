@@ -215,3 +215,31 @@ async def test_a_parked_card_goes_on_after_the_engine_is_updated(tmp_path):
     out = await env.runner.resume(env.card(), "skip", env.stage)
     assert out.status == "failed" and "skipped" in out.reason  # the answer was applied, not the resume refused
     assert [e["kind"] for e in env.store.events("m1") if e["kind"] == "engine.updated"] == ["engine.updated"]
+
+
+async def test_a_wrong_heldout_test_is_corrected_on_the_owners_word(tmp_path):
+    # tipcalc m2/C6: the examiner compared two whole engine replies (their state objects compare by
+    # identity), which no implementation can pass; rewriting the acceptance tests could not fix it
+    from pathlib import Path
+
+    from tests.flow_env import HELDOUT
+
+    def examiner(text):
+        return lambda req, i: {"write": {str(Path(req.add_dirs[0]) / "test_held.py"): text},
+                               "output": {"files": ["test_held.py"]}}  # fmt: skip
+
+    impossible = HELDOUT.replace("== -2, 'add handles negative numbers'", "is not -2, 'two runs are equal'")
+    env = Env(tmp_path, {"implementer": [impl(RIGHT + f"# {i}\n") for i in range(3)],
+                         "examiner": [examiner(impossible), examiner(HELDOUT)]}, max_rounds=2)  # fmt: skip
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human"
+    held = next(o for o in out.question["options"] if o["key"] == "rewrite_tests")
+    assert held["label"] == "Rewrite its held-out tests (they are wrong)" and out.question["rewrite"] == "heldout"
+    calls = len(env.coder.of("implementer"))
+    env.store.update_card("m1", "C1", detail={**env.card().detail, "question": out.question}, run_id=out.run_id)
+    out = await env.runner.resume(env.card(), {"choice": "rewrite_tests", "text": "is-not on an int"}, env.stage)
+    assert out.status == "verified", out
+    assert len(env.coder.of("implementer")) == calls  # the code was right: checked again, not rewritten
+    again = env.coder.of("examiner")[1]["prompt"]
+    assert "found your held-out tests" in again and "two runs are equal" in again and "is-not on an int" in again
+    assert [e["kind"] for e in env.store.events("m1") if e["kind"] == "heldout.rewritten"] == ["heldout.rewritten"]
