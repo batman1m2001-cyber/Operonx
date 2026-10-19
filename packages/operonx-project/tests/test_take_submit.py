@@ -130,3 +130,30 @@ def test_a_card_can_be_taken_ahead_and_waits_for_its_dependencies_first(tmp_path
     assert [c["cwd"].rsplit("/", 1)[-1] for c in life.coder.of("implementer")] == ["C1"]
     taken = next(e for e in life.store.events("m1") if e["kind"] == "card.taken")
     assert taken["card"] == "C2"
+
+
+def test_a_wrong_acceptance_test_is_rewritten_on_the_owners_word(tmp_path):
+    # tipcalc m2/C3: the test author expected output the tool never prints; the implementer may not
+    # change it, so every round failed, and keep / skip / stop could not fix it
+    from operonx_project.model import Policy
+    from tests.flow_env import ACCEPTANCE, impl
+
+    path = "tests/acceptance/C1/test_c1_add.py"
+    wrong = ACCEPTANCE.replace("== 5", "== 6")
+    script = base_script(**{
+        "test_author": [{"write": {path: wrong}, "output": {"files": [path]}},
+                        {"write": {path: ACCEPTANCE}, "output": {"files": [path]}}],
+        "implementer": [impl(RIGHT + f"# {i}\n") for i in range(3)],
+    })  # fmt: skip
+    policy = Policy.w1(approve_plan="auto", heldout=False)
+    policy.budget.max_rounds = 2
+    life = Life(tmp_path, script, policy=policy)
+    life.command("start")
+    assert life.serve() == M.WAITING_HUMAN
+    (q,) = Interactions(life.store).open()
+    assert "rewrite_tests" in [o["key"] for o in q["payload"]["options"]]
+    assert Interactions(life.store).submit_answer(q["id"], {"choice": "rewrite_tests", "text": "6 is wrong"}).ok
+    assert life.serve() == M.DONE, life.store.get_milestone("m1").reason
+    again = life.coder.of("test_author")[1]["prompt"]
+    assert "found wrong by the owner" in again and "6 is wrong" in again
+    assert (life.integ() / path).read_text() == ACCEPTANCE
