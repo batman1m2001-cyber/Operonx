@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.32.0] - 2026-10-19
+
+### Added
+
+- **`operonx init` writes `docs/brd/`, the project's living BRD** (`--no-brd` skips it): the requirements, their checklist (`requirements/requirements_traceability.md`, one row per requirement with its status, code, test and evidence), the open questions, features, decisions and test runs. AGENTS.md gets a marked block, "Building it: docs/brd and the board" (`<!-- operonx:builder -->`): keep a row true when a change meets its requirement, never edit `docs/brd/board/` by hand, how to take and submit a card. `operonx guide` adds the block to an older project that has `docs/brd/` and keeps it current (`operonx.guide.builder_block`). `.gitignore` gets the engine's runtime state, `.operonx/project/`; the board itself, `docs/brd/board/`, is committed. It is the folder `operonx-project` builds milestones from and the studio's Board shows; the template moved from operonx-project into operonx (`operonx/cli/templates/_brd/`, `operonx.cli.init.brd_files`), so `operonx init` and `operonx-project brd init` write the same one.
+
 ## [1.31.1] - 2026-10-17
 
 ### Added

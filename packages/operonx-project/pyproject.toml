@@ -11,9 +11,10 @@ license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "Operon Team" }]
 dependencies = [
-    # 1.30.0: the journal's park/resume and retry_failed, Job(keep_runs=), the
-    # serve layer's middleware; the plan's evidence was measured on it.
-    "operonx[serve]>=1.30.0",  # a greenfield target is an operonx service: its checks run here
+    # 1.32.0: the BRD template (operonx.cli.init.brd_files); 1.30.0 the
+    # journal's park/resume and retry_failed, Job(keep_runs=), the serve
+    # layer's middleware (the plan's evidence was measured on it).
+    "operonx[serve]>=1.32.0",  # a greenfield target is an operonx service: its checks run here
     "httpx>=0.24",
     # the BRD's readers (P4): docx/pptx/xlsx/html with the stdlib, PDF text by
     # docling-parse, scanned pages and images by tesseract (a system binary)

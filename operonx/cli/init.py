@@ -17,11 +17,16 @@ tools being the ``test`` extra that uv's ``dev`` group points at.
 
 The project also gets ``.operonx/guide/``, the guides of every installed
 operonx package, so an assistant reads them beside the code (what
-``operonx guide`` writes).
+``operonx guide`` writes), and, unless ``--no-brd``, ``docs/brd/``: the
+living BRD (requirements, their checklist, open questions) that
+``operonx-project`` builds from and the studio's Board shows. Its template
+is ``templates/_brd/`` (:func:`brd_files`), the one ``operonx-project brd
+init`` writes too.
 """
 
 from __future__ import annotations
 
+import datetime as _dt
 import os
 import re
 import shutil
@@ -32,7 +37,9 @@ from typing import Dict, List, Optional
 __all__ = [
     "TEMPLATES",
     "TOOLCHAINS",
+    "BRD_DIR",
     "Template",
+    "brd_files",
     "InitError",
     "default_toolchain",
     "plan",
@@ -41,6 +48,9 @@ __all__ = [
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 COMMON = "_common"
+BRD = "_brd"
+#: Where a project's BRD folder goes.
+BRD_DIR = "docs/brd"
 
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
@@ -236,6 +246,19 @@ def _sources(root: Path, editable: Optional[Path]) -> str:
     )
 
 
+def brd_files(name: str, date: Optional[str] = None) -> Dict[str, bytes]:
+    """The BRD folder's files for a project called *name*, by path inside the
+    folder (``README.md``, ``requirements/requirements_traceability.md``, …)."""
+    values = {"name": name, "date": date or _dt.date.today().isoformat()}
+    base = TEMPLATE_DIR / BRD
+    return {
+        _target(src.relative_to(base)): _render(src.read_text(encoding="utf-8"), values).encode(
+            "utf-8"
+        )
+        for src in sorted(base.rglob("*.tmpl"))
+    }
+
+
 def plan(
     template: str,
     name: str,
@@ -243,11 +266,13 @@ def plan(
     root: Optional[Path] = None,
     editable: Optional[Path] = None,
     toolchain: str = "uv",
+    brd: bool = True,
 ) -> Dict[str, bytes]:
     """Every file *template* writes for a project called *name*, by path,
     its docs naming *toolchain*'s commands. With *editable*, the project's
-    operonx is that checkout."""
+    operonx is that checkout; with *brd*, it has a BRD folder (``docs/brd``)."""
     from operonx import __version__
+    from operonx.guide import builder_block
 
     if template not in TEMPLATES:
         raise InitError(f"no template {template!r} (have: {', '.join(TEMPLATES)})")
@@ -268,6 +293,7 @@ def plan(
         "summary": t.summary,
         "requires": "".join(f'\n    "{r}",' for r in t.requires),
         "sources": _sources(Path(root or "."), editable),
+        "brd": "\n" + builder_block() + "\n" if brd else "",
     }
     files: Dict[str, bytes] = {}
     for layer in (COMMON, template):
@@ -278,6 +304,8 @@ def plan(
             if target.endswith(".md"):
                 text = _align(text)
             files[target] = text.encode("utf-8")
+    if brd:
+        files.update({f"{BRD_DIR}/{rel}": text for rel, text in brd_files(name).items()})
     return files
 
 
@@ -289,6 +317,7 @@ def init_project(
     force: bool = False,
     editable: Optional[Path] = None,
     toolchain: Optional[str] = None,
+    brd: bool = True,
 ) -> InitResult:
     """Write *template* into *root*. An existing file is kept unless *force*.
     Its docs name *toolchain*'s commands (``"uv"`` or ``"pip"``; by default
@@ -296,7 +325,8 @@ def init_project(
 
     *editable* pins operonx to that checkout (``[tool.uv.sources]``); a
     project made inside an operonx checkout pins it without being asked —
-    there, PyPI's operonx is never the one being worked on."""
+    there, PyPI's operonx is never the one being worked on. Without *brd*,
+    no ``docs/brd/``."""
     root = Path(root)
     if root.exists() and not root.is_dir():
         raise InitError(f"{root} exists and is not a directory")
@@ -304,7 +334,7 @@ def init_project(
     if editable is None:
         editable = operonx_checkout(root.resolve())
     toolchain = toolchain or default_toolchain()
-    files = plan(template, name, root=root, editable=editable, toolchain=toolchain)
+    files = plan(template, name, root=root, editable=editable, toolchain=toolchain, brd=brd)
     result = InitResult(root=root, name=name, template=template, toolchain=toolchain)
     for rel, content in files.items():
         path = root / rel

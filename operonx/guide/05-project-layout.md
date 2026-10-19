@@ -23,8 +23,16 @@ scorer/
 │       └── _text.py      # private helpers (leading underscore)
 ├── tests/
 │   └── test_scoring.py
-└── datasets/             # eval cases, one .jsonl per dataset
+├── datasets/             # eval cases, one .jsonl per dataset
+└── docs/brd/             # the requirements and their checklist (`--no-brd` skips it)
 ```
+
+`docs/brd/requirements/requirements_traceability.md` is the checklist: one
+row per requirement, with its status, the code that meets it and the test
+that shows it. Update a row when a change meets or alters its requirement.
+`operonx-project` builds the open rows as milestones (its state is
+`.operonx/project/`, outside git), and the studio's Board tab shows the
+checklist, before the first milestone too.
 
 ## The rules
 

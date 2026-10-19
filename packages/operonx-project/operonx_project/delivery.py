@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Dict, List
 
 from operonx_project.brd.records import matrix_status
-from operonx_project.gitops import integration_branch
 from operonx_project.model import CardState
 
 if TYPE_CHECKING:
@@ -44,7 +43,7 @@ def delivery_text(life: "Lifecycle", mid: str) -> str:
     if ms.goal:
         lines += [f"**Goal:** {ms.goal}", ""]
     mode = "W1 (spec → DAG)" if ms.policy.horizon == "all" else "W2 (BRD → checklist → board)"
-    lines += [f"**Branch:** `{integration_branch(mid)}` · **Mode:** {mode} · **Cost:** ${ms.cost_usd:.2f} "
+    lines += [f"**Branch:** `{life.p.git.integration_branch(mid)}` · **Mode:** {mode} · **Cost:** ${ms.cost_usd:.2f} "
               "(notional on a Max plan)", ""]  # fmt: skip
 
     lines += ["## What was built", ""]

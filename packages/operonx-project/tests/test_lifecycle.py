@@ -25,7 +25,7 @@ def test_w1_whole_lifecycle(tmp_path):
     assert (integ / "calc.py").read_text() == RIGHT
     delivery = (integ / "DELIVERY.md").read_text()
     assert "**C1** add numbers" in delivery
-    assert "DELIVERY.md" in git(integ, "log", "-1", "--name-only")
+    assert "DELIVERY.md" in git(integ, "log", "-2", "--name-only")  # then the board commit (m1 done)
     base = life.store.ms_get("m1", "baseline")
     assert [c["name"] for c in base["checks"]] == ["tests"] and base["results"][0]["ok"]
     # each flow run is a run page in the studio: the project's run store, out of git

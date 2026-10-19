@@ -22,15 +22,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
+from operonx.core.loggings import LOGGER
+
+from operonx_project.brd.board import rebuild
 from operonx_project.brd.folder import init_brd
 from operonx_project.gitops import GitOps
 from operonx_project.model import Milestone, Policy
 from operonx_project.store import Store
 
-__all__ = ["STATE_DIR", "Project", "create_milestone", "new_project"]
+__all__ = ["STATE_DIR", "Project", "board_seed", "create_milestone", "load_settings", "new_project"]
 
 STATE_DIR = ".operonx/project"
 RUNS_DIR = ".operonx/runs"  # the flows' traces: the studio's run pages
+BRD_DIR = "docs/brd"  # the BRD folder, the board inside it (``board/``)
 
 
 def _exclude(repo: Path, line: str) -> None:
@@ -55,9 +59,17 @@ class Project:
         git = GitOps(Path(repo), project=name, root=worktrees, lock_dir=None)
         state = git.repo / STATE_DIR
         git.lock_dir = state
-        _exclude(git.repo, f"/{STATE_DIR}/")
-        _exclude(git.repo, f"/{RUNS_DIR}/")
-        return cls(repo=git.repo, state=state, store=Store(state / "project.db"), git=git)
+        at = f"/{git.sub}" if git.sub else ""  # a project in a subfolder (D11): its own state, there
+        _exclude(git.repo, f"{at}/{STATE_DIR}/")
+        _exclude(git.repo, f"{at}/{RUNS_DIR}/")
+        fresh = not (state / "project.db").exists()
+        store = Store(state / "project.db")
+        if fresh and (git.repo / BRD_DIR / "board").is_dir():
+            # a clone, or a lost store: the board comes back from the BRD (plan D5)
+            made = rebuild(store, git.repo / BRD_DIR, str(git.repo))
+            if made:
+                LOGGER.info(f"{git.repo}: the board rebuilt from {BRD_DIR}/board ({', '.join(made)})")
+        return cls(repo=git.repo, state=state, store=store, git=git)
 
     @property
     def runs(self) -> Path:
@@ -81,12 +93,17 @@ def create_milestone(
     constraints: str = "",
     brd: str = "docs/brd",
     mid: Optional[str] = None,
+    seed: Optional[Dict[str, Any]] = None,
 ) -> Milestone:
     """Intake: the milestone, its policy and sources, stored; nothing runs yet.
 
     Each source is ``{"path", "role", "private", "title", "name"}``; it is
     registered and extracted in the requirements stage, into the BRD folder
-    on the milestone's integration branch."""
+    on the milestone's integration branch.
+
+    *seed* (``start --from-board``, plan D6) is another milestone's board
+    (``{"from": ..., "cards": [...]}``): its cards become this milestone's plan,
+    all not started, with no planning stage; the owner still approves it."""
     if mode not in ("w1", "w2"):
         raise ValueError(f"mode must be w1 or w2, not {mode!r}")
     policy = policy or (Policy.w1() if mode == "w1" else Policy.w2())
@@ -102,7 +119,9 @@ def create_milestone(
         srcs.append({"path": str(p), "role": s.get("role", "authoritative"), "private": bool(s.get("private")),
                      "title": s.get("title") or p.stem, "name": s.get("name") or ""})  # fmt: skip
     project.store.ms_put(mid, "intake", {"mode": mode, "sources": srcs, "prefix": prefix, "constraints": constraints,
-                                         "brd": brd})  # fmt: skip
+                                         "brd": brd, "branch": project.git.integration_branch(mid)})  # fmt: skip
+    if seed:
+        project.store.ms_put(mid, "seeded", seed)
     return ms
 
 
@@ -124,3 +143,34 @@ def new_project(directory: Path, name: Optional[str] = None, worktrees: Optional
         subprocess.run(["git", *([] if own else env_id), "commit", "-q", "-m", "docs: the living BRD folder"], cwd=d,
                        check=True)  # fmt: skip
     return Project.open(d, worktrees=worktrees, name=name)
+
+
+#: Plan fields a card keeps when it seeds another milestone (D6): its plan, never its outcome.
+_SEED_FIELDS = ("id", "title", "intent", "rows", "criteria", "deps", "paths", "kind", "risk", "priority", "epic")
+
+
+def board_seed(source: Path, mid: str) -> Dict[str, Any]:
+    """Milestone *mid*'s cards from a board folder (a BRD folder, or its
+    ``board/``), as a plan for a new milestone: ``start --from-board``."""
+    from operonx_project.brd.board import BOARD_DIR, read_board
+
+    source = Path(source)
+    brd = source.parent if source.name == BOARD_DIR else source
+    for bf in read_board(brd):
+        if bf.milestone.id == mid:
+            cards = [{k: getattr(c, k) for k in _SEED_FIELDS} for c in bf.cards if c.state.value != "cancelled"]
+            return {"from": f"{brd / BOARD_DIR / (mid + '.md')}", "title": bf.milestone.title, "cards": cards}
+    raise KeyError(f"no milestone {mid!r} in {brd / BOARD_DIR}")
+
+
+def load_settings(state: Path) -> Dict[str, Any]:
+    """``.operonx/project/settings.toml``: this machine's settings (plan D8),
+    outside git: ``sandbox = false`` where bubblewrap cannot run."""
+    path = Path(state) / "settings.toml"
+    if not path.is_file():
+        return {}
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - 3.10
+        import tomli as tomllib
+    return tomllib.loads(path.read_text(encoding="utf-8"))

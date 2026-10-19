@@ -12,7 +12,9 @@ compared on OneWealth's own folder. Each check is an error when it fails:
 - the matrix's summary table equals the counts of its rows;
 - every FEAT-, SCR-, ADR-, Q- and DEF- id referenced is defined;
 - the verbatim source copies still have their recorded SHA-256;
-- every file under ``assets/`` is registered in ``assets/README.md``.
+- every file under ``assets/`` is registered in ``assets/README.md``;
+- every card on the board (``board/``) serves rows that are defined, and
+  depends only on cards of its own milestone.
 
 With a source file (``--source SRC-01=path``): its SHA-256 is the registered
 one, and every code the config's pattern finds in it is defined.
@@ -58,7 +60,7 @@ __all__ = ["BrdConfig", "check", "default_requirement_id"]
 _NOT_REQ = "(?!(?:FEAT|SCR|ADR|Q|DEF|SRC)-)"
 default_requirement_id = _NOT_REQ + r"[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)*-[A-Z]{0,3}\d{2,4}"
 LINK = re.compile(r"(?<!!)\[[^\]]*\]\(([^)\s]+)\)|!\[[^\]]*\]\(([^)\s]+)\)")
-TEST_REF = re.compile(r"tests/((?:[\w.-]+/)*test_\w+\.py)::(test_\w+)")  # nested: tests/acceptance/C1/
+TEST_REF = re.compile(r"tests/((?:[\w.-]+/)*test_\w+\.py)::(?:[A-Z]\w*::)?(test_\w+)")  # nested: tests/acceptance/C1/
 
 
 @dataclass
@@ -195,7 +197,7 @@ def tests_index(cfg: BrdConfig) -> Dict[str, Set[str]]:
     if not cfg.tests.is_dir():
         return out
     for f in cfg.tests.rglob("test_*.py"):
-        names = re.findall(r"^(?:async\s+)?def\s+(test_\w+)", f.read_text(encoding="utf-8"), re.M)
+        names = re.findall(r"^\s*(?:async\s+)?def\s+(test_\w+)", f.read_text(encoding="utf-8"), re.M)
         out[f.relative_to(cfg.tests).as_posix()] = set(names)
     return out
 
@@ -323,6 +325,27 @@ def check_source(cfg: BrdConfig, sid: str, path: Path, errors: List[str], report
         report.append(f"BRD file checked: {len(codes)} codes, SHA-256 {'ok' if ok else 'CHANGED'}")
 
 
+def check_board(cfg: BrdConfig, errors: List[str]) -> None:
+    from operonx_project.brd.board import read_board
+
+    try:
+        board = read_board(cfg.brd)
+    except (ValueError, KeyError) as exc:
+        errors.append(f"board/: unreadable ({exc}); the engine writes it, change a plan with replan")
+        return
+    defined = defined_requirements(cfg) | set(matrix_rows(cfg))
+    for bf in board:
+        ids = {c.id for c in bf.cards}
+        for c in bf.cards:
+            for rid in c.rows:
+                if rid not in defined:
+                    errors.append(f"board/{bf.milestone.id}.md: {c.id} serves {rid}, which is not defined")
+            for dep in c.deps:
+                if dep not in ids:
+                    errors.append(f"board/{bf.milestone.id}.md: {c.id} depends on {dep}, not a card of "
+                                  f"{bf.milestone.id}")  # fmt: skip
+
+
 def check(brd: Path, sources: Optional[Dict[str, Path]] = None) -> Tuple[List[str], List[str]]:
     cfg = BrdConfig.load(brd)
     errors: List[str] = []
@@ -331,6 +354,7 @@ def check(brd: Path, sources: Optional[Dict[str, Path]] = None) -> Tuple[List[st
     check_requirements(cfg, errors, report)
     check_references(cfg, errors)
     check_sources_and_assets(cfg, errors)
+    check_board(cfg, errors)
     if sources:
         for sid, p in sources.items():
             check_source(cfg, sid, Path(p), errors, report)

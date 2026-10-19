@@ -30,7 +30,7 @@ from operonx.core.loggings import LOGGER
 from operonx_project.coder.base import CoderRequest, CoderResult, Started
 from operonx_project.coder.roles import base_deny, sandbox_settings, tools_of
 
-__all__ = ["ClaudeCodeCoder", "base_env", "find_claude", "kill_group"]
+__all__ = ["ClaudeCodeCoder", "activity_label", "base_env", "find_claude", "kill_group"]
 
 # A stream-json line can carry a whole file a tool read.
 _LINE_LIMIT = 64 * 1024 * 1024
@@ -262,6 +262,19 @@ async def _stop(proc: asyncio.subprocess.Process) -> None:
         await proc.wait()
 
 
+def activity_label(tool: str, inputs: Dict[str, Any], cwd: Optional[Path] = None) -> str:
+    """One short line for a tool call: ``Edit src/x.py``, ``Bash pytest -q``."""
+    target = inputs.get("file_path") or inputs.get("path") or inputs.get("notebook_path") or ""
+    if target and cwd is not None:
+        try:
+            target = str(Path(target).resolve().relative_to(Path(cwd).resolve()))
+        except ValueError:
+            pass
+    what = target or inputs.get("command") or inputs.get("pattern") or inputs.get("url") or inputs.get("query") or ""
+    what = " ".join(str(what).split())
+    return f"{tool} {what[:80]}".strip()
+
+
 class _Reader:
     """Folds a session's stream-json events into one :class:`CoderResult`."""
 
@@ -320,6 +333,11 @@ class _Reader:
                     self.tools[name] = self.tools.get(name, 0) + 1
                     if block.get("id"):
                         self.pending[block["id"]] = name
+                    if self.req.on_activity is not None:
+                        try:
+                            self.req.on_activity(activity_label(name, block.get("input") or {}, self.req.cwd))
+                        except Exception:  # noqa: BLE001 — the live line never stops a session
+                            LOGGER.debug("on_activity raised", exc_info=True)
         elif kind == "user":
             for block in (event.get("message") or {}).get("content") or []:
                 if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("is_error"):

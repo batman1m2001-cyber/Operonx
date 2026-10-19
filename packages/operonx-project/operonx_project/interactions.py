@@ -188,6 +188,8 @@ class Interactions:
             for c in self.store.cards(ms.id):
                 q = c.detail.get("question") or {}
                 iid = q.get("interrupt_id")
+                if q.get("kind") == "taken":  # waits for its taker's submit, not for the owner
+                    continue
                 if c.state == CardState.WAITING_HUMAN and iid and iid not in have:
                     rows = {"rows": c.rows, "title": c.title}
                     self._add(iid, ms.id, c.id, "card", {**q, **rows}, version=int(c.detail.get("runs", 1)))

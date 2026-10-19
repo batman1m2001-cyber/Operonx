@@ -13,6 +13,7 @@ Update the documents a change affects, not every document. Keep IDs stable and h
 | A decision changes the architecture | a new ADR; the old one marked superseded |
 | A new version of a source arrives | register it as a new row in `sources/README.md`; extract the differences; keep the old extraction |
 | The suite is run for a change | a row in `testing/regression_coverage.md` with the real result |
+| A milestone is planned, or a card moves | nothing by hand: the engine rewrites `board/`; a plan changes through `operonx-project replan` |
 
 Always: one line in [`CHANGELOG.md`](CHANGELOG.md), then `operonx-project brd check`.
 

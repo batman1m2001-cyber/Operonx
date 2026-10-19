@@ -1,6 +1,6 @@
 """`operonx` — the command line: one command, a subcommand each.
 
-    operonx init [DIR] [--template NAME] [--name NAME] [--force] [--uv | --pip]
+    operonx init [DIR] [--template NAME] [--name NAME] [--force] [--uv | --pip] [--no-brd]
     operonx guide [DIR]             # sync the installed guides into DIR/.operonx/guide/
     operonx guide --check [DIR]     # exit 1 when that copy is stale (CI)
     operonx guide --path            # where the installed core guide is
@@ -92,6 +92,12 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="use the operonx checkout at PATH instead of PyPI (default inside a checkout)",
     )
+    init.add_argument(
+        "--no-brd",
+        dest="brd",
+        action="store_false",
+        help="no docs/brd/ (the requirements checklist operonx-project builds from)",
+    )
     tool = init.add_mutually_exclusive_group()
     tool.add_argument(
         "--uv",
@@ -141,6 +147,7 @@ def _init(args: argparse.Namespace) -> int:
             force=args.force,
             editable=Path(args.editable) if args.editable else None,
             toolchain=args.toolchain,
+            brd=args.brd,
         )
     except InitError as exc:
         print(f"error: {exc}", file=sys.stderr)

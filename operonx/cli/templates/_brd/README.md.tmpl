@@ -1,4 +1,4 @@
-# {project}: the living product repository
+# {{name}}: the living product repository
 
 What the product must do, why, and how far it is. Versioned with the code; every milestone reads and updates it.
 Kept by the rules in [MAINTAINING.md](MAINTAINING.md) and checked by `operonx-project brd check`, which the test
@@ -14,6 +14,7 @@ suite runs.
 | UX | [`ux/`](ux/screen_inventory.md) | Screens (`SCR-…`) and what each shows |
 | Decisions | [`decisions/`](decisions/README.md) | Architecture decision records (`ADR-nnnn`) |
 | Testing | [`testing/`](testing/regression_coverage.md) | Test runs and known defects (`DEF-nn`) |
+| Board | [`board/`](board/README.md) | How it is built: every milestone and its cards (what each does, the rows it serves, its criteria, its dependencies, its files) and their status. Written by the engine |
 
 ## 2. The traceability matrix
 
@@ -37,3 +38,18 @@ requirement's status is stated: requirement → feature → screen → code / AP
 | `blocked` | Cannot be built now; the row says what blocks it and who can unblock it |
 | `out_of_scope_demo` | Deliberately left out of this phase |
 | `not_applicable` | Does not apply to this product; the row says why |
+
+## 5. The project builder
+
+`operonx-project` (the Board tab in `operonx studio`) builds what the matrix leaves open, one milestone at a time:
+
+```bash
+operonx-project start --title "v1" --goal "..." --rows <ID> <ID>   # a milestone for these rows
+operonx-project daemon                                            # plans the cards, builds and checks them
+operonx-project status                                            # where every milestone is
+```
+
+The plan and its status are written to [`board/`](board/README.md), one file per milestone, so a clone carries
+them; `.operonx/project/` (outside git) holds only what the running engine needs, and is rebuilt from `board/`
+when it is missing. `operonx-project start --from-board m1` builds a milestone's cards again, in another repo too.
+Before the first milestone the studio's Board shows this folder's checklist.

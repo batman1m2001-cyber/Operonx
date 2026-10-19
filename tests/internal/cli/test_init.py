@@ -577,3 +577,55 @@ def test_the_durable_block_is_off_and_parses_once_uncommented():
     assert Manifest.from_dict(_toml.loads(toml)).durable is None
     on = re.sub(r"^# (\[durable\]|journal = )", r"\1", toml, flags=re.M)
     assert Manifest.from_dict(_toml.loads(on)).durable.journal == "sqlite:.operonx/journal.db"
+
+
+class TestTheBrd:
+    """``docs/brd/`` and its board, written by default (``--no-brd`` skips it),
+    and AGENTS.md's builder block, kept current by ``operonx guide``."""
+
+    def test_init_writes_the_brd_its_board_and_the_builder_block(self, tmp_path, capsys):
+        root = tmp_path / "p"
+        assert _init(capsys, root)[0] == 0
+        brd = root / "docs" / "brd"
+        for rel in ("README.md", "MAINTAINING.md", "requirements/requirements_traceability.md",
+                    "requirements/open_questions.md", "board/README.md", "sources/owner_requests/.gitkeep"):  # fmt: skip
+            assert (brd / rel).is_file(), rel
+        assert "# p: the living product repository" in (brd / "README.md").read_text()
+        agents = (root / "AGENTS.md").read_text()
+        assert guide.builder_block() in agents
+        assert agents.index(guide.BUILDER_BEGIN) < agents.index("## Commands")
+        assert ".operonx/project/" in (root / ".gitignore").read_text()
+
+    def test_no_brd_writes_neither(self, tmp_path, capsys):
+        root = tmp_path / "p"
+        assert _init(capsys, root, "--no-brd")[0] == 0
+        assert not (root / "docs").exists()
+        assert guide.BUILDER_BEGIN not in (root / "AGENTS.md").read_text()
+        guide.sync(root)  # no docs/brd: the block is not added later either
+        assert guide.BUILDER_BEGIN not in (root / "AGENTS.md").read_text()
+
+    def test_an_older_project_with_a_brd_gets_the_block_once(self, tmp_path):
+        (tmp_path / "docs" / "brd").mkdir(parents=True)
+        old = "# p\n\n## Layout\n\n- mine\n\n## Commands\n\nmake deploy\n"
+        (tmp_path / "AGENTS.md").write_text(old)
+        guide.sync(tmp_path)
+        text = (tmp_path / "AGENTS.md").read_text()
+        assert text.startswith(
+            "# p\n\n## Layout\n\n- mine\n\n" + guide.builder_block() + "\n\n## Commands\n"
+        )
+        guide.sync(tmp_path)
+        assert (tmp_path / "AGENTS.md").read_text() == text
+
+    def test_a_stale_builder_block_is_rewritten(self, tmp_path):
+        stale = f"# p\n\n{guide.BUILDER_BEGIN}\nold words\n{guide.BUILDER_END}\n\n## Rules\n"
+        (tmp_path / "AGENTS.md").write_text(stale)
+        guide.sync(tmp_path)
+        text = (tmp_path / "AGENTS.md").read_text()
+        assert guide.builder_block() + "\n\n## Rules\n" in text and "old words" not in text
+
+    def test_the_template_is_the_one_operonx_project_writes(self):
+        from operonx.cli.init import brd_files
+
+        files = brd_files("calc", date="2026-01-02")
+        assert b"- 2026-01-02: the BRD folder was created." in files["CHANGELOG.md"]
+        assert all(not rel.endswith(".tmpl") for rel in files)

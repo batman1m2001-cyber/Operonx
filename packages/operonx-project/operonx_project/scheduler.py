@@ -146,8 +146,10 @@ class Scheduler:
         rows_left: Callable[[], int] = lambda: 0,
         deadline: Optional[float] = None,  # epoch seconds: max_hours runs out; no new start after it
         hold_max_s: float = 120.0,  # a rate limit resetting later than this pauses the milestone instead
+        on_card_end: Optional[Callable[[str], None]] = None,  # a card done or failed: the board file is rewritten
     ):
         self.store = store
+        self.on_card_end = on_card_end
         self.mid = milestone
         self.runner = runner
         self.integrator = integrator
@@ -180,6 +182,10 @@ class Scheduler:
 
     def cancel(self) -> None:
         self._post(_Event("cancel"))
+
+    def wake(self) -> None:
+        """Look again at what may start (a card was taken, reprioritized)."""
+        self._post(_Event("wake"))
 
     def _post(self, ev: _Event) -> None:
         if self._events is None:
@@ -357,6 +363,7 @@ class Scheduler:
             self.store.move_card(self.mid, cid, CardState.VERIFIED, out.reason, **extra)
         elif out.status == "failed":
             self.store.move_card(self.mid, cid, CardState.FAILED, out.reason, **extra)
+            self._ended(cid)
         elif out.status == "waiting_human":
             detail = dict(card.detail, question=out.question)
             self.store.move_card(
@@ -380,17 +387,28 @@ class Scheduler:
             return
         if res.status == "merged":
             self.store.move_card(self.mid, cid, CardState.DONE, res.reason)
+            self._ended(cid)
         elif res.status == "failed":
             self.store.move_card(self.mid, cid, CardState.FAILED, res.reason)
+            self._ended(cid)
         elif card.reopens >= self.policy.budget.max_reopens:
             self.store.move_card(
                 self.mid, cid, CardState.FAILED, f"{res.status} after {card.reopens} re-opens: {res.reason}"
             )
+            self._ended(cid)
         else:
             detail = dict(card.detail, reopen={"why": res.status, "reason": res.reason})
             self.store.move_card(
                 self.mid, cid, CardState.READY, f"re-opened: {res.status}", reopens=card.reopens + 1, detail=detail
             )
+
+    def _ended(self, cid: str) -> None:
+        if self.on_card_end is None:
+            return
+        try:
+            self.on_card_end(cid)
+        except Exception:  # noqa: BLE001 — the board file never stops a milestone
+            LOGGER.exception(f"card {cid}: the board file could not be written")
 
     def _cancel_all(self) -> None:
         self._cancelled = True

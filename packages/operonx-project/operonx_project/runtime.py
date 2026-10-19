@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import shlex
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
@@ -79,6 +80,7 @@ class Runtime:
     key: str = ""
     python: str = sys.executable  # runs the operonx checks when the target has no .venv of its own
     stages: Dict[Tuple[str, str], Callable[[Stage], None]] = field(default_factory=dict)
+    _activity_at: Dict[Tuple[str, Optional[str]], float] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         self.key = self.key or self.git.project
@@ -93,6 +95,21 @@ class Runtime:
 
     def card(self, mid: str, cid: str) -> Card:
         return self.store.get_card(mid, cid)
+
+    def activity_for(self, mid: str, cid: Optional[str], role: str, every_s: float = 2.0):
+        """A callback that records a session's tool calls as ``activity`` events,
+        at most one per card every *every_s* seconds (plan D10): the Board's
+        live line, and the assistant's view of a running card."""
+        key = (mid, cid)
+
+        def note(text: str) -> None:
+            now = time.time()
+            if now - self._activity_at.get(key, 0.0) < every_s:
+                return
+            self._activity_at[key] = now
+            self.store.note(mid, "activity", {"text": text[:120], "role": role}, card=cid)
+
+        return note
 
     def set_detail(self, mid: str, cid: str, **values) -> Card:
         """Merge *values* into the card's ``detail`` (``None`` removes a key)."""

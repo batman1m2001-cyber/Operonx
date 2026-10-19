@@ -14,6 +14,13 @@ cannot both exist):
 - integration: ``milestone/<m>/main``
 - a card:      ``milestone/<m>/card/<card>``
 
+A project in a subfolder of a repo (plan D11: the folder with
+``operonx.toml``, its own BRD and store) has its own names,
+``milestone/<ns>/<m>/main`` with ``<ns>`` the subfolder's path, so two
+projects in one repo never share a branch. Paths the engine sees are the
+project's (``src/x.py``), and one outside the project is ``../…``, which
+the guard refuses whatever the card's paths.
+
 Every function is idempotent where a crash could repeat it: creating a
 worktree that exists returns it, a commit with nothing to commit returns
 ``None``, a merge finds and aborts a half-written one first.
@@ -64,12 +71,16 @@ def _check_name(kind: str, name: str) -> str:
     return name
 
 
-def integration_branch(milestone: str) -> str:
-    return f"milestone/{_check_name('milestone', milestone)}/main"
+def _prefix(ns: str) -> str:
+    return f"milestone/{ns}/" if ns else "milestone/"
 
 
-def card_branch(milestone: str, card: str) -> str:
-    return f"milestone/{_check_name('milestone', milestone)}/card/{_check_name('card', card)}"
+def integration_branch(milestone: str, ns: str = "") -> str:
+    return f"{_prefix(ns)}{_check_name('milestone', milestone)}/main"
+
+
+def card_branch(milestone: str, card: str, ns: str = "") -> str:
+    return f"{_prefix(ns)}{_check_name('milestone', milestone)}/card/{_check_name('card', card)}"
 
 
 @dataclass
@@ -110,9 +121,13 @@ class GitOps:
         root: Optional[Path] = None,
         lock_dir: Optional[Path] = None,
     ):
-        self.repo = Path(repo).resolve()
-        top = _run(self.repo, "rev-parse", "--show-toplevel").strip()
-        self.repo = Path(top)
+        given = Path(repo).resolve()
+        self.top = Path(_run(given, "rev-parse", "--show-toplevel").strip()).resolve()
+        rel = os.path.relpath(given, self.top)
+        #: the project's folder inside the repo ("" at its top level), and its branch namespace
+        self.sub = "" if rel == "." else Path(rel).as_posix()
+        self.ns = re.sub(r"[^A-Za-z0-9._-]+", "-", self.sub).strip("-")
+        self.repo = given if self.sub else self.top
         self.project = _check_name("project", project or self.repo.name)
         self.root = Path(root or Path.home() / ".operonx" / "worktrees").expanduser() / self.project
         self.lock_dir = Path(lock_dir or self.repo / ".operonx" / "project")
@@ -138,13 +153,33 @@ class GitOps:
     def has_branch(self, branch: str) -> bool:
         return bool(self.git("branch", "--list", branch).strip())
 
+    def integration_branch(self, milestone: str) -> str:
+        return integration_branch(milestone, self.ns)
+
+    def card_branch(self, milestone: str, card: str) -> str:
+        return card_branch(milestone, card, self.ns)
+
+    def _proj(self, path: str) -> str:
+        """A path from the repo's top level, as the project sees it."""
+        return os.path.relpath(path, self.sub).replace(os.sep, "/") if self.sub else path
+
+    def _in(self, root: Path) -> Path:
+        return root / self.sub if self.sub else root
+
     # ── worktrees ──
 
-    def worktree_path(self, milestone: str, card: str) -> Path:
+    def _card_root(self, milestone: str, card: str) -> Path:
         return self.root / _check_name("milestone", milestone) / _check_name("card", card)
 
-    def integration_path(self, milestone: str) -> Path:
+    def _integ_root(self, milestone: str) -> Path:
         return self.root / _check_name("milestone", milestone) / "_integration"
+
+    def worktree_path(self, milestone: str, card: str) -> Path:
+        """The card's project folder inside its worktree."""
+        return self._in(self._card_root(milestone, card))
+
+    def integration_path(self, milestone: str) -> Path:
+        return self._in(self._integ_root(milestone))
 
     def _worktrees(self) -> Dict[str, str]:
         """worktree path → branch (``refs/heads/…`` stripped)."""
@@ -180,21 +215,24 @@ class GitOps:
     def ensure_integration(self, milestone: str, base: str = "HEAD") -> Path:
         """The milestone's integration branch (cut from *base* the first time)
         and its worktree, where merges happen."""
-        return self._ensure_worktree(self.integration_path(milestone), integration_branch(milestone), self.rev(base))
+        root = self._ensure_worktree(self._integ_root(milestone), self.integration_branch(milestone), self.rev(base))
+        return self._in(root)
 
     def ensure_card(self, milestone: str, card: str, start: Optional[str] = None) -> Path:
         """The card's worktree on its own branch, cut from the integration tip
         (or *start*) the first time; the same worktree after a crash."""
-        start = start or integration_branch(milestone)
-        return self._ensure_worktree(self.worktree_path(milestone, card), card_branch(milestone, card), self.rev(start))
+        start = start or self.integration_branch(milestone)
+        root = self._ensure_worktree(self._card_root(milestone, card), self.card_branch(milestone, card),
+                                     self.rev(start))  # fmt: skip
+        return self._in(root)
 
     def remove_card(self, milestone: str, card: str, delete_branch: bool = False) -> None:
-        path = self.worktree_path(milestone, card)
+        path = self._card_root(milestone, card)
         if str(path.resolve() if path.exists() else path) in self._worktrees():
             self.git("worktree", "remove", "--force", str(path))
         self.git("worktree", "prune")
-        if delete_branch and self.has_branch(card_branch(milestone, card)):
-            self.git("branch", "-D", card_branch(milestone, card))
+        if delete_branch and self.has_branch(self.card_branch(milestone, card)):
+            self.git("branch", "-D", self.card_branch(milestone, card))
 
     # ── commits and diffs ──
 
@@ -210,12 +248,12 @@ class GitOps:
     def dirty(self, worktree: Path) -> List[str]:
         """Paths with uncommitted changes, untracked included."""
         out = self.git("status", "--porcelain", "-uall", cwd=worktree)
-        return [line[3:].split(" -> ")[-1] for line in out.splitlines() if line.strip()]
+        return [self._proj(line[3:].split(" -> ")[-1]) for line in out.splitlines() if line.strip()]
 
     def changed(self, worktree: Path, base: str) -> List[str]:
         """Paths the worktree's HEAD changed since its merge base with *base*."""
         mb = self.git("merge-base", base, "HEAD", cwd=worktree).strip()
-        return [p for p in self.git("diff", "--name-only", mb, "HEAD", cwd=worktree).splitlines() if p]
+        return [self._proj(p) for p in self.git("diff", "--name-only", mb, "HEAD", cwd=worktree).splitlines() if p]
 
     def diff(self, worktree: Path, base: str, limit: int = 400_000) -> str:
         """The card's diff since its merge base with *base*, for a reviewer."""
@@ -254,12 +292,12 @@ class GitOps:
         half-merged; the result names the files. ``lock=False`` when the
         caller holds :meth:`merge_lock` already (merge, check, maybe undo)."""
         integ = self.ensure_integration(milestone)
-        branch = card_branch(milestone, card)
+        branch = self.card_branch(milestone, card)
         with self.merge_lock() if lock else nullcontext():
             self._abort_half_merge(integ)
             if self.dirty(integ):
                 raise GitError(["merge"], 1, f"the integration worktree {integ} has uncommitted changes")
-            ahead = self.git("rev-list", "--count", f"{integration_branch(milestone)}..{branch}").strip()
+            ahead = self.git("rev-list", "--count", f"{self.integration_branch(milestone)}..{branch}").strip()
             if ahead == "0":
                 return Merge(status="empty", sha=self.rev("HEAD", cwd=integ))
             p = subprocess.run(
@@ -272,7 +310,8 @@ class GitOps:
             )
             if p.returncode == 0:
                 return Merge(status="merged", sha=self.rev("HEAD", cwd=integ))
-            files = [f for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=integ).splitlines() if f]
+            files = [self._proj(f) for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=integ).splitlines()
+                     if f]  # fmt: skip
             self.git("merge", "--abort", cwd=integ, check=False)
             if not files:
                 raise GitError(["merge", branch], p.returncode, p.stdout + p.stderr)
@@ -286,7 +325,7 @@ class GitOps:
         self._abort_half_merge(wt)
         p = subprocess.run(
             ["git", "merge", "--no-edit", "-m", f"update {card} from the integration branch",
-             integration_branch(milestone)],
+             self.integration_branch(milestone)],
             cwd=str(wt),
             capture_output=True,
             text=True,
@@ -295,13 +334,14 @@ class GitOps:
         )  # fmt: skip
         if p.returncode == 0:
             return Merge(status="merged", sha=self.rev("HEAD", cwd=wt))
-        files = [f for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=wt).splitlines() if f]
+        files = [self._proj(f) for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=wt).splitlines() if f]
         if not files:
             raise GitError(["merge"], p.returncode, p.stdout + p.stderr)
         return Merge(status="conflict", files=files, detail=(p.stdout + p.stderr).strip()[-2000:])
 
     def conflicted(self, worktree: Path) -> List[str]:
-        return [f for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=worktree).splitlines() if f]
+        return [self._proj(f) for f in self.git("diff", "--name-only", "--diff-filter=U", cwd=worktree).splitlines()
+                if f]  # fmt: skip
 
     def reset_integration(self, milestone: str, sha: str) -> None:
         """Move the integration branch back to *sha*: a merge whose checks
@@ -315,9 +355,9 @@ class GitOps:
         """Undo uncommitted changes to *paths*: a tracked file goes back to
         HEAD, a new one is deleted. The guard refuses a change this way, so
         it never reaches a commit."""
-        tracked = set(self.git("ls-tree", "-r", "--name-only", "HEAD", cwd=worktree).splitlines())
         for path in paths:
-            if path in tracked:
+            # asked per path: from a project's subfolder, ls-tree lists only that folder
+            if self.git("ls-tree", "--name-only", "HEAD", "--", path, cwd=worktree).strip():
                 self.git("checkout", "-q", "HEAD", "--", path, cwd=worktree)
             else:
                 f = worktree / path
@@ -397,6 +437,9 @@ def guard(
     findings: List[GuardFinding] = []
     hashes = private or {}
     for path in changed:
+        if path == ".." or path.startswith("../"):
+            findings.append(GuardFinding(path, "outside_project", "blocker", f"{path} is outside the project's folder"))
+            continue
         if protected and _matches(path, protected):
             findings.append(GuardFinding(path, "protected", "blocker", f"{path} is a protected acceptance file"))
         elif paths and not _matches(path, paths):
