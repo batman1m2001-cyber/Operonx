@@ -48,7 +48,8 @@ def test_empty_diff_retries_once_then_fails():
     d = decide(facts(empty_diff=True))
     assert d.next == "fix" and d.counts_empty
     assert decide(facts(empty_diff=True, empty_retries=1)).next == "failed"
-    assert decide(facts(empty_diff=True, kind="docs")).next == "verified"
+    assert decide(facts(empty_diff=True, kind="docs")).next == "fix"  # tipcalc m1/C6: an unchanged docs card
+    assert decide(facts(empty_diff=True, kind="init")).next == "verified"
 
 
 def test_new_failure_is_a_fix():

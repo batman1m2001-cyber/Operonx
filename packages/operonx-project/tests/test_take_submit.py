@@ -56,6 +56,17 @@ def test_a_taken_card_waits_for_its_taker_and_a_submit_is_a_round(tmp_path):
     assert "card.taken" in kinds and kinds.count("card.submitted") == 2
 
 
+def test_a_submit_that_changed_nothing_is_not_verified(tmp_path):
+    # tipcalc m1/C6: a taker's empty submit was verified ("checks pass, review clean") and merged as nothing
+    life = _taken_life(tmp_path)
+    assert life.serve() == M.WAITING_HUMAN
+    life.command("submit", card="C1", summary="no change")
+    assert life.serve() == M.WAITING_HUMAN
+    brief = taker_brief(life.project, "m1", "C1")
+    assert brief["waiting_for_submit"] and brief["round"] == 1 and "changed no file" in brief["feedback"]
+    assert life.store.get_card("m1", "C1").state.value == "waiting_human"
+
+
 def test_release_gives_the_card_back_to_the_engine(tmp_path):
     life = _taken_life(tmp_path)
     assert life.serve() == M.WAITING_HUMAN

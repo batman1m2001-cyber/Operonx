@@ -17,6 +17,7 @@ is reached the milestone stops for the owner instead of trying again.
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -257,10 +258,22 @@ class Lifecycle:
         if sources and not brd.exists():
             init_brd(integ, rel, project=rt.git.project)
         brt = None
+        from operonx_project.brd.records import load_requirements
+
+        scoped: List[str] = []  # sources whose rows are this milestone's scope (an owner request, plan D14)
         for s in sources:
             path = Path(s["path"])
+            if s.get("into"):  # the source's place in the BRD (sources/owner_requests/…): copied there first
+                dest = brd / s["into"]
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if not dest.exists():
+                    shutil.copyfile(path, dest)
+                path = dest
+            before = {r.id for r in load_requirements(brd)} if brd.exists() else set()
             src = register_source(brd, path, role=s.get("role", "authoritative"), title=s.get("title"),
                                   private=bool(s.get("private")), repo=integ)  # fmt: skip
+            if s.get("scope"):
+                scoped.append(src.id)
             if src.private:
                 private[src.sha256[0]] = path.name
                 self.store.ms_put(mid, "private", {"hashes": private})
@@ -276,6 +289,7 @@ class Lifecycle:
                 )
                 if self.models:
                     brt.models = {**brt.models, **{k: v for k, v in self.models.items() if k in brt.models}}
+            brt.taken = sorted(before)
             report = await extract_source(brt, brd, path, src.id, intake.get("prefix") or "REQ", src.title,
                                           s.get("name") or None, journal=self.p.state / "brd.db",
                                           run_id=f"{mid}.brd.{src.id}")  # fmt: skip
@@ -283,12 +297,20 @@ class Lifecycle:
             got = {"source": src.id, "requirements": report.get("requirements"),
                    "problems": len(report.get("problems") or [])}  # fmt: skip
             self.store.note(mid, "requirements.extracted", got)
+            clash = sorted(before & {r.id for r in load_requirements(brd) if r.source == src.id})
+            if clash:  # the extractor reused an id: two requirements on one row would be silently merged
+                raise RuntimeError(f"{src.id}'s requirements reuse ids the BRD already has: {', '.join(clash)}")
             extracted[src.id] = src.sha256[0]
             self.store.ms_put(mid, "extracted", extracted)
         if brd.exists():
             rt.git.git("add", "-A", rel, cwd=integ)
             rt.git.commit(integ, f"{mid}: requirements ({', '.join(sorted(extracted)) or 'the BRD folder'})")
-            scope = scope_rows(brd, ms.rows)
+            only = list(ms.rows)
+            if scoped:  # an owner request: its own rows, and the milestone shows them
+                only += [r.id for r in load_requirements(brd) if r.source in scoped and r.id not in only]
+                if only != list(ms.rows):
+                    self.store.update_milestone(mid, rows=only, actor="engine")
+            scope = scope_rows(brd, only)
         else:
             scope = {"rows": [], "held": []}
         for h in scope["held"]:
@@ -613,6 +635,28 @@ class Lifecycle:
         if self.store.get_milestone(mid).state == M.WAITING_HUMAN:
             self._move(mid, M.RUNNING, f"{cid} resumed", actor=actor)
 
+    # ── linked milestones (plan D17) ───────────────────────────────────────
+    def unmet_needs(self, mid: str) -> List[str]:
+        from operonx_project.links import unmet
+
+        needs = (self.store.ms_get(mid, "needs") or {}).get("needs") or []
+        return unmet(needs, self.p.git.project, self.p.state) if needs else []
+
+    def check_dependencies(self) -> List[str]:
+        """Start each milestone whose needs are all delivered now; the ids started."""
+        started = []
+        for ms in self.store.milestones():
+            if ms.state != M.WAITING_DEPENDENCY:
+                continue
+            waits = self.unmet_needs(ms.id)
+            if not waits:
+                needs = (self.store.ms_get(ms.id, "needs") or {}).get("needs") or []
+                self._move(ms.id, M.DISCOVERING, f"started: {', '.join(needs)} delivered")
+                started.append(ms.id)
+            elif ("waits for " + ", ".join(waits)) != ms.reason:  # a need moved on: the Board says where it is
+                self.store.update_milestone(ms.id, reason="waits for " + ", ".join(waits))
+        return started
+
     # ── owner commands ─────────────────────────────────────────────────────
     async def apply(self, cmd: Dict[str, Any]) -> str:
         """Run one queued command; raises :class:`Refused` when it does not apply."""
@@ -624,6 +668,10 @@ class Lifecycle:
         if kind == "start":
             if ms.state != M.CREATED:
                 raise Refused(f"{mid} is {ms.state.value}, not created")
+            waits = self.unmet_needs(mid)
+            if waits:
+                self._move(mid, M.WAITING_DEPENDENCY, "waits for " + ", ".join(waits), actor=actor)
+                return "waiting for " + ", ".join(waits)
             self._move(mid, M.DISCOVERING, "started", actor=actor)
             return "started"
         if kind == "approve":

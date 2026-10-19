@@ -198,7 +198,9 @@ def reviewer_prompt(card: Card, diff: str, checks: str, previous: List[Dict[str,
         f"Review this change against the card. You are read-only.\n\n{card_brief(card)}\n\n"
         f"Check results (they pass):\n{checks}\n\nThe diff:\n{diff}{prev}\n\n"
         "Report findings. A blocker or major finding must cite a file in the diff and a line that file has, "
-        "or it does not count. Do not report style preferences as major. " + DATA_RULE
+        "or it does not count. Do not report style preferences as major. The owner's standing rules and the "
+        "project's AGENTS.md, appended to your instructions, are part of the bar: a change that breaks one "
+        "is a major finding that names the rule. " + DATA_RULE
     )
 
 

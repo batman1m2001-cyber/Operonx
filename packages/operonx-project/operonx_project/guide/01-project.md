@@ -173,6 +173,65 @@ A taken card is not one of the owner's questions, so `pending` does not
 list it. `--as` names who took it, and `--json` prints the brief for a
 program. The `api` ops are `take`, `submit`, `release` and `card`.
 
+An empty submit is not a round of work: a card whose files did not change
+goes back to its taker with "changed no file", whatever its kind.
+
+## Asking for something new: request
+
+The owner's words become rows, and a milestone for them:
+
+```bash norun
+operonx-project request "The tip screen should remember the last tip percent." --repo demo
+```
+
+The words are saved as a BRD source,
+`docs/brd/sources/owner_requests/<date>-<slug>.md` (role `approved`).
+The extractor turns them into requirements that continue the BRD's
+numbering (it is told the ids already taken, and an id reused fails the
+milestone). The milestone's scope is those rows only. It is planned and
+waits for the owner's approval like any other. The api op is `request`
+(`text`, `title`, `mode` w1 by default, `max_usd`, `needs`).
+
+## Shipping: ship and merge
+
+The engine never pushes on its own. On the owner's tap:
+
+```bash norun
+operonx-project ship m1 --repo demo    # push milestone/m1/main and open the PR
+operonx-project merge m1 --repo demo   # only with `merge = true` in settings.toml
+```
+
+`ship` needs a done milestone and a remote `origin`. On GitHub it opens
+the PR with `gh` (the body is the delivery's `PR.md`). On GitLab, which
+has no API token here, it returns a pre-filled merge-request link to open.
+Any other remote is just pushed. The base is the branch the milestone
+started from. `merge` reads the PR's checks first: it refuses while one
+still runs or has failed, and when the PR conflicts. The api ops are
+`ship` and `merge`.
+
+## Work across repos: needs
+
+A milestone may wait for another project's:
+
+```bash norun
+operonx-project start --title "studio UI" --goal "…" --needs operonx#m3 --repo studio
+```
+
+Started, it is `waiting_dependency` until `operonx#m3` is done (`m2` alone
+is this project's). The daemon looks again every 10 seconds and starts it
+then. A project is found by name in `~/.operonx/projects.json`, which
+every project the engine opens is written into. A need not found there
+says "not found on this machine". Both Boards show the link.
+
+## The owner's standing rules
+
+Every coder session gets two files appended to its system prompt:
+`~/.operonx/owner.md` (the owner's rules for all projects; or the file
+`OPERONX_OWNER_RULES` names) and the project's `AGENTS.md`. The reviewer
+checks each diff against them, and a change that breaks one is a major
+finding that names the rule. The engine's own instructions win where they
+differ.
+
 ## A project that is already built: adopt
 
 ```bash norun
@@ -208,11 +267,19 @@ The studio's Board tab is the owner's console for a project with
   start a milestone for them.
 - A running card shows a live line with what its session is doing now.
 - A taken card shows who is working it.
+- **New request** takes the owner's words (`request`).
+- A done milestone offers **Ship**, then the PR's link; **Merge** where
+  granted.
+- Linked milestones show "needs …" and "needed by …".
+- The home page lists every project's board with what waits on the
+  owner. The tab title counts the open questions, and **Notify me** turns
+  on a browser notification for each new one while a studio tab is open.
 
 The studio's assistant has the same powers as tools: `board_status`,
-`board_card`, `board_start`, `board_act`, `board_daemon`, `board_models`,
-`board_take` and `board_submit`. The owner can run a project from the chat: "build the
-export rows", "what is C3 stuck on?", "take C4 and do it yourself". The
+`board_card`, `board_request`, `board_start`, `board_act` (ship and merge
+too), `board_daemon`, `board_models`, `board_take` and `board_submit`.
+The owner can run a project from the chat: "tipcalc: add a split by item",
+"what is C3 stuck on?", "take C4 and do it yourself", "ship it". The
 studio needs `operonx-project` where it runs (or `OPERONX_PROJECT_BIN`).
 
 ## Bounds

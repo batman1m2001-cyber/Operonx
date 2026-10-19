@@ -47,7 +47,7 @@ class RoundFacts:
 
     round: int  # this round's number, from 1
     max_rounds: int
-    kind: str = "code"  # the card's kind; an empty diff only matters for code
+    kind: str = "code"  # the card's kind; an empty diff matters for every kind but init (the engine's own)
     coder_status: str = "ok"  # the implementer's CoderResult.status
     coder_error: str = ""
     resets_at: Optional[float] = None
@@ -192,10 +192,10 @@ def decide(f: RoundFacts) -> Decision:
         fb = "Some of your changes were refused and reverted:\n" + _bullets(f.guard_blockers)
         return _bounded(f, Decision("fix", "guard: " + "; ".join(f.guard_blockers)[:300], fb))
 
-    if f.empty_diff and f.kind == "code":
+    if f.empty_diff and f.kind != "init":  # a docs card unchanged is as unmet as a code card (tipcalc m1/C6)
         if f.empty_retries >= 1:
             return Decision("failed", "the implementer made no change, twice")
-        fb = "Your last turn changed no file. The card needs code changes; make them."
+        fb = "Your last turn changed no file. The card's criteria need changes to the files; make them."
         return _bounded(f, Decision("fix", "empty diff", fb, counts_empty=True))
 
     if not f.checks_ok:

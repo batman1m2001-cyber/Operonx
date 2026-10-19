@@ -204,3 +204,20 @@ def test_the_replenisher_keeps_ready_at_depth_and_stops_with_no_rows_left(tmp_pa
     assert len(calls) == 2 and all("Detail up to 1 new cards" in c["prompt"] for c in calls)
     assert third in calls[1]["prompt"] and DOUBLE_ROW not in calls[1]["prompt"].split("Rows with no card yet")[1]
     assert life.cards() == {"C1": "done", "C2": "done", "C3": "done"}
+
+
+def test_a_final_finding_that_names_a_card_reopens_it_not_the_milestone(tmp_path):
+    # tipcalc m1/C6: the finding cited the board file (the card's own file was never changed) and named C6;
+    # unattributed, it failed the whole milestone
+    from tests.flow_env import impl
+
+    finding = {"severity": "major", "file": "docs/brd/board/m1.md", "line": 1, "title": "C1 marked done but its "
+               "change is incomplete", "detail": "", "fingerprint": "f1"}  # fmt: skip
+    script = base_script(**{
+        "reviewer:milestone-review": [{"output": {"findings": [finding]}}, {"output": {"findings": []}}],
+        "implementer": [impl(RIGHT), impl(RIGHT + "\n# completed\n")],
+    })  # fmt: skip
+    life = Life(tmp_path, script, policy=Policy.w1(approve_plan="auto", heldout=False))
+    life.command("start")
+    assert life.serve() == M.DONE, life.store.get_milestone("m1").reason
+    assert life.store.get_card("m1", "C1").reopens == 1

@@ -51,6 +51,7 @@ class BrdRuntime:
     data_dir: Path  # outside the repo: a private source's figures never land in git
     models: Dict[str, Optional[str]] = field(default_factory=lambda: {"extractor": "opus", "hunter": "fable"})
     settings_dir: Optional[Path] = None  # the project's state: its settings.toml names the models
+    taken: List[str] = field(default_factory=list)  # requirement ids the BRD already defines: never reused
     key: str = "brd"
     call_max_usd: float = 10.0
     timeout_s: float = 3600.0
@@ -215,6 +216,16 @@ def read(key: str, brd: str, source: str, sid: str, name: str, only: list) -> di
     }
 
 
+def _with_taken(rt: BrdRuntime, prompt: str, first: bool) -> str:
+    """The first chunk's prompt names the ids the BRD already has: a new source continues their numbering."""
+    if not (first and rt.taken):
+        return prompt
+    return (
+        prompt + "\n\nThese requirement ids are already in the BRD; never reuse one (continue the numbering "
+        "of an area instead: after TIP-REQ-SPLIT-01 comes TIP-REQ-SPLIT-02): " + ", ".join(sorted(rt.taken))
+    )
+
+
 @op
 async def extract(key: str, sid: str, prefix: str, sections: list, previous: list, figures: list) -> dict:
     rt = get_runtime(key)
@@ -232,8 +243,8 @@ async def extract(key: str, sid: str, prefix: str, sections: list, previous: lis
     for n, chunk in enumerate(chunks, 1):
         out, res = await _turn(
             rt, steps, f"chunk-{n:02d}",
-            _req(rt, "extractor", chunk_prompt(prefix, chunk, n == 1, len(chunks), n), cwd, session,
-                 [Path(a) for a in add]),
+            _req(rt, "extractor", _with_taken(rt, chunk_prompt(prefix, chunk, n == 1, len(chunks), n), n == 1),
+                 cwd, session, [Path(a) for a in add]),
         )  # fmt: skip
         session = out.get("$session") or session
         cost += out.get("$cost", 0.0)

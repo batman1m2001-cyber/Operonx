@@ -79,6 +79,9 @@ class Project:
             made = rebuild(store, git.repo / BRD_DIR, str(git.repo))
             if made:
                 LOGGER.info(f"{git.repo}: the board rebuilt from {BRD_DIR}/board ({', '.join(made)})")
+        from operonx_project.links import remember
+
+        remember(git.project, state)  # another project's milestone may need this one's (plan D17)
         return cls(repo=git.repo, state=state, store=store, git=git)
 
     @property
@@ -104,6 +107,7 @@ def create_milestone(
     brd: str = "docs/brd",
     mid: Optional[str] = None,
     seed: Optional[Dict[str, Any]] = None,
+    needs: Sequence[str] = (),
 ) -> Milestone:
     """Intake: the milestone, its policy and sources, stored; nothing runs yet.
 
@@ -116,6 +120,10 @@ def create_milestone(
     all not started, with no planning stage; the owner still approves it."""
     if mode not in ("w1", "w2"):
         raise ValueError(f"mode must be w1 or w2, not {mode!r}")
+    from operonx_project.links import parse_need
+
+    for n in needs:
+        parse_need(n, project.git.project)  # a malformed need is refused here, not found out later
     policy = policy or (Policy.w1() if mode == "w1" else Policy.w2())
     mid = mid or project.next_milestone_id()
     ms = Milestone(id=mid, project=str(project.repo), title=title, goal=goal, rows=list(rows), policy=policy)
@@ -127,11 +135,17 @@ def create_milestone(
         if not p.exists():
             raise FileNotFoundError(f"source {p} does not exist")
         srcs.append({"path": str(p), "role": s.get("role", "authoritative"), "private": bool(s.get("private")),
-                     "title": s.get("title") or p.stem, "name": s.get("name") or ""})  # fmt: skip
+                     "title": s.get("title") or p.stem, "name": s.get("name") or "",
+                     **{k: s[k] for k in ("into", "scope") if s.get(k)}})  # fmt: skip
+    head = subprocess.run(["git", "symbolic-ref", "-q", "--short", "HEAD"], cwd=project.repo, capture_output=True,
+                          text=True).stdout.strip()  # fmt: skip
     project.store.ms_put(mid, "intake", {"mode": mode, "sources": srcs, "prefix": prefix, "constraints": constraints,
-                                         "brd": brd, "branch": project.git.integration_branch(mid)})  # fmt: skip
+                                         "brd": brd, "branch": project.git.integration_branch(mid),
+                                         "base": head})  # fmt: skip
     if seed:
         project.store.ms_put(mid, "seeded", seed)
+    if needs:
+        project.store.ms_put(mid, "needs", {"needs": [str(n).strip() for n in needs]})
     return ms
 
 

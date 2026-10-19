@@ -241,7 +241,8 @@ def read_board(brd: Path, project: str = "") -> List[BoardFile]:
 #: A milestone that was moving when its board was written comes back paused:
 #: its worktrees and runs are not in git, so the owner says when it goes on.
 _STILL = {MilestoneState.CREATED, MilestoneState.AWAITING_APPROVAL, MilestoneState.PAUSED, MilestoneState.DONE,
-          MilestoneState.FAILED, MilestoneState.CANCELLED, MilestoneState.BUDGET_EXHAUSTED}  # fmt: skip
+          MilestoneState.FAILED, MilestoneState.CANCELLED, MilestoneState.BUDGET_EXHAUSTED,
+          MilestoneState.WAITING_DEPENDENCY}  # fmt: skip
 _CARD_BACK = {CardState.RUNNING: CardState.READY, CardState.WAITING_HUMAN: CardState.READY,
               CardState.VERIFIED: CardState.READY}  # fmt: skip
 
