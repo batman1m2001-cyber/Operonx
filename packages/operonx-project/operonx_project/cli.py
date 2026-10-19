@@ -110,7 +110,9 @@ def _brd(args) -> int:
 
         state = args.state.resolve()
         # the engine's store stays denied; the figures the session must look at live beside it
-        rt = BrdRuntime(coder=ClaudeCodeCoder(state_dirs=[str(state)]), data_dir=state.parent / "brd")
+        rt = BrdRuntime(
+            coder=ClaudeCodeCoder(state_dirs=[str(state)]), data_dir=state.parent / "brd", settings_dir=state
+        )
         report = asyncio.run(extract_source(rt, args.brd, args.file, args.sid, args.prefix, args.title, args.name))
         out.write(json.dumps(report, ensure_ascii=False, indent=1) + "\n")
         return 0 if not report.get("problems") else 1

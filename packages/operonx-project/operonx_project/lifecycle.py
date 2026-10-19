@@ -258,7 +258,12 @@ class Lifecycle:
             if extracted.get(src.id) == src.sha256[0]:
                 continue
             if brt is None:
-                brt = BrdRuntime(coder=self.coder, data_dir=self.p.state / "brd" / mid, key=f"{rt.key}.brd")
+                brt = BrdRuntime(
+                    coder=self.coder,
+                    data_dir=self.p.state / "brd" / mid,
+                    key=f"{rt.key}.brd",
+                    settings_dir=self.p.state,
+                )
                 if self.models:
                     brt.models = {**brt.models, **{k: v for k, v in self.models.items() if k in brt.models}}
             report = await extract_source(brt, brd, path, src.id, intake.get("prefix") or "REQ", src.title,

@@ -36,7 +36,7 @@ def stage_request(rt: Runtime, mid: str, role: str, model: str, prompt: str, cwd
         role=role,
         session=session,
         schema=schema,
-        model=rt.models.get(model),
+        model=rt.model_for(model),
         max_usd=rt.call_max_usd,
         timeout_s=rt.call_timeout_s,
         transcript=d / f"{name}.jsonl",

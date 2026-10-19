@@ -106,9 +106,24 @@ operonx-project start --repo ../again --title "again" --from-board m1 --board ..
 that are defined, and depends only on cards of its own milestone. A card's
 session cannot write `docs/brd/board/`; change a plan with `replan`.
 
-On a machine where the shell sandbox (bubblewrap) cannot run, say so once
-in `.operonx/project/settings.toml` (outside git, it is about the
-machine): `sandbox = false`. The daemon then runs the coders without it.
+`.operonx/project/settings.toml` holds this machine's settings for the
+project. It stays outside git.
+
+```toml
+sandbox = false        # the shell sandbox (bubblewrap) cannot run here
+model = "sonnet"       # every session's model (a cheap test run)
+
+[models]
+implementer = "opus"   # one role's model; it wins over `model`
+```
+
+The roles are `surveyor`, `planner`, `plan_reviewer`, `test_author`,
+`implementer`, `reviewer`, `examiner`, `arbiter`, `triage`, `replenisher`,
+`milestone_reviewer`, `extractor` and `hunter`. Each session reads the
+models when it starts, so a change applies to the next session with no
+daemon restart. `{"op": "settings", "model": "sonnet"}` through
+`operonx-project api` makes the same change (`""` clears it). The studio's
+assistant uses it too (`board_models`).
 
 ## The owner's questions
 
@@ -195,8 +210,8 @@ The studio's Board tab is the owner's console for a project with
 - A taken card shows who is working it.
 
 The studio's assistant has the same powers as tools: `board_status`,
-`board_card`, `board_start`, `board_act`, `board_daemon`, `board_take` and
-`board_submit`. The owner can run a project from the chat: "build the
+`board_card`, `board_start`, `board_act`, `board_daemon`, `board_models`,
+`board_take` and `board_submit`. The owner can run a project from the chat: "build the
 export rows", "what is C3 stuck on?", "take C4 and do it yourself". The
 studio needs `operonx-project` where it runs (or `OPERONX_PROJECT_BIN`).
 
