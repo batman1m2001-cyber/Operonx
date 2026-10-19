@@ -412,6 +412,11 @@ operonx project status                  # or the Board tab in the studio
 
 ## 4. Requirements: a living BRD
 
+> **Superseded in part by [PROJECT_BUILDER_PLAN.md](PROJECT_BUILDER_PLAN.md)
+> (D1–D6):** the board moved into the BRD, `docs/brd/board/`, in git;
+> `.operonx/project/` is runtime state, rebuilt from it. `operonx init`
+> writes `docs/brd/`. Read that plan for where the board lives.
+
 Requirements are not a planner's scratch list inside the engine. They are
 a **folder in the target repo**, versioned with the code, that every
 milestone on that repo reads and updates. The model for it is OneWealth's
@@ -1278,6 +1283,11 @@ implement / checks / review` as `child()` steps. Coder transcripts
 ---
 
 ## 12. The studio: Board, Checklist and Graph on the project's page
+
+> **Extended by [PROJECT_BUILDER_PLAN.md](PROJECT_BUILDER_PLAN.md) (D8–D10,
+> D14–D18):** the Board is the owner's console. It has Run/Stop for the
+> daemon, Build from the checklist, a live line per card, the assistant's
+> board tools, and take/submit.
 
 **Why the studio and not a separate UI.** It already has the shell (tabs,
 themes, auth, phone layout), run pages for each card attempt, the diff

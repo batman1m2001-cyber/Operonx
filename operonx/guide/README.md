@@ -30,8 +30,10 @@ websocket, and an **Application** bundles a product's jobs and services.
 Other operonx packages ship their own guides beside this one, in the
 project's `.operonx/guide/` (its `README.md` indexes them all):
 **operonx-agents** (`agents/`: `Agent`, `Runner`, approvals,
-`agent_service`, trajectory evals) and **operonx-kb** (`kb/`: ingest,
-search, citations, `kb_tools`, MCP).
+`agent_service`, trajectory evals), **operonx-kb** (`kb/`: ingest,
+search, citations, `kb_tools`, MCP) and **operonx-project** (`project/`:
+building a project from its `docs/brd/` checklist, milestones, cards,
+take/submit, `adopt`).
 
 ## Install
 

@@ -32,7 +32,9 @@ operonx serve --list
 `init` writes the commands of the toolchain you use into the project's
 `AGENTS.md` and `README.md`: uv when it is installed, else pip; `--uv` or
 `--pip` chooses. The project's `pyproject.toml` works with both: its test
-tools are the `test` extra, which uv's `dev` group includes.
+tools are the `test` extra, which uv's `dev` group includes. `init` also
+writes `docs/brd/`, the project's requirements checklist that
+operonx-project builds from. `--no-brd` leaves it out.
 
 | Template | What the first feature is |
 |---|---|
@@ -59,7 +61,8 @@ myapp/
 ├── resources.yaml       models and stores, by key; secrets as ${VAR}
 ├── .env.example         the secrets resources.yaml names; copy to .env
 ├── operonx.toml         points the operonx command at app.main:APP
-└── pyproject.toml       works with uv and with pip
+├── pyproject.toml       works with uv and with pip
+└── docs/brd/            the requirements, their checklist, and the board (`--no-brd` skips it)
 ```
 
 ## What the assistant reads
