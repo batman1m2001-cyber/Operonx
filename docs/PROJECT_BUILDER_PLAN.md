@@ -1,19 +1,53 @@
 # The project builder: the board lives in the BRD, any Claude Code works it
 
-**Status:** 2026-10-19, approved by the owner ("update the plan, and go"); B10 added on their ask; the sandbox question answered (§10). Every "today" below was read in the code
-(Operon `f78752ef`, operonx-studio `2b44cdd`). Nothing in it is built except where a phase says
-"built, unmerged".
+**Status:** 2026-10-19, done (every phase's gate met, below); approved by the owner ("update the plan, and go"); B10 added on their ask; the sandbox question answered (§10). Every "today" below was read in the code
+(Operon `f78752ef`, operonx-studio `2b44cdd`), before any of it was built; all of it is built and merged now.
 
-**Progress (2026-10-19):**
+**Progress (2026-10-19): every phase's gate is met.**
+
 - B1–B6 merged (Operon #214–#215, studio #98–#99); the models setting, the stage budget and take-ahead merged
-  (Operon #216–#218, studio #100–#102).
-- The held-out tests read the project's pytest config (Operon #219). They ran outside the repo and lost a
-  `src/` layout's `pythonpath`, so tipcalc's C2 failed 6 rounds with passing code.
-- B10 (D14–D18) built on `feat/builder-b10` in both repos. B7 on tipcalc found two more defects, fixed
-  there:
-  - a taker's empty submit was verified, and a `docs` card with no change was too;
-  - a final finding that named a card but cited none of its files failed the whole milestone and did
-    not re-open the card.
+  (Operon #216–#218, studio #100–#102). B10 merged (Operon #220, studio #103). B9: operonx 1.32.0 on PyPI,
+  the live studio on :8766 restarted, its public link answers.
+- **B7 (tipcalc).** m1 built the five rows; `--from-board m1` built them again in a fresh clone of the
+  `operonx init` commit: the same six cards and deps, all five rows `implemented_verified` in both builds
+  (the rebuild added one fix card, below). The store came back from `docs/brd/board/` alone. A move showed
+  on the Board 1.78 s after its event (one poll is 3 s).
+- **B10 (tipcalc m2), on the phone layout, no editor:** one chat message → rows `TIP-REQ-SPLIT-02/03` and
+  m2 → the plan approved with a tap → a question answered with a tap (Q-06) → Done → Ship
+  (tipcalc PR #2) → Merge, and the checkout's `main` fast-forwarded. The coder sessions carry owner.md
+  and AGENTS.md (read from their command lines).
+- **B8.** All four adopted and merged (qc-snatcher #3, meeting-prep #13, educa `982f7e5`), with screenshots.
+
+**What the runs cost** (notional: the owner's Claude Code subscription, every role on Sonnet):
+
+| Run | Cost | Cap | Note |
+|---|---|---|---|
+| tipcalc m1 | $10.22 | $5, raised to $11 | re-verified after each defect fix below; its cards alone cost $3.17 |
+| tipcalc m1, rebuilt from its board | $3.04 | $5 | the same cards on the fixed engine |
+| tipcalc m2 (the B10 gate) | $5.30 | $8 | one replan ($0.99 lost on C3) from the engine-update defect |
+| B8, four adoptions | $1.10 | $2 each | $0.35, $0.22, $0.20, $0.33 |
+
+**Defects the runs found, each fixed with a test that fails without it:**
+
+- The held-out tests lost a `src/` layout's `pythonpath` (#219).
+- An empty submit, or a docs card with no change, was verified. A second BRD source overwrote the first's
+  file. A final finding that named a card failed the milestone (#220).
+- The engine's row write replaced cells a card had filled (#221).
+- A wrong acceptance test had no way out: the owner can now have it rewritten (#222). A wrong held-out
+  test likewise, and a rewrite has the examiner check its own tests too (#224, #225).
+- Updating the engine failed every parked card: the graph fingerprint covers op code. The run now resumes
+  under the new engine and notes `engine.updated` (#223).
+- A final-verification gap no card owns failed the milestone for good. m2's own requirements commit had
+  grown the matrix an m1 test pinned, so the test failed in every card's baseline. Such a gap now adds a
+  fix card that starts from the milestone's baseline (#225).
+- Triage options without a key drew "undefined" buttons (#225).
+- Studio: the assistant could not edit card worktrees (#104). Ship was offered on an adopted baseline
+  (#105). A failed milestone had no Retry on the Board (#106).
+
+**Open, for the owner:** tipcalc m1 passes its own tests by swapping an op's class for a private
+`FuncOp` subclass (`src/tipsplit/ops.py`, `_RaisingOp`), so that a direct op call raises. Its reviews did
+not flag it. The rebuild did it the supported way: `Operon(..., errors="raise")`. A tipcalc request can
+replace it.
 
 The owner's model, which this plan follows:
 
