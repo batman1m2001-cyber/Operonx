@@ -241,5 +241,30 @@ async def test_a_wrong_heldout_test_is_corrected_on_the_owners_word(tmp_path):
     assert out.status == "verified", out
     assert len(env.coder.of("implementer")) == calls  # the code was right: checked again, not rewritten
     again = env.coder.of("examiner")[1]["prompt"]
-    assert "found your held-out tests" in again and "two runs are equal" in again and "is-not on an int" in again
+    assert "Check your held-out tests" in again and "two runs are equal" in again and "is-not on an int" in again
     assert [e["kind"] for e in env.store.events("m1") if e["kind"] == "heldout.rewritten"] == ["heldout.rewritten"]
+
+
+async def test_rewriting_acceptance_tests_has_the_examiner_check_its_own(tmp_path):
+    # tipcalc rebuild/C3: both sets expected a direct op call to raise; rewriting only the acceptance
+    # tests left the held-out ones failing the same way, for rounds more
+    from pathlib import Path
+
+    from tests.flow_env import ACCEPTANCE, HELDOUT, author_step
+
+    path = "tests/acceptance/C1/test_c1_add.py"
+    examined = lambda req, i: {"write": {str(Path(req.add_dirs[0]) / "test_held.py"): HELDOUT},  # noqa: E731
+                               "output": {"files": ["test_held.py"]}}  # fmt: skip
+    env = Env(tmp_path, {"test_author": [{"write": {path: ACCEPTANCE.replace("== 5", "== 6")},
+                                          "output": {"files": [path]}}, author_step("C1")],
+                         "examiner": [examined, examined],
+                         "implementer": [impl(RIGHT + f"# {i}\n") for i in range(4)]}, max_rounds=2)  # fmt: skip
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human" and out.question["rewrite"] == "acceptance"
+    env.store.update_card("m1", "C1", detail={**env.card().detail, "question": out.question}, run_id=out.run_id)
+    out = await env.runner.resume(env.card(), {"choice": "rewrite_tests", "text": "6 is wrong"}, env.stage)
+    assert out.status == "verified", out
+    again = env.coder.of("examiner")[1]["prompt"]
+    assert "Check your held-out tests" in again and "6 is wrong" in again
+    kinds = [e["kind"] for e in env.store.events("m1") if e["kind"].endswith(".rewritten")]
+    assert kinds == ["acceptance.rewritten", "heldout.rewritten"]

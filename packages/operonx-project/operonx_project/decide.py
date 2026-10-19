@@ -15,8 +15,9 @@ empty-diff retries (one) and the card's budget.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 __all__ = [
     "ESCALATION_CATEGORIES",
@@ -100,7 +101,28 @@ def question_fingerprint(card: str, category: str, text: str) -> str:
     return hashlib.sha256(basis.encode()).hexdigest()[:16]
 
 
-def _escalation(category: str, problem: str, why: str, options: List[Dict[str, Any]], **extra: Any) -> Dict:
+def _options(options: List[Any], recommended: Optional[str]) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Every option a ``key`` and a ``label``: a triage's options came as ``{"option": "A: …"}``,
+    which the Board drew as buttons named "undefined" that answered nothing (tipcalc rebuild/C3).
+    A recommendation that names no key ("A: replace the tests") goes to the option it letters."""
+    out: List[Dict[str, Any]] = []
+    for i, o in enumerate(options or []):
+        o = dict(o) if isinstance(o, dict) else {"label": str(o)}
+        label = str(o.get("label") or o.get("option") or o.get("text") or o.get("title") or o.get("key") or "")
+        out.append({"key": str(o.get("key") or f"option_{i + 1}"), "label": label.strip()[:300],
+                    "description": o.get("description") or (label[300:] or None)})  # fmt: skip
+    keys = {o["key"] for o in out}
+    if recommended and recommended not in keys:
+        head = re.match(r"\W*(\w+)", recommended)
+        lettered = [o["key"] for o in out if head and re.match(rf"\W*{re.escape(head.group(1))}\b", o["label"])]
+        recommended = lettered[0] if len(lettered) == 1 else None
+    return out, recommended
+
+
+def _escalation(category: str, problem: str, why: str, options: List[Any], **extra: Any) -> Dict:
+    options, rec = _options(options, extra.get("recommended"))
+    if "recommended" in extra:
+        extra["recommended"] = rec
     return {"category": category, "problem": problem, "why": why, "options": options, **extra}
 
 

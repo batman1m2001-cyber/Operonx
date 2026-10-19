@@ -119,8 +119,19 @@ TRIAGE_SCHEMA: Dict[str, Any] = {
                 "problem": {"type": "string"},
                 "why": {"type": "string"},
                 "tried": {"type": "string"},
-                "options": {"type": "array", "items": {"type": "object"}},
-                "recommended": {"type": "string"},
+                "options": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "key": {"type": "string", "description": "a short slug: rewrite_tests, keep_tests"},
+                            "label": {"type": "string", "description": "the button's words, one line"},
+                            "description": {"type": "string", "description": "what happens if it is chosen"},
+                        },
+                        "required": ["key", "label"],
+                    },
+                },
+                "recommended": {"type": "string", "description": "the key of the option you recommend"},
                 "safe_default": {
                     "type": "boolean",
                     "description": "the recommended option is reversible: taken if the owner never answers",
@@ -261,10 +272,10 @@ def examiner_prompt(card: Card, brief: str, directory: str, wrong: str = "") -> 
     )
     if wrong:
         task = (
-            f"You are the examiner. The owner found your held-out tests in {directory}/ wrong: no correct "
-            f"implementation can pass them. What was found:\n{wrong}\n\nRun them against the code in the "
-            "repository to see why, and correct the wrong ones in place; keep every test that checks what the "
-            "rows promise."
+            f"You are the examiner. The owner found this card's tests wrong: no correct implementation can pass "
+            f"them. What was found:\n{wrong}\n\nCheck your held-out tests in {directory}/ against it: run "
+            "them against the code in the repository, and correct the wrong ones in place; keep every test that "
+            "checks what the rows promise."
         )
     return (
         f"{task} Every test must pass for every correct implementation: assert what the rows promise, never "
