@@ -25,7 +25,7 @@ from operonx_project.gitops import GitOps
 from operonx_project.model import Card, Stage
 from operonx_project.store import Store
 
-__all__ = ["DEFAULT_MODELS", "DEFAULT_SHARED", "Runtime", "get_runtime", "register", "unregister"]
+__all__ = ["DEFAULT_MODELS", "DEFAULT_SHARED", "Runtime", "get_runtime", "register", "role_model", "unregister"]
 
 #: Files any card may change, with a warning (plan §7, step 3).
 DEFAULT_SHARED = [
@@ -52,7 +52,25 @@ DEFAULT_MODELS: Dict[str, Optional[str]] = {
     "plan_reviewer": "fable",
     "replenisher": "opus",
     "milestone_reviewer": "fable",
+    # the requirements, from a source (brd_flow)
+    "extractor": "opus",
+    "hunter": "fable",
 }
+
+
+def role_model(state: Path, role: str, fallback: Optional[str]) -> Optional[str]:
+    """The model *role*'s session runs on: ``settings.toml``'s ``[models]`` for
+    that role, else its ``model`` (every role), else *fallback*. Read at each
+    session's start, so the owner's change applies to the next session without
+    restarting the daemon; a file that does not parse is ignored, with a warning."""
+    from operonx_project.project import load_settings
+
+    try:
+        got = load_settings(state)
+    except ValueError:
+        LOGGER.warning(f"operonx-project: {Path(state) / 'settings.toml'} does not parse; its models are ignored")
+        return fallback
+    return (got.get("models") or {}).get(role) or got.get("model") or fallback
 
 
 @dataclass
@@ -95,6 +113,10 @@ class Runtime:
 
     def card(self, mid: str, cid: str) -> Card:
         return self.store.get_card(mid, cid)
+
+    def model_for(self, role: str) -> Optional[str]:
+        """The model a *role*'s session runs on (:func:`role_model`)."""
+        return role_model(Path(self.data_dir), role, self.models.get(role))
 
     def activity_for(self, mid: str, cid: Optional[str], role: str, every_s: float = 2.0):
         """A callback that records a session's tool calls as ``activity`` events,

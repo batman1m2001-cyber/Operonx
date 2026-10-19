@@ -16,6 +16,7 @@ nothing runs until ``start``.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from dataclasses import dataclass
@@ -30,7 +31,16 @@ from operonx_project.gitops import GitOps
 from operonx_project.model import Milestone, Policy
 from operonx_project.store import Store
 
-__all__ = ["STATE_DIR", "Project", "board_seed", "create_milestone", "load_settings", "new_project"]
+__all__ = [
+    "STATE_DIR",
+    "Project",
+    "board_seed",
+    "create_milestone",
+    "load_settings",
+    "new_project",
+    "save_settings",
+    "valid_model",
+]
 
 STATE_DIR = ".operonx/project"
 RUNS_DIR = ".operonx/runs"  # the flows' traces: the studio's run pages
@@ -165,7 +175,10 @@ def board_seed(source: Path, mid: str) -> Dict[str, Any]:
 
 def load_settings(state: Path) -> Dict[str, Any]:
     """``.operonx/project/settings.toml``: this machine's settings (plan D8),
-    outside git: ``sandbox = false`` where bubblewrap cannot run."""
+    outside git: ``sandbox = false`` where bubblewrap cannot run; ``model =
+    "sonnet"``, every session's model; ``[models]``, one role's (``reviewer =
+    "opus"``). The models are read at each session's start, so a change
+    applies to the next session without restarting the daemon."""
     path = Path(state) / "settings.toml"
     if not path.is_file():
         return {}
@@ -174,3 +187,32 @@ def load_settings(state: Path) -> Dict[str, Any]:
     except ImportError:  # pragma: no cover - 3.10
         import tomli as tomllib
     return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+#: Claude Code's model aliases; a full id (``claude-…``) is accepted too.
+MODEL_ALIASES = ("sonnet", "opus", "haiku", "fable")
+
+
+def valid_model(name: str) -> bool:
+    return name in MODEL_ALIASES or bool(re.fullmatch(r"claude-[a-z0-9.-]+", name))
+
+
+def _toml_value(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    return json.dumps(str(v))  # a JSON string is a TOML basic string
+
+
+def save_settings(state: Path, settings: Dict[str, Any]) -> Path:
+    """Write ``settings.toml``: top-level values, then one-level tables."""
+    path = Path(state) / "settings.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["# operonx-project: this machine's settings for this project (outside git)"]
+    lines += [f"{k} = {_toml_value(v)}" for k, v in settings.items() if not isinstance(v, dict)]
+    for k, table in settings.items():
+        if isinstance(table, dict) and table:
+            lines += ["", f"[{k}]", *(f"{rk} = {_toml_value(rv)}" for rk, rv in table.items())]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path

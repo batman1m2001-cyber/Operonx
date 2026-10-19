@@ -170,6 +170,12 @@ async def adopt(project: Project, coder: Coder, prefix: str = "", python: Option
     written = init_brd(repo, BRD_DIR, project=name)
     cost = 0.0
     if answer is None:
+        if not model:  # the surveyor's model: the project's settings, else the engine's default (sonnet)
+            from operonx_project.project import load_settings
+            from operonx_project.runtime import DEFAULT_MODELS
+
+            got = load_settings(project.state)
+            model = (got.get("models") or {}).get("surveyor") or got.get("model") or DEFAULT_MODELS["surveyor"]
         d = project.state / "transcripts" / BASELINE
         d.mkdir(parents=True, exist_ok=True)
         req = CoderRequest(prompt=adopt_prompt(name, prefix), cwd=repo, role="planner", schema=ADOPT_SCHEMA,

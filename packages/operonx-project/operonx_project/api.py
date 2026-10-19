@@ -18,6 +18,8 @@ Requests (``op`` and its fields)::
     {"op": "card",     "milestone": "m1", "card": "C5"}                    # what a taker needs: worktree, criteria
     {"op": "start",    "title": "…", "rows": ["ID", …], "goal": "…", "mode": "w2", "max_usd": 10,
                        "from_board": "m1"}                                  # a new milestone, queued to start
+    {"op": "settings"}                                                      # the models each role runs on
+    {"op": "settings", "model": "sonnet", "models": {"reviewer": "opus"}}   # set them ("" clears one)
 
 The answer: ``{"ok": bool, "status": …, "message": …}`` (``seq``: the queued
 command; ``current``: the open questions, for a stale answer).
@@ -26,6 +28,8 @@ command; ``current``: the open questions, for a stale answer).
 from __future__ import annotations
 
 from typing import Any, Dict
+
+from operonx.core.loggings import LOGGER
 
 from operonx_project.interactions import Interactions
 from operonx_project.model import CardState
@@ -63,6 +67,7 @@ OPS = (
     "release",
     "card",
     "start",
+    "settings",
 )
 
 
@@ -105,6 +110,48 @@ def _start(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
             "message": f"{ms.id} created ({len(rows)} rows); the daemon starts it"}  # fmt: skip
 
 
+def _settings(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    """Read, or change, the models the project's sessions run on (``settings.toml``).
+    A change applies to the next session; nothing running is stopped."""
+    from operonx_project.project import load_settings, save_settings, valid_model
+    from operonx_project.runtime import DEFAULT_MODELS
+
+    try:
+        settings = load_settings(project.state)
+    except ValueError as exc:
+        return _no("invalid", f"settings.toml does not parse: {exc}")
+    changes = {k: req[k] for k in ("model", "models") if k in req}
+    if changes:
+        per = dict(settings.get("models") or {})
+        wanted = changes.get("models") or {}
+        if not isinstance(wanted, dict):
+            return _no("invalid", "models is an object: {role: model}")
+        unknown = [r for r in wanted if r not in DEFAULT_MODELS]
+        bad = [str(m) for m in [changes.get("model"), *wanted.values()] if m and not valid_model(str(m))]
+        if unknown or bad:
+            return _no("invalid", (f"no role {', '.join(unknown)} (roles: {', '.join(DEFAULT_MODELS)}). " if unknown
+                                   else "") + (f"not a model: {', '.join(bad)} (sonnet, opus, haiku, fable or a "
+                                               "claude-… id)" if bad else ""))  # fmt: skip
+        if "model" in changes:
+            if changes["model"]:
+                settings["model"] = str(changes["model"])
+            else:
+                settings.pop("model", None)
+        for role, m in wanted.items():
+            if m:
+                per[role] = str(m)
+            else:
+                per.pop(role, None)
+        settings["models"] = per
+        save_settings(project.state, settings)
+        LOGGER.info("operonx-project: %s set the models: %s %s", actor, settings.get("model"), per)
+    per = settings.get("models") or {}
+    effective = {r: per.get(r) or settings.get("model") or d for r, d in DEFAULT_MODELS.items()}
+    return {"ok": True, "status": "done" if changes else "read",
+            "message": "the next sessions run on: " + ", ".join(sorted(set(effective.values()))),
+            "model": settings.get("model"), "models": per, "effective": effective}  # fmt: skip
+
+
 def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, Any]:
     op, mid = req.get("op"), req.get("milestone")
     if op not in OPS:
@@ -112,6 +159,8 @@ def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, A
     store = project.store
     if op == "start":
         return _start(project, req, actor)
+    if op == "settings":
+        return _settings(project, req, actor)
     try:
         ms = store.get_milestone(str(mid))
     except KeyError:

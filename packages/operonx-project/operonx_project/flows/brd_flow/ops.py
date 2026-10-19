@@ -50,6 +50,7 @@ class BrdRuntime:
     coder: Coder
     data_dir: Path  # outside the repo: a private source's figures never land in git
     models: Dict[str, Optional[str]] = field(default_factory=lambda: {"extractor": "opus", "hunter": "fable"})
+    settings_dir: Optional[Path] = None  # the project's state: its settings.toml names the models
     key: str = "brd"
     call_max_usd: float = 10.0
     timeout_s: float = 3600.0
@@ -60,6 +61,12 @@ class BrdRuntime:
 
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir)
+
+    def model_for(self, role: str) -> Optional[str]:
+        from operonx_project.runtime import role_model
+
+        fallback = self.models.get(role)
+        return role_model(self.settings_dir, role, fallback) if self.settings_dir else fallback
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -128,7 +135,7 @@ def _req(rt: BrdRuntime, role: str, prompt: str, cwd: Path, session: Optional[st
         role="planner" if role == "extractor" else "reviewer",
         session=session,
         schema=RECORDS_SCHEMA,
-        model=rt.models.get(role),
+        model=rt.model_for(role),
         max_usd=rt.call_max_usd,
         timeout_s=rt.timeout_s,
         transcript=rt.data_dir / "transcripts" / f"{role}.jsonl",

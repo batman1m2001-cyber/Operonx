@@ -112,7 +112,7 @@ def _request(rt: Runtime, card: Card, role: str, prompt: str, cwd: Path, name: s
         prompt=prompt,
         cwd=cwd,
         role=role,
-        model=rt.models.get(role),
+        model=rt.model_for(role),
         max_usd=min(rt.call_max_usd, left),
         timeout_s=rt.call_timeout_s,
         transcript=rt.transcript(card.milestone, card.id, name),
