@@ -226,13 +226,23 @@ def triage_prompt(card: Card, brief: str, question: Dict[str, Any], decisions: L
         "- escalate: only for ambiguous or conflicting requirements, a consequential trade-off "
         "(architecture, public API, data migration), missing credentials or access, or anything "
         "irreversible or outward-facing. Then write the message: the problem, why it blocks, what was "
-        "tried, two or three options, and your recommendation.\n\n"
+        "tried, two or three options, and your recommendation.\n"
+        "A protected acceptance test that is itself wrong (it expects what the code or its tools can never "
+        "produce) is never routine: the implementer may not change it, and a failing one blocks every round. "
+        "Escalate it (category requirements) and recommend that its acceptance tests be rewritten.\n\n"
         f"{card_brief(card, brief)}\n\nDecisions so far:\n{made}\n\nThe question:\n"
         f"{json.dumps(question, ensure_ascii=False)}\n\n" + DATA_RULE
     )
 
 
-def test_author_prompt(card: Card, brief: str, directory: str) -> str:
+def test_author_prompt(card: Card, brief: str, directory: str, wrong: str = "") -> str:
+    if wrong:
+        return (
+            f"The acceptance tests you wrote for this card in {directory}/ were found wrong by the owner. What "
+            f"was found:\n{wrong}\n\nRewrite them in {directory}/ only, so each acceptance criterion is checked "
+            "through what the code and its tools really expose (read them; never assume an output format). Keep "
+            "every criterion covered. Do not change the feature.\n\n" + f"{card_brief(card, brief)}\n\n" + DATA_RULE
+        )
     return (
         f"Write the acceptance tests for this card, before any code exists, in {directory}/ only.\n"
         "One or more test files that check each acceptance criterion through the code's public interface. "

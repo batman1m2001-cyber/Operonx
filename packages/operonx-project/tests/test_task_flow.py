@@ -126,7 +126,7 @@ async def test_max_rounds_is_honoured(tmp_path):
     out = await env.runner.run(env.card(), env.stage)
     assert out.status == "waiting_human"
     assert len(env.coder.of("implementer")) == 2
-    assert {o["key"] for o in out.question["options"]} == {"keep", "skip", "stop"}
+    assert {o["key"] for o in out.question["options"]} == {"keep", "skip", "stop", "rewrite_tests"}
     env.store.update_card("m1", "C1", detail={**env.card().detail, "question": out.question}, run_id=out.run_id)
     out = await env.runner.resume(env.card(), "skip", env.stage)
     assert out.status == "failed" and "skipped" in out.reason

@@ -180,11 +180,13 @@ async def _baseline(rt: Runtime, card: Card, wt: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-async def _author(rt: Runtime, card: Card, wt: Path) -> Tuple[Optional[Dict[str, Any]], Optional[CoderResult]]:
-    """The acceptance tests, written before the code by a session of their own."""
+async def _author(rt: Runtime, card: Card, wt: Path, wrong: str = "") -> Tuple[Optional[Dict[str, Any]],
+                                                                             Optional[CoderResult]]:  # fmt: skip
+    """The acceptance tests, written before the code by a session of their own; with
+    *wrong*, written again because the owner found them wrong (what was found)."""
     directory = f"{rt.acceptance_root}/{card.id}"
-    req = _request(rt, card, "test_author", test_author_prompt(card, rt.brief, directory), wt, "test-author",
-                   schema=AUTHOR_SCHEMA)  # fmt: skip
+    req = _request(rt, card, "test_author", test_author_prompt(card, rt.brief, directory, wrong), wt,
+                   "test-author", schema=AUTHOR_SCHEMA)  # fmt: skip
     res = await _coder(rt, card, "test_author", req)
     if not res.ok:
         return None, res
@@ -298,6 +300,13 @@ def _apply_answer(rt: Runtime, card: Card, st: Dict[str, Any], answer: Any) -> O
     note = f" The owner adds: {text}" if text else ""
     rt.store.note(card.milestone, "answer.applied", {"question": q.get("fingerprint"), "choice": choice,
                                                       "text": text}, card=card.id)  # fmt: skip
+    if choice == "rewrite_tests":  # the acceptance tests are wrong: their author writes them again
+        st["rewrite_tests"] = "\n".join(x for x in (q.get("tried") or q.get("evidence") or q.get("problem", ""),
+                                                     text) if x)  # fmt: skip
+        st["cap"] = st["round"] + policy.max_rounds
+        st["same"], st["revised"], st["last_sig"] = 0, False, ""
+        st["feedback"] = "The owner had this card's acceptance tests rewritten: they were wrong. Run them again." + note
+        return None
     if q.get("kind") == "taken":  # the taker submitted (or gave the card back to the engine)
         if isinstance(answer, dict) and answer.get("submitted"):
             st["submitted"] = True
@@ -499,6 +508,14 @@ def _question(card: Card, st: Dict[str, Any], d: Decision, kind: str) -> Dict[st
         "reason": d.reason,
     })  # fmt: skip
     q["fingerprint"] = question_fingerprint(card.id, q.get("category", ""), f"{q.get('problem', '')}|{kind}")
+    if kind in ("engine", "human") and (card.detail.get("acceptance") or {}).get("files"):
+        # the implementer may never change them, so a wrong one has no other way out (tipcalc m2/C3)
+        opts = list(q.get("options") or [])
+        if not any(o.get("key") == "rewrite_tests" for o in opts):
+            opts.append({"key": "rewrite_tests", "label": "Rewrite its acceptance tests (they are wrong)",
+                         "description": "The test author writes them again, told what was found; the card gets "
+                                        "fresh rounds"})  # fmt: skip
+            q["options"] = opts
     return q
 
 
@@ -517,6 +534,14 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
             return ended
     ikey = run_context().idempotency_key
     wt = rt.git.worktree_path(mid, cid)
+    wrong = st.pop("rewrite_tests", None)
+    if wrong:
+        acc, res = await _author(rt, rt.card(mid, cid), wt, wrong)
+        if acc is None:
+            a = _stopped(res, "the test author")
+            return _end(st, a["status"], a["reason"], a.get("not_before"))
+        rt.set_detail(mid, cid, acceptance=acc)
+        rt.store.note(mid, "acceptance.rewritten", {"files": sorted(acc["files"]), "why": wrong[:500]}, card=cid)
     skip = st.pop("skip_implement", False)
     st["skip_implement"] = False
     res: Optional[CoderResult] = None
