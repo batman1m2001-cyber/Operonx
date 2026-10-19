@@ -1,6 +1,6 @@
 # The project builder: the board lives in the BRD, any Claude Code works it
 
-**Status:** 2026-10-19, draft for the owner's go. Every "today" below was read in the code
+**Status:** 2026-10-19, approved by the owner ("update the plan, and go"); B10 added on their ask; the sandbox question answered (§10). Every "today" below was read in the code
 (Operon `f78752ef`, operonx-studio `2b44cdd`). Nothing in it is built except where a phase says
 "built, unmerged".
 
@@ -18,6 +18,9 @@ The owner's model, which this plan follows:
   Board moves while it works.
 - Every project made with `operonx init` has all of this from the start (opt-out), and the usage
   docs say so in one place.
+- **The studio is the owner's console.** The owner no longer drives the work from an editor chat:
+  they say what they want in the studio's assistant, watch the Board, answer its questions and
+  approve shipping there, from a desktop or a phone (B10).
 
 ---
 
@@ -41,7 +44,7 @@ The owner's model, which this plan follows:
 
 ## 2. Decisions
 
-Made here, each with the reason. One question is left for the owner (§10).
+Made here, each with the reason. The owner answered the one open question (§10).
 
 **D1. The board moves into the BRD, as text: `docs/brd/board/`.** One file per milestone,
 `docs/brd/board/m1.md`, and an index, `docs/brd/board/README.md`. `.operonx/project/` keeps only
@@ -134,6 +137,46 @@ board is the operonx-project guide page. AGENTS.md carries a short marked block,
 `<!-- operonx:builder -->`, which `operonx guide` rewrites in any project that has `docs/brd/`, so
 projects made before this plan get the current text, the way the commands block works since 1.31.1.
 
+**D14. The owner's words become rows: `board_request`.** The assistant saves the owner's message as
+an owner request, `docs/brd/sources/owner_requests/<date>-<slug>.md`, registered as a source (role
+`approved`, the owner's own words), and runs the extraction on it (`brd extract`, as for any
+source). The new rows land `planned`, and a milestone for them is started with its plan waiting
+for approval. *Why:* every row keeps a source, even one that came from a chat line. An idea the
+owner is still discussing stays a chat; only "do it" becomes a request.
+
+**D15. Ship from the Board, only on the owner's tap.** When a milestone is delivered, the Board
+offers **Ship**. It pushes the milestone's branch and opens the PR: through `gh` for GitHub, and as
+a pre-filled merge-request URL for GitLab, which has no API token here. **Merge** is offered for a
+repo whose owner has granted it in the repo's settings, and runs after the PR's checks are read,
+never before. A release (a version bump, a changelog) is a card inside the milestone, so it is
+built and checked like the rest. *Why:* the engine never pushes (P1's rule), and the owner keeps
+the one irreversible step.
+
+**D16. The owner's standing rules reach every coder.** There are two files:
+- `~/.operonx/owner.md`: the owner's rules for all projects, for example no co-author trailer,
+  pull before every commit, never touch the OneWealth checkout, callbot work only on its branch.
+  It is seeded from the rules the owner gave in editor sessions.
+- The project's own `AGENTS.md`.
+
+The engine appends both to every coder session's system prompt (`--append-system-prompt`), and a
+reviewer checks a diff against them. *Why:* a daemon's coder works in a worktree under
+`~/.operonx/worktrees`, where no editor memory is loaded. Today it would not know any of these
+rules.
+
+**D17. Work across repos: linked milestones.** A milestone may declare that it needs another
+project's milestone (`needs = ["operonx-studio#m3"]`). It waits, state `waiting_dependency`, until
+that one is delivered, and both Boards show the link. The studio's home lists every project's board
+with what waits on the owner. *Why:* much real work changes operonx and the studio together, and
+one board per repo stays the rule.
+
+**D18. The owner is told when something waits.**
+- The studio polls one cheap route (`/api/boards/waiting`) across projects.
+- The count shows in the tab title and on the home page.
+- A browser notification fires for each new question while a studio tab is open, foreground or not.
+
+Push to a closed phone is Telegram's job (P10). *Why:* Web Push needs a service worker and keys
+for one user, which is more than this needs.
+
 ---
 
 ## 3. The board files
@@ -192,7 +235,7 @@ rebuild elsewhere ─► start --from-board m1 ─► same cards, pending ─►
 
 ## 5. Phases
 
-Each phase is one branch per repo, its docs updated in the same branch, merged when its gate
+Order: B1 → B2 → B3 → B4 → B5 → B6 → B7 → B10 → B8 → B9. Each phase is one branch per repo, its docs updated in the same branch, merged when its gate
 passes. Tests run locally; no phase waits on CI.
 
 ### B1. The board in the BRD (operonx-project; operonx for `init`)
@@ -293,6 +336,32 @@ Corrections are made by hand, and each one is noted in that project's `docs/brd/
   - every `implemented_verified` row cites a test that passed in that adoption's run;
   - screenshots of all four.
 
+### B10. The studio as the owner's console (operonx-project, operonx-studio)
+
+- D14:
+  - `board_request` (assistant tool), `operonx-project request TEXT` (CLI), and a "New request"
+    box on the Board;
+  - the extraction runs on the request, and the milestone is started for the new rows.
+- D15: Ship (push and PR, or the GitLab URL) and Merge (where granted) on a delivered milestone,
+  through `operonx-project api`, with the result on the Board.
+- D16:
+  - `~/.operonx/owner.md`, seeded from the owner's editor rules;
+  - the coder appends it and `AGENTS.md`;
+  - the reviewer's checklist cites it.
+- D17: `needs`, the `waiting_dependency` state, and the links on both Boards; a "Boards" list on
+  the studio's home.
+- D18: `/api/boards/waiting`, the title count, and browser notifications.
+- **Gate (on tipcalc, after B7):** the whole loop on the phone layout, with no editor:
+  1. one chat message ("tipcalc: add a split by item");
+  2. rows and a milestone appear, and the plan is approved with a tap;
+  3. a question is answered on the Board;
+  4. Done, then Ship opens the PR.
+
+  Plus:
+  - a coder session's prompt holds owner.md (read from its transcript);
+  - a test with two linked projects shows the parent waiting and then running;
+  - screenshots at each step.
+
 ### B9. Release
 
 - operonx 1.32.0: `init` with `docs/brd/` and the board folder, `brd_files`, the builder block,
@@ -311,6 +380,7 @@ Corrections are made by hand, and each one is noted in that project's `docs/brd/
 | B5 | one assistant turn | $0.50 |
 | B7 | two milestones of about five cards | $5 each |
 | B8 | four adoption sessions | $2 each |
+| B10 | one extraction and one small milestone on tipcalc | $3 |
 
 The coders run on the owner's Claude Code sign-in, so the plan's rate limits apply. A rate limit
 pauses the milestone, which resumes at the reset (built in P5).
@@ -322,8 +392,9 @@ pauses the milestone, which resumes at the reset (built in P5).
 - **The board file and the store disagree.** Only the engine writes either, and the round-trip
   test is the gate. A hand edit after approval is refused by `brd check` with the replan command
   to use.
-- **Unsandboxed runs** (§10): B7 and B8 run coders with full shell access on this host unless the
-  question is answered the other way.
+- **Unsandboxed runs** (§10, the owner's choice): the coders in B7, B8 and B10 have this user's
+  full shell. Their prompts carry owner.md's rules (D16), the reviewer reads every diff, and nothing
+  is pushed without Ship.
 - **Adoption overstates.** That is why D12's verified rows come from tests the engine ran, and why
   B8 reads every BRD by hand.
 
@@ -361,12 +432,8 @@ Each phase updates the pages its change touches; B6 checks them all together.
 
 ---
 
-## 10. The one question for the owner
+## 10. The sandbox: answered
 
-**The sandbox on this machine.** The engine's coders run their shell in bubblewrap, and this host
-blocks it (`apparmor_restrict_unprivileged_userns = 1`). Either:
-
-- **(a) Recommended:** add an AppArmor profile that lets `/usr/bin/bwrap` create user namespaces.
-  It is a small file in `/etc/apparmor.d/` and a reload, and the sandbox stays on for B7 and B8.
-- **(b)** Run B7 and B8 unsandboxed (`settings.toml: sandbox = false`, a badge on the Board). The
-  coders could then run any shell command as this user.
+This host blocks bubblewrap (`apparmor_restrict_unprivileged_userns = 1`). The owner chose
+(2026-10-19, "I don't need sandbox") to run the coders unsandboxed: `.operonx/project/settings.toml`
+holds `sandbox = false` on this machine, and the Board shows the badge. No AppArmor change is made.
