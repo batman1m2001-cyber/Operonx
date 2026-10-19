@@ -478,10 +478,7 @@ async def _heldout(rt: Runtime, card: Card, wt: Path) -> Tuple[Optional[bool], L
     held = card.detail.get("heldout") or {}
     if not held.get("files"):
         return None, []
-    hdir = Path(held["dir"])
-    inside = "/heldout" if rt.check_mode == "docker" else str(hdir)
-    check = rt.test_check("heldout", rt.heldout_cmd.format(dir=inside),
-                          mounts={str(hdir): "/heldout"} if rt.check_mode == "docker" else None)  # fmt: skip
+    check, inside = rt.heldout_check("heldout", Path(held["dir"]), wt)
     async with child("heldout", inputs={"files": len(held["files"])}, op_type="checks") as step:
         (res,) = await run_checks([check], wt, rt.env)
         names = [] if res.ok else heldout_failures(res.tail, Path(inside))
