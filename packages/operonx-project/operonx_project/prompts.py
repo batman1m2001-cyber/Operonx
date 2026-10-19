@@ -251,12 +251,25 @@ def test_author_prompt(card: Card, brief: str, directory: str, wrong: str = "") 
     )
 
 
-def examiner_prompt(card: Card, brief: str, directory: str) -> str:
-    return (
+def examiner_prompt(card: Card, brief: str, directory: str, wrong: str = "") -> str:
+    """The examiner's held-out tests; with *wrong*, its earlier ones corrected because
+    the owner found them wrong (what was found)."""
+    task = (
         f"You are the examiner. Write a second, independent set of tests for this card's requirement "
         f"rows in {directory}/ (outside the repository; the implementer never sees them). Test behaviour "
-        "the rows promise, including edge cases the criteria imply. Give every assertion a message that "
-        "states the expected behaviour in words: the implementer only ever sees the test names and those "
+        "the rows promise, including edge cases the criteria imply."
+    )
+    if wrong:
+        task = (
+            f"You are the examiner. The owner found your held-out tests in {directory}/ wrong: no correct "
+            f"implementation can pass them. What was found:\n{wrong}\n\nRun them against the code in the "
+            "repository to see why, and correct the wrong ones in place; keep every test that checks what the "
+            "rows promise."
+        )
+    return (
+        f"{task} Every test must pass for every correct implementation: assert what the rows promise, never "
+        "incidentals such as object identity or an engine's own bookkeeping. Give every assertion a message "
+        "that states the expected behaviour in words: the implementer only ever sees the test names and those "
         "messages. Do not change any file in the repository.\n\n"
         f"{card_brief(card, brief)}\n\n" + DATA_RULE
     )

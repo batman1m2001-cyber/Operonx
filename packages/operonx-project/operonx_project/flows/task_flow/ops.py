@@ -203,11 +203,13 @@ async def _author(rt: Runtime, card: Card, wt: Path, wrong: str = "") -> Tuple[O
     return {"dir": directory, "files": {p: sha256_file(wt / p) for p in files}, "commit": sha}, res
 
 
-async def _examine(rt: Runtime, card: Card, wt: Path) -> Tuple[Optional[Dict[str, Any]], Optional[CoderResult]]:
-    """Held-out tests (V2): from the same rows, outside the repo, seen by no one else."""
+async def _examine(rt: Runtime, card: Card, wt: Path,
+                   wrong: str = "") -> Tuple[Optional[Dict[str, Any]], Optional[CoderResult]]:  # fmt: skip
+    """Held-out tests (V2): from the same rows, outside the repo, seen by no one else;
+    with *wrong*, corrected because the owner found them wrong (what was found)."""
     hdir = rt.heldout_dir(card.milestone, card.id)
     hdir.mkdir(parents=True, exist_ok=True)
-    req = _request(rt, card, "examiner", examiner_prompt(card, rt.brief, str(hdir)), wt, "examiner",
+    req = _request(rt, card, "examiner", examiner_prompt(card, rt.brief, str(hdir), wrong), wt, "examiner",
                    add_dirs=[hdir], allow_write=[str(hdir)])  # fmt: skip
     res = await _coder(rt, card, "examiner", req)
     dirty = rt.git.dirty(wt)
@@ -300,12 +302,20 @@ def _apply_answer(rt: Runtime, card: Card, st: Dict[str, Any], answer: Any) -> O
     note = f" The owner adds: {text}" if text else ""
     rt.store.note(card.milestone, "answer.applied", {"question": q.get("fingerprint"), "choice": choice,
                                                       "text": text}, card=card.id)  # fmt: skip
-    if choice == "rewrite_tests":  # the acceptance tests are wrong: their author writes them again
+    if choice == "rewrite_tests":  # the tests that fail are wrong: whoever wrote them writes them again
+        # a question asked before "rewrite" was recorded: its reason says whether the held-out tests failed
+        which = q.get("rewrite") or ("heldout" if "held-out:" in str(q.get("reason", "")) else "acceptance")
         st["rewrite_tests"] = "\n".join(x for x in (q.get("tried") or q.get("evidence") or q.get("problem", ""),
                                                      text) if x)  # fmt: skip
+        st["rewrite_which"] = which
         st["cap"] = st["round"] + policy.max_rounds
         st["same"], st["revised"], st["last_sig"] = 0, False, ""
-        st["feedback"] = "The owner had this card's acceptance tests rewritten: they were wrong. Run them again." + note
+        if which == "heldout":  # the code may be right: check it again against the corrected tests
+            st["skip_implement"] = True
+            st["feedback"] = "The owner had this card's held-out tests corrected: they were wrong." + note
+        else:
+            st["feedback"] = ("The owner had this card's acceptance tests rewritten: they were wrong. "
+                              "Run them again." + note)  # fmt: skip
         return None
     if q.get("kind") == "taken":  # the taker submitted (or gave the card back to the engine)
         if isinstance(answer, dict) and answer.get("submitted"):
@@ -508,14 +518,20 @@ def _question(card: Card, st: Dict[str, Any], d: Decision, kind: str) -> Dict[st
         "reason": d.reason,
     })  # fmt: skip
     q["fingerprint"] = question_fingerprint(card.id, q.get("category", ""), f"{q.get('problem', '')}|{kind}")
-    if kind in ("engine", "human") and (card.detail.get("acceptance") or {}).get("files"):
-        # the implementer may never change them, so a wrong one has no other way out (tipcalc m2/C3)
+    # the implementer may never change either set, so a wrong test has no other way out: an acceptance
+    # one (tipcalc m2/C3), or a held-out one no implementation can pass (m2/C6 compared engine states)
+    held = bool(st.get("heldout_failing")) and bool((card.detail.get("heldout") or {}).get("files"))
+    if kind in ("engine", "human") and (held or (card.detail.get("acceptance") or {}).get("files")):
         opts = list(q.get("options") or [])
         if not any(o.get("key") == "rewrite_tests" for o in opts):
-            opts.append({"key": "rewrite_tests", "label": "Rewrite its acceptance tests (they are wrong)",
+            opts.append({"key": "rewrite_tests", "label": "Rewrite its held-out tests (they are wrong)",
+                         "description": "The examiner corrects them, told which failed; the code is checked "
+                                        "again, with fresh rounds"} if held else
+                        {"key": "rewrite_tests", "label": "Rewrite its acceptance tests (they are wrong)",
                          "description": "The test author writes them again, told what was found; the card gets "
                                         "fresh rounds"})  # fmt: skip
             q["options"] = opts
+            q["rewrite"] = "heldout" if held else "acceptance"
     return q
 
 
@@ -535,7 +551,15 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
     ikey = run_context().idempotency_key
     wt = rt.git.worktree_path(mid, cid)
     wrong = st.pop("rewrite_tests", None)
-    if wrong:
+    which = st.pop("rewrite_which", "acceptance")
+    if wrong and which == "heldout":
+        held, res = await _examine(rt, rt.card(mid, cid), wt, wrong)
+        if held is None:
+            a = _stopped(res, "the examiner")
+            return _end(st, a["status"], a["reason"], a.get("not_before"))
+        rt.set_detail(mid, cid, heldout=held)
+        rt.store.note(mid, "heldout.rewritten", {"files": held["files"], "why": wrong[:500]}, card=cid)
+    elif wrong:
         acc, res = await _author(rt, rt.card(mid, cid), wt, wrong)
         if acc is None:
             a = _stopped(res, "the test author")
@@ -632,6 +656,7 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
                         rt.stage(mid, cid, Stage.QA)
                         facts.heldout_ok, facts.heldout_failures = await _heldout(rt, card, wt)
                         record.update(heldout=facts.heldout_ok)
+    st["heldout_failing"] = facts.heldout_failures if facts.heldout_ok is False else []
 
     facts.cost_usd = rt.card(mid, cid).cost_usd
     async with child("decide", inputs={"round": n}, op_type="decide") as step:
