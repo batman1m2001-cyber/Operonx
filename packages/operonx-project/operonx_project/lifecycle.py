@@ -574,9 +574,7 @@ class Lifecycle:
             if card.state not in (CardState.READY, CardState.PENDING):
                 raise Refused(f"{card.id} is {card.state.value}: only a card not started can be taken")
             done = {c.id for c in self.store.cards(mid) if c.state == CardState.DONE}
-            if card.state == CardState.PENDING and set(card.deps) - done:
-                waits = ", ".join(sorted(set(card.deps) - done))
-                raise Refused(f"{card.id} waits for {waits}: take it when it is ready")
+            waits = ", ".join(sorted(set(card.deps) - done)) if card.state == CardState.PENDING else ""
             first = min([c.priority for c in self.store.cards(mid)] + [0]) - 1
             self.store.update_card(mid, card.id, actor=actor, priority=first,
                                    detail=dict(card.detail, taken={"actor": who, "at": time.time()}))  # fmt: skip
@@ -585,6 +583,8 @@ class Lifecycle:
                 sched.wake()
             elif self.store.get_milestone(mid).state == M.WAITING_HUMAN:
                 self._move(mid, M.RUNNING, f"{card.id} taken by {who}", actor=actor)
+            if waits:  # taken ahead: when its dependencies are done it starts, and waits for its taker
+                return f"{card.id} taken by {who}: it waits for {waits}, then for their submit"
             return f"{card.id} taken by {who}: it starts, then waits for their submit"
         if not taken:
             raise Refused(f"{card.id} is not taken")

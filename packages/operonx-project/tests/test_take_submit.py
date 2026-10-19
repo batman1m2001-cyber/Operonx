@@ -97,3 +97,25 @@ def test_the_api_starts_a_milestone_for_rows_of_the_checklist(tmp_path):
     ms = life.store.get_milestone("m2")
     assert ms.rows == [ADD_ROW] and ms.policy.budget.max_usd == 4
     assert [c["kind"] for c in life.store.commands("m2")] == ["start"]
+
+
+def test_a_card_can_be_taken_ahead_and_waits_for_its_dependencies_first(tmp_path):
+    from tests.flow_env import author_step, impl
+    from tests.life_env import card_json, plan
+
+    script = base_script(**{
+        "planner:plan": [plan([card_json("C1"), card_json("C2", title="add again", deps=["C1"])])],
+        "test_author": [author_step("C1"), author_step("C2")],
+        "implementer": [impl(RIGHT)],
+    })  # fmt: skip
+    life = Life(tmp_path, script, mode="w1")
+    life.command("start")
+    assert life.serve() == M.AWAITING_APPROVAL
+    life.command("approve")
+    life.command("take", card="C2", actor="assistant")  # still pending: C1 is not done
+    assert life.serve() == M.WAITING_HUMAN
+    assert life.cards() == {"C1": "done", "C2": "waiting_human"}  # the engine did C1, then C2 waits for its taker
+    assert taker_brief(life.project, "m1", "C2")["waiting_for_submit"]
+    assert [c["cwd"].rsplit("/", 1)[-1] for c in life.coder.of("implementer")] == ["C1"]
+    taken = next(e for e in life.store.events("m1") if e["kind"] == "card.taken")
+    assert taken["card"] == "C2"
