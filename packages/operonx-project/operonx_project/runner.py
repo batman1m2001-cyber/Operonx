@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, Optional, Union
 from operonx import Operon
 from operonx.core.loggings import LOGGER
 from operonx.durable import SqliteJournal
+from operonx.durable.journal import JournalError
 
 from operonx_project.checks import CheckResult, compare, run_checks
 from operonx_project.flows.task_flow import task_flow
@@ -65,6 +66,20 @@ class FlowRunner:
             trace=trace,
         )
 
+    async def _resume(self, card: Card, answers: Optional[Dict[str, Any]]) -> Any:
+        """Resume the card's run. A run parked under an earlier engine (an update changed
+        a task-flow op's code) goes on under this one: what it journalled stands, and its
+        next round runs the new code. Refusing it failed the card for good and replanned
+        the milestone (tipcalc m2/C3)."""
+        try:
+            return await self.engine.resume(card.run_id, answers=answers)
+        except JournalError as exc:
+            if "ran graph" not in str(exc):
+                raise
+            LOGGER.warning(f"card {card.id}: {card.run_id} ran an earlier engine's task flow; it goes on under this")
+            self.rt.store.note(card.milestone, "engine.updated", {"run": card.run_id}, card=card.id)
+            return await self.engine.resume(card.run_id, answers=answers, allow_graph_change=True)
+
     def _inputs(self, card: Card, reopen: Dict[str, Any]) -> Dict[str, Any]:
         return {"key": self.rt.key, "mid": card.milestone, "cid": card.id, "reopen": reopen}
 
@@ -94,7 +109,7 @@ class FlowRunner:
         self.rt.set_detail(card.milestone, card.id, answering={"interrupt_id": iid, "answer": answer})
         self.rt.stages[(card.milestone, card.id)] = stage
         try:
-            handle = await self.engine.resume(card.run_id, answers={iid: answer})
+            handle = await self._resume(card, {iid: answer})
             out = await handle.result()
         finally:
             self.rt.stages.pop((card.milestone, card.id), None)
@@ -109,7 +124,7 @@ class FlowRunner:
         answers = {answering["interrupt_id"]: answering["answer"]} if answering.get("interrupt_id") else None
         self.rt.stages[(card.milestone, card.id)] = stage
         try:
-            handle = await self.engine.resume(card.run_id, answers=answers)
+            handle = await self._resume(card, answers)
             out = await handle.result()
         finally:
             self.rt.stages.pop((card.milestone, card.id), None)

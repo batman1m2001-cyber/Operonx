@@ -198,3 +198,20 @@ async def test_a_failing_test_author_requeues_on_a_rate_limit(tmp_path):
     env = Env(tmp_path, {"test_author": [{"status": "rate_limited", "resets_at": 4e9}]})
     out = await env.runner.run(env.card(), env.stage)
     assert out.status == "requeue" and not env.coder.of("implementer")
+
+
+async def test_a_parked_card_goes_on_after_the_engine_is_updated(tmp_path):
+    # tipcalc m2/C3: parked on a question, the daemon restarted on a fixed engine (an op's code changed);
+    # the resume was refused (JournalError: the graph changed), the card failed for good and the milestone replanned
+    steps = [impl(f"def add(a, b):\n    return a + b + {i + 1}\n") for i in range(5)]
+    for i, s in enumerate(steps):
+        s["write"]["tests/test_base.py"] = f"def test_base_{i}():\n    assert False\n"
+    env = Env(tmp_path, {"implementer": steps}, max_rounds=2, cards=None)
+    env.store.update_card("m1", "C1", paths=[])
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human"
+    env.store.update_card("m1", "C1", detail={**env.card().detail, "question": out.question}, run_id=out.run_id)
+    env.runner.engine._fingerprint = "an-updated-engine"  # what a changed op's code does to the graph's fingerprint
+    out = await env.runner.resume(env.card(), "skip", env.stage)
+    assert out.status == "failed" and "skipped" in out.reason  # the answer was applied, not the resume refused
+    assert [e["kind"] for e in env.store.events("m1") if e["kind"] == "engine.updated"] == ["engine.updated"]
