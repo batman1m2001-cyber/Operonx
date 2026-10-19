@@ -227,7 +227,10 @@ def set_matrix_row(brd: Path, rid: str, status: str, tests: Sequence[str] = (), 
     """Set one matrix row's status, with the tests that prove it.
 
     A row of the engine's nine columns gets its Code / API, Tests, Status
-    and Evidence cells. Any other layout (a folder written by hand) keeps
+    and Evidence cells, added to what the row says already: a Code / API
+    cell already filled is kept, and the tests it cites stay cited, before
+    the engine's (a card may have written them, and a test of the project
+    may read them: tipcalc m1). Any other layout (a folder written by hand) keeps
     its columns: the one status cell is replaced, and the tests and the
     evidence go in the last cell. Returns whether the row was found."""
     if status not in STATUSES:
@@ -243,10 +246,13 @@ def set_matrix_row(brd: Path, rid: str, status: str, tests: Sequence[str] = (), 
             continue
         cells = _split(line)
         if len(cells) == 9:
-            cells[5] = code or cells[5]
-            cells[6] = cited or cells[6]
+            cells[5] = cells[5] if cells[5].strip() else code
+            have = [x for x in re.split(r"<br>|,\s*", cells[6]) if x.strip()]
+            more = [f"`{t}`" for t in tests if f"`{t}`" not in have and t not in have]
+            cells[6] = "<br>".join(have + more)
             cells[7] = status
-            cells[8] = evidence or cells[8]
+            if not (evidence and evidence in cells[8]):
+                cells[8] = "; ".join(x for x in (cells[8], evidence) if x)
         else:
             at = [i for i, c in enumerate(cells) if c in STATUSES]
             if len(at) != 1:

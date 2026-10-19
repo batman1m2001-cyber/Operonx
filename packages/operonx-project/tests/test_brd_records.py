@@ -125,3 +125,26 @@ def test_a_sources_own_letter_codes_are_ids():
     # E0: the BRD's review findings are coded F01…F27; BRD-F26 keeps the source's code
     assert check_ids([_req("BRD-F26", "x" * 10), _req("BRD-NFR-01", "y" * 10)]) == []
     assert [p.kind for p in check_ids([_req("BRD-FINDING", "z" * 10)])] == ["bad_id"]
+
+
+def test_a_verified_row_keeps_what_it_already_cites(tmp_path):
+    # tipcalc m1: a card filled its rows (code, tests), a project test read them, and the engine's
+    # record replaced both cells; the project's own checks then failed the milestone
+    from operonx_project.brd.records import MATRIX, set_matrix_row
+
+    f = tmp_path / MATRIX
+    f.parent.mkdir(parents=True)
+    f.write_text(
+        "| ID | Source § | Req | Features | Screens | Code / API | Tests | Status | Evidence |\n"
+        "|---|---|---|---|---|---|---|---|---|\n"
+        "| TIP-REQ-SPLIT-01 | §1 | split | FEAT-01 |  | `POST /split` | `tests/test_service.py` | planned | |\n"
+    )
+    acc = "tests/acceptance/C3/test_ops.py::test_split"
+    assert set_matrix_row(tmp_path, "TIP-REQ-SPLIT-01", "implemented_verified", [acc], code="src/ops.py",
+                          evidence="m1: C3")  # fmt: skip
+    row = f.read_text().splitlines()[-1].split(" | ")
+    assert row[5] == "`POST /split`"  # the card's cell is kept
+    assert row[6] == f"`tests/test_service.py`<br>`{acc}`"
+    assert row[7] == "implemented_verified" and row[8].startswith("m1: C3")
+    set_matrix_row(tmp_path, "TIP-REQ-SPLIT-01", "implemented_verified", [acc], evidence="m1: C3")
+    assert f.read_text().splitlines()[-1].split(" | ")[6] == row[6]  # recording twice cites once

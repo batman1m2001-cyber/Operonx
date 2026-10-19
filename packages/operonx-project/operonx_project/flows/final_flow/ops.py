@@ -168,7 +168,12 @@ async def record_rows(key: str, mid: str) -> dict:
             ok = ok and passed[c.id]
             tests += _tests_in(integ, acc["dir"])
         if ok and tests:
-            code = ", ".join(sorted({p for c in serving for p in c.paths}))[:200]
+            code = ""
+            for p in sorted({p for c in serving for p in c.paths}):  # whole paths, never one cut in half
+                if len(code) + len(p) > 200:
+                    code += ", …"
+                    break
+                code = f"{code}, {p}" if code else p
             ev = f"{mid}: " + ", ".join(f"{c.id} done" for c in serving)
             if set_matrix_row(brd, rid, "implemented_verified", tests, code=code, evidence=ev):
                 verified.append(rid)
