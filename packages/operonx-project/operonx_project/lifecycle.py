@@ -33,7 +33,7 @@ from operonx_project.coder.base import Coder
 from operonx_project.flows.discover_flow import discover_flow
 from operonx_project.flows.final_flow import final_flow
 from operonx_project.flows.plan_flow import plan_flow
-from operonx_project.flows.stage import stage_call, stage_request
+from operonx_project.flows.stage import BudgetSpent, stage_call, stage_request
 from operonx_project.model import Card, CardState, MilestoneState
 from operonx_project.plan import INIT_CARD, cards_from_plan, check_cards, covered_rows
 from operonx_project.project import Project
@@ -170,6 +170,12 @@ class Lifecycle:
             self.store.ms_put(mid, "runs", {**runs, name: cur})
             out = await eng.run(inputs, run_id=cur["run_id"])
         if out.get("$errors"):
+            spent = [e for e in out["$errors"].values() if isinstance(e, dict) and e.get("type") == "BudgetSpent"]
+            if spent:  # the run ended there: a retry starts the stage's next run, never this one's error again
+                runs = self.store.ms_get(mid, "runs") or {}
+                self.store.ms_put(mid, "runs", {**runs, name: {**cur, "done": True}})
+                lines = str(spent[0].get("message") or "").strip().splitlines()
+                raise BudgetSpent(lines[-1].split("BudgetSpent: ", 1)[-1] if lines else "the budget is spent")
             raise RuntimeError(f"{name} failed: {str(out['$errors'])[:1500]}")
         runs = self.store.ms_get(mid, "runs") or {}
         self.store.ms_put(mid, "runs", {**runs, name: {**cur, "done": True}})
@@ -221,6 +227,10 @@ class Lifecycle:
                     await self._execute(mid)
                 elif s == M.VERIFYING:
                     await self._verify(mid)
+            except BudgetSpent as exc:  # a stage stopped for money: retry --usd resumes it
+                self.store.ms_put(mid, "exhausted_in", {"state": s.value})
+                self._move(mid, M.BUDGET_EXHAUSTED, f"{s.value}: {exc}")
+                return M.BUDGET_EXHAUSTED
             except Exception as exc:  # noqa: BLE001 — a stage that fails stops the milestone, said why
                 LOGGER.exception(f"{mid}: {s.value} failed")
                 if self.store.get_milestone(mid).state == s:
@@ -697,7 +707,9 @@ class Lifecycle:
                     policy.budget.max_usd = ms.cost_usd + extra
                     said = f"${extra:.2f} more"
                 self.store.update_milestone(mid, policy=policy, actor=actor)
-                self._move(mid, M.RUNNING, f"budget extended: {said}", actor=actor)
+                back = (self.store.ms_get(mid, "exhausted_in") or {}).get("state")
+                self.store.ms_put(mid, "exhausted_in", {})
+                self._move(mid, M(back) if back else M.RUNNING, f"budget extended: {said}", actor=actor)
                 return f"budget extended: {said}"
             if ms.state != M.FAILED:
                 raise Refused(f"{mid} is {ms.state.value}, not failed")

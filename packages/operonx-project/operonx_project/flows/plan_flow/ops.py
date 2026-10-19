@@ -19,7 +19,7 @@ from typing import Any, Dict, List
 
 from operonx import op
 
-from operonx_project.flows.stage import stage_call, stage_request
+from operonx_project.flows.stage import budget_left, stage_call, stage_request
 from operonx_project.plan import cards_from_plan, check_plan, overlaps
 from operonx_project.prompts import PLAN_REVIEW_SCHEMA, PLAN_SCHEMA, plan_prompt, plan_review_prompt
 from operonx_project.runtime import get_runtime
@@ -71,6 +71,13 @@ async def review(key: str, mid: str, state: dict) -> dict:
     cards = cards_from_plan(mid, plan.get("cards") or [], plan.get("init") if green else None)
     problems = check_plan(plan, cards, scope, ms.policy, greenfield=green, existing=existing)
     ov = overlaps([*[c for c in existing if c.state.value == "done"], *cards])
+    if budget_left(rt, mid) <= 0:  # the plan is paid for: the owner gets it unreviewed, never thrown away
+        unreviewed = {"severity": "major", "note": f"not reviewed: the milestone spent ${ms.cost_usd:.2f} of its "
+                      f"${ms.policy.budget.max_usd:.2f}; approve it as it is, replan, or retry with more"}  # fmt: skip
+        rt.store.note(mid, "plan.budget", {"round": n, "cost_usd": ms.cost_usd, "reviewed": False})
+        rt.store.ms_put(mid, "plan", {"plan": plan, "problems": problems, "notes": [unreviewed], "passed": False,
+                                      "rounds": n, "overlaps": ov})  # fmt: skip
+        return {"state": st, "next": "end"}
     prompt = plan_review_prompt(ms.goal, ctx.get("rows") or [], plan, problems, ov, ms.policy.horizon)
     req = stage_request(rt, mid, "reviewer", "plan_reviewer", prompt, rt.git.ensure_integration(mid),
                         f"plan-review-{n}", schema=PLAN_REVIEW_SCHEMA)  # fmt: skip
@@ -82,7 +89,11 @@ async def review(key: str, mid: str, state: dict) -> dict:
     passed = not problems and not blocking
     rt.store.note(mid, "plan.review", {"round": n, "problems": problems, "notes": len(notes),
                                        "blocking": len(blocking), "passed": passed})  # fmt: skip
-    if not passed and n <= ms.policy.budget.plan_reviews:
+    spent = budget_left(rt, mid) <= 0  # no money for another round: the owner gets the plan with its notes
+    if spent and not passed:
+        rt.store.note(mid, "plan.budget", {"round": n, "cost_usd": rt.store.get_milestone(mid).cost_usd,
+                                           "reviewed": True})  # fmt: skip
+    if not passed and n <= ms.policy.budget.plan_reviews and not spent:
         lines = [f"- (engine) {p}" for p in problems]
         for x in blocking:
             on = f", {x['card']}" if x.get("card") else ""

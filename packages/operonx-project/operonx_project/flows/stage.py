@@ -17,7 +17,18 @@ from operonx import child, run_context
 from operonx_project.coder.base import CoderRequest, CoderResult, Started
 from operonx_project.runtime import Runtime
 
-__all__ = ["stage_call", "stage_key", "stage_request"]
+__all__ = ["BudgetSpent", "budget_left", "stage_call", "stage_key", "stage_request"]
+
+
+class BudgetSpent(RuntimeError):
+    """The milestone's money is spent before a stage session: it stops there,
+    ``budget_exhausted``, and ``retry --usd`` resumes the stage."""
+
+
+def budget_left(rt: Runtime, mid: str) -> float:
+    """What the milestone may still spend (``max_usd`` minus its cost)."""
+    ms = rt.store.get_milestone(mid)
+    return ms.policy.budget.max_usd - ms.cost_usd
 
 
 def stage_key(name: str) -> str:
@@ -37,7 +48,7 @@ def stage_request(rt: Runtime, mid: str, role: str, model: str, prompt: str, cwd
         session=session,
         schema=schema,
         model=rt.model_for(model),
-        max_usd=rt.call_max_usd,
+        max_usd=min(rt.call_max_usd, max(0.05, budget_left(rt, mid))),  # never past the milestone's cap
         timeout_s=rt.call_timeout_s,
         transcript=d / f"{name}.jsonl",
         sandbox=False,  # the stage roles read; none has a shell to sandbox
@@ -55,6 +66,10 @@ async def stage_call(rt: Runtime, mid: str, name: str, req: CoderRequest, key: O
     saved = rt.store.checkpoint(key)
     if saved is not None:
         return CoderResult(**{**saved, "cost_usd": 0.0})
+    left = budget_left(rt, mid)
+    if left <= 0:
+        ms = rt.store.get_milestone(mid)
+        raise BudgetSpent(f"spent ${ms.cost_usd:.2f} of ${ms.policy.budget.max_usd:.2f} before {name}")
 
     def started(s: Started) -> None:
         rt.store.ms_put(mid, f"session:{name}", {"session": s.session, "pgid": s.pgid})
