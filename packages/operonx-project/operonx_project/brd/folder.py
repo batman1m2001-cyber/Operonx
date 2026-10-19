@@ -1,8 +1,10 @@
 """The BRD folder: made from the template, its matrix summary kept true.
 
 ``init_brd`` writes OneWealth's layout, generalized, into ``<repo>/docs/brd``
-(``operonx-project brd init``). It only adds what is missing: an existing
-file is never overwritten.
+(``operonx-project brd init``). The template is operonx's own
+(``operonx.cli.init.brd_files``, what ``operonx init`` writes), so a project
+made either way has the same folder. It only adds what is missing: an
+existing file is never overwritten.
 
 ``refresh_summary`` recomputes the matrix's summary table from its rows, so
 the checker's "summary equals the rows" holds after every write.
@@ -10,38 +12,29 @@ the checker's "summary equals the rows" holds after every write.
 
 from __future__ import annotations
 
-import datetime as _dt
 import re
 from collections import Counter
 from pathlib import Path
 from typing import List, Optional
 
+from operonx.cli.init import brd_files
+
 from operonx_project.brd.checker import BrdConfig, _groups, defined_requirements, matrix_rows, row_status
 from operonx_project.brd.records import STATUSES
 
-__all__ = ["TEMPLATE", "init_brd", "refresh_summary"]
-
-TEMPLATE = Path(__file__).parent / "template"
+__all__ = ["init_brd", "refresh_summary"]
 
 
 def init_brd(repo: Path, path: str = "docs/brd", project: Optional[str] = None) -> List[Path]:
     """Write the template's files that *repo*/*path* lacks; returns them."""
     dest = Path(repo) / path
-    name = project or Path(repo).resolve().name
-    today = _dt.date.today().isoformat()
     written: List[Path] = []
-    for src in sorted(TEMPLATE.rglob("*")):
-        if not src.is_file():
-            continue
-        target = dest / src.relative_to(TEMPLATE)
+    for rel, content in brd_files(project or Path(repo).resolve().name).items():
+        target = dest / rel
         if target.exists():
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        if src.suffix in (".md", ".toml"):
-            target.write_text(src.read_text(encoding="utf-8").replace("{project}", name).replace("{date}", today),
-                              encoding="utf-8")  # fmt: skip
-        else:
-            target.write_bytes(src.read_bytes())
+        target.write_bytes(content)
         written.append(target)
     return written
 

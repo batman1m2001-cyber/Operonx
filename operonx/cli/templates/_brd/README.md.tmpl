@@ -1,4 +1,4 @@
-# {project}: the living product repository
+# {{name}}: the living product repository
 
 What the product must do, why, and how far it is. Versioned with the code; every milestone reads and updates it.
 Kept by the rules in [MAINTAINING.md](MAINTAINING.md) and checked by `operonx-project brd check`, which the test
@@ -37,3 +37,16 @@ requirement's status is stated: requirement → feature → screen → code / AP
 | `blocked` | Cannot be built now; the row says what blocks it and who can unblock it |
 | `out_of_scope_demo` | Deliberately left out of this phase |
 | `not_applicable` | Does not apply to this product; the row says why |
+
+## 5. The project builder
+
+`operonx-project` (the Board tab in `operonx studio`) builds what the matrix leaves open, one milestone at a time:
+
+```bash
+operonx-project start --title "v1" --goal "..." --rows <ID> <ID>   # a milestone for these rows
+operonx-project daemon                                            # plans the cards, builds and checks them
+operonx-project status                                            # where every milestone is
+```
+
+Its state lives in `.operonx/project/` (outside git); the BRD stays here, in git. Before the first milestone the
+studio's Board shows this folder's checklist.
