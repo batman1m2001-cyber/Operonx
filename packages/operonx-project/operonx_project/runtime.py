@@ -180,6 +180,21 @@ class Runtime:
         d.mkdir(parents=True, exist_ok=True)
         return d / f"{name}.jsonl"
 
+    def heldout_check(self, name: str, hdir: Path, wt: Path) -> Tuple[Check, str]:
+        """The held-out run of *hdir* in the worktree *wt*, and the directory as the run sees it.
+
+        The tests live outside the repo, so pytest would take its rootdir from
+        them and never read the project's config: a ``src/`` layout's
+        ``pythonpath = ["src"]`` is lost and every import fails. The project's
+        pytest config is named, and the worktree is the rootdir."""
+        docker = self.check_mode == "docker"
+        inside = "/heldout" if docker else str(hdir)
+        cmd = self.heldout_cmd.format(dir=inside)
+        ini = pytest_config(wt)
+        if ini and "pytest" in cmd and " -c " not in cmd:
+            cmd = cmd.replace(" -m pytest", f" -m pytest -c {shlex.quote(ini)} --rootdir .", 1)
+        return self.test_check(name, cmd, mounts={str(hdir): "/heldout"} if docker else None), inside
+
     def test_check(self, name: str, cmd: str, mounts: Optional[Dict[str, str]] = None) -> Check:
         if self.check_mode == "host" and cmd.startswith("python "):
             # on the host, the project's interpreter: a bare `python` is whatever PATH has, or nothing
@@ -193,6 +208,17 @@ class Runtime:
             mounts=mounts or {},
             env={"COLUMNS": "1000"},  # pytest cuts its summary lines to the terminal's width
         )
+
+
+def pytest_config(wt: Path) -> Optional[str]:
+    """The worktree's pytest config file, in pytest's own order of preference, or None."""
+    marks = {"pytest.ini": "", ".pytest.ini": "", "pyproject.toml": "[tool.pytest", "tox.ini": "[pytest]",
+             "setup.cfg": "[tool:pytest]"}  # fmt: skip
+    for name, mark in marks.items():
+        f = Path(wt) / name
+        if f.is_file() and (not mark or mark in f.read_text(errors="replace")):
+            return name
+    return None
 
 
 _REGISTRY: Dict[str, Runtime] = {}
