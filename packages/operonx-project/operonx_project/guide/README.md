@@ -7,5 +7,6 @@ the core guide first (`../core/README.md`); every example here is tested
 against the installed operonx-project.
 
 1. [Projects](01-project.md): a project and a milestone, what the engine
-   does with it, the owner's questions, the bounds, and what a coder inside
-   a card may and may not do.
+   does with it, the two layers (`docs/brd/` and its board), the owner's
+   questions, take and submit, `adopt`, subfolder projects, the studio's
+   Board, the bounds, and what a coder inside a card may and may not do.

@@ -73,7 +73,8 @@ running engine's state is `<repo>/.operonx/project/` (outside git):
 and the stage journals. Each flow run — a card's attempt (`m1.C3.2`, the card's
 `run_id`), discovery, planning, the final pass — is traced to the
 project's run store, `<repo>/.operonx/runs/` (outside git too): the
-studio's Runs tab shows it step by step, and its Board tab is this store.
+studio's Runs tab shows it step by step, and its Board tab reads this
+store and the board files.
 
 ## Two layers: the BRD and the board
 
@@ -135,6 +136,69 @@ echo '{"op": "answer", "milestone": "m1", "ref": "Q-03", "answer": "b"}' | opero
 
 With `daemon --telegram-chat <id> --telegram-user <id>` and
 `OPERONX_TELEGRAM_TOKEN`, the questions also go to Telegram with buttons.
+
+## Working a card yourself: take and submit
+
+Any Claude Code session (yours, or the studio's assistant) can work a card
+instead of the engine's implementer. The card goes through the same gates:
+
+```bash norun
+operonx-project take m1 C3 --repo demo      # waits until the daemon parks C3 for you, then prints its brief
+# edit in the worktree the brief names, until its criteria pass
+operonx-project submit m1 C3 --summary "added double()" --repo demo
+operonx-project release m1 C3 --repo demo   # or hand it back to the engine
+```
+
+The brief says where to work (the card's worktree and branch), the rows
+and criteria, the acceptance tests (written for you; do not change them)
+and what the last round found. `submit` runs the rest of the round:
+checks, review, held-out tests and the merge. If the round fails, the card
+is yours again and `take` shows the findings. A daemon must be running.
+A taken card is not one of the owner's questions, so `pending` does not
+list it. `--as` names who took it, and `--json` prints the brief for a
+program. The `api` ops are `take`, `submit`, `release` and `card`.
+
+## A project that is already built: adopt
+
+```bash norun
+operonx-project adopt --repo ../shop --prefix SHOP     # --max-usd 2 by default
+```
+
+A read-only session reads the code, the docs and the tests. It writes
+`docs/brd/` (made first if missing), the requirements in
+`requirements/adopted_requirements.md`, and one checklist row each, as
+built, partial or open. The engine then runs the tests each row cites,
+with the project's `.venv` (`--python` overrides it). Only a row whose
+cited tests all pass becomes `implemented_verified`. The built work
+becomes milestone `m0 · baseline`, done, with one done card per feature,
+on the board. Nothing is committed: read `docs/brd/`, then commit it.
+
+## A project in a subfolder
+
+A folder inside a bigger repo is a project of its own when it is opened
+as one (`--repo monorepo/service`). Its milestones get their own branches,
+`milestone/<folder>/m1/main`, so two projects in one repo never share a
+branch. A card's worktree holds the whole repo, but its session works in
+the folder. A change outside the folder (`../`) is refused, with the rule
+`outside_project`.
+
+## In the studio
+
+The studio's Board tab is the owner's console for a project with
+`docs/brd/`:
+
+- **Run** and **Stop** start and stop the daemon. Its log is
+  `.operonx/project/daemon.log`.
+- The **Project** view is the checklist. Tick rows, then **Build** to
+  start a milestone for them.
+- A running card shows a live line with what its session is doing now.
+- A taken card shows who is working it.
+
+The studio's assistant has the same powers as tools: `board_status`,
+`board_card`, `board_start`, `board_act`, `board_daemon`, `board_take` and
+`board_submit`. The owner can run a project from the chat: "build the
+export rows", "what is C3 stuck on?", "take C4 and do it yourself". The
+studio needs `operonx-project` where it runs (or `OPERONX_PROJECT_BIN`).
 
 ## Bounds
 

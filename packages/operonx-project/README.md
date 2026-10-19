@@ -8,67 +8,64 @@ implementer) decide whether it passes. When a decision needs the owner, the
 card's run parks and resumes when the answer comes, over Telegram, the CLI or
 the studio.
 
-Status: in development. The plan of record is
-[`docs/PROJECT_ENGINE_PLAN.md`](../../docs/PROJECT_ENGINE_PLAN.md).
+Status: in development. The plans of record are
+[`docs/PROJECT_BUILDER_PLAN.md`](../../docs/PROJECT_BUILDER_PLAN.md) (the
+board in the BRD, take/submit, the studio as the console) and
+[`docs/PROJECT_ENGINE_PLAN.md`](../../docs/PROJECT_ENGINE_PLAN.md) (the
+engine). **The guide is
+[`operonx_project/guide/01-project.md`](operonx_project/guide/01-project.md)**;
+it covers everything below, in detail.
 
 ```bash
 uv sync && uv run pytest                     # or: python -m venv .venv && .venv/bin/pip install -e . && pytest
 ```
 
-## Use
-
-A milestone is started from its requirements and goal; one daemon per
-project drives it, and every other command only queues for that daemon.
+## Quick start
 
 ```bash
-operonx project new ../my-service            # an empty repo: docs/brd/ and an empty board
+operonx init my-service                      # docs/brd/ comes with it (or: operonx project new ../my-service)
+operonx project adopt --repo ../shop         # or an existing project: its BRD and a baseline board
 operonx project start --title "first cut" --source brd.docx --repo ../my-service
-operonx project daemon --repo ../my-service  # leave it running (or --once)
+operonx project daemon --repo ../my-service  # leave it running (the studio's Run does the same)
 operonx project status --repo ../my-service  # the board, the cost, what waits for you
 operonx project approve m1 --repo ../my-service
-operonx project answer m1 C3 a --text "and warn" --repo ../my-service
 ```
 
-`--mode w1` plans the whole DAG at once (a short goal); `--mode w2`, the
-default, plans epics and details cards as the board drains (a real BRD).
-The result is the branch `milestone/m1/main`, with `DELIVERY.md` and the
-updated `docs/brd/`. Nothing is pushed: a push or a PR is yours to approve.
-`operonx-project …` is the same command without core.
+The checklist is `docs/brd/` and the board is `docs/brd/board/`, both in
+git. The engine's runtime state, `.operonx/project/`, is rebuilt from them
+on a fresh clone. The result of a milestone is the branch
+`milestone/m1/main`, with `DELIVERY.md`. Nothing is pushed. To work a card
+yourself, use `take` and then `submit`. `operonx-project …` is the same
+command without core.
 
 ### Questions, and Telegram
 
 Whatever waits on you (a card's question, a plan to approve, a budget
-that ran out) is one question, `Q-nn`; a card's own question is also an
-entry in `docs/brd/requirements/open_questions.md`, and your answer is
-its resolution. `operonx project pending` lists them; `answer` takes a
-card or a `Q-nn`, an option's key or your own words.
-
-With Telegram, the daemon also sends each question with its buttons, and
-takes your tap, your reply to the question, or your words when only one
-question is open:
+that ran out) is one question, `Q-nn`: `operonx project pending` lists
+them, and `answer` takes an option's key or your own words. With
+Telegram, the daemon also sends each question with its buttons:
 
 ```bash
 export OPERONX_TELEGRAM_TOKEN=…   # from @BotFather; never logged
 operonx project daemon --repo ../my-service --telegram-chat <chat id> --telegram-user <your user id>
 ```
 
-Only the listed users, in the listed chat, are heard; anyone else is
-dropped without a reply. In the chat: `/status`, `/pending`,
-`/milestone m1`, `/pause`, `/resume`, `/cancel m1` (asks you to confirm),
-`/budget m1 +20` (or `+2h`). If Telegram is down, the questions wait and
-`operonx project answer` works as ever. A question unanswered for a day is
-reminded; after three it takes its safe default, if triage marked one, or
-is flagged in `status`.
+Only the listed users, in the listed chat, are heard. In the chat:
+`/status`, `/pending`, `/milestone m1`, `/pause`, `/resume`, `/cancel m1`,
+and `/budget m1 +20` (or `+2h`). A question left unanswered for a day
+gets a reminder. After three reminders it takes its safe default, if
+triage marked one, or is flagged in `status`.
 
 ### In the studio
 
-A project the engine drives has a **Board** tab in operonx studio: the
-milestone's columns, the questions waiting on you (answered there with the
-same rules: a second or stale answer is refused), the requirements
-checklist from the milestone's branch, and the card graph in waves. Each
-card attempt opens as a run page, step by step: the engine traces every
-flow run to the project's run store, `.operonx/runs/` (outside git). The
-studio acts through `operonx project api <json>`, so it needs
+The studio's **Board** tab is the owner's console:
+- Run and Stop for the daemon.
+- The checklist, where you tick rows and Build.
+- Each milestone's columns, with a live line on every running card.
+- The questions, the card graph, and each card's attempts as run pages.
+
+The studio's assistant does the same from its chat, with its board tools.
+The studio acts through `operonx project api <json>`, so it needs
 `operonx-project` installed where it runs (or `OPERONX_PROJECT_BIN`).
 
 ### Bounds and boundaries

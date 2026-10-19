@@ -7,7 +7,9 @@ worktrees, a different session reviews each diff, and the repo's own tests
 (plus held-out ones the implementer never sees) decide. A card that needs
 the owner parks its journalled run and resumes when the answer arrives.
 
-The plan of record is ``docs/PROJECT_ENGINE_PLAN.md`` in the operonx repo.
+The plans of record are ``docs/PROJECT_ENGINE_PLAN.md`` (the engine) and
+``docs/PROJECT_BUILDER_PLAN.md`` (the board in the BRD, take/submit, the studio
+as the console) in the operonx repo.
 """
 
 from operonx_project.model import (

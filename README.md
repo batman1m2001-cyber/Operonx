@@ -67,7 +67,8 @@ myapp/
 ├── resources.yaml       models and stores, by key (`llm:assistant`)
 ├── .env.example         the secrets resources.yaml names; copy to .env
 ├── operonx.toml         points the operonx command at app/main.py
-└── pyproject.toml       works with uv and with pip
+├── pyproject.toml       works with uv and with pip
+└── docs/brd/            the requirements and their checklist (`--no-brd` skips it)
 ```
 
 ## What your assistant reads
@@ -78,9 +79,18 @@ myapp/
 | `.operonx/guide/` | how every operonx API is used; every example in it is tested against the installed version | operonx, never edit |
 | `app/main.py` | what the product runs | you and the assistant |
 
+`docs/brd/` is the project's living BRD: a checklist with one row per
+requirement, its status, and the test that proves it. The assistant keeps
+the rows true as it changes code. **operonx-project** builds the open rows
+as milestones of cards on a board (`docs/brd/board/`), with coding agents,
+review and held-out tests. The studio's Board tab is where you run it and
+answer its questions, or tell its assistant what to build
+(`packages/operonx-project/`).
+
 `AGENTS.md` tells the assistant to read the guide before it uses an operonx
 API, so it does not write operonx from memory or from an older version.
-The block between `<!-- operonx:guide -->` markers in `AGENTS.md` belongs to
+The marked blocks in `AGENTS.md` (`<!-- operonx:guide -->`,
+`<!-- operonx:commands -->`, `<!-- operonx:builder -->`) belong to
 operonx; the rest is yours.
 
 After an upgrade, `operonx guide` refreshes the guide and that block. Any
