@@ -29,6 +29,7 @@ from operonx.core.loggings import LOGGER
 
 from operonx_project.coder.base import CoderRequest, CoderResult, Started
 from operonx_project.coder.roles import base_deny, sandbox_settings, tools_of
+from operonx_project.rules import standing_rules
 
 __all__ = ["ClaudeCodeCoder", "activity_label", "base_env", "find_claude", "kill_group"]
 
@@ -149,8 +150,9 @@ class ClaudeCodeCoder:
                 cmd.append("--fork-session")
         elif session:
             cmd += ["--session-id", session]
-        if req.system:
-            cmd += ["--append-system-prompt", req.system]
+        system = "\n\n".join(x for x in (req.system, standing_rules(req.cwd)) if x)  # plan D16
+        if system:
+            cmd += ["--append-system-prompt", system]
         model = req.model or self.model
         if model:
             cmd += ["--model", model]

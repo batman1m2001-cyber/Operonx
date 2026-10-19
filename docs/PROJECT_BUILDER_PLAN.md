@@ -4,6 +4,17 @@
 (Operon `f78752ef`, operonx-studio `2b44cdd`). Nothing in it is built except where a phase says
 "built, unmerged".
 
+**Progress (2026-10-19):**
+- B1–B6 merged (Operon #214–#215, studio #98–#99); the models setting, the stage budget and take-ahead merged
+  (Operon #216–#218, studio #100–#102).
+- The held-out tests read the project's pytest config (Operon #219). They ran outside the repo and lost a
+  `src/` layout's `pythonpath`, so tipcalc's C2 failed 6 rounds with passing code.
+- B10 (D14–D18) built on `feat/builder-b10` in both repos. B7 on tipcalc found two more defects, fixed
+  there:
+  - a taker's empty submit was verified, and a `docs` card with no change was too;
+  - a final finding that named a card but cited none of its files failed the whole milestone and did
+    not re-open the card.
+
 The owner's model, which this plan follows:
 
 - A project has two layers. **`docs/brd/`** says what the product must do and how far it is (the

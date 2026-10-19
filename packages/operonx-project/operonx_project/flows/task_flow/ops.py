@@ -523,6 +523,7 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
     skip = st.pop("skip_implement", False)
     st["skip_implement"] = False
     res: Optional[CoderResult] = None
+    worked = False  # this round is someone's work: the implementer's, or a taker's submit
     taken = rt.card(mid, cid).detail.get("taken")
     if not skip and taken:
         # a person or an assistant works this card (plan D7): the run parks until they submit,
@@ -540,11 +541,12 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
             st["pending"] = q
             return {"next": "ask", "question": q, "state": st, "outcome": None}
         st["round"] += 1
-        skip = True
+        skip = worked = True
     if not skip:
         st["round"] += 1
         rt.stage(mid, cid, Stage.IMPLEMENT)
         res = await _implement(rt, card, wt, st, ikey, st["round"])
+        worked = True
         st["mode"] = "resume"
         st["feedback"] = ""
         st["last_summary"] = (res.output or {}).get("summary") or res.text[-1500:]
@@ -562,7 +564,7 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
             sha = rt.git.commit(wt, f"{mid}/{cid} round {n}: {st['last_summary'][:60]}") if committable else None
             step.outputs = {"blockers": blockers, "warnings": warnings, "commit": sha}
         facts.guard_blockers = blockers
-        facts.empty_diff = res is not None and not _card_changed(rt, card, wt)
+        facts.empty_diff = worked and not _card_changed(rt, card, wt)
         facts.empty_retries = st["empty"]
         record.update(commit=sha, blockers=blockers, warnings=warnings)
         nh = (res.output or {}).get("needs_human") if res is not None else None

@@ -140,8 +140,11 @@ def load_requirements(brd: Path, files: Optional[Iterable[Path]] = None) -> List
     for f in files:
         if not Path(f).exists():
             continue
-        kind = ""
+        kind, source = "", ""
         for line in Path(f).read_text(encoding="utf-8").splitlines():
+            if not source and line.startswith("Extracted from "):  # the file's source, from its header
+                m = re.match(r"Extracted from (SRC-\d+)", line)
+                source = m.group(1) if m else ""
             if line.startswith("## "):
                 kind = next((k for k, v in _TYPE_TITLES.items() if line[3:].strip().startswith(v)), "")
             m = _REQ_ROW.match(line)
@@ -155,7 +158,7 @@ def load_requirements(brd: Path, files: Optional[Iterable[Path]] = None) -> List
             quote = quote[len("(paraphrase) ") :] if para else quote
             status = doc.split()[0] if doc else "documented"
             q = re.search(r"\bQ-\d{2,3}\b", doc)
-            out.append(Requirement(rid, kind, quote, loc, reading, paraphrase=para, status=status,
+            out.append(Requirement(rid, kind, quote, loc, reading, source=source, paraphrase=para, status=status,
                                    question=q.group(0) if q else ""))  # fmt: skip
     return out
 

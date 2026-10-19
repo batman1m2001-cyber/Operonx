@@ -42,7 +42,7 @@ class DaemonBusy(RuntimeError):
 
 class Daemon:
     def __init__(self, life: Lifecycle, owner: Optional[str] = None, poll_s: float = 0.5, lease_ttl: float = 30.0,
-                 interactions: Optional[Interactions] = None, bridge: Any = None):  # fmt: skip
+                 interactions: Optional[Interactions] = None, bridge: Any = None, deps_s: float = 10.0):  # fmt: skip
         self.life = life
         self.store = life.store
         self.interactions = interactions or Interactions(life.store, project=life.p)
@@ -52,6 +52,8 @@ class Daemon:
         self.ttl = lease_ttl
         self.drives: Dict[str, asyncio.Task] = {}
         self._wakes: Dict[str, tuple] = {}  # mid → (timer, the resume_at it was set for)
+        self.deps_s = deps_s
+        self._deps_at = float("-inf")
 
     def recover(self) -> None:
         """The recovery pass: kill the coder sessions a dead daemon left in a
@@ -118,6 +120,17 @@ class Daemon:
         if ms.state == M.PAUSED and ms.resume_at == due:
             self.store.enqueue(mid, "unpause", {"why": "the rate limit reset"}, actor="engine")
 
+    def _dependencies(self) -> None:
+        """Linked milestones (D17): looked at every ``deps_s`` seconds, not every poll."""
+        now = time.monotonic()
+        if now - self._deps_at < self.deps_s:
+            return
+        self._deps_at = now
+        try:
+            self.life.check_dependencies()
+        except Exception as exc:  # noqa: BLE001 — another project's store must not stop this one
+            LOGGER.error(f"the dependency check raised {type(exc).__name__}: {exc}")
+
     def _drive_active(self) -> None:
         for ms in self.store.milestones():
             if ms.state in ACTIVE and (ms.id not in self.drives or self.drives[ms.id].done()):
@@ -135,6 +148,7 @@ class Daemon:
                 await self._commands()
                 await self._questions()
                 self._wake_timers()
+                self._dependencies()
                 self._drive_active()
                 for mid, t in list(self.drives.items()):
                     if t.done():
@@ -143,6 +157,8 @@ class Daemon:
                             LOGGER.error(f"{mid}: the drive raised {t.exception()!r}")
                 if once and not self.drives and not self.store.pending_commands():
                     self._wake_timers()  # a drive that just ended in a rate-limit pause leaves a wake to wait for
+                    if self.life.check_dependencies():  # one of this project's own milestones just delivered
+                        continue
                     if not self._wakes and not any(m.state in ACTIVE for m in self.store.milestones()):
                         await self._questions()  # the last closes: "answered", "no longer current"
                         return

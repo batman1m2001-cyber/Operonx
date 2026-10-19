@@ -17,7 +17,10 @@ Requests (``op`` and its fields)::
     {"op": "release",  "milestone": "m1", "card": "C5"}                    # back to the engine's implementer
     {"op": "card",     "milestone": "m1", "card": "C5"}                    # what a taker needs: worktree, criteria
     {"op": "start",    "title": "…", "rows": ["ID", …], "goal": "…", "mode": "w2", "max_usd": 10,
-                       "from_board": "m1"}                                  # a new milestone, queued to start
+                       "from_board": "m1", "needs": ["operonx-studio#m3"]}  # a new milestone, queued to start
+    {"op": "request",  "text": "…the owner's words…", "title": "…", "mode": "w1", "max_usd": 5}
+                                                                            # a new milestone from the words (plan D14)
+    {"op": "ship" | "merge", "milestone": "m1"}  # push + PR (gh) or the GitLab URL; merge where granted (D15)
     {"op": "settings"}                                                      # the models each role runs on
     {"op": "settings", "model": "sonnet", "models": {"reviewer": "opus"}}   # set them ("" clears one)
 
@@ -67,7 +70,10 @@ OPS = (
     "release",
     "card",
     "start",
+    "request",
     "settings",
+    "ship",
+    "merge",
 )
 
 
@@ -104,10 +110,59 @@ def _start(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
             seed = board_seed(project.repo / BRD_DIR, str(req["from_board"]))
         except KeyError as exc:
             return _no("unknown", str(exc.args[0]))
-    ms = create_milestone(project, title, goal=goal, mode=mode, rows=rows, policy=policy, seed=seed)
+    try:
+        ms = create_milestone(project, title, goal=goal, mode=mode, rows=rows, policy=policy, seed=seed,
+                              needs=[str(n) for n in req.get("needs") or []])  # fmt: skip
+    except ValueError as exc:
+        return _no("invalid", str(exc))
     seq = project.store.enqueue(ms.id, "start", None, actor=actor)
     return {"ok": True, "status": "queued", "milestone": ms.id, "seq": seq,
             "message": f"{ms.id} created ({len(rows)} rows); the daemon starts it"}  # fmt: skip
+
+
+def _request(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    """The owner's words become rows (plan D14): the words are a source of the
+    BRD (``sources/owner_requests/``), extracted into requirements in the
+    milestone's requirements stage; the milestone's scope is those rows, and it
+    is planned and waits for the owner's approval like any other."""
+    import re
+    import time
+
+    from operonx_project.brd.records import matrix_status
+    from operonx_project.model import Policy
+    from operonx_project.project import BRD_DIR, create_milestone
+
+    text = str(req.get("text") or "").strip()
+    if not text:
+        return _no("invalid", "a request needs its words: text")
+    title = str(req.get("title") or "").strip() or text.splitlines()[0][:70].rstrip(" .")
+    mode = str(req.get("mode") or "w1")
+    if mode not in ("w1", "w2"):
+        return _no("invalid", "mode is w1 or w2")
+    policy = Policy.w1() if mode == "w1" else Policy.w2()
+    if req.get("max_usd") is not None:
+        policy.budget.max_usd = float(req["max_usd"])
+    ids = list(matrix_status(project.repo / BRD_DIR))
+    heads = [i.split("-REQ-", 1)[0] for i in ids if "-REQ-" in i]
+    prefix = max(set(heads), key=heads.count) if heads else ""  # the BRD's own prefix: TIP-REQ-… stays TIP
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:40] or "request"
+    name = f"{time.strftime('%Y-%m-%d')}-{slug}.md"
+    asked = project.state / "requests" / name
+    asked.parent.mkdir(parents=True, exist_ok=True)
+    asked.write_text(f"# {title}\n\nThe owner's request, in their words ({actor}, {time.strftime('%Y-%m-%d %H:%M')}):"
+                     f"\n\n{text}\n")  # fmt: skip
+    src = {"path": str(asked), "role": "approved", "title": f"Owner request: {title}",
+           "into": f"sources/owner_requests/{name}", "scope": True}  # fmt: skip
+    goal = f"The owner's request: {text}"
+    try:
+        ms = create_milestone(project, title, goal=goal, mode=mode, sources=[src], policy=policy, prefix=prefix,
+                              needs=[str(n) for n in req.get("needs") or []])  # fmt: skip
+    except ValueError as exc:
+        return _no("invalid", str(exc))
+    seq = project.store.enqueue(ms.id, "start", None, actor=actor)
+    return {"ok": True, "status": "queued", "milestone": ms.id, "seq": seq, "source": src["into"],
+            "message": f"{ms.id} created from the request; its requirements are extracted, then it is planned "
+                       "and waits for your approval"}  # fmt: skip
 
 
 def _settings(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
@@ -159,12 +214,22 @@ def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, A
     store = project.store
     if op == "start":
         return _start(project, req, actor)
+    if op == "request":
+        return _request(project, req, actor)
     if op == "settings":
         return _settings(project, req, actor)
     try:
         ms = store.get_milestone(str(mid))
     except KeyError:
         return _no("unknown", f"no milestone {mid!r}")
+    if op in ("ship", "merge"):
+        from operonx_project import ship as shipping
+
+        try:
+            got = (shipping.ship if op == "ship" else shipping.merge)(project, ms.id, actor=actor)
+        except shipping.Refused as exc:
+            return _no("refused", str(exc))
+        return {"ok": True, "status": "done", **got}
     if op == "answer":
         got = Interactions(store).submit_answer(str(req.get("ref") or ""), req.get("answer"), actor=actor,
                                                 via="studio", mid=ms.id)  # fmt: skip

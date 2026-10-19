@@ -156,6 +156,21 @@ def _milestone_parsers(sub) -> None:
     p.add_argument("--from-board", metavar="MID",
                    help="the plan is milestone MID's cards from a board (docs/brd/board, or --board DIR)")  # fmt: skip
     p.add_argument("--board", type=Path, default=None, help="the BRD (or board) folder --from-board reads")
+    p.add_argument("--needs", nargs="*", default=[], metavar="PROJECT#MID",
+                   help="milestones to wait for (studio#m3, or m2 here): it starts when they are done")  # fmt: skip
+    p = sub.add_parser("request", help="your words become requirements and a milestone that waits for your approval")
+    _repo_arg(p)
+    p.add_argument("text", help="what you want, in your words (- reads them from stdin)")
+    p.add_argument("--title", default="")
+    p.add_argument("--mode", choices=("w1", "w2"), default="w1")
+    p.add_argument("--max-usd", type=float, default=None)
+    for name, text in (
+        ("ship", "push a delivered milestone's branch and open its PR (gh), or the GitLab MR link"),
+        ("merge", "merge a shipped milestone's PR once its checks pass (settings.toml: merge = true)"),
+    ):
+        p = sub.add_parser(name, help=text)
+        _repo_arg(p)
+        p.add_argument("milestone")
     p = sub.add_parser("daemon", help="drive the project's milestones and run the queued commands")
     _repo_arg(p)
     p.add_argument("--once", action="store_true", help="stop when nothing is left to drive")
@@ -356,10 +371,25 @@ def _milestones(args) -> int:
 
             seed = board_seed(args.board or proj.repo / "docs" / "brd", args.from_board)
         ms = create_milestone(proj, args.title, goal=args.goal, mode=args.mode, sources=sources, rows=args.rows,
-                              policy=policy, prefix=args.prefix, constraints=args.constraints, seed=seed)  # fmt: skip
+                              policy=policy, prefix=args.prefix, constraints=args.constraints, seed=seed,
+                              needs=args.needs)  # fmt: skip
         proj.store.enqueue(ms.id, "start")
         out.write(f"{ms.id} created and queued; the daemon starts it (operonx-project daemon --repo {proj.repo})\n")
         return 0
+    if args.cmd in ("ship", "merge"):
+        from operonx_project.api import act
+
+        got = act(proj, {"op": args.cmd, "milestone": args.milestone}, actor="cli")
+        out.write(got["message"] + "\n")
+        return 0 if got["ok"] else 1
+    if args.cmd == "request":
+        from operonx_project.api import act
+
+        text = sys.stdin.read() if args.text == "-" else args.text
+        got = act(proj, {"op": "request", "text": text, "title": args.title, "mode": args.mode,
+                         "max_usd": args.max_usd}, actor="cli")  # fmt: skip
+        out.write(got["message"] + "\n")
+        return 0 if got["ok"] else 1
     if args.cmd == "daemon":
         from operonx_project.daemon import Daemon, DaemonBusy
         from operonx_project.lifecycle import Lifecycle

@@ -19,6 +19,16 @@ def _slug(text: str) -> str:
     return "_".join(re.findall(r"[a-z0-9]+", text.lower())[:4]) or "source"
 
 
+def _file_name(brd: Path, prefix: str, sid: str) -> str:
+    """The source's requirements file: the prefix's, unless another source has
+    it (a project's second source must never rewrite the first's file)."""
+    base = _slug(prefix)
+    f = brd / "requirements" / f"{base}_requirements.md"
+    if not f.exists() or re.search(rf"^Extracted from {re.escape(sid)}\b", f.read_text(encoding="utf-8"), re.M):
+        return base
+    return f"{base}_{re.sub(r'[^a-z0-9]', '', sid.lower())}"
+
+
 async def extract_source(
     rt: BrdRuntime,
     brd: Path,
@@ -45,7 +55,7 @@ async def extract_source(
         "source": str(Path(source)),
         "sid": sid,
         "prefix": prefix,
-        "name": name or _slug(prefix),
+        "name": name or _file_name(Path(brd), prefix, sid),
         "title": title,
         "only": list(only),
     }

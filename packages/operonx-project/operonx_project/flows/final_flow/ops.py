@@ -116,8 +116,11 @@ async def whole_review(key: str, mid: str) -> dict:
     blocking, _ = check_findings(res.output.get("findings") or [], integ, changed)
     gaps = []
     for f in blocking:
-        owner = next((c.id for c in cards if c.state == CardState.DONE and c.kind != "init"
-                      and paths_overlap(c.paths, [f["file"]])), None)  # fmt: skip
+        done = [c for c in cards if c.state == CardState.DONE and c.kind != "init"]
+        owner = next((c.id for c in done if paths_overlap(c.paths, [f["file"]])), None)
+        if owner is None:  # a finding about a card's missing change cites no file of it (tipcalc m1/C6): its name
+            named = {c.id for c in done if re.search(rf"\b{re.escape(c.id)}\b", f"{f['title']} {f.get('detail', '')}")}
+            owner = named.pop() if len(named) == 1 else None
         gaps.append(_gap(owner, "review", f"{f['severity']} at {f['file']}:{f.get('line')}: {f['title']}\n"
                                           f"{f.get('detail', '')}"))  # fmt: skip
     return {"gaps": gaps}

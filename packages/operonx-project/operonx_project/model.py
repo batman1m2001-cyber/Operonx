@@ -64,6 +64,7 @@ class MilestoneState(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    WAITING_DEPENDENCY = "waiting_dependency"  # started; another milestone it needs is not delivered yet (D17)
 
 
 @dataclass
