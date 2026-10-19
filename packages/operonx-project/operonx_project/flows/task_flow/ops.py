@@ -552,20 +552,22 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
     wt = rt.git.worktree_path(mid, cid)
     wrong = st.pop("rewrite_tests", None)
     which = st.pop("rewrite_which", "acceptance")
-    if wrong and which == "heldout":
-        held, res = await _examine(rt, rt.card(mid, cid), wt, wrong)
-        if held is None:
-            a = _stopped(res, "the examiner")
-            return _end(st, a["status"], a["reason"], a.get("not_before"))
-        rt.set_detail(mid, cid, heldout=held)
-        rt.store.note(mid, "heldout.rewritten", {"files": held["files"], "why": wrong[:500]}, card=cid)
-    elif wrong:
+    if wrong and which != "heldout":
         acc, res = await _author(rt, rt.card(mid, cid), wt, wrong)
         if acc is None:
             a = _stopped(res, "the test author")
             return _end(st, a["status"], a["reason"], a.get("not_before"))
         rt.set_detail(mid, cid, acceptance=acc)
         rt.store.note(mid, "acceptance.rewritten", {"files": sorted(acc["files"]), "why": wrong[:500]}, card=cid)
+    # the owner's reason is about the card's tests: held-out ones written from the same misreading fail the same
+    # way (tipcalc rebuild/C3: both sets expected a direct op call to raise), so the examiner checks its own too
+    if wrong and (which == "heldout" or (rt.card(mid, cid).detail.get("heldout") or {}).get("files")):
+        held, res = await _examine(rt, rt.card(mid, cid), wt, wrong)
+        if held is None:
+            a = _stopped(res, "the examiner")
+            return _end(st, a["status"], a["reason"], a.get("not_before"))
+        rt.set_detail(mid, cid, heldout=held)
+        rt.store.note(mid, "heldout.rewritten", {"files": held["files"], "why": wrong[:500]}, card=cid)
     skip = st.pop("skip_implement", False)
     st["skip_implement"] = False
     res: Optional[CoderResult] = None

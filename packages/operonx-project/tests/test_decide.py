@@ -103,3 +103,23 @@ def test_question_fingerprint_ignores_case_and_spacing():
 def test_unknown_decision_raises():
     with pytest.raises(ValueError):
         Decision("maybe", "")
+
+
+def test_escalated_options_always_have_a_key_and_a_label():
+    # tipcalc rebuild/C3: triage sent {"option": "A: ..."}; the Board drew "undefined" buttons that answered nothing
+    msg = {
+        "problem": "the tests expect a raise",
+        "recommended": "A: replace the tests",
+        "options": [{"option": "A (recommended): rewrite the tests"}, {"option": "B: keep them"}, "C: a helper"],
+    }
+    d = decide(facts(needs_human={"question": "which?"}, triage={"action": "escalate", "message": msg}))
+    q = d.question
+    assert [(o["key"], o["label"]) for o in q["options"]] == [
+        ("option_1", "A (recommended): rewrite the tests"),
+        ("option_2", "B: keep them"),
+        ("option_3", "C: a helper"),
+    ]
+    assert q["recommended"] == "option_1"
+    keyed = {**msg, "options": [{"key": "keep", "label": "Keep"}], "recommended": "keep"}
+    q = decide(facts(needs_human={"question": "which?"}, triage={"action": "escalate", "message": keyed})).question
+    assert q["options"][0]["key"] == "keep" and q["recommended"] == "keep"
