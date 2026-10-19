@@ -2,8 +2,8 @@
 
 Each op returns its ``gaps``: ``{"card", "why", "reason"}``, where ``card``
 is the card the gap re-opens, or ``None`` when no single card is
-responsible (the owner decides). The lifecycle re-opens the cards (bounded
-by ``max_reopens``) or delivers.
+responsible: the lifecycle then adds a card to fix it. It re-opens or adds
+cards (bounded by ``max_reopens``) or delivers.
 
 - ``full_checks``: the repo's checks against the milestone's baseline (an
   empty repo's baseline is empty: every failure is new);
@@ -109,7 +109,11 @@ async def whole_review(key: str, mid: str) -> dict:
     res = await stage_call(rt, mid, "milestone-review", req)
     if not res.ok or not isinstance(res.output, dict):
         rt.store.note(mid, "final.review_failed", {"status": res.status, "error": res.error[:300]})
-        return {"gaps": [_gap(None, "review", f"the milestone review did not finish ({res.status}): {res.error}")]}
+        return {
+            "gaps": [
+                _gap(None, "review_unfinished", f"the milestone review did not finish ({res.status}): {res.error}")
+            ]
+        }
     blocking, _ = check_findings(res.output.get("findings") or [], integ, changed)
     gaps = []
     for f in blocking:

@@ -221,3 +221,25 @@ def test_a_final_finding_that_names_a_card_reopens_it_not_the_milestone(tmp_path
     life.command("start")
     assert life.serve() == M.DONE, life.store.get_milestone("m1").reason
     assert life.store.get_card("m1", "C1").reopens == 1
+
+
+def test_a_final_gap_no_card_owns_becomes_a_fix_card(tmp_path):
+    # tipcalc m2: the requirements commit grew the matrix a test of m1 pinned, so that test failed in every
+    # card's baseline, no card's checks saw it, and final verification failed the milestone for good
+    from tests.flow_env import impl
+
+    finding = {"severity": "major", "file": "docs/brd/board/m1.md", "line": 1, "title": "the board is stale",
+               "detail": "", "fingerprint": "f1"}  # fmt: skip
+    script = base_script(**{
+        "reviewer:milestone-review": [{"output": {"findings": [finding]}}, {"output": {"findings": []}}],
+        "implementer": [impl(RIGHT), impl(RIGHT + "\n# fixed\n")],
+    })  # fmt: skip
+    life = Life(tmp_path, script, policy=Policy.w1(approve_plan="auto", heldout=False))
+    life.command("start")
+    assert life.serve() == M.DONE, life.store.get_milestone("m1").reason
+    assert life.cards() == {"C1": "done", "C2": "done"}
+    fix = life.store.get_card("m1", "C2")
+    assert fix.title == "Fix what final verification found" and "the board is stale" in fix.intent
+    # it starts from the milestone's baseline (a failure already in its own would not count), writes no tests
+    assert fix.detail["baseline"] == life.store.ms_get("m1", "baseline")["results"]
+    assert len(life.coder.of("test_author")) == 1 and life.store.ms_get("m1", "final_fixes") == 1

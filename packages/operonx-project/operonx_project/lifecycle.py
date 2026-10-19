@@ -17,6 +17,7 @@ is reached the milestone stops for the owner instead of trying again.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -43,6 +44,9 @@ from operonx_project.runner import FlowRunner, GitIntegrator, InitRunner, Runner
 from operonx_project.runtime import Runtime, register
 from operonx_project.scheduler import Outcome, Scheduler
 from operonx_project.store import MILESTONE_MOVES
+
+#: final-verification gaps a fix card can close; others (the review did not finish) fail the milestone
+FIXABLE = ("checks", "review", "brd")
 
 __all__ = ["ACTIVE", "Lifecycle", "Refused", "scope_rows"]
 
@@ -539,11 +543,17 @@ class Lifecycle:
             self._move(mid, M.DONE, f"delivered on {self.p.git.integration_branch(mid)}")
             return
         mine = [g for g in gaps if not g.get("card")]
-        if mine:
+        fixes = int(self.store.ms_get(mid, "final_fixes") or 0)
+        if mine and (fixes >= ms.policy.budget.max_reopens or any(g["why"] not in FIXABLE for g in mine)):
             self._move(mid, M.FAILED, "final verification: " + " | ".join(g["reason"][:300] for g in mine))
             return
+        if mine:
+            fix = self._fix_card(mid, mine)
+            self.store.ms_put(mid, "final_fixes", fixes + 1)
         by_card: Dict[str, List[str]] = {}
         for g in gaps:
+            if not g.get("card"):
+                continue
             by_card.setdefault(g["card"], []).append(f"[{g['why']}] {g['reason']}")
         over = []
         for cid, reasons in by_card.items():
@@ -558,7 +568,32 @@ class Lifecycle:
             self._move(mid, M.FAILED, f"final verification still finds gaps on {', '.join(over)} after "
                                       f"{ms.policy.budget.max_reopens} re-opens")  # fmt: skip
             return
-        self._move(mid, M.RUNNING, f"final verification re-opened {', '.join(by_card)}")
+        added = [f"added {fix.id}"] if mine else []
+        self._move(mid, M.RUNNING, f"final verification {', '.join(added + [f're-opened {c}' for c in by_card])}")
+
+    def _fix_card(self, mid: str, gaps: List[Dict[str, Any]]) -> Card:
+        """A card for what final verification found that no card owns: a check the milestone's
+        own steps broke (tipcalc m2: the requirements commit grew the matrix a test pinned), or
+        cards that pass apart and fail together. It starts from the milestone's baseline, not its
+        own: a failure already there when it starts must still be fixed."""
+        n = max((int(m.group(1)) for c in self.store.cards(mid) if (m := re.fullmatch(r"C(\d+)", c.id))),
+                default=0) + 1  # fmt: skip
+        found = "\n\n".join(f"[{g['why']}] {g['reason']}" for g in gaps)
+        base = self.store.ms_get(mid, "baseline") or {}
+        card = Card(id=f"C{n}", milestone=mid, title="Fix what final verification found", kind="code",
+                    intent="Final verification of the whole milestone, on its integration branch, found this, "
+                           "and no single card owns it. Fix it at its cause; change a test only where the test "
+                           f"itself is wrong.\n\n{found[:6000]}",
+                    criteria=["When the repo's checks run on the integration branch, they pass as they did "
+                              "before the milestone, and each finding above is resolved."],
+                    state=CardState.READY,
+                    detail={"baseline": base.get("results") or [], "final_fix": found[:6000],
+                            # its criteria are the repo's own checks: no tests of its own to write
+                            "acceptance": {"dir": "", "files": {}, "commit": None},
+                            "heldout": {"dir": "", "files": []}})  # fmt: skip
+        self.store.add_cards([card], actor="engine")
+        self.store.note(mid, "final.fix_card", {"card": card.id, "gaps": [g["why"] for g in gaps]})
+        return card
 
     def deliver(self, mid: str) -> Path:
         """``DELIVERY.md`` on the integration branch, and the PR description
