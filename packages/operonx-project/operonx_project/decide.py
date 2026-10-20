@@ -30,6 +30,10 @@ __all__ = [
 
 #: Rounds in a row with the same failure signature before the approach is revised.
 SAME_FAILURE_LIMIT = 3
+#: Times in a row the held-out tests fail by the same names, the checks and the review passing, before the owner
+#: is asked: a held-out test no implementation can pass loops to the round limit otherwise (tipcalc m3/C5: six
+#: rounds, $1.50, on two tests that expected a direct op call to record its error).
+HELDOUT_SAME_LIMIT = 2
 
 #: What may reach the owner (plan §9.1); anything else triage decides itself.
 ESCALATION_CATEGORIES = (
@@ -69,6 +73,7 @@ class RoundFacts:
     upheld: List[Dict[str, Any]] = field(default_factory=list)
     heldout_ok: Optional[bool] = None  # None: not run (off, or the round did not get that far)
     heldout_failures: List[str] = field(default_factory=list)  # names and messages only
+    heldout_same: int = 0  # held-out runs in a row, this one included, failing by these same names
     cost_usd: float = 0.0  # the card's spend so far
     card_max_usd: float = 5.0
 
@@ -142,6 +147,7 @@ def _bounded(f: RoundFacts, d: Decision) -> Decision:
             f"the card's round limit is {f.max_rounds}",
             _KEEP_SKIP_STOP,
             tried=d.feedback[-1500:],
+            engine=True,
         )
         return Decision("ask", f"max_rounds ({f.max_rounds}) reached: {d.reason}", d.feedback, question=q)
     if f.cost_usd >= f.card_max_usd:
@@ -154,6 +160,7 @@ def _bounded(f: RoundFacts, d: Decision) -> Decision:
                 {"key": "skip", "label": "Skip this card"},
                 {"key": "stop", "label": "Stop the card"},
             ],
+            engine=True,
         )
         return Decision("ask", f"card budget reached: {d.reason}", d.feedback, question=q)
     return d
@@ -236,6 +243,7 @@ def decide(f: RoundFacts) -> Decision:
                 _KEEP_SKIP_STOP,
                 evidence=f.failure_tail[-1500:],
                 tried="a fix in the same session, then a new session with a different approach",
+                engine=True,
             )
             return Decision("ask", "the same failure after a revision", question=q)
         fb = f"These checks fail:\n{failing}\n\nOutput:\n{f.failure_tail}"
@@ -260,6 +268,17 @@ def decide(f: RoundFacts) -> Decision:
         fb = "The review found:\n" + _finding_text(f.findings)
         return _bounded(f, Decision("fix", f"review: {len(f.findings)} blocking finding(s)", fb))
 
+    if f.heldout_ok is False and f.heldout_same >= HELDOUT_SAME_LIMIT:
+        q = _escalation(
+            "requirements",
+            f"the same held-out tests failed {f.heldout_same} times in a row while the checks and the review passed",
+            "the implementer cannot see them, so a held-out test that expects what no implementation can do (an "
+            "engine's behaviour the rows do not promise) is never fixed by another round",
+            _KEEP_SKIP_STOP,
+            evidence="\n".join(f.heldout_failures)[-1500:],  # what a rewrite is told: the failing names, no "tried"
+            engine=True,
+        )
+        return Decision("ask", f"held-out: the same {len(f.heldout_failures)} failing {f.heldout_same}×", question=q)
     if f.heldout_ok is False:
         fb = "The card's examiner tests (which you cannot see) fail. Names and messages only:\n" + _bullets(
             f.heldout_failures

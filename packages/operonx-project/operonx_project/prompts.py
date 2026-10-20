@@ -37,6 +37,7 @@ __all__ = [
     "reviewer_prompt",
     "survey_prompt",
     "test_author_prompt",
+    "INCIDENTALS_RULE",
     "triage_prompt",
 ]
 
@@ -246,18 +247,30 @@ def triage_prompt(card: Card, brief: str, question: Dict[str, Any], decisions: L
     )
 
 
-def test_author_prompt(card: Card, brief: str, directory: str, wrong: str = "") -> str:
+#: What a test must not pin (PROJECT_PRACTICES_PLAN D5): each of these broke a correct implementation once.
+INCIDENTALS_RULE = (
+    "Assert what the rows and criteria promise, never incidentals: not a count the rows do not state (how many "
+    "rows a table has, how many items a list holds), not an id, a name or an order the rows do not fix, not the "
+    "wording of a docstring, a log line or a message the rows do not quote, not object identity, and not an "
+    "engine's own bookkeeping. A correct implementation that differs in any of these must still pass."
+)
+
+
+def test_author_prompt(card: Card, brief: str, directory: str, wrong: str = "", by: str = "the owner") -> str:
     if wrong:
         return (
-            f"The acceptance tests you wrote for this card in {directory}/ were found wrong by the owner. What "
+            f"The acceptance tests you wrote for this card in {directory}/ were found wrong by {by}. What "
             f"was found:\n{wrong}\n\nRewrite them in {directory}/ only, so each acceptance criterion is checked "
             "through what the code and its tools really expose (read them; never assume an output format). Keep "
-            "every criterion covered. Do not change the feature.\n\n" + f"{card_brief(card, brief)}\n\n" + DATA_RULE
+            f"every criterion covered. {INCIDENTALS_RULE} Do not change the feature.\n\n"
+            + f"{card_brief(card, brief)}\n\n"
+            + DATA_RULE
         )
     return (
         f"Write the acceptance tests for this card, before any code exists, in {directory}/ only.\n"
         "One or more test files that check each acceptance criterion through the code's public interface. "
-        "They must fail now (the feature is not built) and pass once it is. Do not write the feature.\n\n"
+        f"They must fail now (the feature is not built) and pass once it is. {INCIDENTALS_RULE} Do not write the "
+        "feature.\n\n"
         f"{card_brief(card, brief)}\n\n" + DATA_RULE
     )
 
@@ -278,8 +291,8 @@ def examiner_prompt(card: Card, brief: str, directory: str, wrong: str = "") -> 
             "checks what the rows promise."
         )
     return (
-        f"{task} Every test must pass for every correct implementation: assert what the rows promise, never "
-        "incidentals such as object identity or an engine's own bookkeeping. Give every assertion a message "
+        f"{task} Every test must pass for every correct implementation. {INCIDENTALS_RULE} Give every assertion "
+        "a message "
         "that states the expected behaviour in words: the implementer only ever sees the test names and those "
         "messages. Do not change any file in the repository.\n\n"
         f"{card_brief(card, brief)}\n\n" + DATA_RULE

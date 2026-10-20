@@ -91,6 +91,9 @@ def test_records_matrix_and_questions_pass_the_checker(tmp_path):
     assert add_matrix_rows(brd, reqs, "Client BRD") == ["BRD-BR-01", "BRD-RULE-CALL-01"]
     assert add_matrix_rows(brd, reqs, "Client BRD") == []  # never twice
     refresh_summary(brd)
+    # the table is the engine's, and says so (tipcalc m3/C6: three rounds and an arbitration on a hand-edited count)
+    matrix = (brd / "requirements/requirements_traceability.md").read_text()
+    assert "rewrites this table: never edit it by hand" in matrix
     errors, report = check(brd)
     assert errors == [], errors
     assert report[0].startswith("BRD: {'planned': 2}")

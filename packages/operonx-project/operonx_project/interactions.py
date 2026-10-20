@@ -67,8 +67,8 @@ def _short(iid: str) -> str:
 
 
 def label_answer(options: List[Dict[str, Any]], text: str) -> Tuple[Optional[str], str]:
-    """Free words → ``(option, words)``: ``"A"``, ``"a) and warn"`` or an option's
-    exact label names an option; anything else is the owner's own words. The words always go on
+    """Free words → ``(option, words)``: ``"A"``, ``"a) and warn"``, ``"rewrite_tests. because …"`` or an
+    option's exact label names an option; anything else is the owner's own words. The words always go on
     verbatim; the label is only a label."""
     opts = [o for o in options if isinstance(o, dict) and o.get("key")]
     keys = {str(o["key"]).lower(): str(o["key"]) for o in opts}
@@ -78,7 +78,9 @@ def label_answer(options: List[Dict[str, Any]], text: str) -> Tuple[Optional[str
         return keys[t.lower()], ""
     if t.lower() in labels:
         return labels[t.lower()], ""
-    m = re.match(r"^([A-Za-z0-9]{1,3})\s*[\).:,\-—]\s*(.*)$", t, re.S)
+    # a key, then a separator: "a) …", and a whole key too (tipcalc m3/C5: the assistant answered
+    # "rewrite_tests. The two held-out tests …", taken as words: the implementer got it and no test was rewritten)
+    m = re.match(r"^([A-Za-z0-9_]+)\s*[\).:,\-—]\s*(.*)$", t, re.S)
     if m and m.group(1).lower() in keys:
         return keys[m.group(1).lower()], text
     return None, text
@@ -298,7 +300,9 @@ class Interactions:
         seq = self.store.answer_interaction(inter["id"], record, actor, kind, payload, card)
         if seq is None:
             return self.submit_answer(ref, answer, actor, via, mid)  # answered meanwhile: say so
-        return Submitted("accepted", f"{inter['qid']}: taken ({choice or 'in your words'})",
+        how = choice or ("in your words, no option chosen (options: " + ", ".join(map(str, keys)) + ")"
+                         if keys else "in your words")  # fmt: skip
+        return Submitted("accepted", f"{inter['qid']}: taken ({how})",
                          self.store.get_interaction(inter["id"]))  # fmt: skip
 
     def _command(self, inter: Dict[str, Any], choice: Optional[str], text: str):

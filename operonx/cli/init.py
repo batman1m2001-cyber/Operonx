@@ -49,6 +49,9 @@ __all__ = [
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 COMMON = "_common"
 BRD = "_brd"
+#: How a new project is built (operonx-project's practices.toml and LESSONS.md): written by ``operonx init``
+#: only, never by ``operonx-project brd init`` on an existing repo, where no file means the builder's defaults.
+PRACTICES = "_practices"
 #: Where a project's BRD folder goes.
 BRD_DIR = "docs/brd"
 
@@ -306,6 +309,9 @@ def plan(
             files[target] = text.encode("utf-8")
     if brd:
         files.update({f"{BRD_DIR}/{rel}": text for rel, text in brd_files(name).items()})
+        base = TEMPLATE_DIR / PRACTICES
+        files.update({f"{BRD_DIR}/{_target(src.relative_to(base))}": src.read_bytes()
+                      for src in sorted(base.rglob("*.tmpl"))})  # fmt: skip
     return files
 
 

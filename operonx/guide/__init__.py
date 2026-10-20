@@ -82,7 +82,8 @@ _BUILDER = """## Building it: docs/brd and the board
   hand: `operonx-project replan` changes a plan.
 - When a change meets or alters a requirement, update its row (status,
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
-  `docs/brd/MAINTAINING.md`.
+  `docs/brd/MAINTAINING.md`. The checklist's summary table is counted from
+  the rows by the engine: leave it.
 - To work a card yourself: `operonx-project take <milestone> <card>` prints
   its worktree, criteria and rows; make the criteria pass there, then
   `operonx-project submit <milestone> <card>`. The review and the held-out

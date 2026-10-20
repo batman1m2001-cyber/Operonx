@@ -1,0 +1,31 @@
+# How this project is built. Every section is optional; `operonx-project practices` checks the file.
+# This preset is the layout AGENTS.md states, checked: `operonx-project arch`.
+
+[tdd]
+mode = "acceptance"   # acceptance | strict (tests must fail before the code) | off
+
+[architecture]
+style = "layered"
+private = "forbid"    # another package's _private names and attributes: never
+layers = [            # outermost first: a module imports its own layer and the ones after it
+  { name = "app",     paths = ["app/**"] },
+  { name = "graph",   paths = ["src/**/graph.py"] },
+  { name = "ops",     paths = ["src/**/ops.py"] },
+  { name = "helpers", paths = ["src/**/_*.py"] },
+]
+
+# Bounded contexts (DDD), when the project has more than one domain: another context is reached only
+# through its public modules. A feature's graph may use another feature's graph as a subgraph.
+# [[contexts]]
+# name = "billing"
+# paths = ["src/billing/**"]
+# public = ["graph.py"]
+
+[language]
+glossary = "docs/brd/GLOSSARY.md"   # its terms go to every session
+
+[lessons]
+file = "docs/brd/LESSONS.md"        # what each milestone taught; every session reads it
+
+[done]
+checks = []                         # more checks every card must pass: { name = "types", cmd = "uv run mypy src" }

@@ -381,6 +381,12 @@ def test_label_answer_and_callback_data():
     assert label_answer(OPTIONS, "a: and log it") == ("a", "a: and log it")
     assert label_answer(OPTIONS, "Minus") == ("b", "")
     assert label_answer(OPTIONS, "an entirely new idea") == (None, "an entirely new idea")
+    # a whole key, then a separator (tipcalc m3/C5: "rewrite_tests. The two held-out tests …" went as words)
+    held = [{"key": "keep", "label": "Keep trying"}, {"key": "rewrite_tests", "label": "Rewrite its tests"}]
+    assert label_answer(held, "rewrite_tests. They expect {}") == ("rewrite_tests", "rewrite_tests. They expect {}")
+    assert label_answer(held, "keep: the code is right") == ("keep", "keep: the code is right")
+    assert label_answer(held, "keep the code as it is") == (None, "keep the code as it is")  # no separator: words
+    assert label_answer(held, "rewrite. them") == (None, "rewrite. them")  # not a key
     data = callback("0123abcd", "keep", 12)
     assert data == "a:0123abcd:keep:12" and parse_callback(data) == ("0123abcd", "keep", 12)
     assert parse_callback("a:nothex!!:x:1") is None

@@ -62,6 +62,9 @@ async def full_checks(key: str, mid: str) -> dict:
         results = await run_checks(rt.checks, integ, rt.env)
         cmp = compare([CheckResult(**r) for r in base.get("results") or []], results)
         step.outputs = {"new": cmp.new, "old": cmp.old, "fixed": cmp.fixed}
+    # the checks at the end, beside the baseline's: what the milestone fixed (the retrospective, the Board)
+    rt.store.ms_put(mid, "final_checks", {"results": [{"name": r.name, "ok": r.ok, "failures": r.failures}
+                                                      for r in results], "fixed": cmp.fixed})  # fmt: skip
     gaps = []
     if cmp.new:
         tails = "\n".join(f"$ {r.name}\n{r.tail[-1200:]}" for r in results if not r.ok)

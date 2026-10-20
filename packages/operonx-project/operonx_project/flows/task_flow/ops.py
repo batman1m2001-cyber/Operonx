@@ -4,7 +4,11 @@
 acceptance tests written by a separate test author (protected from the
 implementer), and the held-out tests written by the examiner outside the
 repo. What it made is kept in the card's ``detail``, so a run after a crash,
-a rate limit or a re-open does each of these once.
+a rate limit or a re-open does each of these once. The project's practices
+(read on the card's branch) set how: ``[tdd] mode = "strict"`` runs the
+acceptance tests before any code and has them written again, once, when one
+already passes (the red evidence is ``detail["red"]``); ``"off"`` writes
+neither set.
 
 ``round_`` is one round (plan §7): implement → guard → commit → checks →
 review (→ arbitration) → held-out → :func:`~operonx_project.decide.decide`.
@@ -19,6 +23,7 @@ rounds, the session, failure signatures, findings seen, questions asked.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -30,6 +35,8 @@ from operonx_project.coder.base import CoderRequest, CoderResult, Started
 from operonx_project.decide import ESCALATION_CATEGORIES, Decision, RoundFacts, decide, question_fingerprint
 from operonx_project.gitops import conflict_markers, guard, sha256_file
 from operonx_project.model import Card, Stage
+from operonx_project.practices import PracticesError
+from operonx_project.practices import load as load_practices
 from operonx_project.prompts import (
     ARBITER_SCHEMA,
     AUTHOR_SCHEMA,
@@ -61,9 +68,13 @@ def _results(rows: List[Dict[str, Any]]) -> List[CheckResult]:
     return [CheckResult(**r) for r in rows]
 
 
+def _junk(path: str) -> bool:
+    return any(j in f"/{path}" or path.startswith(j) for j in _JUNK) or path.endswith(".pyc")
+
+
 def _clean_junk(rt: Runtime, wt: Path) -> None:
     for path in rt.git.dirty(wt):
-        if any(j in f"/{path}" or path.startswith(j) for j in _JUNK) or path.endswith(".pyc"):
+        if _junk(path):
             f = wt / path
             if f.is_file():
                 f.unlink()
@@ -180,12 +191,12 @@ async def _baseline(rt: Runtime, card: Card, wt: Path) -> List[Dict[str, Any]]:
     return rows
 
 
-async def _author(rt: Runtime, card: Card, wt: Path, wrong: str = "") -> Tuple[Optional[Dict[str, Any]],
-                                                                             Optional[CoderResult]]:  # fmt: skip
+async def _author(rt: Runtime, card: Card, wt: Path, wrong: str = "",
+                  by: str = "the owner") -> Tuple[Optional[Dict[str, Any]], Optional[CoderResult]]:  # fmt: skip
     """The acceptance tests, written before the code by a session of their own; with
-    *wrong*, written again because the owner found them wrong (what was found)."""
+    *wrong*, written again because *by* found them wrong (what was found)."""
     directory = f"{rt.acceptance_root}/{card.id}"
-    req = _request(rt, card, "test_author", test_author_prompt(card, rt.brief, directory, wrong), wt,
+    req = _request(rt, card, "test_author", test_author_prompt(card, rt.brief, directory, wrong, by=by), wt,
                    "test-author", schema=AUTHOR_SCHEMA)  # fmt: skip
     res = await _coder(rt, card, "test_author", req)
     if not res.ok:
@@ -195,12 +206,66 @@ async def _author(rt: Runtime, card: Card, wt: Path, wrong: str = "") -> Tuple[O
     if stray:
         LOGGER.warning(f"card {card.id}: the test author changed {stray}; reverted")
         rt.git.revert(wt, stray)
-    files = sorted(p for p in rt.git.dirty(wt) if p.startswith(directory + "/"))
+    # every file git sees in the directory, not only the ones this session changed: a rewrite that keeps a file
+    # keeps it protected (and checked); never a cache a test run left (tipcalc m3/C5 listed a .pyc the red run
+    # wrote, which the guard could only restore from a commit that never had it)
+    changed = [p for p in rt.git.dirty(wt) if p.startswith(directory + "/")]
+    seen = rt.git.git("ls-files", "--cached", "--others", "--exclude-standard", "--", directory, cwd=wt).split("\n")
+    files = sorted(p for p in seen if p and (wt / p).is_file() and not _junk(p))
     if not files:
         LOGGER.warning(f"card {card.id}: the test author wrote no test")
         return {"dir": directory, "files": {}, "commit": None}, res
-    sha = rt.git.commit(wt, f"{card.milestone}/{card.id}: acceptance tests")
+    sha = rt.git.commit(wt, f"{card.milestone}/{card.id}: acceptance tests") if changed else rt.git.head(wt)
     return {"dir": directory, "files": {p: sha256_file(wt / p) for p in files}, "commit": sha}, res
+
+
+#: pytest's summary: "3 failed, 1 passed in 0.2s".
+_PASSED = re.compile(r"\b(\d+) passed\b")
+#: Said to the test author when a strict card's tests already pass before any code.
+VACUOUS = ("These tests already pass before any code is written, so they check nothing this card adds ({passed} "
+           "passed on the card's base). Under test-first, every acceptance test fails before the code (red) and "
+           "passes after it (green): test the behaviour the card adds, through what will expose it.")  # fmt: skip
+
+
+def _tdd(rt: Runtime, card: Card, wt: Path) -> str:
+    """The card's TDD mode, from the practices on its own branch."""
+    try:
+        return load_practices(wt).tdd
+    except PracticesError as e:  # discovery refused a broken file; one changed on a branch is not this op's to fail
+        LOGGER.warning(f"card {card.id}: the practices do not parse ({e}); acceptance tests as usual")
+        return "acceptance"
+
+
+async def _red(rt: Runtime, card: Card, wt: Path, acc: Dict[str, Any]) -> Dict[str, Any]:
+    """The acceptance tests run on the card's base, before any code: how many fail (red) and pass."""
+    check = rt.test_check("acceptance", rt.acceptance_cmd.format(dir=acc["dir"]))
+    async with child("red", inputs={"files": len(acc["files"])}, op_type="checks") as step:
+        (res,) = await run_checks([check], wt, rt.env)
+        passed = sum(int(n) for n in _PASSED.findall(res.tail[-2000:]))
+        out = {"red": not res.ok and passed == 0, "exit_code": res.exit_code, "failed": res.failures[:50],
+               "passed": passed if not res.ok else max(passed, 1), "tail": res.tail[-1500:]}  # fmt: skip
+        step.outputs = {k: out[k] for k in ("red", "passed", "failed")}
+    return out
+
+
+async def _author_red(rt: Runtime, card: Card, wt: Path) -> Tuple[Optional[Dict[str, Any]], Optional[CoderResult]]:
+    """Strict TDD: the acceptance tests, then the proof that they fail before the code; written again,
+    once, when one passes. A card whose tests still pass after that goes on, with the evidence recorded."""
+    acc, res = await _author(rt, card, wt)
+    if acc is None or not acc["files"]:
+        return acc, res
+    red = await _red(rt, card, wt, acc)
+    rewritten = False
+    if not red["red"]:
+        rt.store.note(card.milestone, "acceptance.vacuous", {"passed": red["passed"]}, card=card.id)
+        again, res2 = await _author(rt, card, wt, VACUOUS.format(passed=red["passed"]), by="the engine")
+        if again is None:
+            return None, res2
+        if again["files"]:
+            acc, res, rewritten = again, res2, True
+            red = await _red(rt, card, wt, acc)
+    rt.set_detail(card.milestone, card.id, red={**red, "rewritten": rewritten})
+    return acc, res
 
 
 async def _examine(rt: Runtime, card: Card, wt: Path,
@@ -234,8 +299,15 @@ async def prepare(key: str, mid: str, cid: str, reopen: dict) -> dict:
     detail = card.detail
     if "baseline" not in detail:
         rt.set_detail(mid, cid, baseline=await _baseline(rt, card, wt))
+    tdd = _tdd(rt, card, wt) if card.kind == "code" else "acceptance"
+    if tdd == "off" and card.kind == "code":  # no test author, no examiner: the checks and the review judge it
+        if "acceptance" not in detail:
+            rt.set_detail(mid, cid, acceptance={"dir": "", "files": {}, "commit": None, "tdd": "off"})
+        if "heldout" not in detail:
+            rt.set_detail(mid, cid, heldout={"dir": "", "files": [], "tdd": "off"})
+        detail = rt.card(mid, cid).detail
     if card.kind == "code" and "acceptance" not in detail:
-        acc, res = await _author(rt, card, wt)
+        acc, res = await (_author_red if tdd == "strict" else _author)(rt, card, wt)
         if acc is None:
             st["abort"] = _stopped(res, "the test author")
             return {"state": st}
@@ -294,14 +366,16 @@ def _apply_answer(rt: Runtime, card: Card, st: Dict[str, Any], answer: Any) -> O
     ending, or ``None`` with ``st`` set up for the next round."""
     q = st.get("pending") or {}
     st["pending"] = None
+    st["heldout_same"], st["heldout_last"] = 0, None  # rewritten tests, or the owner's "keep": a fresh count
     if q.get("fingerprint"):
         st["asked"][q["fingerprint"]] = answer
     choice, text = _choice(q, answer)
     cat = q.get("category", "")
     policy = rt.store.get_milestone(card.milestone).policy.budget
     note = f" The owner adds: {text}" if text else ""
-    rt.store.note(card.milestone, "answer.applied", {"question": q.get("fingerprint"), "choice": choice,
-                                                      "text": text}, card=card.id)  # fmt: skip
+    rt.store.note(card.milestone, "answer.applied", {"question": q.get("fingerprint"), "choice": choice, "text": text,
+                                                      "problem": str(q.get("problem") or q.get("reason") or "")[:600]},
+                  card=card.id)  # fmt: skip
     if choice == "rewrite_tests":  # the tests that fail are wrong: whoever wrote them writes them again
         # a question asked before "rewrite" was recorded: its reason says whether the held-out tests failed
         which = q.get("rewrite") or ("heldout" if "held-out:" in str(q.get("reason", "")) else "acceptance")
@@ -532,6 +606,8 @@ def _question(card: Card, st: Dict[str, Any], d: Decision, kind: str) -> Dict[st
                                         "fresh rounds"})  # fmt: skip
             q["options"] = opts
             q["rewrite"] = "heldout" if held else "acceptance"
+    if held and not q.get("evidence"):  # the owner sees what the implementer cannot: which held-out tests fail
+        q["evidence"] = "The held-out tests failing:\n" + "\n".join(f"- {x}" for x in st["heldout_failing"])[:1500]
     return q
 
 
@@ -658,7 +734,14 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
                         rt.stage(mid, cid, Stage.QA)
                         facts.heldout_ok, facts.heldout_failures = await _heldout(rt, card, wt)
                         record.update(heldout=facts.heldout_ok)
-    st["heldout_failing"] = facts.heldout_failures if facts.heldout_ok is False else []
+    if facts.heldout_ok is not None:  # a round the held-out tests did not run in neither breaks nor extends a run
+        same = facts.heldout_ok is False and sorted(facts.heldout_failures) == st.get("heldout_last")
+        st["heldout_same"] = st.get("heldout_same", 0) + 1 if same else (1 if facts.heldout_ok is False else 0)
+        st["heldout_last"] = sorted(facts.heldout_failures) if facts.heldout_ok is False else None
+        # what still fails: a round they did not run in (a question, a failing check) keeps the last run's names,
+        # so its question offers to rewrite the held-out tests (tipcalc m3/C5 offered the acceptance tests)
+        st["heldout_failing"] = facts.heldout_failures if facts.heldout_ok is False else []
+    facts.heldout_same = st.get("heldout_same", 0)
 
     facts.cost_usd = rt.card(mid, cid).cost_usd
     async with child("decide", inputs={"round": n}, op_type="decide") as step:
@@ -682,8 +765,11 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
         st["feedback"] = d.feedback
         return {"next": "fix", "question": None, "state": st, "outcome": None}
     # ask
+    # the engine's own limits are "engine" even on a round the implementer asked in: their "keep" extends the
+    # limit (tipcalc m3/C5 hit max rounds on a question round; "keep" read as an answer left the cap at 6)
+    mine = (d.question or {}).get("engine")
     kind = ("auth" if facts.coder_status == "auth" else "finding" if facts.upheld
-            else "human" if facts.needs_human else "engine")  # fmt: skip
+            else "engine" if mine else "human" if facts.needs_human else "engine")  # fmt: skip
     q = _question(card, st, d, kind)
     if q["fingerprint"] in st["asked"]:  # asked and answered before: apply that answer again
         st["pending"] = q
