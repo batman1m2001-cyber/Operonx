@@ -713,25 +713,8 @@ class ResourceHub:
     # ========================================================================
 
     def _refresh_token(self, instance) -> None:
-        """Refresh the bearer token on a cached instance, if it has one.
-
-        Works for every provider in :data:`TOKEN_REF_PREFIXES` — each one
-        exposes ``get_token()`` and nothing here knows which scheme minted
-        it. Cheap on the hot path: the provider returns its cached token
-        until expiry, so this is a dict lookup plus a clock read.
-        """
-        provider = getattr(instance, "_token_provider", None)
-        if provider is None:
-            # Pre-oauth2 instances (and anything built by hand) may carry
-            # only the old attribute.
-            provider = getattr(instance, "_keycloak_provider", None)
-        if provider is None:
-            return
-        fresh_token = provider.get_token()
-        if hasattr(instance, "client"):
-            instance.client.api_key = fresh_token
-        if hasattr(instance, "config"):
-            instance.config.api_key = fresh_token
+        """Refresh the bearer token on a cached instance — :func:`refresh_token`."""
+        refresh_token(instance)
 
     #: Deprecated alias kept because the name was public in practice.
     _refresh_keycloak = _refresh_token
@@ -955,3 +938,49 @@ class ResourceHub:
         if not result.healthy:
             raise ResourceUnreachable({k: result.errors.get(k, "unhealthy") for k in result.failed})
         return result
+
+
+# ============================================================================
+# Bearer tokens on a live instance
+# ============================================================================
+
+
+def _token_provider(instance) -> Any:
+    provider = getattr(instance, "_token_provider", None)
+    # Pre-oauth2 instances (and anything built by hand) may carry only the
+    # old attribute.
+    return provider if provider is not None else getattr(instance, "_keycloak_provider", None)
+
+
+def refresh_token(instance) -> None:
+    """Put the token provider's current token on *instance*, if it has one.
+
+    A resource whose ``api_key`` is ``"oauth2:<name>"`` or ``"keycloak:<name>"``
+    gets the token minted when it was built. The provider renews in the
+    background, but the renewed token reaches the instance only through this
+    — so anything that keeps an instance across requests (``LLMOp`` does, for
+    the life of the op) calls it before each one. Cheap on the hot path: the
+    provider returns its cached token until expiry, a lock and a clock read.
+    """
+    provider = _token_provider(instance)
+    if provider is None:
+        return
+    fresh_token = provider.get_token()
+    if hasattr(instance, "client"):
+        instance.client.api_key = fresh_token
+    if hasattr(instance, "config"):
+        instance.config.api_key = fresh_token
+
+
+def invalidate_token(instance) -> bool:
+    """Drop the cached token behind *instance* and put a newly fetched one on it.
+
+    For a 401 on a token the provider still considers valid (revoked, or the
+    two clocks disagree). False when *instance* has a literal key: nothing to renew.
+    """
+    provider = _token_provider(instance)
+    if provider is None:
+        return False
+    provider.invalidate()
+    refresh_token(instance)
+    return True
