@@ -88,6 +88,11 @@ def delivery_text(life: "Lifecycle", mid: str) -> str:
     lines += ["", "## Checks", ""]
     lines += [f"- `{c['cmd']}`" for c in f["base"].get("checks") or []] or ["- none"]
     lines.append("")
+    retro = life.store.ms_get(mid, "retro")
+    if retro:
+        from operonx_project.retro import report_text
+
+        lines += report_text(retro["report"], retro.get("lessons") or [], retro.get("file") or "")
     return "\n".join(lines)
 
 

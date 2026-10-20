@@ -74,6 +74,8 @@ def test_findings_are_a_fix_and_upheld_ones_ask():
 def test_heldout_failure_is_a_fix_with_names_only():
     d = decide(facts(heldout_ok=False, heldout_failures=["test_x: should do y"]))
     assert d.next == "fix" and "test_x: should do y" in d.feedback
+    again = decide(facts(heldout_ok=False, heldout_failures=["test_x: should do y"], heldout_same=2))
+    assert again.next == "ask" and again.question["category"] == "requirements"  # the same names twice: ask
 
 
 @pytest.mark.parametrize("row", [

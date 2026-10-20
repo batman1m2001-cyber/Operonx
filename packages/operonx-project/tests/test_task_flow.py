@@ -245,6 +245,44 @@ async def test_a_wrong_heldout_test_is_corrected_on_the_owners_word(tmp_path):
     assert [e["kind"] for e in env.store.events("m1") if e["kind"] == "heldout.rewritten"] == ["heldout.rewritten"]
 
 
+async def test_the_same_heldout_failures_twice_ask_the_owner_before_the_round_limit(tmp_path):
+    # tipcalc m3/C5: two held-out tests expected a direct op call to record its error, which operonx never does;
+    # checks and review passed every round, so only the round limit stopped it (six rounds)
+    from pathlib import Path
+
+    from tests.flow_env import HELDOUT
+
+    impossible = HELDOUT.replace("== -2, 'add handles negative numbers'", "is not -2, 'two runs are equal'")
+    examiner = lambda req, i: {"write": {str(Path(req.add_dirs[0]) / "test_held.py"): impossible},  # noqa: E731
+                               "output": {"files": ["test_held.py"]}}  # fmt: skip
+    env = Env(tmp_path, {"implementer": [impl(RIGHT + f"# {i}\n") for i in range(6)], "examiner": [examiner]},
+              max_rounds=6)  # fmt: skip
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human"
+    assert [r["next"] for r in env.rounds()] == ["fix", "ask"]  # not six rounds
+    assert out.question["category"] == "requirements" and out.question["rewrite"] == "heldout"
+    assert "failed 2 times in a row" in out.question["problem"]
+    assert "test_negative: AssertionError: two runs are equal" in out.question["evidence"]
+
+
+async def test_a_question_round_keeps_the_heldout_failures_it_did_not_run(tmp_path):
+    # tipcalc m3/C5: the round limit came on a question round, which cleared the held-out failures, so the
+    # owner was offered a rewrite of the (right) acceptance tests, and shown nothing of the held-out ones
+    from pathlib import Path
+
+    from tests.flow_env import HELDOUT
+
+    impossible = HELDOUT.replace("== -2, 'add handles negative numbers'", "is not -2, 'two runs are equal'")
+    examiner = lambda req, i: {"write": {str(Path(req.add_dirs[0]) / "test_held.py"): impossible},  # noqa: E731
+                               "output": {"files": ["test_held.py"]}}  # fmt: skip
+    ask = {"output": {"summary": "a question", "needs_human": {"category": "requirements", "problem": "p",
+                                                               "why": "w", "options": ["a", "b"]}}}
+    env = Env(tmp_path, {"implementer": [impl(RIGHT), ask], "examiner": [examiner]}, max_rounds=2)  # fmt: skip
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human" and len(env.rounds()) == 2
+    assert out.question["rewrite"] == "heldout" and "two runs are equal" in out.question["evidence"]
+
+
 async def test_rewriting_acceptance_tests_has_the_examiner_check_its_own(tmp_path):
     # tipcalc rebuild/C3: both sets expected a direct op call to raise; rewriting only the acceptance
     # tests left the held-out ones failing the same way, for rounds more
@@ -268,3 +306,19 @@ async def test_rewriting_acceptance_tests_has_the_examiner_check_its_own(tmp_pat
     assert "Check your held-out tests" in again and "6 is wrong" in again
     kinds = [e["kind"] for e in env.store.events("m1") if e["kind"].endswith(".rewritten")]
     assert kinds == ["acceptance.rewritten", "heldout.rewritten"]
+
+
+async def test_keep_on_the_round_limit_gives_fresh_rounds_even_on_a_question_round(tmp_path):
+    # tipcalc m3/C5: the round limit came on a round the implementer asked in (triage answered it); the limit's
+    # question was classed the implementer's, so "keep" left the cap where it was: the next round hit it again
+    ask = {"output": {"summary": "a question", "needs_human": {"question": "which file?", "why": "w"}}}
+    env = Env(tmp_path, {"implementer": [impl(WRONG), ask] + [impl(WRONG + f"# {i}\n") for i in range(3)],
+                         "triage": [{"output": {"action": "answer", "answer": "calc.py", "evidence": ["calc.py"]}}]},
+              max_rounds=2)  # fmt: skip
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human" and len(env.rounds()) == 2
+    assert out.question["category"] == "repeated_failure" and out.question.get("engine")
+    env.store.update_card("m1", "C1", detail={**env.card().detail, "question": out.question}, run_id=out.run_id)
+    out = await env.runner.resume(env.card(), "keep", env.stage)
+    assert out.status == "waiting_human" and out.question["category"] == "repeated_failure"
+    assert len(env.rounds()) == 4  # two fresh rounds, not one round straight back to the limit

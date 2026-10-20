@@ -52,6 +52,7 @@ DEFAULT_MODELS: Dict[str, Optional[str]] = {
     "plan_reviewer": "fable",
     "replenisher": "opus",
     "milestone_reviewer": "fable",
+    "retrospective": "sonnet",  # the lessons a delivered milestone teaches (retro.py)
     # the requirements, from a source (brd_flow)
     "extractor": "opus",
     "hunter": "fable",

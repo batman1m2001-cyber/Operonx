@@ -20,7 +20,7 @@ import pytest
 
 import operonx
 from operonx import guide
-from operonx.cli.init import plan
+from operonx.cli.init import brd_files, plan
 from operonx.cli.main import TEMPLATES, main
 
 pytestmark = pytest.mark.unit
@@ -591,6 +591,12 @@ class TestTheBrd:
                     "requirements/open_questions.md", "board/README.md", "sources/owner_requests/.gitkeep"):  # fmt: skip
             assert (brd / rel).is_file(), rel
         assert "# p: the living product repository" in (brd / "README.md").read_text()
+        # how it is built (operonx-project): a new project's own; brd init on an existing repo writes neither
+        assert (
+            'style = "layered"' in (brd / "practices.toml").read_text()
+            and (brd / "LESSONS.md").is_file()
+        )
+        assert not {"practices.toml", "LESSONS.md"} & set(brd_files("p"))
         agents = (root / "AGENTS.md").read_text()
         assert guide.builder_block() in agents
         assert agents.index(guide.BUILDER_BEGIN) < agents.index("## Commands")

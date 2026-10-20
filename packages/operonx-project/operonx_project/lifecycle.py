@@ -539,6 +539,7 @@ class Lifecycle:
         rec = self.store.ms_get(mid, "final") or {"gaps": []}
         gaps = rec["gaps"]
         if not gaps:
+            await self._retro(mid)
             self.deliver(mid)
             self._move(mid, M.DONE, f"delivered on {self.p.git.integration_branch(mid)}")
             return
@@ -570,6 +571,43 @@ class Lifecycle:
             return
         added = [f"added {fix.id}"] if mine else []
         self._move(mid, M.RUNNING, f"final verification {', '.join(added + [f're-opened {c}' for c in by_card])}")
+
+    async def _retro(self, mid: str) -> None:
+        """The retrospective (retro.py): its report, always; its lessons, one session, when the practices name
+        a lessons file and the milestone had friction, committed to that file on the integration branch. A
+        failure here is logged and noted: it never holds a delivery."""
+        from operonx_project import retro
+        from operonx_project.practices import PracticesError, load
+
+        if self.store.ms_get(mid, "retro") is not None:
+            return
+        rt = self.rt(mid)
+        rep = retro.report(self.store, mid)
+        rec: Dict[str, Any] = {"report": rep, "lessons": [], "file": "", "commit": None}
+        try:
+            integ = rt.git.ensure_integration(mid)
+            try:
+                file = load(integ).lessons
+            except PracticesError:
+                file = ""
+            if file and retro.friction(rep):
+                existing = (integ / file).read_text(encoding="utf-8") if (integ / file).is_file() else ""
+                req = stage_request(rt, mid, "planner", "retrospective", retro.lessons_prompt(rep, existing), integ,
+                                    "retrospective", schema=retro.LESSONS_SCHEMA)  # fmt: skip
+                res = await stage_call(rt, mid, "retrospective", req, key=f"{rt.key}:{mid}:retrospective")
+                got = (res.output or {}).get("lessons") if res.ok and isinstance(res.output, dict) else None
+                if got is None:
+                    self.store.note(mid, "retro.failed", {"error": f"{res.status}: {res.error[:300]}"})
+                elif retro.append(integ, file, mid, got):
+                    rt.git.git("add", file, cwd=integ)
+                    rec.update(lessons=retro.usable(got), file=file,
+                               commit=rt.git.commit(integ, f"{mid}: lessons ({file})"))  # fmt: skip
+        except Exception as e:  # noqa: BLE001 - a retrospective never holds a delivery
+            LOGGER.warning(f"operonx-project: {mid}'s retrospective failed: {e}")
+            self.store.note(mid, "retro.failed", {"error": str(e)[:300]})
+        self.store.ms_put(mid, "retro", rec)
+        self.store.note(mid, "retro", {"rounds": rep["rounds"], "cost_usd": rep["cost_usd"],
+                                       "lessons": len(rec["lessons"]), "file": rec["file"]})  # fmt: skip
 
     def _fix_card(self, mid: str, gaps: List[Dict[str, Any]]) -> Card:
         """A card for what final verification found that no card owns: a check the milestone's

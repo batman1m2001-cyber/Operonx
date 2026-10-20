@@ -232,6 +232,60 @@ checks each diff against them, and a change that breaks one is a major
 finding that names the rule. The engine's own instructions win where they
 differ.
 
+## How the project is built: practices
+
+`docs/brd/practices.toml` declares how the engine builds the project. It
+is committed, so a team and a rebuild share it, and each card reads the
+version on its own branch. Every section is optional. A project without
+the file is built as before. `operonx init` writes the `operonx` preset;
+`brd init` and `adopt` write none.
+
+```bash run
+operonx-project practices --repo demo --init operonx    # or --init clean
+operonx-project practices --repo demo                   # validated, in words
+operonx-project arch --repo demo                        # the architecture check, as every round runs it
+```
+
+The sections:
+- **`[tdd] mode`**:
+  - `acceptance` (the default): acceptance tests are written before the
+    code.
+  - `strict`: the tests must also fail before the code. A set that
+    already passes is written again, once, and the red evidence goes on
+    the card.
+  - `off`: no test author and no examiner, for spikes and docs.
+- **`[architecture]`**: a `style` told to every session, and rules
+  `operonx-project arch` checks:
+  - `layers` (outermost first; a module never imports a layer before its
+    own);
+  - `forbid` (modules a layer never imports: the domain's frameworks);
+  - `private = "forbid"` (no other package's `_names` or `_attributes`);
+  - `command` (any other tool: import-linter, dependency-cruiser).
+
+  Globs read as git reads them: `*` is one path segment and `**` is any
+  number of them.
+- **`[[contexts]]`**: DDD bounded contexts, reached from one another only
+  through their `public` modules.
+- **`[language] glossary`**: its terms go to every session.
+- **`[lessons] file`**: what earlier milestones taught. Every session
+  reads it.
+- **`[done] checks`**: the Definition of Done, as more commands every card
+  must pass. A type check, a coverage gate and a docs build all fit.
+
+At discovery, `architecture` and the `[done]` checks join the milestone's
+baseline. A violation already in the code is the past and costs no card
+anything. A new one fails the round, as a new failing test does, and it
+names the file and the rule.
+
+When a milestone is delivered, its **retrospective** goes into
+`DELIVERY.md` and onto the Board. It reports the cost by stage and by
+card, the rounds, the checks that failed them, the owner's answers and
+the tests written again, all read from the store. When the milestone had
+friction and `[lessons]` names a file, one Sonnet session proposes at most
+five lessons, each with its evidence. They are appended to that file on
+the milestone's branch, so the owner reviews them in the PR. The next
+milestone's sessions read them.
+
 ## A project that is already built: adopt
 
 ```bash norun
@@ -277,7 +331,11 @@ The studio's Board tab is the owner's console for a project with
 
 The studio's assistant has the same powers as tools: `board_status`,
 `board_card`, `board_request`, `board_start`, `board_act` (ship and merge
-too), `board_daemon`, `board_models`, `board_take` and `board_submit`.
+too), `board_daemon`, `board_models`, `board_practices` (read, recommend
+and set the practices; a write commits that file alone), `board_take`
+and `board_submit`. The Board shows the practices as a chip, the
+architecture check's count on each milestone's base, each card's
+test-first evidence, and the retrospective.
 The owner can run a project from the chat: "tipcalc: add a split by item",
 "what is C3 stuck on?", "take C4 and do it yourself", "ship it". The
 studio needs `operonx-project` where it runs (or `OPERONX_PROJECT_BIN`).

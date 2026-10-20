@@ -23,6 +23,11 @@ Requests (``op`` and its fields)::
     {"op": "ship" | "merge", "milestone": "m1"}  # push + PR (gh) or the GitLab URL; merge where granted (D15)
     {"op": "settings"}                                                      # the models each role runs on
     {"op": "settings", "model": "sonnet", "models": {"reviewer": "opus"}}   # set them ("" clears one)
+    {"op": "practices"}                       # how the project is built: the file, in words, and the arch check
+    {"op": "practices", "preview": "operonx"} # what a preset's rules would find on the checkout; nothing written
+    {"op": "practices", "preset": "operonx"}  # write a preset (``force``: over an existing file)
+    {"op": "practices", "toml": "…"}          # validate and write the file
+                                              # a write is committed on the checkout's branch: that file only
 
 The answer: ``{"ok": bool, "status": …, "message": …}`` (``seq``: the queued
 command; ``current``: the open questions, for a stale answer).
@@ -72,6 +77,7 @@ OPS = (
     "start",
     "request",
     "settings",
+    "practices",
     "ship",
     "merge",
 )
@@ -207,6 +213,88 @@ def _settings(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
             "model": settings.get("model"), "models": per, "effective": effective}  # fmt: skip
 
 
+def _practices(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    """Read the project's practices, with the architecture check run on the checkout; or write them (a preset,
+    or TOML the engine validates first), committed on the checkout's branch, that file alone. The next card
+    reads them from its own branch, so a milestone already running keeps the practices it started with."""
+    from operonx_project.contracts import check
+    from operonx_project.practices import FILE, PRESETS, PracticesError, load, parse, render, tomllib
+
+    repo = project.repo
+    path = repo / FILE
+    wrote = ""
+    writing = bool(req.get("preset")) or req.get("toml") is not None
+    if req.get("preview") and req["preview"] not in PRESETS:
+        return _no("invalid", f"no preset {req['preview']!r}; there are {', '.join(PRESETS)}")
+    if writing:
+        if req.get("preset"):
+            if req["preset"] not in PRESETS:
+                return _no("invalid", f"no preset {req['preset']!r}; there are {', '.join(PRESETS)}")
+            if path.exists() and not req.get("force"):
+                return _no("refused", f"{FILE} exists: read it and send its new text as toml, or force the preset")
+            text = PRESETS[req["preset"]]
+        else:
+            text = str(req["toml"])
+        try:
+            parse(tomllib.loads(text), source=FILE)
+        except (PracticesError, tomllib.TOMLDecodeError) as exc:
+            return _no("invalid", f"{FILE} would not be valid: {exc}")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+        wrote = _commit_one(project, FILE, f"practices: {req.get('preset') or 'edited'} ({actor})")
+        LOGGER.info("operonx-project: %s wrote %s (%s)", actor, FILE, req.get("preset") or "toml")
+    try:
+        p = load(repo)
+    except PracticesError as exc:
+        return {"ok": False, "status": "invalid", "message": str(exc), "file": FILE,
+                "text": path.read_text(encoding="utf-8") if path.exists() else ""}  # fmt: skip
+    found = check(repo, p) if p.enforced else []
+    preview = None
+    if req.get("preview"):  # the evidence for a recommendation: what the preset's rules would flag today
+        seen = check(repo, parse(tomllib.loads(PRESETS[req["preview"]]), source=f"preset {req['preview']}"))
+        preview = {"preset": req["preview"], "violation_count": len(seen),
+                   "violations": [_violation(v) for v in seen[:100]]}  # fmt: skip
+    summary = render(p) or f"no {FILE}: the defaults (acceptance tests first; no architecture rules)"
+    said = [f"wrote {FILE}" + (f" (commit {wrote[:8]})" if wrote else "")] if writing else []
+    said.append(f"{len(found)} architecture violation(s) on the checkout" if p.enforced else "no architecture rules")
+    return {
+        "ok": True,
+        "status": "done" if writing else "read",
+        "message": "; ".join(said),
+        "file": FILE,
+        "exists": path.exists(),
+        "text": path.read_text(encoding="utf-8") if path.exists() else "",
+        "practices": p.to_dict(),
+        "summary": summary,
+        "presets": list(PRESETS),
+        "violations": [_violation(v) for v in found[:100]],
+        "violation_count": len(found),
+        "preview": preview,
+        "commit": wrote or None,
+    }  # fmt: skip
+
+
+def _violation(v: Any) -> Dict[str, Any]:
+    return {"id": v.id, "rule": v.rule, "file": v.file, "line": v.line, "message": v.message}
+
+
+def _commit_one(project: Any, rel: str, message: str) -> str:
+    """Commit *rel* alone on the checkout's branch (anything else staged stays staged); "" outside git or
+    when the file did not change."""
+    from operonx_project.gitops import _run
+
+    repo = project.repo
+    try:
+        _run(repo, "add", "--", rel)
+        if not _run(repo, "diff", "--cached", "--name-only", "--", rel).strip():
+            return ""
+        _run(repo, "commit", "-q", "--no-verify", "-m", message, "--", rel, env=project.git._commit_env(repo))
+        return project.git.rev("HEAD", cwd=repo)
+    except Exception as exc:  # noqa: BLE001 - not a git checkout, or no identity: the file is written either way
+        LOGGER.warning(f"operonx-project: {rel} written, not committed: {exc}")
+        return ""
+
+
 def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, Any]:
     op, mid = req.get("op"), req.get("milestone")
     if op not in OPS:
@@ -218,6 +306,8 @@ def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, A
         return _request(project, req, actor)
     if op == "settings":
         return _settings(project, req, actor)
+    if op == "practices":
+        return _practices(project, req, actor)
     try:
         ms = store.get_milestone(str(mid))
     except KeyError:

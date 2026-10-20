@@ -7,7 +7,9 @@ them:
 
 - ``~/.operonx/owner.md`` (or ``OPERONX_OWNER_RULES``): the owner's rules for
   every project;
-- the project's ``AGENTS.md``, from the session's working directory.
+- the project's ``AGENTS.md``, from the session's working directory;
+- the project's practices (``docs/brd/practices.toml``, rendered), with its
+  glossary and its lessons, from the same place.
 
 :func:`standing_rules` is appended to every session's system prompt
 (``--append-system-prompt``), and the reviewer checks a diff against them.
@@ -18,6 +20,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Optional
+
+from operonx_project.practices import FILE, PracticesError, load, render
 
 __all__ = ["LIMIT", "owner_rules_path", "standing_rules"]
 
@@ -37,9 +41,16 @@ def _read(path: Path) -> str:
     return text if len(text) <= LIMIT else text[:LIMIT] + "\n… (cut)"
 
 
+def _practices(cwd: Path) -> str:
+    try:
+        return render(load(cwd), cwd)
+    except PracticesError as e:  # discovery refuses the file; a session is not the place to fail on it
+        return f"({FILE} does not parse: {e}. Follow AGENTS.md.)"
+
+
 def standing_rules(cwd: Optional[Path]) -> str:
-    """The text appended to a session's system prompt: the owner's rules, then
-    the project's AGENTS.md. Empty when there are neither."""
+    """The text appended to a session's system prompt: the owner's rules, the
+    project's AGENTS.md, then its practices. Empty when there are none."""
     parts = []
     owner = _read(owner_rules_path())
     if owner:
@@ -47,6 +58,9 @@ def standing_rules(cwd: Optional[Path]) -> str:
     agents = _read(Path(cwd) / "AGENTS.md") if cwd else ""
     if agents:
         parts.append("# This project's rules (its AGENTS.md)\n\n" + agents)
+    practices = _practices(Path(cwd)) if cwd else ""
+    if practices:
+        parts.append(f"# This project's practices ({FILE})\n\n" + practices)
     if not parts:
         return ""
     return (

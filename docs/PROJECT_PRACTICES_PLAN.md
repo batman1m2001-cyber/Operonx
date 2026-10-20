@@ -1,7 +1,7 @@
 # Project practices: how a project is built, declared once and enforced by the builder
 
-**Status:** 2026-10-20. The owner asked for this ("act as a solution architect … carry it through"),
-so it is approved. Every claim about today below was read in the code (Operon `487e7917`,
+**Status:** 2026-10-20. Done: P1–P6 built, and the gate run is in §4. The owner asked for this ("act as a
+solution architect … carry it through"), so it is approved. Every claim about today below was read in the code (Operon `487e7917`,
 operonx-studio `72866a3`) or measured in the tipcalc runs of `PROJECT_BUILDER_PLAN.md`.
 
 ## 1. What the builder does today, and where it falls short
@@ -178,3 +178,45 @@ calls happen only in P6, on Sonnet.
 | P4 | Retrospective: the report in DELIVERY.md, the lessons call, LESSONS.md on the branch | Scripted: a milestone with a rewritten test proposes a lesson that lands in LESSONS.md, and the next session's prompt carries it. |
 | P5 | Studio: `board_practices`, the decision guide, retro in `board_status`, Board chips; the API's `practices` op | Studio tests; desktop and phone screenshots. |
 | P6 | End to end, through the assistant: chat sets tipcalc's practices (operonx preset, strict TDD); a request replaces `_RaisingOp`. Then the guide page, the init template (`practices.toml`, `LESSONS.md`), operonx release | The run: the arch check shows the violation in the baseline and as fixed at the end; the red evidence; lessons committed; Ship. Sonnet, cap $5. |
+
+## 4. Results
+
+P1–P5 were tested with scripted coders. P6 was run on tipcalc through the studio assistant (Sonnet, a
+scratch studio on its own port).
+
+**The gate run.** In chat, the assistant previewed both presets on the code and recommended `operonx`.
+`clean` found nothing that has rings. With the owner's agreement it set `operonx` with strict TDD, and
+each setting was one commit of `docs/brd/practices.toml`. The owner's request ("replace the `_RaisingOp`
+hack") made m3 (W1, with six cards: C1–C4 tests, C5 the code, C6 docs).
+- **Architecture.** m3's baseline had one violation, `arch:private:src/tipsplit/ops.py->state._run_policy`.
+  It cost the cards nothing. Merged `main` has none (`operonx-project arch`: 0 violations).
+- **Red evidence on C5.** The first acceptance set passed before the code (2 passed), so it was
+  re-authored. The second failed before the code (5 failed, 0 passed).
+- **Lessons.** The retrospective wrote three lessons, each with its evidence, to `docs/brd/LESSONS.md`,
+  committed on the branch. Every later session reads them.
+- **Ship.** The assistant shipped the milestone and merged it on the owner's word, as tipcalc PR #3.
+- **Cost.** $4.60 of the $5 cap, over 19 rounds. C5 took 10 rounds and $2.59 of that.
+- **Tests on `main`.** 267 pass and 1 fails. The failure is tipcalc's own
+  `test_summary_counts_match_table`, which counts only `TIP-REQ-` rows. m3's request added two
+  `TIP-RULE-` rows at intake, so it was red in the baseline. Fixing it is a one-line card for the
+  owner, and lesson 3 says so.
+
+**What the run found, and the fix.** Every fix except #2, #4 and #13 (guide text and CSS) has a test that failed before it. The engine is Operon
+`feat/practices`; the studio is `feat/board-practices`.
+
+| # | Found | Fix |
+|---|---|---|
+| 1 | The assistant chose a preset by name, with no evidence. | `practices` op `preview`: what a preset would flag, with nothing written. |
+| 2 | The assistant proposed Done checks that every round already runs. | The guide lists them. |
+| 3 | A W1 plan's cards were on no board, so the assistant could not say what it was approving. | The approval question carries the plan cards; `board_status` prints them. |
+| 4 | Strict TDD's red check stopped the characterization tests a refactor needs. | The rule says those go in a `test` card, which has no red check. |
+| 5 | The test author's `.pyc` files were listed as protected tests. | Files come from `git ls-files`. |
+| 6 | Held-out tests that no code can pass looped to the round limit. | The same held-out failures twice ask the owner (`HELDOUT_SAME_LIMIT`). |
+| 7 | A question round cleared the held-out failures, so "rewrite" targeted the acceptance tests. | The failures are kept across a question round. |
+| 8 | The question named no held-out test. | The question carries the failing names; `board_status` prints the evidence. |
+| 9 | "Keep" at the round limit, on a round the implementer had asked in, added no rounds. | The engine's own limits are marked `engine`; "keep" extends them. |
+| 10 | The assistant sent `"rewrite_tests. The two …"` as one string. The engine took it as words, and no test was rewritten. | An answer that starts with a whole option key and a separator names that option. A reply that took no option says so and lists the options. `board_act` documents `{choice, text}`. |
+| 11 | C6 hand-edited the checklist's summary count: three rounds and an arbitration over a table the engine rewrites. | The template and AGENTS.md's builder block say the table is the engine's. |
+| 12 | A done milestone's Board showed only the violations at its base. | Final verification records its checks. The retrospective, DELIVERY.md and the Board show before and after. |
+| 13 | On a phone, a long test name in a lesson ran off the screen. | The notes wrap. |
+

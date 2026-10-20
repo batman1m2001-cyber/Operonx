@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.33.0] - 2026-10-20
+
+### Added
+
+- **`operonx init` writes `docs/brd/practices.toml` and `docs/brd/LESSONS.md`.** The practices file says how the project is built, and operonx-project enforces it (PROJECT_PRACTICES_PLAN):
+  - the TDD mode (`acceptance`, `strict` or `off`);
+  - the layers AGENTS.md states (app → graph → ops → helpers), checked on every round by `operonx-project arch`, with no other package's `_private` names or attributes;
+  - the glossary and the lessons every coder session reads;
+  - Definition-of-Done checks.
+
+  The file is the engine's `operonx` preset, and every template is clean under it. The lessons file starts empty; a delivered milestone's retrospective adds to it. `operonx-project brd init`, which an existing repo gets, writes neither file: there, no file means the builder's defaults (`operonx/cli/templates/_practices/`).
+
+### Changed
+
+- **The checklist's summary table says it is the engine's.** The BRD template's `## 0. Summary` and the AGENTS.md builder block (which `operonx guide` keeps current) say that `operonx-project` counts the table from the rows and that nobody edits it by hand. In a tipcalc run, a coder hand-edited the count, and it took three rounds and an arbitration over a table final verification rewrites anyway.
+
 ## [1.32.0] - 2026-10-19
 
 ### Added

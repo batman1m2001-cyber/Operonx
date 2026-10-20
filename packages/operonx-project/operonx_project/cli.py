@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -131,6 +132,15 @@ def _milestone_parsers(sub) -> None:
     p = sub.add_parser("new", help="a new project: a git repo with docs/brd/ and an empty board")
     p.add_argument("dir", type=Path)
     p.add_argument("--name")
+    p = sub.add_parser("practices", help="how the project is built (docs/brd/practices.toml): show, check, --init")
+    _repo_arg(p)
+    p.add_argument("--init", metavar="PRESET", help="write a starting file: operonx | clean")
+    p.add_argument("--force", action="store_true", help="with --init: replace an existing file")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("arch", help="check the architecture the practices declare: one FAILED line per violation")
+    _repo_arg(p)
+    p.add_argument("--preset", help="check a preset's rules instead of the file's (what would it flag?)")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("adopt", help="an existing project: its BRD from its docs and tests, its baseline board")
     _repo_arg(p)
     p.add_argument("--prefix", default="", help="the requirement id prefix (default: from the project name)")
@@ -332,8 +342,65 @@ def show_data(project, mid: str, cid: Optional[str], events: int) -> dict:
             "events": store.events(mid, limit=100_000)[-events:]}  # fmt: skip
 
 
+def _practices(args) -> int:
+    """``practices`` and ``arch``: files only, no store."""
+    from operonx_project.practices import FILE, PRESETS, PracticesError, load, parse, render, tomllib
+
+    out = sys.stdout
+    repo = Path(args.repo)
+    if args.cmd == "practices" and args.init:
+        if args.init not in PRESETS:
+            sys.stderr.write(f"error: no preset {args.init!r}; there are {', '.join(PRESETS)}\n")
+            return 2
+        path = repo / FILE
+        if path.exists() and not args.force:
+            sys.stderr.write(f"error: {FILE} exists (--force replaces it)\n")
+            return 2
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(PRESETS[args.init], encoding="utf-8")
+        out.write(f"wrote {FILE} ({args.init}); edit it for this project, then commit it\n")
+    try:
+        if getattr(args, "preset", None):
+            if args.preset not in PRESETS:
+                raise PracticesError(f"no preset {args.preset!r}; there are {', '.join(PRESETS)}")
+            p = parse(tomllib.loads(PRESETS[args.preset]), source=f"preset {args.preset}")
+        else:
+            p = load(repo)
+    except PracticesError as e:
+        sys.stderr.write(f"error: {e}\n")
+        return 2
+    if args.cmd == "practices":
+        if args.json:
+            out.write(json.dumps(p.to_dict(), indent=2) + "\n")
+        else:
+            out.write((render(p) or f"no {FILE}: the defaults (acceptance tests first; no architecture rules)")
+                      + "\n")  # fmt: skip
+        return 0
+    from operonx_project.contracts import check
+
+    found = check(repo, p) if p.enforced else []
+    extra = None
+    if p.command:
+        res = subprocess.run(p.command, shell=True, cwd=repo, capture_output=True, text=True)
+        extra = {"cmd": p.command, "exit_code": res.returncode, "tail": (res.stdout + res.stderr)[-4000:]}
+    if args.json:
+        out.write(json.dumps({"enforced": p.enforced, "violations": [{**v.__dict__, "id": v.id} for v in found],
+                              "command": extra}, indent=2) + "\n")  # fmt: skip
+    else:
+        for v in found:
+            out.write(f"FAILED {v.id} - {v.message} (line {v.line})\n")
+        if extra is not None:
+            out.write(f"$ {extra['cmd']}\n{extra['tail']}\n")
+            if extra["exit_code"]:
+                out.write(f"FAILED arch:command - exit {extra['exit_code']}\n")
+        out.write(f"{len(found)} violation(s)" + ("" if p.enforced else f" (no rules in {FILE})") + "\n")
+    return 1 if found or (extra and extra["exit_code"]) else 0
+
+
 def _milestones(args) -> int:
     out = sys.stdout
+    if args.cmd in ("practices", "arch"):
+        return _practices(args)
     if args.cmd == "new":
         from operonx_project.project import new_project
 
