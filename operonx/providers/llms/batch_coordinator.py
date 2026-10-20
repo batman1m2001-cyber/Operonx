@@ -11,6 +11,8 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
+from operonx.core.registry.resource_hub import refresh_token
+
 if TYPE_CHECKING:
     from operonx.providers.llms.base import BaseLLM
 
@@ -210,7 +212,9 @@ class BatchCoordinator:
             # Get common params from first request (they should be consistent)
             params = job.requests[0].params if job.requests else {}
 
-            # Call the LLM's generate_batch method
+            # Call the LLM's generate_batch method, with the provider's current
+            # token: the coordinator keeps its LLM instance across batches.
+            refresh_token(self.llm)
             results = await self.llm.generate_batch(
                 batch_messages=batch_messages,
                 poll_interval=self.poll_interval,

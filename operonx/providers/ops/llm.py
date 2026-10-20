@@ -17,7 +17,8 @@ from operonx.core.exceptions import LLMRefusalError, PromptError
 from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, should_emit_for_channel, split_shorthand_kwargs
-from operonx.core.policy import resource_retry, retry_call
+from operonx.core.policy import _http_status, resource_retry, retry_call
+from operonx.core.registry.resource_hub import invalidate_token, refresh_token
 from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
@@ -882,11 +883,34 @@ class LLMOp(BaseOp):
         if not isinstance(retry_on_empty, bool):
             retry_on_empty = True
         return await retry_call(
-            lambda: coro_fn(**kwargs),
+            lambda: self._send(coro_fn, llm, kwargs),
             retry,
             again=_is_empty_completion if retry_on_empty else None,
             label=self.name,
         )
+
+    @staticmethod
+    async def _send(coro_fn, llm, kwargs: Dict[str, Any]):
+        """One request with the token provider's current token.
+
+        The op keeps its LLM instances for its whole life, and a renewed
+        ``oauth2:`` / ``keycloak:`` token reached a kept instance only through
+        a later ``hub.get()`` that never came — an hour in, every request went
+        out with an expired token. A 401 gets one more try with a token
+        fetched now (operonx retries 429 / 5xx only); a literal key, or a
+        second 401, propagates.
+        """
+        if llm is not None:
+            refresh_token(llm)
+        try:
+            return await coro_fn(**kwargs)
+        except Exception as e:
+            if _http_status(e) != 401 or llm is None or not invalidate_token(llm):
+                raise
+            LOGGER.warning(
+                "401 from %s; retrying once with a token fetched now", type(llm).__name__
+            )
+            return await coro_fn(**kwargs)
 
     def _is_refusal(self, result: Dict[str, Any]) -> bool:
         """Return True when the response looks like a provider-signalled refusal.
@@ -1007,6 +1031,7 @@ class LLMOp(BaseOp):
         emitted = False
 
         try:
+            refresh_token(selected)
             async for chunk in selected.stream(**llm_params):
                 yield_dict = self._process_chunk(chunk, acc)
                 if yield_dict:
@@ -1044,6 +1069,7 @@ class LLMOp(BaseOp):
             emitted = False
             try:
                 acc = self._new_stream_acc()
+                refresh_token(fallback_llm)
                 async for chunk in fallback_llm.stream(**llm_params):
                     yield_dict = self._process_chunk(chunk, acc)
                     if yield_dict:
