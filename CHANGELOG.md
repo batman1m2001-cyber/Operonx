@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.35.0] - 2026-10-23
+
 ### Added
 
 - **operonx-project: the api's `{"op": "status"}` also returns `text`, the status in plain lines.** It is the same text `operonx-project status` prints. The studio's `project_status` tool hands it to the assistant, so the assistant reports the same numbers the screen shows (PROJECT_MODE_PLAN P5).
