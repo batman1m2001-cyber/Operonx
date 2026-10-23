@@ -2,9 +2,9 @@
 title: Project mode — the studio as the place a project is built from
 status: in_progress
 phases:
-  - {id: P0, title: The studio reaches the engine, status: open}
-  - {id: P1, title: Plans carry their status, status: open}
-  - {id: P2, title: One status for the whole project, status: open}
+  - {id: P0, title: The studio reaches the engine, status: done}
+  - {id: P1, title: Plans carry their status, status: done}
+  - {id: P2, title: One status for the whole project, status: done}
   - {id: P3, title: Project mode, chat first, status: open}
   - {id: P4, title: The pages behind the icons, status: open}
   - {id: P5, title: The assistant works by the conventions, status: open}
@@ -152,7 +152,7 @@ calls only in P6, on Sonnet.
 |---|---|---|
 | P0 | The studio's `install.sh` installs operonx-project beside operonx; the live studio gets it; Project mode (and today's Board) says plainly when the engine is missing instead of failing an action | `operonx-project api` answers from the live studio's environment; a studio test with no engine shows the message |
 | P1 | `operonx_project/plans.py` (read, validate), `brd check` rules, `operonx-project plans [--check]`, the AGENTS.md builder block line (core), guide pages | Unit tests per rule; a project without plan blocks checks as before |
-| P2 | The `status` op and `operonx-project status`; the sentences | Fixture tests; on a copy of OneWealth it returns the 7 open rows, the 6 open questions and every plan, in under 1 s |
+| P2 | The `status` op and `operonx-project status` (the milestone list it printed is now `operonx-project milestones`); the sentences | Fixture tests; on a copy of OneWealth it returns the 7 open rows, the 6 open questions and every plan, in under 1 s |
 | P3 | Project mode: the route, the icon bar, the chat-first layout (the assistant's placement in the centre), the status column, the main rail slim by default | Studio tests; screenshots desktop and phone with no sideways scroll |
 | P4 | Plans, Checklist, Questions, Changes, Settings pages; `/board` opens Project mode | Studio tests; screenshots of each page |
 | P5 | `project_status` MCP tool; `knowledge.md`: direct work by the conventions, status from the tool | Studio tests (the tool's text from a fixture) |

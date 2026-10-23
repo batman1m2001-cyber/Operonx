@@ -8,7 +8,9 @@ The milestone commands queue a command in the project's store; the daemon
     operonx-project start --title T [--goal G] [--mode w1|w2] [--source FILE ...] [--private FILE ...]
                           [--rows ID ...] [--auto-approve] [--max-usd N] [--from-board MID [--board DIR]] [--repo .]
     operonx-project daemon [--repo .] [--once] [--no-sandbox] [--model ROLE=MODEL ...]
-    operonx-project status [--repo .] [--json]
+    operonx-project status [--repo .] [--json]         # checklist, plans, what needs you, changes (read-only)
+    operonx-project milestones [--repo .] [--json]     # every milestone: board, cost, what waits for you
+    operonx-project plans [--repo .] [--json]          # the plan docs under docs/ and where each stands
     operonx-project show MID [CARD] [--repo .] [--json]
     operonx-project approve MID | pause MID | unpause MID | cancel MID
     operonx-project answer MID CARD ANSWER [--text WORDS]
@@ -141,6 +143,9 @@ def _milestone_parsers(sub) -> None:
     _repo_arg(p)
     p.add_argument("--preset", help="check a preset's rules instead of the file's (what would it flag?)")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("plans", help="the plan docs under docs/ and where each stands (their status blocks)")
+    _repo_arg(p)
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("adopt", help="an existing project: its BRD from its docs and tests, its baseline board")
     _repo_arg(p)
     p.add_argument("--prefix", default="", help="the requirement id prefix (default: from the project name)")
@@ -202,10 +207,12 @@ def _milestone_parsers(sub) -> None:
     p = sub.add_parser("pending", help="the questions waiting for you")
     _repo_arg(p)
     p.add_argument("--json", action="store_true")
-    for name in ("status",):
-        p = sub.add_parser(name, help="every milestone: state, board, cost, what waits for you")
-        _repo_arg(p)
-        p.add_argument("--json", action="store_true")
+    p = sub.add_parser("status", help="where the project stands: checklist, plans, what needs you, recent changes")
+    _repo_arg(p)
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("milestones", help="every milestone: state, board, cost, what waits for you")
+    _repo_arg(p)
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("show", help="one milestone (its cards and last events), or one card")
     _repo_arg(p)
     p.add_argument("milestone")
@@ -397,10 +404,59 @@ def _practices(args) -> int:
     return 1 if found or (extra and extra["exit_code"]) else 0
 
 
+def _plans(args) -> int:
+    """``plans``: files only, no store. Exit 1 when a block is wrong."""
+    from operonx_project.plans import find
+
+    out = sys.stdout
+    plans, errors, warnings = find(Path(args.repo))
+    if args.json:
+        out.write(json.dumps({"plans": [p.as_dict() for p in plans], "errors": errors, "warnings": warnings},
+                             indent=1, ensure_ascii=False) + "\n")  # fmt: skip
+        return 1 if errors else 0
+    order = {"in_progress": 0, "plan": 1, "parked": 2, "done": 3}
+    for p in sorted(plans, key=lambda p: (order[p.status], p.path)):
+        cur = p.current if p.status == "in_progress" else None
+        step = f" · now {cur.id} {cur.title}".rstrip() if cur else ""
+        out.write(f"{p.status:<12} {p.done}/{len(p.phases)}  {p.title}{step}  ({p.path})\n")
+    for w in warnings:
+        out.write(f"warning: {w}\n")
+    for e in errors:
+        out.write(f"ERROR {e}\n")
+    out.write(f"{len(plans)} plan(s), {len(warnings)} without a status block, {len(errors)} error(s)\n")
+    return 1 if errors else 0
+
+
+def _status(args) -> int:
+    """``status``: the project in one document (PROJECT_MODE_PLAN D2), read-only: no store is made."""
+    from operonx_project.status import status, text
+
+    doc = status(args.repo)
+    sys.stdout.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n" if args.json else text(doc))
+    return 0
+
+
 def _milestones(args) -> int:
     out = sys.stdout
     if args.cmd in ("practices", "arch"):
         return _practices(args)
+    if args.cmd == "plans":
+        return _plans(args)
+    if args.cmd == "status":
+        return _status(args)
+    if args.cmd == "api":
+        raw = sys.stdin.read() if args.request == "-" else args.request
+        try:
+            req = json.loads(raw)
+        except ValueError as exc:
+            out.write(json.dumps({"ok": False, "status": "invalid", "message": f"not JSON: {exc}"}) + "\n")
+            return 2
+        if isinstance(req, dict) and req.get("op") == "status":  # read-only: before a store is opened
+            from operonx_project.status import status
+
+            out.write(json.dumps({"ok": True, "project": status(args.repo, changes=int(req.get("changes", 15)))},
+                                 ensure_ascii=False) + "\n")  # fmt: skip
+            return 0
     if args.cmd == "new":
         from operonx_project.project import new_project
 
@@ -491,7 +547,7 @@ def _milestones(args) -> int:
             sys.stderr.write(f"error: {exc}\n")
             return 3
         return 0
-    if args.cmd == "status":
+    if args.cmd == "milestones":
         data = status_data(proj)
         if args.json:
             out.write(json.dumps(data, indent=1) + "\n")
@@ -512,12 +568,6 @@ def _milestones(args) -> int:
     if args.cmd == "api":
         from operonx_project.api import act
 
-        raw = sys.stdin.read() if args.request == "-" else args.request
-        try:
-            req = json.loads(raw)
-        except ValueError as exc:
-            out.write(json.dumps({"ok": False, "status": "invalid", "message": f"not JSON: {exc}"}) + "\n")
-            return 2
         result = act(proj, req if isinstance(req, dict) else {}, actor=args.actor)
         out.write(json.dumps(result) + "\n")
         return 0 if result["ok"] else 1

@@ -31,16 +31,19 @@ def test_status_and_show_match_the_store(tmp_path):
     assert "queued approve" in run("approve", "m1", "--repo", repo)  # queued, refused later: nothing to approve
     life.command("start")
     assert life.serve() == M.AWAITING_APPROVAL
-    text = run("status", "--repo", repo)
+    text = run("milestones", "--repo", repo)
     assert "m1  awaiting_approval" in text and "the plan waits for the owner" in text
+    assert "calc  (milestone m1, awaiting approval)" in run("status", "--repo", repo)
     run("approve", "m1", "--repo", repo)
     assert life.serve() == M.DONE
     store = life.store
     ms = store.get_milestone("m1")
-    [st] = json.loads(run("status", "--repo", repo, "--json"))
+    [st] = json.loads(run("milestones", "--repo", repo, "--json"))
     cards = store.cards("m1")
     assert st["state"] == ms.state.value == "done" and st["cost_usd"] == round(ms.cost_usd, 4) > 0
     assert st["cards"] == len(cards) and st["columns"]["done"] == sum(column_of(c) == "done" for c in cards)
+    [plan] = json.loads(run("status", "--repo", repo, "--json"))["plans"]  # the project's view of the same
+    assert (plan["milestone"], plan["status"], plan["total"], plan["cost_usd"]) == ("m1", "done", len(cards), st["cost_usd"])
     shown = json.loads(run("show", "m1", "--repo", repo, "--json", "--events", "1000"))
     assert [(c["id"], c["state"], c["cost_usd"]) for c in shown["cards"]] == [
         (c.id, c.state.value, round(c.cost_usd, 4)) for c in cards

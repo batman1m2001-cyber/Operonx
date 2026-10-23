@@ -14,7 +14,9 @@ compared on OneWealth's own folder. Each check is an error when it fails:
 - the verbatim source copies still have their recorded SHA-256;
 - every file under ``assets/`` is registered in ``assets/README.md``;
 - every card on the board (``board/``) serves rows that are defined, and
-  depends only on cards of its own milestone.
+  depends only on cards of its own milestone;
+- every plan doc under the repo's ``docs/`` has a block that parses and rows
+  that are defined (:mod:`operonx_project.plans`).
 
 With a source file (``--source SRC-01=path``): its SHA-256 is the registered
 one, and every code the config's pattern finds in it is defined.
@@ -346,7 +348,26 @@ def check_board(cfg: BrdConfig, errors: List[str]) -> None:
                                   f"{bf.milestone.id}")  # fmt: skip
 
 
-def check(brd: Path, sources: Optional[Dict[str, Path]] = None) -> Tuple[List[str], List[str]]:
+def check_plans(cfg: BrdConfig, errors: List[str], report: List[str]) -> None:
+    """The plan docs under the repo's ``docs/`` (PROJECT_MODE_PLAN D1): a block that does not parse, or a row
+    the checklist does not define, is an error; a ``*_PLAN.md`` with no block is a line of the report."""
+    from operonx_project.plans import find
+
+    plans, bad, warnings = find(cfg.root)
+    errors.extend(f"plan {e}" for e in bad)
+    defined = defined_requirements(cfg) | set(matrix_rows(cfg))
+    for p in plans:
+        for rid in p.rows:
+            if rid not in defined:
+                errors.append(f"plan {p.path}: row {rid} is not in the checklist")
+    if plans or warnings:
+        report.append(f"plans: {len(plans)} with a status block, {len(warnings)} without")
+    report.extend(f"warning: {w}" for w in warnings)
+
+
+def check(brd: Path, sources: Optional[Dict[str, Path]] = None, plans: bool = True) -> Tuple[List[str], List[str]]:
+    """Every check of the docstring above; with *plans*, the plan docs too (a milestone's final verification
+    leaves them out: a plan block it never touched is not its delivery's business)."""
     cfg = BrdConfig.load(brd)
     errors: List[str] = []
     report: List[str] = []
@@ -355,6 +376,8 @@ def check(brd: Path, sources: Optional[Dict[str, Path]] = None) -> Tuple[List[st
     check_references(cfg, errors)
     check_sources_and_assets(cfg, errors)
     check_board(cfg, errors)
+    if plans:
+        check_plans(cfg, errors, report)
     if sources:
         for sid, p in sources.items():
             check_source(cfg, sid, Path(p), errors, report)
