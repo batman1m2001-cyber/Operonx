@@ -146,7 +146,7 @@ class TelegramBridge:
             text = f"⌛ No answer came for {inter['qid']}: I took the safe default ({rec}). Reply to it to correct me."
         else:
             text = (f"⌛ {inter['qid']} expired with no safe default: it stays open, flagged in "
-                    "operonx-project status. Reply to it whenever you can.")  # fmt: skip
+                    "operonx-project pending. Reply to it whenever you can.")  # fmt: skip
         try:
             await self._send(first["chat"], text, reply_to=first["id"])
         except TelegramError as exc:

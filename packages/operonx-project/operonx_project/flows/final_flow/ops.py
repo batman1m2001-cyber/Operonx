@@ -199,7 +199,7 @@ async def brd_checked(key: str, mid: str) -> dict:
     brd = _brd(rt, mid)
     if brd is None or not brd.exists():
         return {"gaps": []}
-    errors, _ = check(brd)
+    errors, _ = check(brd, plans=False)
     if not errors:
         return {"gaps": []}
     return {"gaps": [_gap(None, "brd", "operonx project brd check: " + "; ".join(errors[:20]))]}

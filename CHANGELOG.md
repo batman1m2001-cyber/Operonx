@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.34.0] - 2026-10-23
+
+### Added
+
+- **A plan doc says where it stands (PROJECT_MODE_PLAN D1).** The AGENTS.md builder block, which `operonx guide` keeps current, adds a rule: work with more than one step gets a plan doc under `docs/` that starts with a status block. The block holds:
+  - `title`;
+  - `status`: plan, in_progress, done or parked;
+  - `phases`, each `{id, title, status}`;
+  - `rows`.
+
+  A phase's status changes in the commit that finishes it. Work done in a Claude Code session or the studio's assistant then keeps its status true, as the checklist already does.
+
+  OneWealth shows why: it has 21 plan docs. 14 had no status at all, and 2 gave the wrong one.
+
+  operonx-project reads the blocks:
+  - `operonx-project plans` lists the plans;
+  - `brd check` fails on a wrong block;
+  - `operonx-project status` and the api's `{"op": "status"}` return the whole project as one read-only document: the checklist, plans and milestones, what needs the owner, what is in progress, the last commits and the setup. The studio's Project mode and its assistant both read it.
+
+### Changed
+
+- **`operonx-project status` now describes the whole project. The milestone list it used to print is `operonx-project milestones`,** with the same `--json` records.
+
 ## [1.33.0] - 2026-10-20
 
 ### Added

@@ -19,7 +19,7 @@ pip install -e packages/operonx-project      # or: uv pip install -e packages/op
 ```bash run
 operonx-project new demo --name demo
 operonx-project start --repo demo --title "first cut" --mode w1 --goal "a greeting service"
-operonx-project status --repo demo
+operonx-project milestones --repo demo
 operonx-project pending --repo demo
 ```
 
@@ -67,7 +67,7 @@ print(m1["id"], m1["state"], m1["title"])  # m1 created first cut
 assert m1["state"] == "created" and pending_data(project) == []
 ```
 
-`status --json` and `show m1 [C3] --json` print the same records. The
+`milestones --json` and `show m1 [C3] --json` print the same records. The
 running engine's state is `<repo>/.operonx/project/` (outside git):
 `project.db` (milestones, cards, events, the command queue, the questions)
 and the stage journals. Each flow run — a card's attempt (`m1.C3.2`, the card's
@@ -75,6 +75,74 @@ and the stage journals. Each flow run — a card's attempt (`m1.C3.2`, the card'
 project's run store, `<repo>/.operonx/runs/` (outside git too): the
 studio's Runs tab shows it step by step, and its Board tab reads this
 store and the board files.
+
+## Work done outside the engine: plans
+
+Most work is done in a Claude Code session or the studio's assistant, not
+by the engine's coders. Such work is planned in a Markdown file under
+`docs/`, and the plan says where it stands in a block at its top. A phase's
+status changes in the commit that finishes it, as a checklist row does, so
+the status stays true whoever did the work:
+
+```python
+from pathlib import Path
+
+from operonx_project.plans import find
+
+(Path("demo") / "docs").mkdir(exist_ok=True)
+(Path("demo") / "docs" / "EXPORT_PLAN.md").write_text("""---
+title: CSV export
+status: in_progress            # plan | in_progress | done | parked
+phases:
+  - {id: E1, title: The rows, status: done}          # open | in_progress | done | skipped
+  - {id: E2, title: The export service, status: in_progress}
+rows: []                       # the checklist rows it serves
+updated: 2026-10-23
+---
+
+# CSV export
+""")
+plans, errors, warnings = find(Path("demo"))
+[plan] = plans
+print(plan.title, plan.status, f"{plan.done}/{len(plan.phases)}", plan.current.id)  # CSV export in_progress 1/2 E2
+assert errors == [] and plan.current.title == "The export service"
+```
+
+```bash run
+operonx-project plans --repo demo        # every plan and where it stands; exit 1 when a block is wrong
+```
+
+`operonx-project brd check` checks the blocks too: one that does not parse,
+a status outside the vocabulary, a row the checklist does not define or a
+`done` plan with a phase still open is an error; a `*_PLAN.md` with no
+block is a warning. The studio's Project mode shows the plans beside the
+engine's milestones.
+
+## Where the project stands
+
+`operonx-project status` (and the api's `{"op": "status"}`) puts the whole
+project in one document: the checklist's counts and its open rows, the plans
+and milestones in one shape, what needs the owner (the engine's questions
+and the BRD's open ones), what is in progress with one sentence each, the
+last commits and the setup. It only reads, and every sentence is written by
+code from the data, so the studio's screen and its assistant never disagree:
+
+```python
+from pathlib import Path
+
+from operonx_project.status import status, text
+
+doc = status(Path("demo"))
+[export] = [p for p in doc["plans"] if p["source"] == "doc"]
+[m1] = [p for p in doc["plans"] if p["source"] == "engine"]
+print(doc["working_on"][0]["sentence"])  # E2, phase 2 of 2: The export service
+assert export["current"] == "E2" and m1["milestone"] == "m1"
+assert text(doc).startswith("Checklist:")
+```
+
+```bash run
+operonx-project status --repo demo          # the same, in plain lines; --json for the document
+```
 
 ## Two layers: the BRD and the board
 

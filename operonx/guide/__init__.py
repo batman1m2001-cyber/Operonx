@@ -84,6 +84,12 @@ _BUILDER = """## Building it: docs/brd and the board
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
   `docs/brd/MAINTAINING.md`. The checklist's summary table is counted from
   the rows by the engine: leave it.
+- Work with more than one step gets a plan doc under `docs/` that starts
+  with a status block: `title`, `status` (plan, in_progress, done or
+  parked), `phases` (each `{id, title, status}`: open, in_progress, done or
+  skipped) and the `rows` it serves. Change a phase's status in the commit
+  that finishes it. `operonx-project plans` lists them; the studio's
+  Project mode shows them.
 - To work a card yourself: `operonx-project take <milestone> <card>` prints
   its worktree, criteria and rows; make the criteria pass there, then
   `operonx-project submit <milestone> <card>`. The review and the held-out
