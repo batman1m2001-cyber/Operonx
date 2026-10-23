@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **operonx-project: the api's `{"op": "status"}` also returns `text`, the status in plain lines.** It is the same text `operonx-project status` prints. The studio's `project_status` tool hands it to the assistant, so the assistant reports the same numbers the screen shows (PROJECT_MODE_PLAN P5).
 
+- **operonx-project: the standard, in the status document (PROJECT_STANDARD_PLAN D1).** `status()["standard"]` holds four items, each with `ok`, where the project stands in words, and the fix:
+  - `brd`: docs/brd with a checklist;
+  - `check`: `brd check` reports nothing (re-run only when a file it reads changes);
+  - `plans`: every plan doc has a status block;
+  - `practices`: `docs/brd/practices.toml` validates.
+
+  `text()` ends with "Standard: n of 4" and one line per missing item. The guide's new section "The standard" documents `docs/brd/brd.toml` `[[groups]]`, which a summary table with sets of its own names needs.
+
 ## [1.34.0] - 2026-10-23
 
 ### Added

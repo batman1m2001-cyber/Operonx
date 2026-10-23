@@ -11,6 +11,7 @@ one dict the studio's screen and its assistant both read::
     working_on  what is in progress, each with one sentence written here from the data
     changes     the last commits, newest first
     setup       the practices in one line, the models, the daemon
+    standard    the engine's standard, item by item (brd, check, plans, practices): ok, a sentence, the fix
 
 It only reads: a project the engine has never run keeps no ``.operonx/project`` because of it. Every
 sentence is made by code from the data; no model writes any of it.
@@ -26,7 +27,7 @@ from typing import Any, Dict, List, Optional
 from operonx_project.brd.records import MATRIX, STATUSES, _split, load_questions
 from operonx_project.plans import find
 
-__all__ = ["CLOSED", "status", "text"]
+__all__ = ["CLOSED", "STANDARD", "standard", "status", "text"]
 
 #: Row statuses that need no more work.
 CLOSED = ("implemented_verified", "out_of_scope_demo", "not_applicable")
@@ -78,6 +79,85 @@ def _git_log(repo: Path, n: int) -> List[Dict[str, str]]:
         return []
     keys = ("sha", "at", "author", "subject")
     return [dict(zip(keys, line.split("\x00"))) for line in out.stdout.splitlines() if line.count("\x00") == 3]
+
+
+#: The standard, in order (PROJECT_STANDARD_PLAN D1): what a project needs for the studio and the engine to read
+#: it, each with what it is called and what makes it true.
+STANDARD = (
+    ("brd", "a checklist", "docs/brd with its requirements and the checklist matrix (operonx-project adopt "
+                           "writes one from the code)"),
+    ("check", "brd check passes", "fix what operonx-project brd check reports; a summary table with sets of its "
+                                  "own names them in docs/brd/brd.toml [[groups]] (name, pattern)"),
+    ("plans", "every plan says where it stands", "a status block at the top of each docs/*_PLAN.md (title, status, "
+                                                 "phases with their status, rows, updated)"),
+    ("practices", "how it is built", "docs/brd/practices.toml describing the project as it is: its real test "
+                                     "command as a [done] check, rules the code already keeps"),
+)
+
+_CHECKED: Dict[Path, Any] = {}  # brd dir → (the files' signature, the errors): the check re-runs when a file changes
+
+
+def _signature(brd: Path) -> Any:
+    from operonx_project.brd.checker import BrdConfig
+
+    cfg = BrdConfig.load(brd)
+    files = [*brd.rglob("*")]
+    if cfg.tests.is_dir():
+        files += cfg.tests.rglob("test_*.py")
+    files += (cfg.root / "docs").glob("**/*_PLAN.md")
+    sig = []
+    for f in files:
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        sig.append((str(f), st.st_mtime_ns, st.st_size))
+    return tuple(sorted(sig))
+
+
+def _check_errors(brd: Path) -> List[str]:
+    from operonx_project.brd.checker import check
+
+    sig = _signature(brd)
+    hit = _CHECKED.get(brd)
+    if hit and hit[0] == sig:
+        return hit[1]
+    try:
+        errors, _ = check(brd)
+    except Exception as exc:  # noqa: BLE001 — a checker that cannot read the folder is itself the finding
+        errors = [f"brd check could not run: {exc}"]
+    _CHECKED[brd] = (sig, errors)
+    return errors
+
+
+def standard(repo: Path, doc: Dict[str, Any], brd: str = "docs/brd") -> List[Dict[str, Any]]:
+    """The project against the standard, one entry per item of :data:`STANDARD`: ``key``, ``name``, ``ok``,
+    ``line`` (where it stands, in words) and ``fix`` (what makes it true)."""
+    brd_dir = Path(repo) / brd
+    has_brd = doc["checklist"]["total"] > 0
+    out: List[Dict[str, Any]] = []
+    for key, name, fix in STANDARD:
+        if key == "brd":
+            ok = has_brd
+            line = f"{doc['checklist']['total']} rows in {doc['checklist']['file']}" if ok else f"no checklist in {brd}"
+        elif key == "check":
+            errors = _check_errors(brd_dir) if has_brd else []
+            ok = has_brd and not errors
+            line = ("no checklist to check" if not has_brd else "0 errors" if ok
+                    else f"{len(errors)} error{'s' if len(errors) > 1 else ''}, first: {errors[0]}")  # fmt: skip
+        elif key == "plans":
+            bad = len(doc["plan_errors"]) + len(doc["unmarked"])
+            ok = not bad
+            line = (f"{len(doc['plans'])} plans, each with its status" if ok else
+                    ", ".join(x for x in (f"{len(doc['unmarked'])} with no status block" if doc["unmarked"] else "",
+                                          f"{len(doc['plan_errors'])} with a wrong one" if doc["plan_errors"] else "")
+                              if x))  # fmt: skip
+        else:
+            pr = doc["setup"]["practices"]
+            ok = bool(pr.get("file")) and not pr.get("error")
+            line = pr["line"] if ok else (pr["line"] if pr.get("error") else "no docs/brd/practices.toml")
+        out.append({"key": key, "name": name, "ok": ok, "line": line, "fix": "" if ok else fix})
+    return out
 
 
 def _practices(repo: Path) -> Dict[str, Any]:
@@ -215,9 +295,11 @@ def status(repo: Path, changes: int = 15, brd: str = "docs/brd") -> Dict[str, An
              "daemon": (engine or {}).get("daemon"), "model": settings.get("model", ""),
              "models": dict(settings.get("models") or {})}  # fmt: skip
     unmarked = [w.split(": ", 1)[0] for w in plan_warnings]
-    return {"repo": str(repo), "checklist": checklist, "plans": plans, "plan_errors": plan_errors,
-            "unmarked": unmarked, "needs_you": needs_you, "working_on": working_on,
-            "changes": _git_log(repo, changes), "setup": setup}  # fmt: skip
+    doc = {"repo": str(repo), "checklist": checklist, "plans": plans, "plan_errors": plan_errors,
+           "unmarked": unmarked, "needs_you": needs_you, "working_on": working_on,
+           "changes": _git_log(repo, changes), "setup": setup}  # fmt: skip
+    doc["standard"] = standard(repo, doc, brd)
+    return doc
 
 
 def text(doc: Dict[str, Any], changes: int = 5) -> str:
@@ -260,4 +342,9 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
     engine = f"engine: daemon {'running' if s['daemon'] else 'stopped'}" if s["engine"] else "engine: not used yet"
     model = f" · model {s['model']}" if s["model"] else ""
     out.append(f"Setup: {s['practices']['line']} · {engine}{model}")
+    std = doc.get("standard") or []
+    missing = [x for x in std if not x["ok"]]
+    out.append(f"Standard: {len(std) - len(missing)} of {len(std)}" + ("" if missing else ", all met"))
+    for x in missing:
+        out.append(f"  missing {x['key']}: {x['line']}. Fix: {x['fix']}"[:400])
     return "\n".join(out) + "\n"

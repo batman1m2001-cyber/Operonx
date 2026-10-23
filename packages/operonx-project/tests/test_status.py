@@ -119,3 +119,74 @@ def test_the_api_op_and_the_cli_read_without_making_a_store(tmp_path):
     assert code == 0 and json.loads(out)["checklist"]["verified"] == 1
     assert _cli("status", "--repo", str(repo))[1] == text(status(repo))
     assert not (repo / ".operonx").exists()
+
+
+# ── the standard (PROJECT_STANDARD_PLAN D1) ─────────────────────────────────
+
+GOOD_MATRIX = """# Requirements traceability matrix
+
+## 0. Summary
+
+| Set | Rows | implemented_verified | implemented_unverified | partially_implemented | planned | not_implemented | blocked | out_of_scope_demo | not_applicable |
+|---|---|---|---|---|---|---|---|---|---|
+| {name} | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+
+## 1. Rows
+
+| ID | Requirement | Tests | Status |
+|---|---|---|---|
+| CALC-01 | Add two numbers | `tests/test_calc.py::test_add` | implemented_verified |
+"""
+
+
+def _standard_repo(tmp_path: Path, summary_name: str = "CALC") -> Path:
+    repo = tmp_path / "std"
+    req = repo / "docs/brd/requirements"
+    req.mkdir(parents=True)
+    (req / "requirements.md").write_text("# Requirements\n\n### CALC-01 Add two numbers\n", encoding="utf-8")
+    (req / "requirements_traceability.md").write_text(GOOD_MATRIX.format(name=summary_name), encoding="utf-8")
+    (repo / "tests").mkdir()
+    (repo / "tests/test_calc.py").write_text("def test_add():\n    assert 1 + 1 == 2\n", encoding="utf-8")
+    (repo / "docs/EXPORT_PLAN.md").write_text(_plan("plan", "  - {id: E1, title: Rows}\n", "2026-10-23", "Export"))
+    (repo / "docs/brd/practices.toml").write_text('[tdd]\nmode = "acceptance"\n\n[done]\nchecks = [{ name = "tests", cmd = "pytest -q" }]\n',
+                                                  encoding="utf-8")  # fmt: skip
+    return repo
+
+
+def _std(doc):
+    return {x["key"]: x["ok"] for x in doc["standard"]}
+
+
+def test_a_project_up_to_the_standard_meets_all_four(tmp_path):
+    from operonx_project.brd.checker import check
+
+    repo = _standard_repo(tmp_path)
+    assert check(repo / "docs/brd")[0] == []
+    doc = status(repo)
+    assert _std(doc) == {"brd": True, "check": True, "plans": True, "practices": True}
+    assert all(x["fix"] == "" for x in doc["standard"])
+    assert "Standard: 4 of 4, all met\n" in text(doc)
+
+
+def test_each_missing_item_says_where_it_stands_and_what_fixes_it(tmp_path):
+    doc = status(_repo(tmp_path))
+    assert _std(doc) == {"brd": True, "check": False, "plans": False, "practices": True}
+    plans = next(x for x in doc["standard"] if x["key"] == "plans")
+    assert plans["line"] == "1 with no status block" and "status block" in plans["fix"]
+    lines = text(doc)
+    assert "Standard: 2 of 4\n" in lines and "  missing check: " in lines and "  missing plans: 1 with no status" in lines
+
+    bare = status(tmp_path / "nothing")
+    assert _std(bare) == {"brd": False, "check": False, "plans": True, "practices": False}
+    assert "operonx-project adopt" in bare["standard"][0]["fix"]
+
+
+def test_a_summary_with_sets_of_its_own_is_named_in_brd_toml(tmp_path):
+    # OneWealth's case: the summary names its sets in words, the checker groups by prefix
+    repo = _standard_repo(tmp_path, summary_name="The calculator (CALC)")
+    check_item = next(x for x in status(repo)["standard"] if x["key"] == "check")
+    assert not check_item["ok"] and "summary row" in check_item["line"] and "brd.toml [[groups]]" in check_item["fix"]
+    (repo / "docs/brd/brd.toml").write_text('[[groups]]\nname = "The calculator (CALC)"\npattern = "CALC-"\n',
+                                            encoding="utf-8")  # fmt: skip
+    # the check re-runs because a file it reads changed
+    assert _std(status(repo))["check"] is True
