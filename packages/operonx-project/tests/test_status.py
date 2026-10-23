@@ -114,6 +114,7 @@ def test_the_api_op_and_the_cli_read_without_making_a_store(tmp_path):
     code, out = _cli("api", "--repo", str(repo), '{"op": "status", "changes": 1}')
     got = json.loads(out)
     assert code == 0 and got["ok"] and [ch["subject"] for ch in got["project"]["changes"]] == ["E1: rows"]
+    assert got["text"] == text(got["project"])
     code, out = _cli("status", "--repo", str(repo), "--json")
     assert code == 0 and json.loads(out)["checklist"]["verified"] == 1
     assert _cli("status", "--repo", str(repo))[1] == text(status(repo))

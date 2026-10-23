@@ -6,8 +6,8 @@ phases:
   - {id: P1, title: Plans carry their status, status: done}
   - {id: P2, title: One status for the whole project, status: done}
   - {id: P3, title: Project mode, chat first, status: open}
-  - {id: P4, title: The pages behind the icons, status: open}
-  - {id: P5, title: The assistant works by the conventions, status: open}
+  - {id: P4, title: The pages behind the icons, status: done}
+  - {id: P5, title: The assistant works by the conventions, status: done}
   - {id: P6, title: Gate on OneWealth and tipcalc, status: open}
 updated: 2026-10-23
 ---

@@ -452,10 +452,11 @@ def _milestones(args) -> int:
             out.write(json.dumps({"ok": False, "status": "invalid", "message": f"not JSON: {exc}"}) + "\n")
             return 2
         if isinstance(req, dict) and req.get("op") == "status":  # read-only: before a store is opened
-            from operonx_project.status import status
+            from operonx_project.status import status, text
 
-            out.write(json.dumps({"ok": True, "project": status(args.repo, changes=int(req.get("changes", 15)))},
-                                 ensure_ascii=False) + "\n")  # fmt: skip
+            doc = status(args.repo, changes=int(req.get("changes", 15)))
+            # the same in plain lines: what an assistant reads (the studio's project_status tool)
+            out.write(json.dumps({"ok": True, "project": doc, "text": text(doc)}, ensure_ascii=False) + "\n")
             return 0
     if args.cmd == "new":
         from operonx_project.project import new_project
