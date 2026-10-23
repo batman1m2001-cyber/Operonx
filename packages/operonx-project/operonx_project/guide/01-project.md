@@ -144,6 +144,35 @@ assert text(doc).startswith("Checklist:")
 operonx-project status --repo demo          # the same, in plain lines; --json for the document
 ```
 
+## The standard
+
+What a project needs for the engine and the studio to read it: four items, in the status document as
+`standard` and as one line of `text()`. Each says where it stands and, when it is missing, what fixes it.
+
+1. **`brd`**: `docs/brd` with its requirements and the checklist matrix. `adopt` writes one from the code.
+2. **`check`**: `brd check` reports nothing. A summary table whose sets have names of their own (not the id
+   prefixes) names them in `docs/brd/brd.toml`:
+
+   ```toml
+   [[groups]]
+   name = "BRD numbered (BR, FR, NFR)"    # the summary row's first cell, exactly
+   pattern = "BRD-(BR|FR|NFR)-"           # a regex the row ids of that set match from their start
+   ```
+3. **`plans`**: every `docs/*_PLAN.md` has a valid status block.
+4. **`practices`**: `docs/brd/practices.toml` validates. It describes the project as it is: its real test
+   command as a `[done]` check that passes today, and only rules the code already keeps.
+
+```python
+from pathlib import Path
+
+from operonx_project.status import status
+
+doc = status(Path("demo"))
+assert [x["key"] for x in doc["standard"]] == ["brd", "check", "plans", "practices"]
+missing = [x for x in doc["standard"] if not x["ok"]]
+print([(x["key"], x["fix"][:40]) for x in missing])
+```
+
 ## Two layers: the BRD and the board
 
 A project is two folders in git, and one outside it:
