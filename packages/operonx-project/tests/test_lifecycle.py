@@ -167,10 +167,13 @@ def test_replan_keeps_done_cards_and_replaces_the_rest(tmp_path):
 def test_a_replan_before_the_requirements_were_read_discovers_again(tmp_path):
     from tests.life_env import SURVEY
 
-    # paused while it was still discovering: no context record yet, so planning straight away would fail
+    # paused while it was still discovering: no context record yet, so planning straight away fails
     life = Life(tmp_path, base_script(**{"planner:survey": [SURVEY, SURVEY]}), mode="w1")
     life.store.move_milestone("m1", M.DISCOVERING, "")
     life.store.move_milestone("m1", M.PAUSED, "paused by the owner")
+    life.store.move_milestone("m1", M.PLANNING, "")
+    assert life.serve() == M.FAILED and "no context record" in life.store.get_milestone("m1").reason
+    # the replan discovers again, and its planning is a new run, not the failed one replayed
     life.command("replan", notes="merge the series flows")
     assert life.serve() == M.AWAITING_APPROVAL, life.store.get_milestone("m1").reason
     assert "merge the series flows" in life.coder.of("planner:plan")[0]["prompt"]

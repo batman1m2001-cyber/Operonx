@@ -175,10 +175,11 @@ class Lifecycle:
             self.store.ms_put(mid, "runs", {**runs, name: cur})
             out = await eng.run(inputs, run_id=cur["run_id"])
         if out.get("$errors"):
+            # the run ended there: a retry or a replan starts the stage's next run, never this one's error again
+            runs = self.store.ms_get(mid, "runs") or {}
+            self.store.ms_put(mid, "runs", {**runs, name: {**cur, "done": True}})
             spent = [e for e in out["$errors"].values() if isinstance(e, dict) and e.get("type") == "BudgetSpent"]
-            if spent:  # the run ended there: a retry starts the stage's next run, never this one's error again
-                runs = self.store.ms_get(mid, "runs") or {}
-                self.store.ms_put(mid, "runs", {**runs, name: {**cur, "done": True}})
+            if spent:
                 lines = str(spent[0].get("message") or "").strip().splitlines()
                 raise BudgetSpent(lines[-1].split("BudgetSpent: ", 1)[-1] if lines else "the budget is spent")
             raise RuntimeError(f"{name} failed: {str(out['$errors'])[:1500]}")
