@@ -66,8 +66,94 @@ def test_store_to_files_to_store_is_equal(tmp_path):
             assert getattr(got, f) == getattr(exp, f), (got.id, f)
 
     text = (brd / "board" / "m1.md").read_text()
-    assert "| C2 | double | R-02 | C1 | test | running |" in text  # a person reads the table
+    assert "### C2 · double · running" in text  # a person reads each card's status in its heading
+    assert "- Kind: test" in text and "- Kind: code" not in text  # a default is left out
+    assert "Priority" not in text and "Cost" not in text  # what only a rebuild needs is in the comment
     assert "| m1 | first a \\| pipe" in (brd / "board" / "README.md").read_text()
+
+
+OLD = """# m0 · baseline
+
+| Field | Value |
+|---|---|
+| State | done |
+| Mode | w2 |
+| Rows | every row not verified |
+| Budget | $30.00, 8 h · spent $0.35 |
+| Replans | 1 |
+| Reason | adopted |
+
+## Goal
+
+What was built.
+
+## Cards
+
+| Card | Title | Rows | Deps | Kind | Status |
+|---|---|---|---|---|---|
+| C1 | Door · in | R-01 |  | code | done |
+| C2 | Store | R-02 | C1 | test | running |
+
+### C1 · Door · in
+
+- Intent: Accept calls.
+- Rows: R-01
+- Deps: 
+- Files: app/main.py, app/x.py
+- Kind: code
+- Risk: low
+- Priority: 0
+- Epic: 
+- Criteria:
+  - a missing one → 403
+- Status: done
+- Stage: 
+- Reopens: 0
+- Outcome: adopted
+- Run: 
+- Cost: 0.0000
+
+### C2 · Store
+
+- Intent: 
+- Rows: R-02
+- Deps: C1
+- Files: 
+- Kind: test
+- Risk: high
+- Priority: 3
+- Epic: E1
+- Criteria:
+- Status: running
+- Stage: review
+- Reopens: 1
+- Outcome: 
+- Run: m0.C2.1
+- Cost: 0.2500
+
+<!-- operonx-project: {"created": 1.0, "policy": {}, "times": {"C1": [2.0, 3.0], "C2": [4.0, 5.0]}, "updated": 6.0} -->
+"""
+
+
+def test_the_older_format_still_reads_and_comes_back_compact(tmp_path):
+    folder = tmp_path / "brd" / "board"
+    folder.mkdir(parents=True)
+    (folder / "m0.md").write_text(OLD)
+    (bf,) = read_board(tmp_path / "brd")
+    ms, (c1, c2) = bf.milestone, bf.cards
+    assert (ms.state, ms.rows, ms.reason, ms.replans, ms.cost_usd, ms.goal) == (
+        MilestoneState.DONE, [], "adopted", 1, 0.35, "What was built.")
+    assert (c1.title, c1.paths, c1.criteria, c1.state, c1.reason, c1.created) == (
+        "Door · in", ["app/main.py", "app/x.py"], ["a missing one → 403"], CardState.DONE, "adopted", 2.0)
+    assert (c2.deps, c2.kind, c2.risk, c2.priority, c2.epic, c2.stage, c2.reopens, c2.run_id, c2.cost_usd) == (
+        ["C1"], "test", "high", 3, "E1", Stage.REVIEW, 1, "m0.C2.1", 0.25)
+
+    write_board(tmp_path / "brd", [(ms, bf.cards)])
+    assert len((folder / "m0.md").read_text()) < len(OLD) * 0.8
+    (again,) = read_board(tmp_path / "brd")
+    assert again.milestone.cost_usd == 0.35 and again.milestone.replans == 1
+    for got, exp in zip(again.cards, bf.cards):
+        assert got == exp
 
 
 def _repo(tmp_path):

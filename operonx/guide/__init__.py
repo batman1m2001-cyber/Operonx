@@ -82,7 +82,7 @@ _BUILDER = """## Building it: docs/brd and the board
   hand: `operonx-project replan` changes a plan.
 - When a change meets or alters a requirement, update its row (status,
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
-  `docs/brd/MAINTAINING.md`. The checklist's summary table is counted from
+  `docs/brd/README.md`. The checklist's summary table is counted from
   the rows by the engine: leave it.
 - Work with more than one step gets a plan doc under `docs/` that starts
   with a status block: `title`, `status` (plan, in_progress, done or
