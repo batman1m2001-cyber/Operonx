@@ -1,32 +1,33 @@
 # {{name}}: the living product repository
 
-What the product must do, why, and how far it is. Versioned with the code; every milestone reads and updates it.
-Kept by the rules in [MAINTAINING.md](MAINTAINING.md) and checked by `operonx-project brd check`, which the test
-suite runs.
+What the product must do, why, and how far it is. It is versioned with the code, every milestone reads and
+updates it, and `operonx-project brd check` checks it (the test suite runs the check).
 
-## 1. Layers
+| Where | What |
+|---|---|
+| [`sources/`](sources/README.md) | Every document the requirements come from, registered with its hash. Never edited |
+| [`requirements/requirements_traceability.md`](requirements/requirements_traceability.md) | The checklist: each requirement in its original wording, with code, test, evidence and status. This is the only place a requirement's status is stated |
+| [`requirements/open_questions.md`](requirements/open_questions.md) | Ambiguities, conflicts, divergences and gaps (`Q-nn`). A question is never deleted, and never resolved without saying so |
+| [`board/`](board/README.md) | How the product is built: one file per milestone, with each card's intent, rows, criteria, dependencies, files and status. The engine writes these files |
+| [`CHANGELOG.md`](CHANGELOG.md) | One line per change |
 
-| Layer | Where | What |
-|---|---|---|
-| Sources | [`sources/`](sources/README.md) | Every document the requirements come from, registered with its hash. Never edited |
-| Requirements | [`requirements/`](requirements/) | Extracted from the sources with their original wording and location |
-| Features | [`features/`](features/README.md) | Behaviour: what the product does to meet the requirements (`FEAT-nn`) |
-| UX | [`ux/`](ux/screen_inventory.md) | Screens (`SCR-…`) and what each shows |
-| Decisions | [`decisions/`](decisions/README.md) | Architecture decision records (`ADR-nnnn`) |
-| Testing | [`testing/`](testing/regression_coverage.md) | Test runs and known defects (`DEF-nn`) |
-| Board | [`board/`](board/README.md) | How it is built: every milestone and its cards (what each does, the rows it serves, its criteria, its dependencies, its files) and their status. Written by the engine |
+Add `features/` (`FEAT-nn`), `decisions/` (`ADR-nnnn`), `ux/screen_inventory.md` (`SCR-…`), `testing/`
+(`DEF-nn`) or `assets/` (each file listed in its README) when there is something to put there. The checker
+follows these ids when the folders exist.
 
-## 2. The traceability matrix
+## Keeping it
 
-[`requirements/requirements_traceability.md`](requirements/requirements_traceability.md) is the only place a
-requirement's status is stated: requirement → feature → screen → code / API → test → evidence.
+- A change meets or alters a requirement: update its row (status, code, test, evidence) and add one line to the
+  changelog, then run `operonx-project brd check`.
+- A rule changes: never edit a source's text. Record the change in `open_questions.md`, or in an ADR.
+- A requirement is removed: keep its row, and say so in its status and note.
+- A new version of a source: register it as a new row, and keep the old one.
+- A milestone is planned, or a card moves: change nothing by hand. The engine rewrites `board/`, and
+  `operonx-project replan` changes a plan.
+- State facts only with a source: a source section, a code path, a test or a measurement. Mark assumptions as
+  assumptions. A private source is registered by path and hash only, never committed.
 
-## 3. Questions
-
-[`requirements/open_questions.md`](requirements/open_questions.md): ambiguities, conflicts, divergences and gaps
-(`Q-nn`). A question is never deleted and never silently resolved.
-
-## 4. Status vocabulary
+## Status
 
 | Status | Meaning |
 |---|---|
@@ -39,9 +40,10 @@ requirement's status is stated: requirement → feature → screen → code / AP
 | `out_of_scope_demo` | Deliberately left out of this phase |
 | `not_applicable` | Does not apply to this product; the row says why |
 
-## 5. The project builder
+## The project builder
 
-`operonx-project` (the Board tab in `operonx studio`) builds what the matrix leaves open, one milestone at a time:
+`operonx-project` (the Project tab in `operonx studio`) builds what the checklist leaves open, one milestone at a
+time:
 
 ```bash
 operonx-project start --title "v1" --goal "..." --rows <ID> <ID>   # a milestone for these rows
@@ -49,7 +51,5 @@ operonx-project daemon                                            # plans the ca
 operonx-project status                                            # where every milestone is
 ```
 
-The plan and its status are written to [`board/`](board/README.md), one file per milestone, so a clone carries
-them; `.operonx/project/` (outside git) holds only what the running engine needs, and is rebuilt from `board/`
-when it is missing. `operonx-project start --from-board m1` builds a milestone's cards again, in another repo too.
-Before the first milestone the studio's Board shows this folder's checklist.
+`.operonx/project/` (outside git) holds only what the running engine needs. When it is missing, it is rebuilt
+from `board/`.

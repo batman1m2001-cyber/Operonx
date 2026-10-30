@@ -587,10 +587,12 @@ class TestTheBrd:
         root = tmp_path / "p"
         assert _init(capsys, root)[0] == 0
         brd = root / "docs" / "brd"
-        for rel in ("README.md", "MAINTAINING.md", "requirements/requirements_traceability.md",
+        for rel in ("README.md", "CHANGELOG.md", "requirements/requirements_traceability.md",
                     "requirements/open_questions.md", "board/README.md", "sources/owner_requests/.gitkeep"):  # fmt: skip
             assert (brd / rel).is_file(), rel
         assert "# p: the living product repository" in (brd / "README.md").read_text()
+        # only what is read: no stub folders a project has nothing to put in yet
+        assert not any((brd / d).exists() for d in ("features", "decisions", "ux", "testing", "assets", "templates"))
         # how it is built (operonx-project): a new project's own; brd init on an existing repo writes neither
         assert (
             'style = "layered"' in (brd / "practices.toml").read_text()

@@ -13,9 +13,13 @@ back (:func:`read_board`) to rebuild a store or to seed a new milestone
 with an old one's cards (``start --from-board``). Store → files → store is
 the contract (``tests/test_board_files.py``).
 
-The format is Markdown a person reads in a PR. What a reader needs to
-rebuild exactly and a person does not (the policy, timestamps) is in one
-HTML comment per milestone, which Markdown does not render.
+The format is Markdown a person, or the next session, reads: a card is its
+heading (``### C3 · title · status``) and its intent, rows, dependencies,
+files, criteria and outcome; a field at its default is left out. What only
+a rebuild needs (the policy as it differs from the default, timestamps, a
+card's run, cost, stage, reopens and priority) is in one HTML comment per
+milestone, which Markdown does not render. Files in the older form, every
+field written out, still read.
 """
 
 from __future__ import annotations
@@ -68,60 +72,56 @@ def _unlist(text: str) -> List[str]:
     return [_unesc(p.replace("\\,", ",")) for p in parts]
 
 
-def _mode(policy: Policy) -> str:
-    return "w1" if policy.horizon == "all" else "w2"
+#: What a card holds that a rebuild needs and a reader does not: kept in the
+#: file's comment, and only when it is not the default.
+_CARD_META = {"run": ("run_id", None), "cost": ("cost_usd", 0.0), "stage": ("stage", None),
+              "reopens": ("reopens", 0), "priority": ("priority", 0)}  # fmt: skip
+
+
+def _changed(got: Dict[str, Any], default: Dict[str, Any]) -> Dict[str, Any]:
+    """*got*'s keys that differ from *default*, nested dicts by key too."""
+    out: Dict[str, Any] = {}
+    for k, v in got.items():
+        d = default.get(k)
+        if isinstance(v, dict) and isinstance(d, dict) and k != "wip":
+            v = _changed(v, d)
+            if v:
+                out[k] = v
+        elif v != d:
+            out[k] = v
+    return out
 
 
 def board_text(ms: Milestone, cards: List[Card]) -> str:
-    """One milestone's file."""
-    b = ms.policy.budget
-    lines = [
-        f"# {ms.id} · {_esc(ms.title)}",
-        "",
-        "| Field | Value |",
-        "|---|---|",
-        f"| State | {ms.state.value} |",
-        f"| Mode | {_mode(ms.policy)} |",
-        f"| Rows | {_list(ms.rows) or 'every row not verified'} |",
-        f"| Budget | ${b.max_usd:.2f}, {b.max_hours:g} h · spent ${ms.cost_usd:.2f} |",
-        f"| Replans | {ms.replans} |",
-        f"| Reason | {_esc(ms.reason)} |",
-        "",
-        "## Goal",
-        "",
-        *(ms.goal.splitlines() or ["—"]),
-        "",
-        "## Cards",
-        "",
-        "| Card | Title | Rows | Deps | Kind | Status |",
-        "|---|---|---|---|---|---|",
-    ]
+    """One milestone's file: what the milestone is for, and each card as its
+    heading (with its status) and what the next session needs from it."""
+    lines = [f"# {ms.id} · {_esc(ms.title)}", "", f"- State: {ms.state.value}",
+             f"- Rows: {_list(ms.rows) or 'every row not verified'}"]  # fmt: skip
+    if ms.reason:
+        lines.append(f"- Reason: {_esc(ms.reason)}")
+    lines += ["", "## Goal", "", *(ms.goal.splitlines() or ["—"]), "", "## Cards"]
     for c in cards:
-        lines.append(f"| {c.id} | {_esc(c.title)} | {_list(c.rows)} | {_list(c.deps)} | {c.kind} | {c.state.value} |")
+        lines += ["", f"### {c.id} · {_esc(c.title)} · {c.state.value}", ""]
+        if c.intent:
+            lines.append(f"- Intent: {_esc(c.intent)}")
+        lines += [f"- {k}: {_list(v)}" for k, v in (("Rows", c.rows), ("Deps", c.deps), ("Files", c.paths)) if v]
+        lines += [f"- {k}: {_esc(v)}" for k, v, d in (("Kind", c.kind, "code"), ("Risk", c.risk, "low"),
+                                                      ("Epic", c.epic, "")) if v != d]  # fmt: skip
+        if c.criteria:
+            lines += ["- Criteria:", *[f"  - {_esc(x)}" for x in c.criteria]]
+        if c.reason:
+            lines.append(f"- Outcome: {_esc(c.reason)}")
+    meta: Dict[str, Any] = {"policy": _changed(ms.policy.to_dict(), Policy().to_dict()), "created": ms.created,
+                            "updated": ms.updated}  # fmt: skip
+    meta.update({k: v for k, v in (("cost", ms.cost_usd), ("replans", ms.replans)) if v})
+    meta["cards"] = {}
     for c in cards:
-        lines += [
-            "",
-            f"### {c.id} · {_esc(c.title)}",
-            "",
-            f"- Intent: {_esc(c.intent)}",
-            f"- Rows: {_list(c.rows)}",
-            f"- Deps: {_list(c.deps)}",
-            f"- Files: {_list(c.paths)}",
-            f"- Kind: {c.kind}",
-            f"- Risk: {c.risk}",
-            f"- Priority: {c.priority}",
-            f"- Epic: {_esc(c.epic)}",
-            "- Criteria:",
-            *[f"  - {_esc(x)}" for x in c.criteria],
-            f"- Status: {c.state.value}",
-            f"- Stage: {c.stage.value if c.stage else ''}",
-            f"- Reopens: {c.reopens}",
-            f"- Outcome: {_esc(c.reason)}",
-            f"- Run: {c.run_id or ''}",
-            f"- Cost: {c.cost_usd:.4f}",
-        ]
-    meta = {"policy": ms.policy.to_dict(), "created": ms.created, "updated": ms.updated,
-            "times": {c.id: [c.created, c.updated] for c in cards}}  # fmt: skip
+        m: Dict[str, Any] = {"t": [c.created, c.updated]}
+        for key, (attr, default) in _CARD_META.items():
+            v = getattr(c, attr)
+            if v != default:
+                m[key] = v.value if isinstance(v, Stage) else v
+        meta["cards"][c.id] = m
     lines += ["", f"<!-- operonx-project: {json.dumps(meta, sort_keys=True)} -->", ""]
     return "\n".join(lines)
 
@@ -166,6 +166,8 @@ class BoardFile:
 
 
 def _parse(text: str, project: str) -> BoardFile:
+    """A milestone file, in the compact form :func:`board_text` writes or the
+    older one (a field table, a cards table, every card field as a bullet)."""
     lines = text.splitlines()
     head = _MS_HEAD.match(lines[0]) if lines else None
     if head is None:
@@ -187,12 +189,16 @@ def _parse(text: str, project: str) -> BoardFile:
         c = _CARD_HEAD.match(line)
         if c:
             section = "card"
-            cards.append({"id": c.group(1), "title": _unesc(c.group(2)), "criteria": []})
+            cards.append({"id": c.group(1), "head": c.group(2), "criteria": []})
             continue
-        if section == "" and line.startswith("| ") and not line.startswith("| Field"):
-            cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
-            if len(cells) >= 2:
-                fields[cells[0].strip()] = cells[1].strip()
+        if section == "":
+            f = _FIELD.match(line)
+            if f:
+                fields[f.group(1)] = f.group(2)
+            elif line.startswith("| ") and not line.startswith("| Field"):
+                cells = re.split(r"(?<!\\)\|", line.strip().strip("|"))
+                if len(cells) >= 2:
+                    fields[cells[0].strip()] = cells[1].strip()
         elif section == "Goal":
             goal.append(line)
         elif section == "card" and cards:
@@ -208,16 +214,20 @@ def _parse(text: str, project: str) -> BoardFile:
     ms = Milestone(id=mid, project=project, title=title, goal="" if goal_text == "—" else goal_text,
                    rows=[] if rows == "every row not verified" else _unlist(rows),
                    state=MilestoneState(fields.get("State", "created")), policy=policy,
-                   reason=_unesc(fields.get("Reason", "")), replans=int(fields.get("Replans", "0") or 0),
+                   reason=_unesc(fields.get("Reason", "")), replans=int(meta.get("replans") or fields.get("Replans") or 0),
                    created=float(meta.get("created") or 0), updated=float(meta.get("updated") or 0))  # fmt: skip
     spent = re.search(r"spent \$([\d.]+)", fields.get("Budget", ""))
-    ms.cost_usd = float(spent.group(1)) if spent else 0.0
+    ms.cost_usd = float(meta.get("cost") or (spent.group(1) if spent else 0.0))
     times = meta.get("times") or {}
+    extra = meta.get("cards") or {}
     out: List[Card] = []
     for c in cards:
-        t = times.get(c["id"]) or [0.0, 0.0]
+        if "status" not in c:  # the compact heading: "<title> · <status>"
+            c["head"], _, c["status"] = c["head"].rpartition(" · ")
+        c.update({k: v for k, v in (extra.get(c["id"]) or {}).items() if k != "t"})
+        t = (extra.get(c["id"]) or {}).get("t") or times.get(c["id"]) or [0.0, 0.0]
         out.append(Card(
-            id=c["id"], milestone=mid, title=c["title"], intent=_unesc(c.get("intent", "")),
+            id=c["id"], milestone=mid, title=_unesc(c["head"]), intent=_unesc(c.get("intent", "")),
             rows=_unlist(c.get("rows", "")), criteria=c["criteria"], deps=_unlist(c.get("deps", "")),
             paths=_unlist(c.get("files", "")), kind=c.get("kind", "code") or "code", risk=c.get("risk", "low") or "low",
             priority=int(c.get("priority") or 0), epic=_unesc(c.get("epic", "")),

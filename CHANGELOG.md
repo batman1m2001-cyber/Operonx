@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.36.0] - 2026-10-30
+
+### Changed
+
+- **operonx-project: a board card is its heading and what the next session needs.** `### C3 · title · status`, then Intent, Rows, Deps, Files, Criteria and Outcome; Kind, Risk and Epic only when not the default. The cards table is gone, and what only a rebuild needs (policy, times, run, cost, stage, reopens, priority) sits in the closing comment when it is not the default. Boards are 25–28% smaller. The reader still takes the older format (BOARD_SIMPLIFY_PLAN B1).
+- **`operonx init` writes 9 BRD files, not 20.** The empty `architecture/`, `features/`, `decisions/`, `ux/`, `testing/`, `assets/`, `templates/` and `GLOSSARY.md` stubs are gone; a project adds a folder when it has something for it, and the checker reads it then. `MAINTAINING.md` is folded into the README (B2).
+
 ## [1.35.0] - 2026-10-23
 
 ### Added
