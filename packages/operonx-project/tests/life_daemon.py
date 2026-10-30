@@ -45,6 +45,10 @@ def main(config: str) -> None:
     repo = root / "proj"
     life = Life(root, c["script"], mode=c.get("mode", "w1"), policy=Policy.from_dict(c.get("policy")),
                 repo=repo if repo.exists() else None, log=Path(c["log"]))  # fmt: skip
+    if c.get("post_merge"):  # a command git runs right after each merge commit (a crash while merging)
+        hook = Path(life.repo) / ".git" / "hooks" / "post-merge"
+        hook.write_text(f"#!/bin/sh\n{c['post_merge']}\n")
+        hook.chmod(0o755)
     if c.get("fake_claude"):
         life.life.coder = life.coder = Hybrid(life.coder, Path(c["fake_claude"]))
     for kind, payload, card in c.get("commands") or []:

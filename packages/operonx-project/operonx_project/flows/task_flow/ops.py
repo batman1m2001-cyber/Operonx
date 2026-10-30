@@ -185,9 +185,17 @@ def _fresh_state(card: Card, rt: Runtime) -> Dict[str, Any]:
 
 
 async def _baseline(rt: Runtime, card: Card, wt: Path) -> List[Dict[str, Any]]:
-    async with child("baseline", inputs={"checks": [c.name for c in rt.checks]}, op_type="checks") as step:
-        rows = [r.to_dict() for r in await run_checks(rt.checks, wt, rt.env)]
-        step.outputs = {"failing": [r["name"] for r in rows if not r["ok"]]}
+    """The card's checks on its base: the integration branch's last results when they
+    stand for it (the merge before ran them on the same code), else run here."""
+    checks, mid = rt.card_checks, card.milestone
+    async with child("baseline", inputs={"checks": [c.name for c in checks]}, op_type="checks") as step:
+        head = rt.git.head(wt)
+        rows = rt.reuse(mid, rt.store.checkpoint(rt.integration_key(mid)), head, checks)
+        rows = rows if rows is not None else rt.reuse(mid, rt.store.ms_get(mid, "baseline"), head, checks)
+        reused = rows is not None
+        if rows is None:
+            rows = [r.to_dict() for r in await run_checks(checks, wt, rt.env)]
+        step.outputs = {"failing": [r["name"] for r in rows if not r["ok"]], "reused": reused}
     return rows
 
 
@@ -509,7 +517,7 @@ def _card_changed(rt: Runtime, card: Card, wt: Path) -> List[str]:
 
 async def _checks(rt: Runtime, card: Card, wt: Path) -> Tuple[List[CheckResult], List[str], str, str]:
     """(results, new failures, failure tail, signature) against the card's baseline."""
-    checks = list(rt.checks)
+    checks = list(rt.card_checks)
     acc = card.detail.get("acceptance") or {}
     if acc.get("files"):
         checks.append(rt.test_check("acceptance", rt.acceptance_cmd.format(dir=acc["dir"])))
@@ -517,6 +525,10 @@ async def _checks(rt: Runtime, card: Card, wt: Path) -> Tuple[List[CheckResult],
         results = await run_checks(checks, wt, rt.env)
         cmp = compare(_results(card.detail.get("baseline") or []), results)
         step.outputs = {"new": cmp.new, "old": cmp.old, "fixed": cmp.fixed}
+    # what the merge reuses when the integration branch has not moved under the card (GitIntegrator)
+    own = {c.name for c in rt.card_checks}
+    rt.set_detail(card.milestone, card.id, checked={"sha": rt.git.head(wt), "ok": not cmp.new,
+                                                    "results": [r.to_dict() for r in results if r.name in own]})
     failing = [r for r in results if not r.ok and any(n == r.name or n.startswith(r.name + ":") for n in cmp.new)]
     tail = "\n\n".join(f"$ {r.name}\n{r.tail[-3000:]}" for r in failing)
     sig = hashlib.sha256("\n".join(sorted(r.signature for r in failing)).encode()).hexdigest()[:16] if failing else ""

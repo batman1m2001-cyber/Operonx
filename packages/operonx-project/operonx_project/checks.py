@@ -28,6 +28,7 @@ from operonx.core.loggings import LOGGER
 __all__ = ["Check", "CheckResult", "Comparison", "compare", "failure_signature", "run_check", "run_checks"]
 
 _TAIL_LINES = 80
+WHEN = ("always", "card", "final")
 _TAIL_CHARS = 8000
 
 
@@ -43,8 +44,13 @@ class Check:
     image: Optional[str] = None
     env: Dict[str, str] = field(default_factory=dict)
     mounts: Dict[str, str] = field(default_factory=dict)  # docker: host dir → container dir, read-only
+    # always: every card and the milestone's end; card: the cards only (a fast subset of a final suite);
+    # final: once, at the milestone's end (a long suite a card would wait on three times)
+    when: str = "always"
 
     def __post_init__(self) -> None:
+        if self.when not in WHEN:
+            raise ValueError(f"check {self.name!r}: when must be one of {', '.join(WHEN)}, not {self.when!r}")
         if self.mode not in ("host", "docker"):
             raise ValueError(f"check mode must be 'host' or 'docker', not {self.mode!r}")
         if self.mode == "docker" and not self.image:

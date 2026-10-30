@@ -15,7 +15,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from operonx.core.loggings import LOGGER
 
@@ -133,6 +133,45 @@ class Runtime:
             self.store.note(mid, "activity", {"text": text[:120], "role": role}, card=cid)
 
         return note
+
+    @property
+    def card_checks(self) -> List[Check]:
+        """The checks a card runs (its baseline, QA, the merge); ``when="final"`` ones wait for the end."""
+        return [c for c in self.checks if c.when != "final"]
+
+    @property
+    def final_checks(self) -> List[Check]:
+        """The checks the milestone's end runs on the integration branch."""
+        return [c for c in self.checks if c.when != "card"]
+
+    def integration_key(self, mid: str) -> str:
+        """The checkpoint of the checks last run on *mid*'s integration branch: ``{sha, results}``."""
+        return f"integration-baseline:{self.key}:{mid}"
+
+    def same_code(self, mid: str, a: Optional[str], b: Optional[str]) -> bool:
+        """Checks that ran on commit *a* stand for commit *b*: the same tree but
+        for the board files the engine commits (``<brd>/board``, :meth:`Lifecycle.board`)."""
+        if not a or not b:
+            return False
+        if a == b:
+            return True
+        rel = (self.store.ms_get(mid, "intake") or {}).get("brd") or "docs/brd"
+        try:
+            paths = self.git.git("diff", "--name-only", a, b).splitlines()
+        except Exception:  # noqa: BLE001 — a commit gone: nothing stands for it
+            return False
+        return all(p.startswith(f"{rel}/board/") for p in paths if p)
+
+    def reuse(self, mid: str, saved: Optional[Dict[str, Any]], sha: Optional[str],
+              checks: List[Check]) -> Optional[List[Dict[str, Any]]]:  # fmt: skip
+        """*saved*'s results (``{sha, results}``) for *checks*, when they stand for *sha*
+        (:meth:`same_code`) and each check ran to an end there; else None (run them)."""
+        if not saved or not self.same_code(mid, saved.get("sha"), sha):
+            return None
+        rows = {r["name"]: r for r in saved.get("results") or []}
+        if any(c.name not in rows or rows[c.name].get("timed_out") for c in checks):
+            return None
+        return [rows[c.name] for c in checks]
 
     def set_detail(self, mid: str, cid: str, **values) -> Card:
         """Merge *values* into the card's ``detail`` (``None`` removes a key)."""
