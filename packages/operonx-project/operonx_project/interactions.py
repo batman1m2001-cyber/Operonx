@@ -126,7 +126,17 @@ class Interactions:
         return None
 
     def current(self, inter: Dict[str, Any]) -> bool:
-        return self._context(inter) == inter["context_hash"]
+        now = self._context(inter)
+        if now is not None and now != inter["context_hash"] and inter["kind"] == "card":
+            # a question parked before the hash left out the card's words (#241): the run is still parked on it,
+            # so it takes the new hash, and an edit to the card after the upgrade leaves it open too
+            card = self.store.get_card(inter["milestone"], inter["card"])
+            ms = self.store.get_milestone(inter["milestone"])
+            if _hash(card.title, card.intent, card.criteria, card.paths, card.run_id, ms.replans,
+                     inter["id"]) == inter["context_hash"]:  # fmt: skip
+                self.store.update_interaction(inter["id"], context_hash=now)
+                inter["context_hash"] = now
+        return now == inter["context_hash"]
 
     def open(self, mid: Optional[str] = None) -> List[Dict[str, Any]]:
         return [i for i in self.store.interactions(mid, [OPEN]) if self.current(i)]
