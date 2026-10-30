@@ -115,9 +115,10 @@ async def _coder(
 
 
 def _request(rt: Runtime, card: Card, role: str, prompt: str, cwd: Path, name: str, **kw: Any) -> CoderRequest:
-    spent = rt.card(card.milestone, card.id).cost_usd
-    budget = rt.store.get_milestone(card.milestone).policy.budget.card_max_usd
-    left = max(0.05, budget - spent)
+    now = rt.card(card.milestone, card.id)
+    # the run's allowance (``card_budget``: the owner's "keep", "rewrite" or retry extend it), else the policy's
+    budget = now.detail.get("card_budget") or rt.store.get_milestone(card.milestone).policy.budget.card_max_usd
+    left = max(0.05, budget - now.cost_usd)
     hide = [] if role == "examiner" else [rt.heldout_root]
     return CoderRequest(
         prompt=prompt,
@@ -159,10 +160,12 @@ def _save(rt: Runtime, key: str, res: CoderResult) -> None:
 
 def _fresh_state(card: Card, rt: Runtime) -> Dict[str, Any]:
     budget = rt.store.get_milestone(card.milestone).policy.budget
+    allowance = card.cost_usd + budget.card_max_usd  # a retried card starts with a whole budget, not what is left
+    rt.set_detail(card.milestone, card.id, card_budget=allowance)
     return {
         "round": 0,
         "cap": budget.max_rounds,
-        "card_budget": budget.card_max_usd,
+        "card_budget": allowance,
         "mode": "first",  # first | resume | fresh (a new session) | rebase
         "feedback": "",
         "last_sig": "",
@@ -378,8 +381,12 @@ def _apply_answer(rt: Runtime, card: Card, st: Dict[str, Any], answer: Any) -> O
     if q.get("fingerprint"):
         st["asked"][q["fingerprint"]] = answer
     choice, text = _choice(q, answer)
-    cat = q.get("category", "")
     policy = rt.store.get_milestone(card.milestone).policy.budget
+    spent = rt.card(card.milestone, card.id).cost_usd
+    # the card goes on: with at least a call's worth (mr-finance m33/F3: a rewrite past the budget got $0.05)
+    if choice not in ("stop", "skip") and st["card_budget"] - spent < rt.call_max_usd:
+        st["card_budget"] = spent + policy.card_max_usd
+        rt.set_detail(card.milestone, card.id, card_budget=st["card_budget"])
     note = f" The owner adds: {text}" if text else ""
     rt.store.note(card.milestone, "answer.applied", {"question": q.get("fingerprint"), "choice": choice, "text": text,
                                                       "problem": str(q.get("problem") or q.get("reason") or "")[:600]},
@@ -411,8 +418,6 @@ def _apply_answer(rt: Runtime, card: Card, st: Dict[str, Any], answer: Any) -> O
         return _end(st, "failed", "skipped by the owner")
     if q.get("kind") == "engine":  # max rounds, budget, repeated failure: keep (or words) goes on
         st["cap"] = st["round"] + policy.max_rounds
-        if cat == "budget":
-            st["card_budget"] = rt.card(card.milestone, card.id).cost_usd + policy.card_max_usd
         st["same"], st["revised"], st["last_sig"] = 0, False, ""
         st["feedback"] = (st.get("feedback") or "") + "\n\nThe owner says: keep trying." + note
         return None

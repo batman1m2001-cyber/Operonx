@@ -38,7 +38,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional
 
 
 def _brd_parser(sub) -> None:
@@ -543,7 +543,7 @@ def _milestones(args) -> int:
             bridge = TelegramBridge(proj.store, inter, TelegramMessenger(token, api=args.telegram_api),
                                     args.telegram_chat, args.telegram_user, project_name=proj.repo.name)  # fmt: skip
         try:
-            asyncio.run(Daemon(life, poll_s=args.poll, interactions=inter, bridge=bridge).serve(once=args.once))
+            asyncio.run(_serve(Daemon(life, poll_s=args.poll, interactions=inter, bridge=bridge), args.once))
         except DaemonBusy as exc:
             sys.stderr.write(f"error: {exc}\n")
             return 3
@@ -685,6 +685,18 @@ def _taker(proj, args, out) -> int:
         out.write(f"{brief['card']}: {brief['state']}{' (' + brief['stage'] + ')' if brief['stage'] else ''}"
                   f" — {brief['reason'] or sent['message']}\n")  # fmt: skip
     return 0
+
+
+async def _serve(daemon: Any, once: bool) -> None:
+    """The daemon until it is done, or until SIGTERM / SIGINT: a stop ends the loop and releases the lease (a
+    killed process left it held, and a start right after the studio's stop saw "a daemon drives it")."""
+    import signal
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await daemon.serve(once=once, stop=stop)
 
 
 def main(argv: Optional[List[str]] = None) -> int:

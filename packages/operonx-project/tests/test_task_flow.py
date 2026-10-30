@@ -308,6 +308,25 @@ async def test_rewriting_acceptance_tests_has_the_examiner_check_its_own(tmp_pat
     assert kinds == ["acceptance.rewritten", "heldout.rewritten"]
 
 
+async def test_an_answer_that_goes_on_past_the_card_budget_gives_the_card_money_to_do_it(tmp_path):
+    # mr-finance m33/F3: rewrite_tests on a card that had spent $5.22 of $5 — the test author was sent with $0.05
+    from tests.flow_env import ACCEPTANCE, author_step
+
+    path = "tests/acceptance/C1/test_c1_add.py"
+    env = Env(tmp_path, {"test_author": [{"write": {path: ACCEPTANCE.replace("== 5", "== 6")},
+                                          "output": {"files": [path]}}, author_step("C1")],
+                         "implementer": [impl(RIGHT + f"# {i}\n") for i in range(4)]},
+              heldout=False, max_rounds=2)  # fmt: skip
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "waiting_human" and out.question["rewrite"] == "acceptance"
+    env.store.add_cost("m1", 5.2, card="C1")  # past card_max_usd (5.0)
+    env.store.update_card("m1", "C1", detail={**env.card().detail, "question": out.question}, run_id=out.run_id)
+    out = await env.runner.resume(env.card(), {"choice": "rewrite_tests", "text": "6 is wrong"}, env.stage)
+    assert out.status == "verified", out
+    assert env.coder.of("test_author")[1]["max_usd"] == env.rt.call_max_usd
+    assert env.card().detail["card_budget"] > env.card().cost_usd + 4
+
+
 async def test_keep_on_the_round_limit_gives_fresh_rounds_even_on_a_question_round(tmp_path):
     # tipcalc m3/C5: the round limit came on a round the implementer asked in (triage answered it); the limit's
     # question was classed the implementer's, so "keep" left the cap where it was: the next round hit it again
