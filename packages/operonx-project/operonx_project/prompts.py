@@ -169,7 +169,9 @@ def implement_prompt(card: Card, brief: str, acceptance: Optional[str], shared: 
     rules = [
         "Work only in this directory. Do not run git commands that change history or branches: "
         "the engine commits your changes after your turn.",
-        "Run the tests yourself before you finish.",
+        # mr-finance m33/F1: the implementer ran the repo's 35-minute suite and its session timed out waiting on it
+        "Before you finish, run the acceptance tests and the tests near the code you changed. Do not run the "
+        "whole suite: the engine runs every check after your turn and tells you what fails.",
         DATA_RULE,
     ]
     if acceptance:

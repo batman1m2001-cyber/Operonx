@@ -448,5 +448,11 @@ def test_the_api_queues_the_rest_and_moves_a_card_not_started(tmp_path):
     assert _api(proj, {"op": "prioritize", "milestone": "m1", "card": "C9", "priority": -5})["ok"]
     assert proj.store.get_card("m1", "C9").priority == -5
     assert _api(proj, {"op": "prioritize", "milestone": "m1", "card": "C1", "priority": 1})["status"] == "refused"
+    # the owner edits the card waiting on a question: done at once, and the question can still be answered
+    got = _api(proj, {"op": "edit", "milestone": "m1", "card": "C1", "paths": ["calc.py", "tests/test_calc.py"]})
+    assert got["ok"] and proj.store.get_card("m1", "C1").paths == ["calc.py", "tests/test_calc.py"]
+    assert _api(proj, {"op": "edit", "milestone": "m1", "card": "C1"})["status"] == "invalid"
+    Interactions(proj.store).sync()
+    assert _api(proj, {"op": "answer", "milestone": "m1", "ref": "C1", "answer": "a"})["ok"]
     assert _api(proj, {"op": "nope", "milestone": "m1"})["status"] == "invalid"
     assert _api(proj, {"op": "pause", "milestone": "m7"})["status"] == "unknown"

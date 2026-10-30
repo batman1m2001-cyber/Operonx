@@ -12,6 +12,8 @@ Requests (``op`` and its fields)::
     {"op": "replan",   "milestone": "m1", "notes": "…"}
     {"op": "retry",    "milestone": "m1", "usd": 20 | "hours": 2}
     {"op": "prioritize", "milestone": "m1", "card": "C5", "priority": -1}   # lower runs first
+    {"op": "edit",     "milestone": "m1", "card": "C5", "paths": […], "criteria": […], "title": "…"}
+                                                                            # or "intent"; a card not running
     {"op": "take",     "milestone": "m1", "card": "C5"}                    # the actor works it (plan D7)
     {"op": "submit",   "milestone": "m1", "card": "C5", "summary": "…"}    # checks, review, held-out tests
     {"op": "release",  "milestone": "m1", "card": "C5"}                    # back to the engine's implementer
@@ -70,6 +72,7 @@ OPS = (
     "replan",
     "retry",
     "prioritize",
+    "edit",
     "take",
     "submit",
     "release",
@@ -340,6 +343,19 @@ def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, A
             return _no("refused", f"{card.id} is {card.state.value}: only a card not started can move")
         store.update_card(ms.id, card.id, actor=actor, priority=priority)
         return {"ok": True, "status": "done", "message": f"{card.id}: priority {priority}"}
+    if op == "edit":  # the owner widens a card's paths or rewords its criteria (mr-finance m33: only by hand in the db)
+        try:
+            card = store.get_card(ms.id, str(req.get("card")))
+        except KeyError:
+            return _no("unknown", f"no card {req.get('card')!r} in {ms.id}")
+        if card.state in (CardState.RUNNING, CardState.VERIFIED, CardState.DONE, CardState.CANCELLED):
+            return _no("refused", f"{card.id} is {card.state.value}: edit a card that waits, is failed or not started")
+        values = {k: req[k] for k in ("paths", "criteria") if isinstance(req.get(k), list)}
+        values.update({k: str(req[k]) for k in ("title", "intent") if req.get(k)})
+        if not values:
+            return _no("invalid", "edit needs paths, criteria, title or intent")
+        store.update_card(ms.id, card.id, actor=actor, **values)
+        return {"ok": True, "status": "done", "message": f"{card.id}: {', '.join(values)} changed"}
     if op == "card":
         try:
             return {"ok": True, "status": "done", **taker_brief(project, ms.id, str(req.get("card")))}

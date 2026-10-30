@@ -311,10 +311,10 @@ def load_questions(brd: Path) -> List[Question]:
     return out
 
 
-def add_questions(brd: Path, questions: Sequence[Question]) -> List[Question]:
-    """Give each new question the next ``Q-nn`` and add it, to the index and
-    as an entry. A question with the same topic as an existing one is not
-    added twice. Nothing is ever removed."""
+def add_questions(brd: Path, questions: Sequence[Question], after: int = 0) -> List[Question]:
+    """Give each new question the next ``Q-nn`` (past *after*: numbers used
+    outside the file) and add it, to the index and as an entry. A question with
+    the same topic as an existing one is not added twice. Nothing is ever removed."""
     f = Path(brd) / QUESTIONS
     f.parent.mkdir(parents=True, exist_ok=True)
     if not f.exists():
@@ -328,7 +328,7 @@ def add_questions(brd: Path, questions: Sequence[Question]) -> List[Question]:
         )
     existing = load_questions(brd)
     topics = {" ".join(q.topic.lower().split()) for q in existing}
-    n = max((int(q.id.split("-")[1]) for q in existing), default=0)
+    n = max([int(q.id.split("-")[1]) for q in existing] + [after])
     added: List[Question] = []
     for q in questions:
         key = " ".join(q.topic.lower().split())

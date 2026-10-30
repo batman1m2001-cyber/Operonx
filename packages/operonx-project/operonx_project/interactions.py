@@ -114,7 +114,9 @@ class Interactions:
             q = card.detail.get("question") or {}
             if card.state != CardState.WAITING_HUMAN or q.get("interrupt_id") != inter["id"] or ms.state == M.CANCELLED:
                 return None
-            return _hash(card.title, card.intent, card.criteria, card.paths, card.run_id, ms.replans, inter["id"])
+            # not the card's words: the owner edits a card (its paths, its criteria) to answer it, and the run is still
+            # parked on this question (mr-finance m33: an edit left the card waiting on a question no one could answer)
+            return _hash(card.run_id, ms.replans, inter["id"])
         if inter["kind"] == "approval":
             n = ((self.store.ms_get(ms.id, "runs") or {}).get("plan") or {}).get("n")
             return _hash("plan", n, ms.replans) if ms.state == M.AWAITING_APPROVAL else None
@@ -130,8 +132,13 @@ class Interactions:
         return [i for i in self.store.interactions(mid, [OPEN]) if self.current(i)]
 
     # ── making them ────────────────────────────────────────────────────────
+    def _used(self) -> int:
+        """The highest ``Q-nn`` an interaction holds (a plan's approval is one, and is not in the BRD's file)."""
+        return max((int(i["qid"][2:]) for i in self.store.interactions() if (i.get("qid") or "").startswith("Q-")),
+                   default=0)  # fmt: skip
+
     def _next_qid(self, brd: Optional[Path]) -> str:
-        n = [int(i["qid"][2:]) for i in self.store.interactions() if (i.get("qid") or "").startswith("Q-")]
+        n = [self._used()]
         if brd is not None:
             from operonx_project.brd.records import load_questions
 
@@ -175,7 +182,8 @@ class Interactions:
                          fact=payload.get("why") or payload.get("problem", ""),
                          interpretation=f"recommended: {payload['recommended']}" if payload.get("recommended") else "",
                          requirements=list(payload.get("rows") or []))  # fmt: skip
-            added = self._write_brd(mid, lambda b: add_questions(b, [q]), f"{mid}/{card}: {q.topic[:60]}")
+            used = self._used()  # mr-finance m33: Q-33 was both a plan's approval and F2's question
+            added = self._write_brd(mid, lambda b: add_questions(b, [q], after=used), f"{mid}/{card}: {q.topic[:60]}")
             qid = added[0].id if added else None
         base["qid"] = qid or self._next_qid(self._brd(mid))
         self.store.add_interaction(base)

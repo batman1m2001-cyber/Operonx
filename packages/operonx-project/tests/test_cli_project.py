@@ -83,3 +83,28 @@ def test_one_daemon_per_project(tmp_path):
         asyncio.run(Daemon(life.life).serve(once=True))
     life.store.release_lease("someone-else")
     asyncio.run(Daemon(life.life).serve(once=True))  # free again: nothing to drive, it returns
+
+
+def test_a_stopped_daemon_releases_its_lease(tmp_path):
+    # mr-finance m33: the studio's stop killed the daemon with its lease held; a start right after was told
+    # "a daemon drives it" until the lease ran out
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    life = Life(tmp_path, base_script(), mode="w1")
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    proc = subprocess.Popen([sys.executable, "-c", "import sys; from operonx_project.cli import main; "
+                             f"sys.exit(main(['daemon', '--repo', {str(life.repo)!r}]))"], env=env)  # fmt: skip
+    try:
+        until = time.time() + 30
+        while life.store.lease_holder() is None and time.time() < until:
+            time.sleep(0.2)
+        assert life.store.lease_holder() is not None
+        proc.send_signal(signal.SIGTERM)
+        assert proc.wait(timeout=30) == 0
+    finally:
+        proc.kill()
+    assert life.store.lease_holder() is None

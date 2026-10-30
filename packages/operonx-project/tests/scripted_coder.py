@@ -85,7 +85,8 @@ class ScriptedCoder:
             on_start(Started(session, None))
         rec = {"role": role, "key": key, "step": req.tags.get("step"), "i": i, "session_in": req.session,
                "session": session, "prompt": req.prompt,
-               "cwd": str(req.cwd), "hide": [str(h) for h in req.hide], "model": req.model}  # fmt: skip
+               "cwd": str(req.cwd), "hide": [str(h) for h in req.hide], "model": req.model,
+               "max_usd": req.max_usd}  # fmt: skip
         self.calls.append(rec)
         if self.log is not None:
             with open(self.log, "a") as fh:

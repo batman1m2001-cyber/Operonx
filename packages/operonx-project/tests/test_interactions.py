@@ -32,6 +32,11 @@ def test_a_card_question_is_a_brd_entry_resolved_by_the_answer(tmp_path):
     assert "C1: Should add accept strings" in git(life.integ(), "log", "-1", "--format=%s")
 
     inter_api = Interactions(life.store, project=life.project)
+    card = life.store.get_card("m1", "C1")
+    life.store.update_card("m1", "C1", actor="owner", paths=card.paths + ["calc_extra.py"],
+                           criteria=card.criteria + ["WHEN add gets a str THE SYSTEM SHALL raise"])  # fmt: skip
+    inter_api.sync()  # an edit to the card waiting on it leaves the question open
+    assert life.store.get_interaction(inter["id"])["state"] == "open"
     got = inter_api.submit_answer(q.id, "a: and say so in the error", actor="owner", via="cli", mid="m1")
     assert got.ok, got.message
     assert inter_api.submit_answer(q.id, "b").status == "already"

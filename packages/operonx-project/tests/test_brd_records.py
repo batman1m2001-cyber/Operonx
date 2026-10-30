@@ -88,6 +88,9 @@ def test_records_matrix_and_questions_pass_the_checker(tmp_path):
     (q,) = add_questions(brd, [Question("Q-00", "ambiguity", "Whose time zone is 21 giờ?", "§3 says 21 giờ")])
     assert q.id == "Q-01"
     assert add_questions(brd, [Question("Q-00", "ambiguity", "whose time zone is  21 giờ?", "")]) == []
+    # numbers held outside the file (a plan's approval is Q-05) are skipped: mr-finance m33 had two Q-33s
+    (q,) = add_questions(brd, [Question("Q-00", "gap", "Which calendar?", "")], after=5)
+    assert q.id == "Q-06"
     assert add_matrix_rows(brd, reqs, "Client BRD") == ["BRD-BR-01", "BRD-RULE-CALL-01"]
     assert add_matrix_rows(brd, reqs, "Client BRD") == []  # never twice
     refresh_summary(brd)
