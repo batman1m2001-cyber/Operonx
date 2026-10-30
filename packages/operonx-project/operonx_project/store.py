@@ -65,7 +65,7 @@ MILESTONE_MOVES: Dict[MilestoneState, frozenset] = {
     M.PAUSED: frozenset(_STAGES | {M.WAITING_HUMAN, M.CANCELLED}),
     M.VERIFYING: frozenset({M.DONE, M.RUNNING, M.WAITING_HUMAN, M.PAUSED, M.FAILED, M.CANCELLED, M.BUDGET_EXHAUSTED}),
     M.BUDGET_EXHAUSTED: frozenset(_STAGES | {M.PAUSED, M.FAILED, M.CANCELLED}),  # retry resumes the stage it left
-    M.FAILED: frozenset({M.PLANNING, M.RUNNING}),  # the owner retries
+    M.FAILED: frozenset({M.DISCOVERING, M.PLANNING, M.RUNNING}),  # the owner retries or replans
     M.DONE: frozenset({M.RUNNING}),  # a changed source re-opens it
     M.CANCELLED: frozenset(),
 }

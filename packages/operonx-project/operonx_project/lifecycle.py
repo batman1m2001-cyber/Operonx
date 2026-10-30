@@ -529,7 +529,10 @@ class Lifecycle:
         )
         self.store.ms_put(mid, "replan", {"notes": notes, "why": why})
         self.store.update_milestone(mid, replans=ms.replans + 1)
-        self._move(mid, M.PLANNING, f"replan {ms.replans + 1}: {why[:300]}", actor=actor)
+        # stopped before its requirements were read: the planner has no context record yet, so the
+        # milestone starts over from discovery (the notes wait for the planner)
+        to = M.PLANNING if self.store.ms_get(mid, "context") else M.DISCOVERING
+        self._move(mid, to, f"replan {ms.replans + 1}: {why[:300]}", actor=actor)
 
     # ── verify and deliver ─────────────────────────────────────────────────
     async def _verify(self, mid: str) -> None:

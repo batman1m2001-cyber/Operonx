@@ -164,6 +164,18 @@ def test_replan_keeps_done_cards_and_replaces_the_rest(tmp_path):
     )
 
 
+def test_a_replan_before_the_requirements_were_read_discovers_again(tmp_path):
+    from tests.life_env import SURVEY
+
+    # paused while it was still discovering: no context record yet, so planning straight away would fail
+    life = Life(tmp_path, base_script(**{"planner:survey": [SURVEY, SURVEY]}), mode="w1")
+    life.store.move_milestone("m1", M.DISCOVERING, "")
+    life.store.move_milestone("m1", M.PAUSED, "paused by the owner")
+    life.command("replan", notes="merge the series flows")
+    assert life.serve() == M.AWAITING_APPROVAL, life.store.get_milestone("m1").reason
+    assert "merge the series flows" in life.coder.of("planner:plan")[0]["prompt"]
+
+
 def test_the_replenisher_keeps_ready_at_depth_and_stops_with_no_rows_left(tmp_path):
     from tests.flow_env import author_step, impl
     from tests.life_env import (
