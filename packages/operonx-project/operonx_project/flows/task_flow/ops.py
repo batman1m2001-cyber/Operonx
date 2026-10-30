@@ -551,8 +551,9 @@ async def _review(
     if saved is None:
         summary = "\n".join(f"- {r.name}: {'pass' if r.ok else 'fail (failing before this card too)'}"
                             for r in results)  # fmt: skip
-        req = _request(rt, card, "reviewer", reviewer_prompt(card, diff, summary, st["open"]), wt,
-                       f"r{st['round']}-review", schema=REVIEWER_SCHEMA)  # fmt: skip
+        acc = card.detail.get("acceptance") or {}
+        prompt = reviewer_prompt(card, diff, summary, st["open"], acc.get("dir") if acc.get("files") else None)
+        req = _request(rt, card, "reviewer", prompt, wt, f"r{st['round']}-review", schema=REVIEWER_SCHEMA)
         res = await _coder(rt, card, "review", req)
         if not res.ok and res.status not in _STOP:  # one more try: the reviewer's failure is not the card's
             res = await _coder(rt, card, "review", req)

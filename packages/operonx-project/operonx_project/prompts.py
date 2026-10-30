@@ -200,7 +200,8 @@ def rebase_prompt(why: str, reason: str, files: List[str]) -> str:
     )
 
 
-def reviewer_prompt(card: Card, diff: str, checks: str, previous: List[Dict[str, Any]]) -> str:
+def reviewer_prompt(card: Card, diff: str, checks: str, previous: List[Dict[str, Any]],
+                    acceptance: Optional[str] = None) -> str:  # fmt: skip
     prev = ""
     if previous:
         prev = (
@@ -211,7 +212,10 @@ def reviewer_prompt(card: Card, diff: str, checks: str, previous: List[Dict[str,
     return (
         f"Review this change against the card. You are read-only.\n\n{card_brief(card)}\n\n"
         f"Check results (they pass):\n{checks}\n\nThe diff:\n{diff}{prev}\n\n"
-        "Report findings. A blocker or major finding must cite a file in the diff and a line that file has, "
+        # mr-finance m33/F3: a blocker for the acceptance tests being "outside the card's paths"
+        + (f"{acceptance} holds the card's acceptance tests, written by the engine before the change: they are "
+           "not outside the card's paths, and not the implementer's to edit.\n\n" if acceptance else "")  # fmt: skip
+        + "Report findings. A blocker or major finding must cite a file in the diff and a line that file has, "
         "or it does not count. Do not report style preferences as major. The owner's standing rules and the "
         "project's AGENTS.md, appended to your instructions, are part of the bar: a change that breaks one "
         "is a major finding that names the rule. " + DATA_RULE

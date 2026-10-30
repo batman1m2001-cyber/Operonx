@@ -40,3 +40,5 @@ def test_the_reviewer_is_told_the_rules_are_the_bar():
 
     card = Card(id="C1", milestone="m1", title="t", intent="i")
     assert "a change that breaks one is a major finding" in reviewer_prompt(card, "diff", "ok", [])
+    told = reviewer_prompt(card, "diff", "ok", [], "tests/acceptance/C1")
+    assert "tests/acceptance/C1 holds the card's acceptance tests" in told and "not outside" in told
