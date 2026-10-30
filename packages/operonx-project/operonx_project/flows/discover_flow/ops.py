@@ -10,7 +10,9 @@ operonx's own.
 a check already failing there never counts as a regression and is never
 blamed on a card. A command that cannot be found or cannot run is dropped
 from the checks and recorded as ``missing``, the first thing to tell the
-owner. An operonx target always gets operonx's checks (plan §6.1): its
+owner. A check that times out there is run once more with a long cap
+and keeps twice the time it took: a timeout on both sides compares as "old"
+and would gate nothing. An operonx target always gets operonx's checks (plan §6.1): its
 tests, ``operonx lint --build`` (the conventions, and every graph built
 with the network blocked) and ``operonx guide --check``.
 
@@ -26,7 +28,7 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -131,6 +133,10 @@ async def survey(key: str, mid: str) -> dict:
     return {"survey": out}
 
 
+# the cap a check that timed out at baseline is measured again with
+LONG_CHECK_S = 3600.0
+
+
 @op
 async def baseline(key: str, mid: str, survey: dict) -> dict:
     rt = get_runtime(key)
@@ -157,6 +163,19 @@ async def baseline(key: str, mid: str, survey: dict) -> dict:
     missing: List[Dict[str, str]] = []
     if not survey.get("greenfield"):
         ran = await run_checks(checks, integ, rt.env)
+        for i, (c, r) in enumerate(zip(checks, ran)):
+            if not r.timed_out:
+                continue
+            # a timeout at baseline is "old" on every later round, so the check would gate nothing:
+            # measure it once with a long cap and give it room (twice what it took)
+            (again,) = await run_checks([replace(c, timeout_s=LONG_CHECK_S)], integ, rt.env)
+            if again.timed_out:
+                rt.store.note(mid, "discover.timed_out", {"check": c.name, "cmd": c.cmd, "after_s": LONG_CHECK_S})
+                continue
+            checks[i] = replace(c, timeout_s=max(c.timeout_s, round(2 * again.duration_s)))
+            ran[i] = again
+            rt.store.note(mid, "discover.slow_check", {"check": c.name, "took_s": round(again.duration_s),
+                                                       "timeout_s": checks[i].timeout_s})  # fmt: skip
         for c, r in zip(checks, ran):
             if _is_missing(r):
                 missing.append({"name": c.name, "cmd": c.cmd, "tail": r.tail[-600:]})

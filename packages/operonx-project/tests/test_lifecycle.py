@@ -258,3 +258,22 @@ def test_a_final_gap_no_card_owns_becomes_a_fix_card(tmp_path):
     # it starts from the milestone's baseline (a failure already in its own would not count), writes no tests
     assert fix.detail["baseline"] == life.store.ms_get("m1", "baseline")["results"]
     assert len(life.coder.of("test_author")) == 1 and life.store.ms_get("m1", "final_fixes") == 1
+
+
+def test_a_check_that_times_out_at_baseline_is_measured_again_and_given_room(tmp_path):
+    from tests.life_env import PY, TESTS
+
+    slow = {"output": {"brief": "calc", "stack": "python", "commands": [
+        {"name": "tests", "cmd": TESTS, "purpose": "test"},
+        {"name": "slow", "cmd": f"{PY} -c 'import time; time.sleep(2)'", "purpose": "test"}]}}  # fmt: skip
+    rt = {"acceptance_cmd": f"{PY} -m pytest -q -p no:cacheprovider {{dir}}", "check_timeout_s": 1.5}
+    life = Life(tmp_path, base_script(**{"planner:survey": [slow]}), runtime=rt)
+    life.command("start")
+    assert life.serve() == M.AWAITING_APPROVAL
+    base = life.store.ms_get("m1", "baseline")
+    # a timeout would be "old" on every round: the check would gate nothing
+    assert {r["name"]: (r["ok"], r["timed_out"]) for r in base["results"]}["slow"] == (True, False)
+    timeouts = {c["name"]: c["timeout_s"] for c in base["checks"]}
+    assert timeouts["slow"] >= 4 and timeouts["tests"] == 1.5
+    kinds = [e["kind"] for e in life.store.events("m1", limit=1000)]
+    assert "discover.slow_check" in kinds and "discover.timed_out" not in kinds
