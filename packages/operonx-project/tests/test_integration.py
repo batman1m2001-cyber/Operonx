@@ -3,6 +3,8 @@ with a rebase round, a regression is undone; and the scheduler end to end."""
 
 from __future__ import annotations
 
+import pytest
+
 from operonx_project.checks import Check
 from operonx_project.gitops import integration_branch
 from operonx_project.model import CardState, MilestoneState
@@ -67,6 +69,51 @@ async def test_a_regression_is_undone_and_reported(tmp_path):
     res = await GitIntegrator(env.rt).integrate(env.card())
     assert res.status == "regression" and "no-plus" in res.reason
     assert env.git.head(integ) == before
+
+
+def _marked(env, marker):
+    """The card's checks, each also leaving *marker* when it runs."""
+    env.rt.checks = [Check(c.name, f"touch {marker} && {c.cmd}", timeout_s=c.timeout_s) for c in env.rt.checks]
+
+
+async def test_a_card_checked_on_an_unmoved_branch_merges_without_running_the_checks_again(tmp_path):
+    env = Env(tmp_path, {"implementer": [impl(RIGHT)]}, heldout=False)
+    assert (await env.runner.run(env.card(), env.stage)).status == "verified"
+    integ = env.git.integration_path("m1")
+    (integ / "docs/brd/board").mkdir(parents=True)
+    (integ / "docs/brd/board/m1.md").write_text("# m1\n")  # the engine's board commit moves the branch, not the code
+    git(integ, "add", "-A")
+    git(integ, "commit", "-qm", "m1: board (C1 verified)")
+    _marked(env, tmp_path / "ran")
+    res = await GitIntegrator(env.rt).integrate(env.card())
+    assert res.status == "merged" and "the card's QA" in res.reason, res
+    assert not (tmp_path / "ran").exists()
+    assert (integ / "calc.py").read_text() == RIGHT
+
+
+async def test_a_card_merged_onto_new_code_is_checked_again(tmp_path):
+    env = Env(tmp_path, {"implementer": [impl(RIGHT)]}, heldout=False)
+    assert (await env.runner.run(env.card(), env.stage)).status == "verified"
+    integ = env.git.integration_path("m1")
+    (integ / "other.py").write_text("X = 1\n")
+    git(integ, "add", "-A")
+    git(integ, "commit", "-qm", "another card")
+    _marked(env, tmp_path / "ran")
+    res = await GitIntegrator(env.rt).integrate(env.card())
+    assert res.status == "merged" and "the card's QA" not in res.reason, res
+    assert (tmp_path / "ran").exists()
+
+
+async def test_a_final_check_waits_for_the_milestone_end(tmp_path):
+    env = Env(tmp_path, {"implementer": [impl(RIGHT)]}, heldout=False)
+    env.rt.checks = env.rt.checks + [Check("long", f"touch {tmp_path / 'long'}", when="final"),
+                                     Check("fast", "true", when="card")]  # fmt: skip
+    assert (await env.runner.run(env.card(), env.stage)).status == "verified"
+    assert not (tmp_path / "long").exists()
+    assert [c.name for c in env.rt.card_checks] == ["tests", "fast"]
+    assert [c.name for c in env.rt.final_checks] == ["tests", "long"]
+    with pytest.raises(ValueError, match="when"):
+        Check("x", "true", when="sometimes")
 
 
 async def test_scheduler_runs_cards_to_merged(tmp_path):

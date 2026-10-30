@@ -139,25 +139,36 @@ class GitIntegrator:
     def __init__(self, rt: Runtime):
         self.rt = rt
 
-    def _baseline_key(self, mid: str) -> str:
-        return f"integration-baseline:{self.rt.key}:{mid}"
-
     async def integrate(self, card: Card) -> Integrated:
-        rt, mid = self.rt, card.milestone
+        rt, mid, checks = self.rt, card.milestone, self.rt.card_checks
+        key = rt.integration_key(mid)
         with rt.git.merge_lock():
             integ = rt.git.ensure_integration(mid)
             before = rt.git.head(integ)
-            saved = rt.store.checkpoint(self._baseline_key(mid))
-            if saved is None or saved.get("sha") != before:
-                rows = [r.to_dict() for r in await run_checks(rt.checks, integ, rt.env)]
+            # the card's QA ran on the tree this merge makes when the integration branch did not move
+            # under it (only the board did): the checks are not run again, before the merge or after
+            checked = rt.card(mid, card.id).detail.get("checked") or {}
+            branch = rt.git.git("rev-parse", rt.git.card_branch(mid, card.id)).strip()
+            fork = rt.git.git("merge-base", before, branch).strip()
+            qa = (rt.reuse(mid, checked, branch, checks)
+                  if checked.get("ok") and rt.same_code(mid, fork, before) else None)  # fmt: skip
+            saved: Dict[str, Any] = {"sha": before, "results": []}
+            if qa is None:
+                rows = rt.reuse(mid, rt.store.checkpoint(key), before, checks)
+                if rows is None:
+                    rows = [r.to_dict() for r in await run_checks(checks, integ, rt.env)]
                 saved = {"sha": before, "results": rows}
-                rt.store.save_checkpoint(self._baseline_key(mid), saved)
+                rt.store.save_checkpoint(key, saved)
             m = rt.git.merge_card(mid, card.id, message=f"{mid}: merge card {card.id} ({card.title})", lock=False)
             if m.status == "conflict":
                 return Integrated("conflict", f"conflict with the integration branch in {', '.join(m.files)}")
             if m.status == "empty":
                 return Integrated("merged", "nothing to merge")
-            results = await run_checks(rt.checks, integ, rt.env)
+            if qa is not None:
+                rt.store.save_checkpoint(key, {"sha": m.sha, "results": qa})
+                rt.store.note(mid, "integration.merged", {"sha": m.sha, "checks": "the card's QA"}, card=card.id)
+                return Integrated("merged", f"merged at {m.sha[:10] if m.sha else '?'} (checked in the card's QA)")
+            results = await run_checks(checks, integ, rt.env)
             cmp = compare([CheckResult(**r) for r in saved["results"]], results)
             if not cmp.ok:
                 rt.git.reset_integration(mid, before)
@@ -165,7 +176,7 @@ class GitIntegrator:
                 rt.store.note(mid, "integration.regression", {"new": cmp.new, "merge": m.sha}, card=card.id)
                 LOGGER.warning(f"card {card.id}: merge regressed {cmp.new}; undone")
                 return Integrated("regression", f"after the merge these checks fail: {', '.join(cmp.new)}\n{tails}")
-            rt.store.save_checkpoint(self._baseline_key(mid), {"sha": m.sha, "results": [r.to_dict() for r in results]})
+            rt.store.save_checkpoint(key, {"sha": m.sha, "results": [r.to_dict() for r in results]})
             rt.store.note(mid, "integration.merged", {"sha": m.sha}, card=card.id)
             return Integrated("merged", f"merged at {m.sha[:10] if m.sha else '?'}")
 
@@ -213,7 +224,7 @@ class InitRunner:
             if failed:
                 return failed
         stage(Stage.QA)
-        results = await run_checks(rt.checks, wt, rt.env)
+        results = await run_checks(rt.card_checks, wt, rt.env)
         bad = [r for r in results if not r.ok]
         if bad:
             tails = "\n".join(f"$ {r.name}\n{r.tail[-800:]}" for r in bad)

@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LEASE = 1.0  # a killed daemon's lease expires after this; the next one waits it out
 
 
-def daemon(root: Path, script, commands=(), policy=None) -> int:
+def daemon(root: Path, script, commands=(), policy=None, post_merge: str = "") -> int:
     killed = root / "last-was-killed"
     if killed.exists():
         time.sleep(LEASE + 0.2)
@@ -35,7 +35,8 @@ def daemon(root: Path, script, commands=(), policy=None) -> int:
     cfg = root / "config.json"
     pol = (policy or Policy.w1(heldout=False, approve_plan="auto")).to_dict()
     cfg.write_text(json.dumps({"root": str(root), "script": script, "log": str(root / "calls.jsonl"),
-                               "policy": pol, "commands": list(commands), "lease_ttl": LEASE}))  # fmt: skip
+                               "policy": pol, "commands": list(commands), "lease_ttl": LEASE,
+                               "post_merge": post_merge}))  # fmt: skip
     proc = subprocess.run([sys.executable, "-m", "tests.life_daemon", str(cfg)], cwd=ROOT, capture_output=True,
                           text=True, timeout=600)  # fmt: skip
     if proc.returncode not in (0, -9):
@@ -97,10 +98,11 @@ def test_an_answer_survives_a_crash_between_it_and_the_resume(tmp_path):
 
 def test_killed_while_merging_redoes_the_merge_once(tmp_path):
     marker = tmp_path / "killed"
-    killer = f"{PY} {ROOT / 'tests' / 'killer.py'} {marker} && {TESTS}"
-    survey = {"output": {**SURVEY["output"], "commands": [{"name": "tests", "cmd": killer, "purpose": "test"}]}}
-    script = script_json(**{"planner:survey": [survey]})
-    assert daemon(tmp_path, script, commands=[["start", None, None]]) == -9
+    # the merge commit made, not yet recorded: a card checked on an unmoved branch runs no checks there (its QA's
+    # stand), so git's post-merge hook is where the crash lands
+    killer = f"{PY} {ROOT / 'tests' / 'killer.py'} {marker}"
+    script = script_json()
+    assert daemon(tmp_path, script, commands=[["start", None, None]], post_merge=killer) == -9
     assert marker.exists() and state(tmp_path) == M.RUNNING
     store = Store(tmp_path / "proj" / ".operonx" / "project" / "project.db")
     assert store.get_card("m1", "C1").state.value == "verified"

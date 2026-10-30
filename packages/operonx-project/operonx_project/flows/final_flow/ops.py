@@ -58,8 +58,9 @@ async def full_checks(key: str, mid: str) -> dict:
     rt = get_runtime(key)
     integ = rt.git.ensure_integration(mid)
     base = rt.store.ms_get(mid, "baseline") or {}
-    async with child("checks", inputs={"checks": [c.name for c in rt.checks]}, op_type="checks") as step:
-        results = await run_checks(rt.checks, integ, rt.env)
+    checks = rt.final_checks
+    async with child("checks", inputs={"checks": [c.name for c in checks]}, op_type="checks") as step:
+        results = await run_checks(checks, integ, rt.env)
         cmp = compare([CheckResult(**r) for r in base.get("results") or []], results)
         step.outputs = {"new": cmp.new, "old": cmp.old, "fixed": cmp.fixed}
     # the checks at the end, beside the baseline's: what the milestone fixed (the retrospective, the Board)
