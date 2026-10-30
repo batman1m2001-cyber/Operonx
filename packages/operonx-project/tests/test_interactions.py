@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from operonx_project.brd.checker import check
 from operonx_project.brd.records import QUESTIONS, load_questions
-from operonx_project.interactions import Interactions
+from operonx_project.interactions import Interactions, _hash
 from operonx_project.model import MilestoneState as M
 from operonx_project.model import Policy
 from tests.flow_env import RIGHT, git
@@ -33,6 +33,10 @@ def test_a_card_question_is_a_brd_entry_resolved_by_the_answer(tmp_path):
 
     inter_api = Interactions(life.store, project=life.project)
     card = life.store.get_card("m1", "C1")
+    ms = life.store.get_milestone("m1")
+    legacy = _hash(card.title, card.intent, card.criteria, card.paths, card.run_id, ms.replans, inter["id"])
+    life.store.update_interaction(inter["id"], context_hash=legacy)  # parked by an engine before #241
+    assert inter_api.current(life.store.get_interaction(inter["id"]))
     life.store.update_card("m1", "C1", actor="owner", paths=card.paths + ["calc_extra.py"],
                            criteria=card.criteria + ["WHEN add gets a str THE SYSTEM SHALL raise"])  # fmt: skip
     inter_api.sync()  # an edit to the card waiting on it leaves the question open
