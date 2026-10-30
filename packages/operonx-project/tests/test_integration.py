@@ -82,6 +82,8 @@ async def test_a_card_checked_on_an_unmoved_branch_merges_without_running_the_ch
     integ = env.git.integration_path("m1")
     (integ / "docs/brd/board").mkdir(parents=True)
     (integ / "docs/brd/board/m1.md").write_text("# m1\n")  # the engine's board commit moves the branch, not the code
+    (integ / "docs/brd/requirements").mkdir(parents=True)
+    (integ / "docs/brd/requirements/open_questions.md").write_text("# Q-1\n")  # nor does a question it records
     git(integ, "add", "-A")
     git(integ, "commit", "-qm", "m1: board (C1 verified)")
     _marked(env, tmp_path / "ran")

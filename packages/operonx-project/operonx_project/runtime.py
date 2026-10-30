@@ -150,7 +150,8 @@ class Runtime:
 
     def same_code(self, mid: str, a: Optional[str], b: Optional[str]) -> bool:
         """Checks that ran on commit *a* stand for commit *b*: the same tree but
-        for the board files the engine commits (``<brd>/board``, :meth:`Lifecycle.board`)."""
+        for the files the engine commits: the board (``<brd>/board``, :meth:`Lifecycle.board`) and the
+        owner's questions (``<brd>/requirements/open_questions.md``, ``Interactions._write_brd``)."""
         if not a or not b:
             return False
         if a == b:
@@ -160,7 +161,7 @@ class Runtime:
             paths = self.git.git("diff", "--name-only", a, b).splitlines()
         except Exception:  # noqa: BLE001 — a commit gone: nothing stands for it
             return False
-        return all(p.startswith(f"{rel}/board/") for p in paths if p)
+        return all(p.startswith(f"{rel}/board/") or p == f"{rel}/requirements/open_questions.md" for p in paths if p)
 
     def reuse(self, mid: str, saved: Optional[Dict[str, Any]], sha: Optional[str],
               checks: List[Check]) -> Optional[List[Dict[str, Any]]]:  # fmt: skip
