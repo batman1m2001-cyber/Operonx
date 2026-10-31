@@ -38,32 +38,35 @@ DEFAULT_SHARED = [
     "CHANGELOG.md",
 ]
 
-#: Different sessions and different models, by construction (plan §2, decision 5).
+#: Different sessions and different models, by construction (plan §2, decision 5). Sonnet codes and plans,
+#: Haiku does the light reading, and the roles that check the coder's work stay on a stronger model than it
+#: (PROJECT_SPEED_PLAN V4: on Opus the implementer was 89% of mr-finance m33's money).
 DEFAULT_MODELS: Dict[str, Optional[str]] = {
-    "implementer": "opus",
+    "implementer": "sonnet",
+    "implementer:high": "opus",  # <role>:<risk>: a high-risk card's implementer
     "reviewer": "fable",
     "arbiter": "sonnet",
-    "triage": "sonnet",
+    "triage": "haiku",
     "test_author": "sonnet",
     "examiner": "fable",
     # the milestone's stages
-    "surveyor": "sonnet",
-    "planner": "opus",
+    "surveyor": "haiku",
+    "planner": "sonnet",
     "plan_reviewer": "fable",
-    "replenisher": "opus",
+    "replenisher": "sonnet",
     "milestone_reviewer": "fable",
-    "retrospective": "sonnet",  # the lessons a delivered milestone teaches (retro.py)
+    "retrospective": "haiku",  # the lessons a delivered milestone teaches (retro.py)
     # the requirements, from a source (brd_flow)
-    "extractor": "opus",
+    "extractor": "sonnet",
     "hunter": "fable",
 }
 
 
-def role_model(state: Path, role: str, fallback: Optional[str]) -> Optional[str]:
+def role_model(state: Path, role: str, fallback: Optional[str], risk: Optional[str] = None) -> Optional[str]:
     """The model *role*'s session runs on: ``settings.toml``'s ``[models]`` for
-    that role, else its ``model`` (every role), else *fallback*. Read at each
-    session's start, so the owner's change applies to the next session without
-    restarting the daemon; a file that does not parse is ignored, with a warning."""
+    ``<role>:<risk>`` (a card's risk), then for that role, else its ``model`` (every role),
+    else *fallback*. Read at each session's start, so the owner's change applies to the next
+    session without restarting the daemon; a file that does not parse is ignored, with a warning."""
     from operonx_project.project import load_settings
 
     try:
@@ -71,7 +74,8 @@ def role_model(state: Path, role: str, fallback: Optional[str]) -> Optional[str]
     except ValueError:
         LOGGER.warning(f"operonx-project: {Path(state) / 'settings.toml'} does not parse; its models are ignored")
         return fallback
-    return (got.get("models") or {}).get(role) or got.get("model") or fallback
+    per = got.get("models") or {}
+    return (risk and per.get(f"{role}:{risk}")) or per.get(role) or got.get("model") or fallback
 
 
 @dataclass
@@ -115,9 +119,10 @@ class Runtime:
     def card(self, mid: str, cid: str) -> Card:
         return self.store.get_card(mid, cid)
 
-    def model_for(self, role: str) -> Optional[str]:
-        """The model a *role*'s session runs on (:func:`role_model`)."""
-        return role_model(Path(self.data_dir), role, self.models.get(role))
+    def model_for(self, role: str, risk: Optional[str] = None) -> Optional[str]:
+        """The model a *role*'s session runs on, for a card of *risk* (:func:`role_model`)."""
+        default = (risk and self.models.get(f"{role}:{risk}")) or self.models.get(role)
+        return role_model(Path(self.data_dir), role, default, risk)
 
     def activity_for(self, mid: str, cid: Optional[str], role: str, every_s: float = 2.0):
         """A callback that records a session's tool calls as ``activity`` events,

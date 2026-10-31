@@ -219,14 +219,18 @@ def _toml_value(v: Any) -> str:
     return json.dumps(str(v))  # a JSON string is a TOML basic string
 
 
+def _toml_key(k: str) -> str:
+    return k if re.fullmatch(r"[A-Za-z0-9_-]+", k) else json.dumps(k)  # "implementer:high" is quoted
+
+
 def save_settings(state: Path, settings: Dict[str, Any]) -> Path:
     """Write ``settings.toml``: top-level values, then one-level tables."""
     path = Path(state) / "settings.toml"
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# operonx-project: this machine's settings for this project (outside git)"]
-    lines += [f"{k} = {_toml_value(v)}" for k, v in settings.items() if not isinstance(v, dict)]
+    lines += [f"{_toml_key(k)} = {_toml_value(v)}" for k, v in settings.items() if not isinstance(v, dict)]
     for k, table in settings.items():
         if isinstance(table, dict) and table:
-            lines += ["", f"[{k}]", *(f"{rk} = {_toml_value(rv)}" for rk, rv in table.items())]
+            lines += ["", f"[{k}]", *(f"{_toml_key(rk)} = {_toml_value(rv)}" for rk, rv in table.items())]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path

@@ -49,6 +49,14 @@ def test_a_session_reads_the_models_when_it_starts(tmp_path):
     project = _project(tmp_path)
     rt = Runtime(store=project.store, git=project.git, coder=None, data_dir=project.state)
     assert rt.model_for("reviewer") == DEFAULT_MODELS["reviewer"]
+    # Sonnet codes; a high-risk card's implementer is Opus (PROJECT_SPEED_PLAN V4)
+    assert (rt.model_for("implementer"), rt.model_for("implementer", "low")) == ("sonnet", "sonnet")
+    assert rt.model_for("implementer", "high") == "opus" and rt.model_for("triage", "high") == "haiku"
+    act(project, {"op": "settings", "models": {"implementer:high": "fable"}})
+    assert rt.model_for("implementer", "high") == "fable" and rt.model_for("implementer", "low") == "sonnet"
+    act(project, {"op": "settings", "model": "haiku"})
+    # the owner's one model beats the defaults, and the owner's own role:risk beats it
+    assert (rt.model_for("implementer", "high"), rt.model_for("implementer", "low")) == ("fable", "haiku")
     act(project, {"op": "settings", "model": "sonnet"})
     assert rt.model_for("reviewer") == "sonnet" and rt.model_for("planner") == "sonnet"
     path = project.state / "settings.toml"
