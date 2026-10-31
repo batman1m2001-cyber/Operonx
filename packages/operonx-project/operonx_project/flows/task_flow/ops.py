@@ -561,10 +561,16 @@ async def _quick(rt: Runtime, card: Card, wt: Path, paths: List[str]) -> Tuple[L
         own = {c.name for c in rt.card_checks if _PYTEST.search(c.cmd)}
         old = [f for r in _results(card.detail.get("baseline") or []) if not r.ok and r.name in own for f in r.failures]
         extra = [f for f in res.failures if not any(f == b or b.endswith("/" + f) or f.endswith("/" + b) for b in old)]
+        # named for the part that failed, so the retrospective still says "acceptance" (test_retro)
+        acc = (card.detail.get("acceptance") or {}).get("dir") if (card.detail.get("acceptance") or {}).get("files") else None
+        mine = [f for f in extra if acc and f.startswith(acc.rstrip("/") + "/")]
+        near = [f for f in extra if f not in mine]
         if res.ok or res.exit_code == 5:  # 5: pytest collected nothing (a helper named test_*.py)
             new = []
+        elif extra:
+            new = ([f"acceptance: {', '.join(mine)}"] if mine else []) + ([f"quick: {', '.join(near)}"] if near else [])
         else:
-            new = [f"quick: {', '.join(extra)}"] if extra else [] if res.failures else ["quick"]
+            new = [] if res.failures else ["acceptance" if paths == [acc] else "quick"]
         step.outputs = {"new": new, "ran": len(paths)}
     res.ok = res.ok or not new
     tail = f"$ quick checks: {' '.join(paths)}\n{res.tail[-3000:]}" if new else ""
