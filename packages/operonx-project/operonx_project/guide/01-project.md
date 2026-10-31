@@ -212,7 +212,14 @@ model = "sonnet"       # every session's model (a cheap test run)
 
 [models]
 implementer = "opus"   # one role's model; it wins over `model`
+"implementer:high" = "opus"  # a high-risk card's implementer; wins over the role's
 ```
+
+By default Sonnet codes and plans (`implementer`, `planner`,
+`replenisher`, `extractor`, `test_author`, `arbiter`), Haiku reads
+(`triage`, `surveyor`, `retrospective`), a high-risk card's implementer
+is Opus, and the roles that check the coder's work (`reviewer`,
+`plan_reviewer`, `examiner`, `milestone_reviewer`, `hunter`) are Fable.
 
 The roles are `surveyor`, `planner`, `plan_reviewer`, `test_author`,
 `implementer`, `reviewer`, `examiner`, `arbiter`, `triage`, `replenisher`,

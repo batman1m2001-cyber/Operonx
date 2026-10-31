@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -124,7 +125,7 @@ def _request(rt: Runtime, card: Card, role: str, prompt: str, cwd: Path, name: s
         prompt=prompt,
         cwd=cwd,
         role=role,
-        model=rt.model_for(role),
+        model=rt.model_for(role, card.risk),
         max_usd=min(rt.call_max_usd, left),
         timeout_s=rt.call_timeout_s,
         transcript=rt.transcript(card.milestone, card.id, name),
@@ -520,6 +521,70 @@ def _card_changed(rt: Runtime, card: Card, wt: Path) -> List[str]:
     return [p for p in changed if not (acc and p.startswith(acc + "/"))]
 
 
+_PYTEST = re.compile(r"\bpytest\b")
+_NEAR_MAX = 40  # test files; a stem like "io" matches half a suite, and then the full checks are the quick ones
+
+
+def _near(rt: Runtime, card: Card, wt: Path, failing: List[str]) -> List[str]:
+    """The tests near the card's change (PROJECT_SPEED_PLAN V2): the test files it changed, the `test_*<stem>*.py`
+    of each source file it changed, and the ids its last full checks failed on. A project whose checks are not
+    pytest gets none of them."""
+    if not any(_PYTEST.search(c.cmd) for c in rt.card_checks):
+        return []
+    changed = [p for p in _card_changed(rt, card, wt) if p.endswith(".py") and (wt / p).exists()]
+    tests = {p for p in changed if Path(p).name.startswith("test_")}
+    stems = {Path(p).stem for p in changed if not Path(p).name.startswith("test_") and Path(p).stem != "__init__"}
+    acc = (card.detail.get("acceptance") or {}).get("dir")
+    if stems:
+        for p in rt.git.git("ls-files", "*.py", cwd=wt).splitlines():
+            name = Path(p).name
+            if name.startswith("test_") and any(s in name[5:-3] for s in stems) and not (acc and p.startswith(acc)):
+                tests.add(p)
+    near = sorted(tests)[:_NEAR_MAX]
+    return near + [t for t in failing if t not in near and (wt / t.split("::")[0]).exists()]
+
+
+def _quick_paths(rt: Runtime, card: Card, wt: Path, failing: List[str]) -> List[str]:
+    acc = card.detail.get("acceptance") or {}
+    return ([acc["dir"]] if acc.get("files") else []) + _near(rt, card, wt, failing)
+
+
+async def _quick(rt: Runtime, card: Card, wt: Path, paths: List[str]) -> Tuple[List[CheckResult], List[str], str, str]:
+    """(results, new failures, tail, signature) of the acceptance tests and the tests near the change: what the
+    review waits on, in seconds; the card's whole checks run once the review is clean (V1)."""
+    if not paths:
+        return [], [], "", ""
+    check = rt.test_check("quick", rt.acceptance_cmd.format(dir=" ".join(shlex.quote(p) for p in paths)))
+    async with child("quick", inputs={"paths": paths}, op_type="checks") as step:
+        (res,) = await run_checks([check], wt, rt.env)
+        # judged against the tip's failures of the card's pytest checks; the ids may be rooted elsewhere
+        own = {c.name for c in rt.card_checks if _PYTEST.search(c.cmd)}
+        old = [f for r in _results(card.detail.get("baseline") or []) if not r.ok and r.name in own for f in r.failures]
+        extra = [f for f in res.failures if not any(f == b or b.endswith("/" + f) or f.endswith("/" + b) for b in old)]
+        # named for the part that failed, so the retrospective still says "acceptance" (test_retro)
+        acc = (card.detail.get("acceptance") or {}).get("dir") if (card.detail.get("acceptance") or {}).get("files") else None
+        mine = [f for f in extra if acc and f.startswith(acc.rstrip("/") + "/")]
+        near = [f for f in extra if f not in mine]
+        if res.ok or res.exit_code == 5:  # 5: pytest collected nothing (a helper named test_*.py)
+            new = []
+        elif extra:
+            new = ([f"acceptance: {', '.join(mine)}"] if mine else []) + ([f"quick: {', '.join(near)}"] if near else [])
+        else:
+            new = [] if res.failures else ["acceptance" if paths == [acc] else "quick"]
+        step.outputs = {"new": new, "ran": len(paths)}
+    res.ok = res.ok or not new
+    tail = f"$ quick checks: {' '.join(paths)}\n{res.tail[-3000:]}" if new else ""
+    sig = hashlib.sha256(res.signature.encode()).hexdigest()[:16] if new else ""
+    return [res], new, tail, sig
+
+
+def _new_ids(card: Card, results: List[CheckResult]) -> List[str]:
+    """The test ids a full run failed on that the tip did not: the next round's quick checks run them."""
+    base = {r.name: r for r in _results(card.detail.get("baseline") or [])}
+    return [f for r in results if not r.ok for f in r.failures
+            if r.name not in base or f not in base[r.name].failures][:50]  # fmt: skip
+
+
 async def _checks(rt: Runtime, card: Card, wt: Path) -> Tuple[List[CheckResult], List[str], str, str]:
     """(results, new failures, failure tail, signature) against the card's baseline."""
     checks = list(rt.card_checks)
@@ -551,6 +616,7 @@ async def _review(
     if saved is None:
         summary = "\n".join(f"- {r.name}: {'pass' if r.ok else 'fail (failing before this card too)'}"
                             for r in results)  # fmt: skip
+        summary += "\n- the card's whole checks: they run after this review"
         acc = card.detail.get("acceptance") or {}
         prompt = reviewer_prompt(card, diff, summary, st["open"], acc.get("dir") if acc.get("files") else None)
         req = _request(rt, card, "reviewer", prompt, wt, f"r{st['round']}-review", schema=REVIEWER_SCHEMA)
@@ -714,13 +780,20 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
             facts.needs_human = nh
             facts.triage = await _triage(rt, card, wt, st, ikey, nh)
         elif not blockers and not facts.empty_diff:
+            def failing(new: List[str], tail: str, sig: str) -> None:
+                facts.checks_ok, facts.new_failures, facts.failure_tail = not new, new, tail
+                st["same"] = 0 if not new else (st["same"] + 1 if sig == st["last_sig"] else 1)
+                st["last_sig"] = sig
+                facts.same_failure, facts.revised = st["same"], st["revised"]
+                record.update(checks_ok=not new, new_failures=new)
+
+            # quick checks → review → the card's whole checks (PROJECT_SPEED_PLAN V1): a finding costs a fix and
+            # the quick checks, not a fix and the whole suite (m33/F3: 11 rounds, a 16-minute QA in each)
             rt.stage(mid, cid, Stage.QA)
-            results, new, tail, sig = await _checks(rt, card, wt)
-            facts.checks_ok, facts.new_failures, facts.failure_tail = not new, new, tail
-            st["same"] = 0 if not new else (st["same"] + 1 if sig == st["last_sig"] else 1)
-            st["last_sig"] = sig
-            facts.same_failure, facts.revised = st["same"], st["revised"]
-            record.update(checks_ok=not new, new_failures=new)
+            paths = _quick_paths(rt, card, wt, st.get("full_failing") or [])
+            results, new, tail, sig = await _quick(rt, card, wt, paths)
+            failing(new, tail, sig)
+            record.update(quick=paths)
             if not new:
                 rt.stage(mid, cid, Stage.REVIEW)
                 failed, blocking, other = await _review(rt, card, wt, st, ikey, results)
@@ -750,8 +823,13 @@ async def round_(key: str, mid: str, cid: str, state: dict, answers: list) -> di
                                   upheld=len(upheld))  # fmt: skip
                     if not blocking:
                         rt.stage(mid, cid, Stage.QA)
-                        facts.heldout_ok, facts.heldout_failures = await _heldout(rt, card, wt)
-                        record.update(heldout=facts.heldout_ok)
+                        results, new, tail, sig = await _checks(rt, card, wt)
+                        failing(new, tail, sig)
+                        st["full_failing"] = _new_ids(card, results) if new else []
+                        record.update(full_checks=True)
+                        if not new:
+                            facts.heldout_ok, facts.heldout_failures = await _heldout(rt, card, wt)
+                            record.update(heldout=facts.heldout_ok)
     if facts.heldout_ok is not None:  # a round the held-out tests did not run in neither breaks nor extends a run
         same = facts.heldout_ok is False and sorted(facts.heldout_failures) == st.get("heldout_last")
         st["heldout_same"] = st.get("heldout_same", 0) + 1 if same else (1 if facts.heldout_ok is False else 0)
