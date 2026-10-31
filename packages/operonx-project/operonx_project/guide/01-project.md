@@ -118,6 +118,14 @@ a status outside the vocabulary, a row the checklist does not define or a
 block is a warning. The studio's Project mode shows the plans beside the
 engine's milestones.
 
+A plan worked in chat goes on the board with the api's `{"op": "plan",
+"path": "docs/EXPORT_PLAN.md"}` (`"text"`: the doc as it stands in the
+worktree it is worked in, when the checkout has not got it yet). The plan
+becomes a milestone and each phase a card, in the state the doc gives it.
+Each later call brings the same milestone back in line with the doc, so call
+it whenever a phase moves. The engine never works those cards: the milestone
+stays paused until the plan is done, and its other ops are refused.
+
 ## Where the project stands
 
 `operonx-project status` (and the api's `{"op": "status"}`) puts the whole
