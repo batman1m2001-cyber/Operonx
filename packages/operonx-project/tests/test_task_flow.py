@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.flow_env import ABS, RIGHT, WRONG, Env, impl
+from tests.flow_env import ABS, RIGHT, WRONG, Env, git, impl
 
 
 async def test_card_passes(tmp_path):
@@ -341,3 +341,36 @@ async def test_keep_on_the_round_limit_gives_fresh_rounds_even_on_a_question_rou
     out = await env.runner.resume(env.card(), "keep", env.stage)
     assert out.status == "waiting_human" and out.question["category"] == "repeated_failure"
     assert len(env.rounds()) == 4  # two fresh rounds, not one round straight back to the limit
+
+
+async def test_a_finding_costs_the_quick_checks_not_the_whole_ones(tmp_path):
+    """PROJECT_SPEED_PLAN gate: the review sees the quick checks; the card's checks run once, after it."""
+    env = Env(
+        tmp_path,
+        {
+            "implementer": [impl(RIGHT), impl('def add(a, b):\n    """Add."""\n    return a + b\n')],
+            "reviewer": [{"output": {"findings": [_finding()]}}, {"output": {"findings": []}}],
+        },
+    )
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "verified"
+    rounds = env.rounds()
+    assert [r.get("full_checks") for r in rounds] == [None, True]
+    assert all(r["quick"] == ["tests/acceptance/C1"] for r in rounds)
+    assert "they run after this review" in env.coder.of("reviewer")[0]["prompt"]
+
+
+async def test_a_whole_check_failure_is_quick_checked_in_the_fix_round(tmp_path):
+    """A test far from the change fails in the card's checks: the fix round's quick checks run it by name."""
+    env = Env(tmp_path, {"implementer": [impl(RIGHT + "BROKEN = 1\n"), impl(RIGHT)]})
+    other = "import calc\n\n\ndef test_other():\n    assert not hasattr(calc, 'BROKEN')\n"
+    (env.repo / "tests" / "test_other.py").write_text(other)
+    git(env.repo, "add", "tests/test_other.py")
+    git(env.repo, "commit", "-q", "-m", "other")
+    out = await env.runner.run(env.card(), env.stage)
+    assert out.status == "verified", out
+    first, second = env.rounds()
+    assert first["full_checks"] and first["new_failures"] == ["tests"]  # green on the tip: the check is new
+    assert "tests/test_other.py::test_other" in second["quick"]
+    assert second["full_checks"] and second["heldout"] is True
+    assert "test_other" in env.prompts()[1]
