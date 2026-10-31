@@ -264,6 +264,24 @@ class Store:
                 )
         return cards
 
+    def mirror(self, ms: Milestone, cards: Iterable[Card], actor: str = "plan") -> None:
+        """Make *ms* and its cards exactly these, unchecked by the transition table: a milestone whose
+        record is a plan doc worked outside the engine (api ``plan``), where the doc says each state."""
+        cards = list(cards)
+        row = self._ms_row(ms)
+        with self._tx() as db:
+            db.execute(
+                f"INSERT OR REPLACE INTO milestones ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
+                list(row.values()),
+            )
+            db.execute("DELETE FROM cards WHERE milestone=?", (ms.id,))
+            for card in cards:
+                crow = self._card_row(card)
+                db.execute(f"INSERT INTO cards ({', '.join(crow)}) VALUES ({', '.join('?' * len(crow))})",
+                           list(crow.values()))  # fmt: skip
+            self._event(db, ms.id, None, "plan.sync", actor,
+                        {"state": ms.state.value, "cards": {c.id: c.state.value for c in cards}})  # fmt: skip
+
     def get_card(self, mid: str, cid: str) -> Card:
         with self._lock:
             row = self._db.execute("SELECT * FROM cards WHERE milestone=? AND id=?", (mid, cid)).fetchone()

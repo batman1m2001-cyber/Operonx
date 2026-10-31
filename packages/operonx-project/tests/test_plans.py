@@ -102,3 +102,40 @@ def test_the_cli_lists_the_plans_and_fails_on_a_wrong_block(tmp_path):
     _doc(tmp_path, "docs/BAD_PLAN.md", "---\nstatus: started\n---\n")
     r = cli()
     assert r.returncode == 1 and "ERROR docs/BAD_PLAN.md: status 'started'" in r.stdout
+
+
+def test_a_plan_is_on_the_board_as_its_doc_says(tmp_path):
+    """A plan worked in chat shows on the board (api ``plan``): a milestone, each phase a card, kept to the doc."""
+    from operonx_project.api import act
+    from operonx_project.project import Project
+    from tests.flow_env import git, make_repo
+
+    repo = make_repo(tmp_path)
+    proj = Project.open(repo, worktrees=tmp_path / "wt")
+    rel = "docs/CSV_PLAN.md"
+    assert act(proj, {"op": "plan", "path": rel})["status"] == "unknown"  # not in the checkout: send its text
+    got = act(proj, {"op": "plan", "path": rel, "text": BLOCK}, actor="assistant")
+    assert got["ok"] and got["status"] == "created" and got["milestone"] == "m1" and got["commit"]
+    states = {c.title: c.state.value for c in proj.store.cards("m1")}
+    assert states == {"E1 The rows": "done", "E2 The service": "running", "E3 Docs": "ready"}
+    ms = proj.store.get_milestone("m1")
+    assert ms.state.value == "paused" and "1 of 3 done, E2 in progress" in ms.reason and ms.rows == ["R-EX-01"]
+    assert git(repo, "show", "--name-only", "--format=%s", "HEAD").split()[-2:] == [
+        "docs/brd/board/README.md", "docs/brd/board/m1.md"]  # fmt: skip
+    # the engine does not work it: an act on the milestone is refused, the doc is changed instead
+    assert act(proj, {"op": "unpause", "milestone": "m1"})["status"] == "refused"
+
+    # the doc moves on and one phase is skipped: the same milestone says so, nothing else is made
+    _doc(
+        repo,
+        rel,
+        BLOCK.replace("status: in_progress}", "status: done}")
+        .replace("title: Docs}", "title: Docs, status: skipped}")
+        .replace("status: in_progress\n", "status: done\n", 1),
+    )
+    got = act(proj, {"op": "plan", "path": rel})
+    assert got["status"] == "updated" and got["milestone"] == "m1" and len(proj.store.milestones()) == 1
+    assert [c.state.value for c in proj.store.cards("m1")] == ["done", "done", "cancelled"]
+    assert proj.store.get_milestone("m1").state.value == "done"
+    assert act(proj, {"op": "plan", "path": "docs/brd/board/m1.md"})["status"] == "invalid"
+    assert act(proj, {"op": "plan", "path": rel, "text": "# no block\n"})["status"] == "invalid"

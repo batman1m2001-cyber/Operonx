@@ -22,6 +22,9 @@ Requests (``op`` and its fields)::
                        "from_board": "m1", "needs": ["operonx-studio#m3"]}  # a new milestone, queued to start
     {"op": "request",  "text": "…the owner's words…", "title": "…", "mode": "w1", "max_usd": 5}
                                                                             # a new milestone from the words (plan D14)
+    {"op": "plan",     "path": "docs/X_PLAN.md", "text": "…"}  # a plan doc on the board: the plan a milestone,
+                                              # each phase a card, as the doc says; ``text``: the doc where it is
+                                              # worked (a branch's worktree), else the checkout's; committed
     {"op": "ship" | "merge", "milestone": "m1"}  # push + PR (gh) or the GitLab URL; merge where granted (D15)
     {"op": "settings"}                                                      # the models each role runs on
     {"op": "settings", "model": "sonnet", "models": {"reviewer": "opus"}}   # set them ("" clears one)
@@ -81,6 +84,7 @@ OPS = (
     "request",
     "settings",
     "practices",
+    "plan",
     "ship",
     "merge",
 )
@@ -277,6 +281,102 @@ def _practices(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
     }  # fmt: skip
 
 
+def _mirrored(store: Any, ms: Any) -> str:
+    """The plan doc a milestone mirrors (op ``plan``, or a board made from plans before it), or ""."""
+    import re
+
+    got = (store.ms_get(ms.id, "plan") or {}).get("path")
+    m = re.match(r"Plan: \[(docs/[^\]]+\.md)\]", ms.goal or "")
+    return str(got or (m.group(1) if m else ""))
+
+
+_PHASE_CARD = {"done": CardState.DONE, "skipped": CardState.CANCELLED, "in_progress": CardState.RUNNING,
+               "open": CardState.READY}  # fmt: skip
+
+
+def _plan(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
+    """A plan doc worked outside the engine (a chat, a Claude Code session), on the board: the plan is a
+    milestone, each phase a card. The doc is the record: each call makes the milestone say what the doc says
+    (a new phase is a new card, a phase's status its card's state), so call it whenever a phase moves. The
+    engine never works these cards: the milestone stays paused until the plan is done."""
+    from pathlib import Path
+
+    from operonx_project import plans
+    from operonx_project.brd.board import BOARD_DIR, board_text, index_text
+    from operonx_project.model import Card, Milestone, MilestoneState, Policy
+    from operonx_project.project import BRD_DIR
+
+    rel = str(req.get("path") or "").strip().removeprefix("./")
+    if not (rel.startswith("docs/") and rel.endswith(".md")) or ".." in Path(rel).parts or rel.startswith(BRD_DIR):
+        return _no("invalid", "path is the plan doc, as docs/<NAME>_PLAN.md")
+    text = req.get("text")
+    if text is None:
+        if not (project.repo / rel).is_file():
+            return _no("unknown", f"no {rel} in the checkout; send its text from where it is worked")
+        text = (project.repo / rel).read_text(encoding="utf-8")
+    try:
+        data = plans.front_matter(str(text))
+        if data is None or "status" not in data:
+            return _no("invalid", f"{rel} has no status block (title, status, phases): the board reads it")
+        plan = plans.parse(rel, data, str(text))
+    except plans.PlanError as exc:
+        return _no("invalid", f"{rel}: {exc}")
+    store = project.store
+    old = next((m for m in store.milestones() if _mirrored(store, m) == rel), None)
+    mid = old.id if old else project.next_milestone_id()
+    was = {c.id: c for c in store.cards(mid)} if old else {}
+    phases = plan.phases or [plans.Phase("", plan.title, "done" if plan.status == "done" else "open")]
+    cards = []
+    for i, ph in enumerate(phases, 1):
+        card = Card(
+            id=f"C{i}",
+            milestone=mid,
+            title=f"{ph.id} {ph.title}".strip(),
+            rows=list(plan.rows),
+            state=_PHASE_CARD[ph.status],
+            reason="skipped" if ph.status == "skipped" else "",
+        )
+        if card.id in was:
+            card.created = was[card.id].created
+        cards.append(card)
+    done, cur = sum(p.status in ("done", "skipped") for p in phases), plan.current
+    if plan.status == "done":
+        state, reason = MilestoneState.DONE, f"built outside the engine; recorded in {rel}"
+    else:
+        state = MilestoneState.PAUSED
+        reason = (
+            f"parked: {done} of {len(phases)} done — see {rel}"
+            if plan.status == "parked"
+            else f"worked in chat, not by the engine: {done} of {len(phases)} done"
+            + (f", {cur.id} {cur.status.replace('_', ' ')}" if cur and cur.id else "")
+            + f" — see {rel}"
+        )
+    ms = Milestone(
+        id=mid,
+        project=str(project.repo),
+        title=plan.title,
+        rows=list(plan.rows),
+        state=state,
+        goal=f"Plan: [{rel}](../../{rel[len('docs/') :]}) — the detail, the decisions and the gate are there.",
+        policy=old.policy if old else Policy.w2(),
+        reason=reason,
+        cost_usd=old.cost_usd if old else 0.0,
+    )
+    if old:
+        ms.created = old.created
+    store.mirror(ms, cards, actor=actor)
+    store.ms_put(mid, "plan", {"path": rel})
+    folder = project.repo / BRD_DIR / BOARD_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{mid}.md").write_text(board_text(ms, store.cards(mid)), encoding="utf-8")
+    (folder / "README.md").write_text(index_text([(m, store.cards(m.id)) for m in store.milestones()]),
+                                      encoding="utf-8")  # fmt: skip
+    commit = _commit_one(project, f"{BRD_DIR}/{BOARD_DIR}", f"board: {mid} from {rel} ({actor})")
+    said = f"{mid} · {plan.title}: {done} of {len(phases)} done ({'updated' if old else 'new'})"
+    return {"ok": True, "status": "updated" if old else "created", "milestone": mid, "commit": commit,
+            "message": said}  # fmt: skip
+
+
 def _violation(v: Any) -> Dict[str, Any]:
     return {"id": v.id, "rule": v.rule, "file": v.file, "line": v.line, "message": v.message}
 
@@ -311,10 +411,16 @@ def act(project: Any, req: Dict[str, Any], actor: str = "studio") -> Dict[str, A
         return _settings(project, req, actor)
     if op == "practices":
         return _practices(project, req, actor)
+    if op == "plan":
+        return _plan(project, req, actor)
     try:
         ms = store.get_milestone(str(mid))
     except KeyError:
         return _no("unknown", f"no milestone {mid!r}")
+    mirrored = _mirrored(store, ms)
+    if mirrored and op != "card":
+        return _no("refused", f"{ms.id} mirrors {mirrored}, which is worked in chat: change the plan doc, "
+                              "then send it again (op plan)")  # fmt: skip
     if op in ("ship", "merge"):
         from operonx_project import ship as shipping
 
