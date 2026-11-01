@@ -321,6 +321,11 @@ asyncio.run(main())
   (`c["big"] == True`, `c["n"] > 10`, `p["a"] >= p["b"]`), combined with
   `&`, `|`, `~` (never `and`, `or`, `not`), or an op that returns a single
   `bool`.
+- **A parameter a variant binds is a plain value**, so `action == "view"`
+  is a plain `bool`, and `if_` takes it: the build decides the arm, and the
+  arms not taken never run. Write `START >> if_(action == "view",
+  show).else_(ask)` — no op that hands the value back to make a Ref. The
+  same graph with `action` left a runtime input routes at run time.
 - Write a branch inline (it is named `route_1`, `route_2`, … in its
   graph); assign it (`size = if_(...)`) only when another op refers to it.
 - **Always `if_(...).else_(...)`, never a hand-built `BranchOp` or

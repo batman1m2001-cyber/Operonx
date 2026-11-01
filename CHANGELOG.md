@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.38.0] - 2026-11-01
+
+### Added
+
+- **`if_` takes a `bool`: a branch on a parameter a variant binds.** A bound parameter is a plain value inside the graph function, so `action == "view"` is a plain `bool`, which `if_` used to refuse (a condition had to be a Ref or an op). A graph routing on a bound `action` needed an op that only returned its input, to get a Ref to test. Now `START >> if_(action == "view", show).else_(ask)` is decided at build: the arm is fixed, the arms not taken never run, and the decision table reads `True`/`False`. The same graph with `action` left a runtime input still routes at run time. Any other non-Ref, non-op condition is still refused, now naming the bool form.
+
 ## [1.37.0] - 2026-11-01
 
 ### Added

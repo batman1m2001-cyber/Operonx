@@ -301,11 +301,46 @@ def _entry_of(graph, source: str, target: BaseOp) -> str:
     return unwired[0].name
 
 
-def _as_condition_ref(condition: Union[Ref, BaseOp]) -> Tuple[Ref, Optional[BaseOp]]:
+class _Constant:
+    """A condition already decided when the graph is built.
+
+    ``if_(action == "view", show)`` where ``action`` is a graph parameter a
+    variant bound (``compile_graph(bind=)``): inside the graph function it is
+    a plain value, so the comparison is a plain ``bool``. The branch keeps the
+    case — same arms, same wiring as any build — and always routes the way
+    the bool says; the arms it never takes never run.
+
+    It answers what a branch asks of a condition Ref: the values it reads
+    (none), its text, its value.
+    """
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: bool):
+        self.value = value
+
+    def get_all_refs(self) -> List[Ref]:
+        return []
+
+    def describe(self) -> str:
+        return repr(self.value)
+
+    __str__ = describe
+
+    def _resolve(self, ctx: Dict[Any, Any]) -> bool:
+        return self.value
+
+    def serialize(self) -> dict:
+        return {"constant": self.value}
+
+
+def _as_condition_ref(condition: Union[Ref, BaseOp, bool]) -> Tuple[Ref, Optional[BaseOp]]:
     """Normalise a branch condition to ``(ref, predicate_op)``.
 
     A ``Ref`` passes through with no predicate — that is the original form,
     ``if_(op["field"] == x, target)``.
+
+    A ``bool`` is a condition the build already decided — see `_Constant`.
 
     A ``BaseOp`` is a predicate: the op runs, and the branch tests its
     single output. It must declare exactly one, because ``if_(route_check,
@@ -316,10 +351,15 @@ def _as_condition_ref(condition: Union[Ref, BaseOp]) -> Tuple[Ref, Optional[Base
     if isinstance(condition, Ref):
         return condition, None
 
+    if isinstance(condition, bool):
+        return _Constant(condition), None
+
     if not isinstance(condition, BaseOp):
         raise TypeError(
-            f"branch condition must be a Ref or an op, got {type(condition).__name__}. "
-            f"Write if_(op['field'], target) or if_(predicate_op(...), target)."
+            f"branch condition must be a Ref, an op or a bool, got "
+            f"{type(condition).__name__}. Write if_(op['field'], target), "
+            f"if_(predicate_op(...), target) or, on a bound parameter, "
+            f"if_(action == 'view', target)."
         )
 
     outs = [k for k in (condition.outputs or {}) if not k.startswith("__")]
@@ -385,11 +425,12 @@ class Branch:
         self._inputs: Dict[str, Any] = {}
         self._kwargs = kwargs
 
-    def if_(self, condition: Union[Ref, BaseOp], target: Union[str, BaseOp]) -> "Branch":
+    def if_(self, condition: Union[Ref, BaseOp, bool], target: Union[str, BaseOp]) -> "Branch":
         """Add a condition–target case.
 
         Args:
-            condition: Ref with comparison (e.g., ``PARENT["score"] >= 90``).
+            condition: Ref with comparison (e.g., ``PARENT["score"] >= 90``),
+                a single-output op, or a bool the build already decided.
             target: Target op instance (enables auto-wiring) or op name string.
 
         Returns:
@@ -509,7 +550,7 @@ class Branch:
 
 
 def if_(
-    condition: Union[Ref, BaseOp],
+    condition: Union[Ref, BaseOp, bool],
     target: Union[str, BaseOp],
     *,
     max_iterations: Optional[int] = None,
@@ -517,7 +558,10 @@ def if_(
     """Start a branch declaration with the first condition.
 
     Args:
-        condition: What to test — a Ref comparison or a single-output op.
+        condition: What to test — a Ref comparison, a single-output op, or
+            a bool: a parameter a variant bound is a plain value, so
+            ``if_(action == "view", show)`` is decided when the graph is
+            built and always takes the same arm.
         target: The op (or op name) to route to when it holds.
         max_iterations: When one of this branch's arms loops back to an
             earlier op, the most iterations that loop may run (default
