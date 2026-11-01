@@ -5,7 +5,8 @@ when the project has any, the questions waiting for the owner, the last commits 
 one dict the studio's screen and its assistant both read::
 
     checklist   counts by status, the open rows (neither verified nor out of scope)
-    plans       plan docs and milestones in one shape, in progress first, then planned, then the rest;
+    plans       plan docs and milestones in one shape, in progress first, then planned, then the rest; a doc
+                on the board is its milestone alone, with the doc's ``path``;
                 ``unmarked``: the ``*_PLAN.md`` files with no status block yet
     needs_you   the engine's open questions and approvals, and the BRD's open questions
     working_on  what is in progress, each with one sentence written here from the data
@@ -196,7 +197,9 @@ def _engine(repo: Path) -> Optional[Dict[str, Any]]:
     milestones = []
     for ms in store.milestones():
         cards = store.cards(ms.id)
-        milestones.append({"ms": ms, "cards": cards, "columns": columns(cards)})
+        plan = store.ms_get(ms.id, "plan")
+        milestones.append({"ms": ms, "cards": cards, "columns": columns(cards),
+                           "doc": plan.get("path", "") if isinstance(plan, dict) else ""})  # fmt: skip
     questions = []
     for i in store.interactions(states=["open"]):
         p = i.get("payload") or {}
@@ -217,7 +220,7 @@ def _milestone_plan(m: Dict[str, Any]) -> Dict[str, Any]:
     done = sum(1 for c in cards if c.state.value in ("done", "cancelled"))
     running = [c for c in cards if c.state.value in ("running", "waiting_human", "verified")]
     cur = running[0] if running else next((c for c in cards if c.state.value in ("ready", "pending")), None)
-    return {"path": "", "source": "engine", "milestone": ms.id, "title": ms.title, "status": status,
+    return {"path": m.get("doc", ""), "source": "engine", "milestone": ms.id, "title": ms.title, "status": status,
             "state": state, "reason": ms.reason, "updated": _iso(ms.updated), "rows": list(ms.rows),
             "done": done, "total": len(cards), "current": cur.id if cur and status == "in_progress" else None,
             "cost_usd": round(ms.cost_usd, 4), "budget_usd": ms.policy.budget.max_usd,
@@ -272,8 +275,10 @@ def status(repo: Path, changes: int = 15, brd: str = "docs/brd") -> Dict[str, An
                  "file": f"{brd}/{MATRIX}" if rows else ""}  # fmt: skip
 
     docs, plan_errors, plan_warnings = find(repo)
-    plans = [{**p.as_dict(), "source": "doc"} for p in docs]
     engine = _engine(repo)
+    mirrored = {m["doc"] for m in engine["milestones"] if m["doc"]} if engine else set()
+    # a plan on the board (api ``plan``) is its milestone, listed once: the board has its cards and runs
+    plans = [{**p.as_dict(), "source": "doc"} for p in docs if p.path not in mirrored]
     cards_of: Dict[str, List[Any]] = {}
     if engine:
         for m in engine["milestones"]:
