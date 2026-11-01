@@ -25,6 +25,8 @@ Requests (``op`` and its fields)::
     {"op": "plan",     "path": "docs/X_PLAN.md", "text": "…"}  # a plan doc on the board: the plan a milestone,
                                               # each phase a card, as the doc says; ``text``: the doc where it is
                                               # worked (a branch's worktree), else the checkout's; committed
+                                              # (docs/brd/board/) only when read from the checkout: a branch's
+                                              # plan moves the store alone, the checkout's branch is left as it is
     {"op": "ship" | "merge", "milestone": "m1"}  # push + PR (gh) or the GitLab URL; merge where granted (D15)
     {"op": "settings"}                                                      # the models each role runs on
     {"op": "settings", "model": "sonnet", "models": {"reviewer": "opus"}}   # set them ("" clears one)
@@ -366,13 +368,17 @@ def _plan(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
         ms.created = old.created
     store.mirror(ms, cards, actor=actor)
     store.ms_put(mid, "plan", {"path": rel})
+    said = f"{mid} · {plan.title}: {done} of {len(phases)} done ({'updated' if old else 'new'})"
+    if req.get("text") is not None:
+        # the doc lives on a branch: the checkout (often the live one, on main) gets no files and no commit
+        return {"ok": True, "status": "updated" if old else "created", "milestone": mid, "commit": None,
+                "message": said}  # fmt: skip
     folder = project.repo / BRD_DIR / BOARD_DIR
     folder.mkdir(parents=True, exist_ok=True)
     (folder / f"{mid}.md").write_text(board_text(ms, store.cards(mid)), encoding="utf-8")
     (folder / "README.md").write_text(index_text([(m, store.cards(m.id)) for m in store.milestones()]),
                                       encoding="utf-8")  # fmt: skip
     commit = _commit_one(project, f"{BRD_DIR}/{BOARD_DIR}", f"board: {mid} from {rel} ({actor})")
-    said = f"{mid} · {plan.title}: {done} of {len(phases)} done ({'updated' if old else 'new'})"
     return {"ok": True, "status": "updated" if old else "created", "milestone": mid, "commit": commit,
             "message": said}  # fmt: skip
 
