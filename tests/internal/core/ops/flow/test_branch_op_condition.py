@@ -194,7 +194,7 @@ class TestRejects:
     def test_a_plain_function_is_not_a_condition(self):
         """An undecorated callable is a likely typo, not an op."""
         with GraphOp(name="g"):
-            with pytest.raises(TypeError, match="must be a Ref or an op"):
+            with pytest.raises(TypeError, match="must be a Ref, an op or a bool, got function"):
                 if_(lambda: True, "x").else_("y")
 
 

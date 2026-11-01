@@ -366,6 +366,8 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   compiles the door's module-level `@graph` once per variant, each with
   those parameters fixed; `?variant=casual` picks one (the first declared
   when absent; an unknown one is refused). A graph factory is refused (see 05).
+  Inside the graph a bound parameter is a plain value: branch on it with
+  `if_(action == "view", show)` (see 03, if/else).
 - `body=fn` gives one route its own request contract: `fn`'s signature
   (names, which are required, defaults) replaces the graph's parameters at
   the door, which refuses (`400`) a field `fn` does not take or a required
