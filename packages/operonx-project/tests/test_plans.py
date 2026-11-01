@@ -114,8 +114,14 @@ def test_a_plan_is_on_the_board_as_its_doc_says(tmp_path):
     proj = Project.open(repo, worktrees=tmp_path / "wt")
     rel = "docs/CSV_PLAN.md"
     assert act(proj, {"op": "plan", "path": rel})["status"] == "unknown"  # not in the checkout: send its text
+    head = git(repo, "rev-parse", "HEAD")
     got = act(proj, {"op": "plan", "path": rel, "text": BLOCK}, actor="assistant")
-    assert got["ok"] and got["status"] == "created" and got["milestone"] == "m1" and got["commit"]
+    # worked on a branch (its text sent): the store moves, the checkout gets no file and no commit
+    assert got["ok"] and got["status"] == "created" and got["milestone"] == "m1" and got["commit"] is None
+    assert git(repo, "rev-parse", "HEAD") == head and not (repo / "docs/brd/board").exists()
+    _doc(repo, rel, BLOCK)
+    got = act(proj, {"op": "plan", "path": rel}, actor="assistant")
+    assert got["status"] == "updated" and got["commit"]
     states = {c.title: c.state.value for c in proj.store.cards("m1")}
     assert states == {"E1 The rows": "done", "E2 The service": "running", "E3 Docs": "ready"}
     ms = proj.store.get_milestone("m1")
