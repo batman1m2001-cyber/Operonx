@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -119,6 +120,8 @@ def test_a_plan_is_on_the_board_as_its_doc_says(tmp_path):
     # worked on a branch (its text sent): the store moves, the checkout gets no file and no commit
     assert got["ok"] and got["status"] == "created" and got["milestone"] == "m1" and got["commit"] is None
     assert git(repo, "rev-parse", "HEAD") == head and not (repo / "docs/brd/board").exists()
+    # the sha is what the board read, so a reader can tell the doc changed since
+    assert proj.store.ms_get("m1", "plan") == {"path": rel, "sha": hashlib.sha256(BLOCK.encode()).hexdigest()}
     _doc(repo, rel, BLOCK)
     got = act(proj, {"op": "plan", "path": rel}, actor="assistant")
     assert got["status"] == "updated" and got["commit"]

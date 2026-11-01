@@ -301,6 +301,7 @@ def _plan(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
     milestone, each phase a card. The doc is the record: each call makes the milestone say what the doc says
     (a new phase is a new card, a phase's status its card's state), so call it whenever a phase moves. The
     engine never works these cards: the milestone stays paused until the plan is done."""
+    import hashlib
     from pathlib import Path
 
     from operonx_project import plans
@@ -367,7 +368,8 @@ def _plan(project: Any, req: Dict[str, Any], actor: str) -> Dict[str, Any]:
     if old:
         ms.created = old.created
     store.mirror(ms, cards, actor=actor)
-    store.ms_put(mid, "plan", {"path": rel})
+    # sha: what the board last read, so a reader can tell a doc changed since (the studio's turn-end sync)
+    store.ms_put(mid, "plan", {"path": rel, "sha": hashlib.sha256(str(text).encode("utf-8")).hexdigest()})
     said = f"{mid} · {plan.title}: {done} of {len(phases)} done ({'updated' if old else 'new'})"
     if req.get("text") is not None:
         # the doc lives on a branch: the checkout (often the live one, on main) gets no files and no commit
