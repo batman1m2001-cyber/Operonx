@@ -34,7 +34,7 @@ from operonx.core.loggings import LOGGER
 from .asgi import DoorDecodeError, HttpTransport, WebSocketTransport, decode_payload
 from .protocol import RunRequest
 from .registry import load_object, resolve_ref, resolve_transport
-from .runner import ServeRunner
+from .runner import ServeRunner, body_of
 
 __all__ = [
     "build_app",
@@ -243,6 +243,7 @@ def _check_served_engine(spec: ServeSpec, key: str, engine: Any) -> None:
             f"[serve:{key}] trace_id={field!r} names a parameter with a default; a run id "
             "comes from every caller, so the parameter must be required"
         )
+    _check_body(spec, key, engine, params)
     key_ops = list(spec.options.get("key_ops") or ())
     if key_ops:
         names = _op_names(engine.graph)
@@ -252,6 +253,39 @@ def _check_served_engine(spec: ServeSpec, key: str, engine: Any) -> None:
                 f"[serve:{key}] key_ops names {unknown}, which graph "
                 f"{ref_name(spec.graph)} has no op called; its ops are {sorted(names)}"
             )
+
+
+def _check_body(spec: ServeSpec, key: str, engine: Any, params: list) -> None:
+    """``body=`` fits the graph: each field it takes is a parameter this route
+    leaves free (not one its variant binds), and each parameter it leaves out
+    has a default — at build, not on the first request."""
+    contract = body_of(spec)
+    if contract is None:
+        return
+    from operonx.app.doors import has_doors
+
+    names, defaults = contract
+    graph = ref_name(spec.graph)
+    if has_doors(engine):
+        raise ManifestError(
+            f"[serve:{key}] body= is for a graph without doors; {graph} reads through one"
+        )
+    unknown = [n for n in names if n not in params]
+    if unknown:
+        raise ManifestError(
+            f"[serve:{key}] body= takes {unknown[0]!r}, which graph {graph} leaves no "
+            f"parameter for (it takes {params or 'nothing'} here)"
+        )
+    have = getattr(engine, "inputs_defaults", None) or {}
+    unfilled = [p for p in params if p not in names and p not in have]
+    if unfilled:
+        raise ManifestError(
+            f"[serve:{key}] graph {graph} needs {unfilled[0]!r}, which body= does not take "
+            "and which has no default; add it to body= or give the graph a default"
+        )
+    field = spec.options.get("trace_id")
+    if field and (field not in names or field in defaults):
+        raise ManifestError(f"[serve:{key}] trace_id={field!r} must be a required field of body=")
 
 
 def _op_names(graph: Any) -> set:

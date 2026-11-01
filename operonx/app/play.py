@@ -537,7 +537,10 @@ class Bridge:
             except Exception as exc:  # noqa: BLE001
                 codec, codec_err = None, f"{type(exc).__name__}: {exc}"
             try:
-                graph_fn = resolve_ref(spec.graph, field=f"[[serve]] {spec.name!r} graph")
+                # a route with body= is filled by its own contract, not the feature graph's
+                graph_fn = resolve_ref(
+                    spec.options.get("body") or spec.graph, field=f"[[serve]] {spec.name!r} graph"
+                )
                 signature = inspect.signature(graph_fn).parameters
                 params = list(signature)
                 defaults = {

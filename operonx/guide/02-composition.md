@@ -366,6 +366,17 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   compiles the door's module-level `@graph` once per variant, each with
   those parameters fixed; `?variant=casual` picks one (the first declared
   when absent; an unknown one is refused). A graph factory is refused (see 05).
+- `body=fn` gives one route its own request contract: `fn`'s signature
+  (names, which are required, defaults) replaces the graph's parameters at
+  the door, which refuses (`400`) a field `fn` does not take or a required
+  one left out; the graph's parameters `fn` leaves out take their
+  defaults. `fn` is never called (a route's old handler serves). This is
+  how routes share one feature graph and keep their contracts:
+  `Service("tilt", http("POST", "/tilt"), graph=allocation_flow,
+  variants={"tilt": {"action": "tilt"}}, body=tilt_body)`. Checked at
+  build: every field of `fn` is a parameter the variant leaves free, and
+  every required parameter is in `fn`. One-shot doors of graphs without
+  doors only; not with `input=`.
 - Also: `replay=True` (keep requests for replay), `key_ops=[...]` (ops the
   dashboard pins first; a name the graph has no op for is refused).
 - `on_session`, `on_close` and `session` are deprecated (removed in 2.0):

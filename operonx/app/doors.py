@@ -25,6 +25,7 @@ __all__ = [
     "BindError",
     "RESERVED_QUERY",
     "bind_item",
+    "body_contract",
     "has_doors",
     "plain",
     "serve_inputs",
@@ -43,6 +44,32 @@ class BindError(ValueError):
     def __init__(self, message: str, field: Optional[str] = None):
         super().__init__(message)
         self.field = field
+
+
+def body_contract(fn: Any, where: str = "body=") -> tuple:
+    """``Service(body=fn)``: *fn*'s signature as one route's request
+    contract — ``(names, defaults)``, the fields a caller may send and the
+    values of those it may leave out. *fn* is never called; a route's old
+    handler (an ``@op`` included) keeps its signature this way after it
+    joins a feature flow."""
+    if not callable(fn):
+        raise TypeError(
+            f"{where} is a function whose signature is the request's contract, got {fn!r}"
+        )
+    names, defaults = [], {}
+    for name, p in inspect.signature(fn).parameters.items():
+        if p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD):
+            raise TypeError(
+                f"{where} {_label(fn)} takes *{name}; a contract names every field it accepts"
+            )
+        names.append(name)
+        if p.default is not p.empty:
+            defaults[name] = p.default
+    return names, defaults
+
+
+def _label(fn: Any) -> str:
+    return getattr(fn, "__qualname__", None) or repr(fn)
 
 
 def _graph_of(target: Any) -> Any:
