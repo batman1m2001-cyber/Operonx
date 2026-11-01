@@ -36,6 +36,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from operonx.core.loggings import LOGGER
 
+from .doors import body_contract
 from .manifest import (
     SESSION_MODES,
     STREAM_KINDS,
@@ -198,6 +199,7 @@ def Service(  # noqa: N802 — reads as a declaration
     replay: bool = False,
     input: Optional[str] = None,  # noqa: A002 — the graph parameter's name
     trace_id: Optional[str] = None,
+    body: Any = None,
     **options: Any,
 ) -> ServeSpec:
     """One endpoint, as :class:`ServeSpec` — the same record ``[[serve]]``
@@ -240,6 +242,15 @@ def Service(  # noqa: N802 — reads as a declaration
     ``session`` are deprecated (removed in 2.0): the graph's parameters
     are the connection's data, its first op opens what a run needs, and
     ``END >> op`` closes it however the run ended.
+
+    ``body=fn`` makes a plain function's signature this route's request
+    contract (names, which are required, defaults), in place of the graph's
+    parameters: the door refuses a field *fn* does not take, or a required
+    one left out, before any run, then fills the graph's parameters from it
+    (the rest take the graph's defaults). Several routes then share one
+    feature graph — each binding its branch with ``variants`` — and each
+    keeps its own contract. *fn* is never called; a route's old handler
+    serves. A one-shot door of a graph without doors only.
 
     ``replay=True`` records what clients send this door — text and JSON as
     they are, audio and bytes only counted — on each run, so a real session
@@ -302,6 +313,19 @@ def Service(  # noqa: N802 — reads as a declaration
         if not (isinstance(trace_id, str) and trace_id):
             raise ManifestError(f"{label}: trace_id= is the name of a graph parameter")
         opts["trace_id"] = trace_id
+    if body is not None:
+        if kind in STREAM_KINDS or kind == "asgi":
+            raise ManifestError(f"{label}: body= is for a graph's one-shot door, not a {kind}")
+        if input is not None:
+            raise ManifestError(f"{label}: body= and input= both say what the body is; pick one")
+        if on_session is not None:
+            raise ManifestError(f"{label}: body= and on_session both build the inputs; pick one")
+        if callable(body):
+            try:
+                body_contract(body, f"{label} body=")
+            except TypeError as exc:
+                raise ManifestError(str(exc)) from None
+        opts["body"] = body
 
     return ServeSpec(
         name=name,

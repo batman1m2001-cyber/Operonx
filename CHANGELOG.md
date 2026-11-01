@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.37.0] - 2026-11-01
+
+### Added
+
+- **`Service(body=fn)`: a route's request contract of its own.** Several routes can share one feature graph, each binding its branch with `variants`; without `body=` every route took the union of the graph's (optional) parameters. With it, a plain function's signature — its names, which are required, its defaults — is that route's contract: checked before any run (a 400 with the field, no run), then the graph's other parameters take their defaults. *fn* is never called, so a route's old one-op handler keeps its signature after it joins a feature flow. The build refuses a body field the graph has no parameter for, a graph parameter with no default the body leaves out, and `body=` on a graph with doors, a stream, `input=` or `on_session`. Manifests name it as `body = "module:fn"`; the playground form shows the route's fields (FEATURE_FLOWS_PLAN FF1).
+
 ## [1.36.0] - 2026-10-30
 
 ### Changed

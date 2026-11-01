@@ -9,6 +9,7 @@ project has to write it again. The callbot's version of it is 437 lines.
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import inspect
 import os
@@ -16,8 +17,15 @@ from collections.abc import Mapping
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from operonx.app.declare import ref_name
-from operonx.app.doors import RESERVED_QUERY, BindError, has_doors, plain, serve_inputs
-from operonx.app.manifest import STREAM_KINDS, ServeSpec
+from operonx.app.doors import (
+    RESERVED_QUERY,
+    BindError,
+    body_contract,
+    has_doors,
+    plain,
+    serve_inputs,
+)
+from operonx.app.manifest import STREAM_KINDS, ManifestError, ServeSpec
 from operonx.core import loop_lag
 from operonx.core.loggings import LOGGER
 from operonx.core.ops.graph.task_scheduler import FINAL_TIMEOUT_S
@@ -31,7 +39,19 @@ from .registry import resolve_ref, resolve_transport
 #: worker that served it was (and an uneven spread over workers shows).
 _in_flight = [0]
 
-__all__ = ["RunTimeout", "ServeRunner", "serve_session"]
+__all__ = ["RunTimeout", "ServeRunner", "body_of", "serve_session"]
+
+
+def body_of(spec: ServeSpec) -> Optional[Tuple[list, Dict[str, Any]]]:
+    """``Service(body=)``'s contract, ``(names, defaults)``; None without one."""
+    ref = spec.options.get("body")
+    if ref is None:
+        return None
+    where = f"[[serve]] {spec.name!r} body"
+    try:
+        return body_contract(resolve_ref(ref, field=where), where)
+    except TypeError as exc:
+        raise ManifestError(str(exc)) from None
 
 
 class RunTimeout(TimeoutError):
@@ -211,6 +231,7 @@ class ServeRunner:
             else None
         )
         self._runs: set = set()
+        self._body = body_of(spec)
 
     def _request_for(self, session: Session) -> Optional[RunRequest]:
         # A transport that can refuse before completing its handshake asks
@@ -281,7 +302,7 @@ class ServeRunner:
                     ),
                 )
         engine = self.variants[variant] if self.variants else self.engine
-        params = self._params(engine)
+        params = self._fields(engine)
         given = {k: v for k, v in query.items() if k in params and v != ""}
         request = RunRequest(
             inputs=given,
@@ -371,14 +392,33 @@ class ServeRunner:
         expected = getattr(engine, "inputs_expected", None)
         return list(expected) if expected is not None else list(engine.graph.inputs)
 
+    def _fields(self, engine: Any) -> list:
+        """What a caller may send: ``body=``'s names, else the graph's parameters."""
+        return list(self._body[0]) if self._body else self._params(engine)
+
     def _serve_inputs(
         self, engine: Any, given: Mapping[str, Any], item: Any, tick: bool = False
     ) -> Dict[str, Any]:
+        defaults = getattr(engine, "inputs_defaults", None)
+        if self._body:
+            # the route's contract decides what the caller sends; what it does not
+            # take, the graph's own defaults fill (the build checked they exist)
+            names, own = self._body
+            inputs = self._contract_inputs(names, own, given, item, tick)
+            for name, value in (defaults or {}).items():
+                if name not in inputs:
+                    inputs[name] = copy.deepcopy(value)
+            return inputs
+        return self._contract_inputs(self._params(engine), defaults, given, item, tick)
+
+    def _contract_inputs(
+        self, names: list, defaults: Any, given: Mapping[str, Any], item: Any, tick: bool
+    ) -> Dict[str, Any]:
         return serve_inputs(
-            self._params(engine),
+            names,
             given,
             item,
-            defaults=getattr(engine, "inputs_defaults", None),
+            defaults=defaults,
             tick=tick,
             # the default hook hands over the whole query; a project's hook
             # builds exactly what it means
@@ -449,7 +489,7 @@ class ServeRunner:
                 query = dict((meta or {}).get("query") or {})
                 self._serve_inputs(self.engine, query, payload)
             elif isinstance(payload, Mapping) and not self.spec.options.get("input"):
-                params = {p for e in engines for p in self._params(e)}
+                params = {p for e in engines for p in self._fields(e)}
                 unknown = [k for k in payload if k not in params]
                 if unknown:
                     raise BindError(
