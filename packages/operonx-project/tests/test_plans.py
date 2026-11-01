@@ -131,6 +131,10 @@ def test_a_plan_is_on_the_board_as_its_doc_says(tmp_path):
     assert ms.state.value == "paused" and "1 of 3 done, E2 in progress" in ms.reason and ms.rows == ["R-EX-01"]
     assert git(repo, "show", "--name-only", "--format=%s", "HEAD").split()[-2:] == [
         "docs/brd/board/README.md", "docs/brd/board/m1.md"]  # fmt: skip
+    # the project's status lists it once: the milestone, with the doc's path (the board has its cards and runs)
+    from operonx_project.status import status
+
+    assert [(p["source"], p["path"], p["milestone"]) for p in status(repo)["plans"]] == [("engine", rel, "m1")]
     # the engine does not work it: an act on the milestone is refused, the doc is changed instead
     assert act(proj, {"op": "unpause", "milestone": "m1"})["status"] == "refused"
 
