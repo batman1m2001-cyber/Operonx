@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 490" width="960" height="490" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.card{fill:#ffffff;stroke:#d0d7de}.rule{stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}
+    .ui{fill:#8250df}.web{fill:#0969da}.core{fill:#1a7f37}.data{fill:#9a6700}.ai{fill:#bf3989}.plat{fill:#6e7781}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.card{fill:#161b22;stroke:#30363d}.rule{stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}
+      .ui{fill:#a371f7}.web{fill:#4493f8}.core{fill:#3fb950}.data{fill:#d29922}.ai{fill:#db61a2}.plat{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" width="960" height="490" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">10 units, by lane</text>
+  <text x="24" y="54" class="mut" font-size="13">Admitted at ≥ 3 uses in ≥ 2 projects, or ≥ 5 in one. Uses counted across the six studio projects.</text>
+
+  <g class="rule">
+    <line x1="24" x2="936" y1="70" y2="70"/><line x1="24" x2="936" y1="136" y2="136"/>
+    <line x1="24" x2="936" y1="202" y2="202"/><line x1="24" x2="936" y1="268" y2="268"/>
+    <line x1="24" x2="936" y1="334" y2="334"/><line x1="24" x2="936" y1="400" y2="400"/>
+    <line x1="24" x2="936" y1="466" y2="466"/>
+  </g>
+
+  <!-- lane labels -->
+  <g font-size="13.5" font-weight="600" class="ink">
+    <circle class="ui" cx="32" cy="103" r="6"/><text x="46" y="108">UI/UX</text>
+    <circle class="web" cx="32" cy="169" r="6"/><text x="46" y="174">web backend</text>
+    <circle class="core" cx="32" cy="235" r="6"/><text x="46" y="240">core</text>
+    <circle class="data" cx="32" cy="301" r="6"/><text x="46" y="306">data</text>
+    <circle class="ai" cx="32" cy="367" r="6"/><text x="46" y="372">AI</text>
+    <circle class="plat" cx="32" cy="433" r="6"/><text x="46" y="438">platform</text>
+  </g>
+
+  <!-- UI/UX -->
+  <g transform="translate(180,78)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="ui" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">page</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">39 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">web/pages/&lt;x&gt;.js + UI test</text>
+  </g>
+
+  <!-- web backend -->
+  <g transform="translate(180,144)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="web" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">route</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">93 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">Service + bodies.py</text>
+  </g>
+  <g transform="translate(436,144)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="web" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">job</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">40 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">Job(...) + run test</text>
+  </g>
+
+  <!-- core -->
+  <g transform="translate(180,210)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="core" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">op</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">336 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">@op in ops.py + unit test</text>
+  </g>
+  <g transform="translate(436,210)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="core" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">flow</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">91 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">graph.py + run test</text>
+  </g>
+  <g transform="translate(692,210)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="core" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">rule</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">17 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">pure module, no I/O + test</text>
+  </g>
+
+  <!-- data -->
+  <g transform="translate(180,276)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="data" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">store</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">15 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">store.py (SQLite) + test</text>
+  </g>
+  <g transform="translate(436,276)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="data" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">source</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">5 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">fetch → normalise → store</text>
+  </g>
+
+  <!-- AI -->
+  <g transform="translate(180,342)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="ai" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">llm</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">68 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">LLMOp + prompt + fake model</text>
+  </g>
+  <g transform="translate(436,342)">
+    <rect class="card" width="240" height="50" rx="7"/><rect class="ai" width="5" height="50" rx="2.5"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">agent</text><text x="228" y="21" class="mut" font-size="11.5" text-anchor="end">30 uses</text>
+    <text x="16" y="39" class="mut mono" font-size="11">AgentOp + tools + fake model</text>
+  </g>
+
+  <!-- platform -->
+  <g transform="translate(180,408)">
+    <rect class="card" width="496" height="50" rx="7" stroke-dasharray="5 4"/>
+    <text x="16" y="21" class="ink" font-size="13.5" font-weight="700">no unit: always a flexible card</text>
+    <text x="16" y="39" class="mut mono" font-size="11">operonx.toml · resources.yaml · env · deploy</text>
+  </g>
+</svg>

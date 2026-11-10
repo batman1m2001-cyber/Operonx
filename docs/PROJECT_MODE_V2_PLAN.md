@@ -77,25 +77,7 @@ Arrow = *may import*. Domain imports nothing. Tests are not a lane: every card b
 
 ## 4. Units: the ready parts
 
-```mermaid
-mindmap
-  root((10 units))
-    UI/UX
-      page
-    web backend
-      route
-      job
-    core
-      flow
-      op
-      rule
-    data
-      store
-      source
-    AI
-      llm
-      agent
-```
+![10 units, by lane](project-mode-v2/units.svg)
 
 | unit | stamps | uses today (6 projects) | template from |
 |---|---|---|---|
