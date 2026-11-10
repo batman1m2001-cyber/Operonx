@@ -11,183 +11,315 @@ phases:
 updated: 2026-11-10
 ---
 
-# Project mode v2 — one board, cards from units (2026-11-10)
+# Project mode v2 — one board, cards from units
 
-**Asked** (owner). Project mode is over-built. Keep a Jira-like board. Break a task into cards made from
-ready units; what no unit covers is *flexible*. Separate the layers. Templates only for patterns that are
-really reused. The running card is highlighted and shows its progress. No decoration.
+**Asked** (owner, 2026-11-10). A Jira-like board. A task breaks into cards built from ready units; what no unit
+covers is *flexible*. Layers kept apart. Templates only for patterns that really repeat. The running card is
+highlighted and shows its progress. Nothing decorative.
 
-## 1. Why — measured 2026-11-10
+---
 
+## 1. Why
+
+```mermaid
+xychart-beta
+  title "tipcalc builder run: 35 send-backs, by cause"
+  x-axis ["held-out tests (QA)", "questions to a human", "review findings", "project checks"]
+  y-axis "send-backs" 0 --> 20
+  bar [16, 10, 5, 4]
 ```
-assistant turns (all projects)        90
-  tool calls: Bash 166 · Read 38 · project_status 2 · failing_on_base 1
-  turns tied to a board card           0          ← real work happens in chat, not on the board
 
-builder on tipcalc (only real run)    35 send-backs
-  held-out tests (QA)                 16   ← 4 of 6 "ask a human" came from held-out loops
-  needs-human questions               10
-  review findings                      5
-  project checks                       4
-  held-out test itself rewritten       2   ← the test was wrong, not the code
+**0 of 90** assistant turns were tied to a board card · engine **14.5k** lines · studio project mode **~2k** lines of JS.
 
-code size        engine 14.5k lines (brd 2.1k · flows 2.0k · coder 0.7k · telegram 0.7k)
-                 studio project mode ~2k lines JS (projectmode.js, board.js)
+```mermaid
+flowchart TB
+  subgraph today["today: one task"]
+    direction LR
+    a1[discover]:::cut --> a2[plan]:::cut --> a3[implement] --> a4[review]:::cut --> a5[held-out tests]:::cut --> a6[QA]:::cut --> a7[final]:::cut
+  end
+  subgraph v2["v2: one card"]
+    direction LR
+    b1[build from a unit] --> b2[its test] --> b3[project tests] --> b4[done]
+  end
+  today ~~~ v2
+  classDef cut fill:#ffebe9,stroke:#d1242f,color:#82071e,stroke-dasharray:4 3
 ```
+
+---
 
 ## 2. Architecture
 
-```
-┌─ Studio · project page ─────────────────────────────────────────────────────┐
-│                                                                             │
-│   BOARD  (lanes × status)                   │   CHAT  (the assistant)       │
-│   ▶ the running card, highlighted           │   task → cards → work         │
-│     its live progress line                  │                               │
-│                                             │                               │
-└───────────────┬─────────────────────────────┴───────────────┬───────────────┘
-                │ reads, re-renders on change                 │ one Claude Code turn
-                ▼                                             ▼
-   docs/brd/board.md   ◄── card status, card id ────   assistant (MCP: card_set)
-   docs/brd/requirements.md  ◄── req ids                      │
-                                                              │ operonx add <unit>
-                                                              ▼
-                              operonx/cli/templates/_units/  ──►  project code + its test
-                                                              │
-                              runhook progress events ────────┘──► the running card's line
-```
+![Architecture: studio page, assistant turn, repo, studio server, operonx](project-mode-v2/architecture.svg)
 
-Two files and one catalog are the whole model:
+---
 
-| | holds | changes |
-|---|---|---|
-| `docs/brd/requirements.md` | what and why: one row per requirement, its source, its test | rarely |
-| `docs/brd/board.md` | how and how far: the cards | every turn |
-| `_units/` (in operonx) | the ready units, each a template plus its test | when a pattern earns it |
+## 3. Lanes: clean architecture rings
 
-## 3. Lanes — clean architecture rings
-
-```
-          ┌──────────────────────── platform ────────────────────────┐
-          │  operonx.toml · resources.yaml · env · deploy · docker   │
-          │                                                          │
-          │   UI/UX ──► web backend ──► core: flow ──► core: domain   │
-          │   web/pages   app/main.py      graph.py      rules, model │
-          │               bodies.py        ops.py        (no I/O)     │
-          │               jobs               │                       │
-          │                                  ▼  only via ops + resources
-          │                          data          AI                │
-          │                          store.py      LLM op + prompt   │
-          │                          sources       agent + tools     │
-          └──────────────────────────────────────────────────────────┘
-
-   arrows = "may import";  domain imports nothing;  tests are not a lane — every card brings its own
+```mermaid
+flowchart LR
+  UI["UI/UX<br/><small>web/pages</small>"]:::ui --> WEB["web backend<br/><small>Service · Job · bodies.py</small>"]:::web
+  WEB --> FLOW["core · flow<br/><small>graph.py · ops.py</small>"]:::core
+  FLOW --> DOM["core · domain<br/><small>rules · model · no I/O</small>"]:::core
+  FLOW -- "via resources" --> DATA["data<br/><small>store · source</small>"]:::data
+  FLOW -- "via resources" --> AI["AI<br/><small>llm · agent</small>"]:::ai
+  PLAT["platform<br/><small>operonx.toml · resources.yaml · deploy</small>"]:::plat -.- WEB
+  classDef ui fill:#8250df,stroke:#8250df,color:#fff
+  classDef web fill:#0969da,stroke:#0969da,color:#fff
+  classDef core fill:#1a7f37,stroke:#1a7f37,color:#fff
+  classDef data fill:#9a6700,stroke:#9a6700,color:#fff
+  classDef ai fill:#bf3989,stroke:#bf3989,color:#fff
+  classDef plat fill:#6e7781,stroke:#6e7781,color:#fff
 ```
 
-| lane | folders | units |
-|---|---|---|
-| UI/UX | `web/pages`, `web/lib` | page |
-| web backend | `app/main.py`, `src/<f>/bodies.py` | route, job |
-| core | `src/<f>/graph.py`, `ops.py`, `rules.py`, `model.py` | flow, op, rule |
-| data | `src/<f>/store.py`, sources | store, source |
-| AI | `src/<f>/prompts.py`, `agent.py`, `tools.py` | llm, agent |
-| platform | `operonx.toml`, `resources.yaml`, deploy files | — (always flexible) |
+Arrow = *may import*. Domain imports nothing. Tests are not a lane: every card brings its own.
 
-## 4. Unit catalog
+---
 
-Admission rule: **≥ 3 uses in ≥ 2 projects, or ≥ 5 in one.** Below that, a pattern stays flexible.
+## 4. Units: the ready parts
 
-| unit | lane | stamps | real uses (6 projects) | template from |
-|---|---|---|---|---|
-| op | core | `@op` in `ops.py` + unit test | 336 `@op` | `templates/hello` |
-| flow | core | `graph.py` + run test | 91 `@graph` | `templates/hello` |
-| rule | core | pure module + test | 17 files | tipcalc `money.py` |
-| route | web backend | `Service(...)` + `bodies.py` + HTTP test | 93 `Service` | `templates/http`, mr-finance `news/bodies.py` |
-| job | web backend | `Job(...)` + run test | 40 `Job` | mr-finance `app/main.py` |
-| store | data | `store.py` (SQLite) + test | 15 files | mr-finance `news/store.py` |
-| source | data | fetch → normalise → store + fixture test | 5 (mr-finance) | mr-finance `market/sources.py` |
-| llm | AI | `LLMOp` + prompt + fake-model test | 68 refs | `templates/chat` |
-| agent | AI | `AgentOp` + tools + fake-model test | 30 refs | `templates/agent` |
-| page | UI/UX | `web/pages/<x>.js` + UI test | 39 (mr-finance) | a small mr-finance page |
-
-Coverage: **49 %** of the 477 code files across the six projects already have one of these shapes (tipcalc 85 %,
-qc-snatcher 59 %, meeting-prep 57–60 %, mr-finance 47 %, callbot 32 %). The rest is real project code: audio
-(wav/vad/stt/tts), valuation, signing, retention. It stays flexible.
-
-Not admitted (seen once or twice): `judge.py`, `mcp.py`, `golden.py`, `format.py`, `wav.py`.
-
-## 5. The card and the board
-
+```mermaid
+mindmap
+  root((10 units))
+    UI/UX
+      page
+    web backend
+      route
+      job
+    core
+      flow
+      op
+      rule
+    data
+      store
+      source
+    AI
+      llm
+      agent
 ```
+
+| unit | stamps | uses today (6 projects) | template from |
+|---|---|---|---|
+| op | `@op` in `ops.py` + unit test | 336 | `templates/hello` |
+| flow | `graph.py` + run test | 91 | `templates/hello` |
+| rule | pure module + test | 17 | tipcalc `money.py` |
+| route | `Service(...)` + `bodies.py` + HTTP test | 93 | `templates/http`, mr-finance `news/bodies.py` |
+| job | `Job(...)` + run test | 40 | mr-finance `app/main.py` |
+| store | `store.py` (SQLite) + test | 15 | mr-finance `news/store.py` |
+| source | fetch → normalise → store + fixture test | 5 | mr-finance `market/sources.py` |
+| llm | `LLMOp` + prompt + fake-model test | 68 | `templates/chat` |
+| agent | `AgentOp` + tools + fake-model test | 30 | `templates/agent` |
+| page | `web/pages/<x>.js` + UI test | 39 | a small mr-finance page |
+
+**Admission:** ≥ 3 uses in ≥ 2 projects, or ≥ 5 in one. Seen once or twice (`judge.py`, `mcp.py`, `golden.py`, `wav.py`) → stays flexible.
+
+```mermaid
+flowchart LR
+  CMD["operonx add rule news threshold"] --> T[("_units/rule/")]
+  T --> F1["src/news/threshold.py<br/><small>a stub with the signature</small>"]
+  T --> F2["tests/news/test_threshold.py<br/><small>one red test</small>"]
+  F1 & F2 --> C["card C4: files + done filled in"]
+```
+
+```mermaid
+xychart-beta
+  title "Code files that already have a unit's shape (%)"
+  x-axis [tipcalc, qc, mp-brd, mp-ox, mrf, callbot]
+  y-axis "%" 0 --> 100
+  bar [85, 59, 60, 57, 47, 32]
+```
+
+qc = qc-snatcher · mp = meeting-prep (brd, operonx) · mrf = mr-finance. 49 % of 477 files across the six projects. The rest (audio, valuation, signing, retention) is real project code
+and stays flexible.
+
+---
+
+## 5. Cards
+
+![Three kinds of card: unit, flexible, fix](project-mode-v2/cards.svg)
+
+What the assistant writes in `docs/brd/board.md`:
+
+```markdown
 ### C4 · threshold rule · doing
 lane: core · unit: rule · req: NEWS-07 · after: C2
-files: src/news/rules.py, tests/news/test_rules.py
-done: tests/news/test_rules.py::test_gold_jump, project tests green
+files: src/news/threshold.py, tests/news/test_threshold.py
+done: tests/news/test_threshold.py::test_gold_jump, project tests
 ```
 
-```
- lane        │ todo            │ doing                          │ needs you          │ done
-─────────────┼─────────────────┼────────────────────────────────┼────────────────────┼──────────
- UI/UX       │ C6 alert tile   │                                │                    │
- web backend │ C5 /api/alerts  │                                │                    │
- core        │                 │ ▶ C4 threshold rule    4m12s   │ C3 engine (flex)   │ C1
-             │                 │   pytest 812/1220 · ✓ rules    │   review the diff  │
- data        │                 │                                │                    │ C2
- AI          │                 │                                │                    │
-```
+![One card through its states](project-mode-v2/states.svg)
 
-```
- status:   todo ──► doing ──► done
-                      │  ▲
-                      ▼  │
-                   needs you        (a question, or a flexible card's review)
-```
-
-- One card = one lane = one unit (or flexible). A task across lanes becomes several cards.
-- Only the assistant moves cards. The owner answers what is in *needs you*.
-- The running card shows the running command's last progress line and its elapsed time. A line older than
-  30 s shows its age, so a slow step is never silent.
-
-## 6. One task, end to end
-
-```
-owner:  "alert when gold moves > 2 % in a day"
-   │
-   ▼  breakdown turn ─────────────►  C1 store   C2 source   C3 engine (flex)   C4 rule   C5 route   C6 page
-   │                                  (todo on the board; the owner edits or says go)
-   ▼  per card, in `after:` order
-        ready    operonx add rule news threshold  → fill the body → its test → project tests → done
-        flexible a 3-line design note on the card → code → tests → needs you → done
-   │
-   ▼  every status change is a card_set call in the turn; the stop hook refuses a turn that ends
-      with a card still `doing`
+```mermaid
+stateDiagram-v2
+  direction LR
+  state "needs you" as ask
+  [*] --> waiting: after not done
+  [*] --> todo
+  waiting --> todo: after done
+  todo --> doing: assistant starts it
+  doing --> ask: a question, or a flexible card ready
+  ask --> doing: owner answers
+  ask --> done: owner approves
+  doing --> done: tests green, not flexible
+  done --> [*]
 ```
 
-Checks: the card's `done:` tests plus the project's tests. Review only for flexible cards. **No QA stage, no
-held-out tests.**
+---
 
-## 7. Keep and cut
+## 6. The board
 
+![The project page: board with lanes × status, chat on the right](project-mode-v2/board.svg)
+
+---
+
+## 7. The implement flow
+
+### 7a. A task becomes cards
+
+```mermaid
+flowchart TD
+  T(["owner: alert me when gold moves more than 2% in a day"]) --> R["find its requirement,<br/>or add one to requirements.md"]
+  R --> S["split the task by lane"]
+  S --> B{"something broken?"}
+  B -- "yes" --> F["fix card<br/><small>red test first</small>"]
+  B -- "no" --> U{"a unit fits?"}
+  U -- "yes" --> UC["unit card"]
+  U -- "no" --> X["flexible card<br/><small>3-line design</small>"]
+  F & UC & X --> O["order them with after:"]
+  O --> G["board: all cards todo or waiting"]
+  G --> GO{"owner"}
+  GO -- "edit in chat" --> G
+  GO -- "go" --> RUN(["work the cards in order"])
 ```
-KEEP                                          CUT
-────────────────────────────────────────      ──────────────────────────────────────────────
-board store + reader (card format v2)         discover / plan / final flows
-brd check, slimmed to requirements.md         review → held-out → QA stages, examiner
-status (one read-only summary)                practices.toml, retro, LESSONS
-studio: turn checks, stop hook,               plan status blocks → milestone mirror
-        failing_on_base, live progress        studio pages: Checklist · Questions · Changes · Graph
-operonx init templates (+ _units)             decorative animation on the project page (hand.js)
+
+### 7b. The gold-alert task, as cards
+
+```mermaid
+flowchart LR
+  C1["C1 prices store<br/><small>data · store</small>"]:::data --> C2["C2 gold feed<br/><small>data · source</small>"]:::data
+  C2 --> C3["C3 daily move<br/><small>core · flexible</small>"]:::flex
+  C2 --> C4["C4 threshold rule<br/><small>core · rule</small>"]:::core
+  C3 & C4 --> C5["C5 /api/alerts/gold<br/><small>web · route</small>"]:::web
+  C5 --> C6["C6 alert tile<br/><small>UI · page</small>"]:::ui
+  classDef ui fill:#8250df,stroke:#8250df,color:#fff
+  classDef web fill:#0969da,stroke:#0969da,color:#fff
+  classDef core fill:#1a7f37,stroke:#1a7f37,color:#fff
+  classDef data fill:#9a6700,stroke:#9a6700,color:#fff
+  classDef flex fill:#fff8c5,stroke:#9a6700,color:#3b2300,stroke-dasharray:4 3
 ```
 
-Before each cut: grep the second job (`feedback: check the second job before removing an API`). The
-Telegram bridge (0.7k lines) stays until the owner says whether they use it from the phone.
+### 7c. Working the cards
 
-## 8. Phases
+```mermaid
+sequenceDiagram
+  autonumber
+  actor O as Owner
+  participant S as Studio board
+  participant A as Assistant
+  participant X as operonx add
+  participant R as Repo
+  O->>A: alert me when gold moves more than 2 percent a day
+  A->>R: card_add C1 to C6, all todo
+  R-->>S: 6 cards appear
+  O->>A: go
+  loop each card, in after order
+    A->>R: card_set Cn doing
+    R-->>S: Cn highlighted
+    alt unit card
+      A->>X: operonx add rule news threshold
+      X->>R: stub and red test
+      A->>R: fill the body
+    else flexible card
+      A->>R: design on the card, then code and test
+    else fix card
+      A->>R: red test first, then the fix
+    end
+    A->>R: the card's test, then the project tests
+    R-->>S: live progress line on Cn
+    alt green, and not flexible
+      A->>R: card_set Cn done
+    else flexible, or a question
+      A->>R: card_set Cn needs-you
+      O->>A: answer or approve
+      A->>R: card_set Cn done
+    end
+  end
+```
 
-| | what | gate |
-|---|---|---|
-| V1 | `_units/` with the 10 templates; `operonx add <unit> <feature> <name>` | each unit stamped into a scratch copy of hello, its test green |
-| V2 | card format v2 (lane, unit, req, after, files, done); reader accepts v1; `requirements.md` | boards of mr-finance, callbot, tipcalc rewritten; nothing lost (diff of ids) |
-| V3 | project page = board + chat; running card highlighted with its progress line; the other pages removed | screenshots light/dark; a 2-min test run never shows a line older than 30 s unannounced |
-| V4 | assistant: breakdown turn, `card_set`, stop hook on a `doing` card | a Sonnet turn breaks a real task into cards with lanes and units |
-| V5 | engine cut per §7 | engine and studio suites green; line counts before and after |
-| V6 | one real mr-finance task end to end | cards on the board, every card done or needs-you, owner reads the board instead of the transcript |
+### 7d. Inside one card
+
+```mermaid
+flowchart TB
+  subgraph unit["unit card"]
+    direction LR
+    u1["operonx add"] --> u2["fill the body"] --> u3["its test green"] --> u4["project tests green"] --> u5(["done"])
+  end
+  subgraph flex["flexible card"]
+    direction LR
+    x1["3-line design on the card"] --> x2["code + test"] --> x3["project tests green"] --> x4(["needs you: review the diff"])
+  end
+  subgraph fix["fix card"]
+    direction LR
+    f1["the red test"] --> f2["the fix"] --> f3["red test green"] --> f4["project tests green"] --> f5(["done"])
+  end
+  unit ~~~ flex ~~~ fix
+```
+
+No QA stage, no held-out tests: the card's test and the project's tests decide.
+
+### 7e. The progress line
+
+```mermaid
+flowchart TD
+  SH["a shell call<br/><small>pytest -q</small>"] -- "output + markers" --> OUT[("runhook out file")]
+  OUT --> P["progress.read"]
+  P -- "the tool printed a total" --> BAR["bar + n / total"]
+  P -- "otherwise" --> LN["count + last line"]
+  BAR & LN --> CARD["the running card"]
+  CARD --> AGE{"last line older than 30 s?"}
+  AGE -- "yes" --> SHOW["show its age"]
+```
+
+---
+
+## 8. Keep and cut
+
+| keep | cut |
+|---|---|
+| board store + reader (card format v2) | discover / plan / final flows |
+| `brd check`, slimmed to `requirements.md` | review → held-out → QA stages, the examiner |
+| `status`, one read-only summary | `practices.toml`, retro, LESSONS |
+| studio turn checks, stop hook, `failing_on_base` | plan status blocks → milestone mirror |
+| live progress (`progress.py`, runhook) | pages: Checklist · Questions · Changes · Graph |
+| `operonx init` templates, plus `_units/` | decorative motion on the project page (`hand.js`) |
+
+Before each cut: grep for a second job. The Telegram bridge (0.7k lines) stays until the owner says whether they use it.
+
+---
+
+## 9. Phases
+
+```mermaid
+flowchart TB
+  subgraph r1[" "]
+    direction LR
+    V1["<b>V1</b> units<br/><small>_units/ + operonx add</small>"] --> V2["<b>V2</b> card format<br/><small>lane · unit · req · after · files · done</small>"]
+    V2 --> V3["<b>V3</b> page<br/><small>board + chat, running card</small>"]
+  end
+  subgraph r2[" "]
+    direction LR
+    V4["<b>V4</b> assistant<br/><small>breakdown, card_set, stop hook</small>"] --> V5["<b>V5</b> engine cut<br/><small>per §8</small>"]
+    V5 --> V6["<b>V6</b> gate<br/><small>one real mr-finance task</small>"]
+  end
+  r1 --> r2
+  style r1 fill:none,stroke:none
+  style r2 fill:none,stroke:none
+```
+
+| | gate |
+|---|---|
+| V1 | every unit stamped into a scratch copy of `hello`; its test green |
+| V2 | mr-finance, callbot, tipcalc boards rewritten; no card id lost |
+| V3 | screenshots light and dark; a 2-minute test run never shows a stale line without its age |
+| V4 | a Sonnet turn breaks a real task into cards with lanes and units |
+| V5 | engine and studio suites green; line counts before and after |
+| V6 | the owner follows one real task on the board alone, without reading the transcript |

@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 560" width="1180" height="560" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.card{fill:#ffffff;stroke:#d0d7de}.surf{fill:#f6f8fa;stroke:#d0d7de}.cell{fill:#f6f8fa}
+    .ink{fill:#1f2328}.mut{fill:#59636e}.rule{stroke:#d0d7de}
+    .ui{fill:#8250df}.web{fill:#0969da}.core{fill:#1a7f37}.data{fill:#9a6700}.ai{fill:#bf3989}.plat{fill:#6e7781}
+    .run{stroke:#0969da;stroke-width:2;fill:#ffffff}.runfill{fill:#0969da}.track{fill:#d0d7de}
+    .ask{fill:#bf8700}.ok{fill:#1a7f37}
+    .me{fill:#ddf4ff;stroke:#b6e3ff}.bot{fill:#ffffff;stroke:#d0d7de}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.card{fill:#161b22;stroke:#30363d}.surf{fill:#0d1117;stroke:#30363d}.cell{fill:#0d1117}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}.rule{stroke:#30363d}
+      .ui{fill:#a371f7}.web{fill:#4493f8}.core{fill:#3fb950}.data{fill:#d29922}.ai{fill:#db61a2}.plat{fill:#8b949e}
+      .run{stroke:#4493f8;fill:#161b22}.runfill{fill:#4493f8}.track{fill:#30363d}
+      .ask{fill:#d29922}.ok{fill:#3fb950}
+      .me{fill:#0c2d6b;stroke:#1f6feb}.bot{fill:#161b22;stroke:#30363d}
+    }
+  </style>
+  <rect class="bg" width="1180" height="560" rx="12"/>
+
+  <!-- top bar -->
+  <text x="24" y="34" class="ink" font-size="17" font-weight="600">mr-finance</text>
+  <text x="156" y="34" class="mut" font-size="13">gold alert · 6 cards · 2 done · 1 doing · 1 needs you · 2 todo</text>
+
+  <!-- column headers -->
+  <g font-size="12" font-weight="600" class="mut">
+    <text x="28" y="76">lane</text>
+    <text x="146" y="76">todo</text>
+    <text x="326" y="76">doing</text>
+    <text x="516" y="76">needs you</text>
+    <text x="696" y="76">done</text>
+  </g>
+  <line class="rule" x1="16" x2="860" y1="86" y2="86"/>
+
+  <!-- row lines -->
+  <g class="rule">
+    <line x1="16" x2="860" y1="152" y2="152"/>
+    <line x1="16" x2="860" y1="216" y2="216"/>
+    <line x1="16" x2="860" y1="326" y2="326"/>
+    <line x1="16" x2="860" y1="436" y2="436"/>
+    <line x1="16" x2="860" y1="484" y2="484"/>
+    <line x1="16" x2="860" y1="532" y2="532"/>
+    <line x1="136" x2="136" y1="64" y2="532"/>
+    <line x1="316" x2="316" y1="64" y2="532"/>
+    <line x1="506" x2="506" y1="64" y2="532"/>
+    <line x1="686" x2="686" y1="64" y2="532"/>
+  </g>
+
+  <!-- lane labels -->
+  <g font-size="12.5" class="ink">
+    <circle class="ui" cx="30" cy="116" r="5"/><text x="42" y="120">UI/UX</text>
+    <circle class="web" cx="30" cy="180" r="5"/><text x="42" y="184">web backend</text>
+    <circle class="core" cx="30" cy="268" r="5"/><text x="42" y="272">core</text>
+    <circle class="data" cx="30" cy="378" r="5"/><text x="42" y="382">data</text>
+    <circle class="ai" cx="30" cy="460" r="5"/><text x="42" y="464">AI</text>
+    <circle class="plat" cx="30" cy="508" r="5"/><text x="42" y="512">platform</text>
+  </g>
+
+  <!-- UI todo -->
+  <g transform="translate(144,96)">
+    <rect class="card" width="164" height="48" rx="6"/><rect class="ui" width="4" height="48" rx="2"/>
+    <text x="12" y="20" class="ink" font-size="12.5"><tspan font-weight="700">C6</tspan>  alert tile</text>
+    <text x="12" y="38" class="mut" font-size="11">page · after C5</text>
+  </g>
+  <!-- web todo -->
+  <g transform="translate(144,160)">
+    <rect class="card" width="164" height="48" rx="6"/><rect class="web" width="4" height="48" rx="2"/>
+    <text x="12" y="20" class="ink" font-size="12.5"><tspan font-weight="700">C5</tspan>  /api/alerts/gold</text>
+    <text x="12" y="38" class="mut" font-size="11">route · after C3, C4</text>
+  </g>
+  <!-- core doing (the running card) -->
+  <g transform="translate(324,224)">
+    <rect class="run" width="174" height="94" rx="6"/><rect class="core" x="1" y="1" width="4" height="92" rx="2"/>
+    <text x="12" y="21" class="ink" font-size="12.5">▶ <tspan font-weight="700">C4</tspan>  threshold rule</text>
+    <text x="12" y="42" class="ink mono" font-size="11">pytest   812 / 1220</text>
+    <rect class="track" x="12" y="51" width="150" height="4" rx="2"/><rect class="runfill" x="12" y="51" width="100" height="4" rx="2"/>
+    <text x="12" y="74" class="mut" font-size="11">tests/news/test_alerts.py</text>
+    <text x="12" y="88" class="mut" font-size="10.5">4m12s · 3 s ago</text>
+  </g>
+  <!-- core needs you -->
+  <g transform="translate(514,224)">
+    <rect class="card" width="164" height="62" rx="6"/><rect class="ask" width="4" height="62" rx="2"/>
+    <text x="12" y="21" class="ink" font-size="12.5"><tspan font-weight="700">C3</tspan>  daily move</text>
+    <text x="12" y="38" class="mut" font-size="11">flexible</text>
+    <text x="12" y="54" class="ink" font-size="11">review the diff</text>
+  </g>
+  <!-- data done -->
+  <g transform="translate(694,334)">
+    <rect class="card" width="158" height="44" rx="6"/><rect class="data" width="4" height="44" rx="2"/>
+    <text x="12" y="19" class="ink" font-size="12.5"><tspan class="ok">✓</tspan> <tspan font-weight="700">C1</tspan>  prices store</text>
+    <text x="12" y="35" class="mut" font-size="11">store</text>
+  </g>
+  <g transform="translate(694,384)">
+    <rect class="card" width="158" height="44" rx="6"/><rect class="data" width="4" height="44" rx="2"/>
+    <text x="12" y="19" class="ink" font-size="12.5"><tspan class="ok">✓</tspan> <tspan font-weight="700">C2</tspan>  gold feed</text>
+    <text x="12" y="35" class="mut" font-size="11">source · after C1</text>
+  </g>
+
+  <!-- chat -->
+  <rect class="surf" x="876" y="56" width="288" height="476" rx="10"/>
+  <text x="892" y="80" class="ink" font-size="13" font-weight="600">chat</text>
+  <line class="rule" x1="876" x2="1164" y1="92" y2="92"/>
+  <g font-size="12">
+    <rect class="me" x="934" y="106" width="218" height="40" rx="8"/>
+    <text x="946" y="122" class="ink">alert me when gold moves</text>
+    <text x="946" y="138" class="ink">more than 2 % in a day</text>
+
+    <rect class="bot" x="888" y="158" width="236" height="72" rx="8"/>
+    <text x="900" y="176" class="ink">6 cards on the board:</text>
+    <text x="900" y="194" class="ink">4 units, 1 flexible (C3), 1 page.</text>
+    <text x="900" y="212" class="ink">Requirement NEWS-07. Go?</text>
+
+    <rect class="me" x="1104" y="242" width="48" height="28" rx="8"/>
+    <text x="1128" y="261" class="ink" text-anchor="middle">go</text>
+
+    <rect class="bot" x="888" y="282" width="236" height="72" rx="8"/>
+    <text x="900" y="300" class="ink">C1, C2 done.</text>
+    <text x="900" y="318" class="ink">C3 is new code: please review.</text>
+    <text x="900" y="336" class="ink">Now on C4.</text>
+  </g>
+  <rect class="bg" x="888" y="488" width="264" height="32" rx="8" stroke="#8c959f" stroke-opacity="0.5"/>
+  <text x="900" y="509" class="mut" font-size="12">Message the assistant</text>
+</svg>
