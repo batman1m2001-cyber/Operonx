@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 330" width="960" height="330" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.card{fill:#ffffff;stroke:#d0d7de}.surf{fill:#f6f8fa;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}.arrow{stroke:#8c959f;fill:none}.head{fill:#8c959f}
+    .core{fill:#1a7f37}.run{stroke:#0969da;stroke-width:2;fill:#ffffff}.runfill{fill:#0969da}.track{fill:#d0d7de}
+    .ask{fill:#bf8700}.ok{fill:#1a7f37}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.card{fill:#161b22;stroke:#30363d}.surf{fill:#0d1117;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}.arrow{stroke:#6e7681}.head{fill:#6e7681}
+      .core{fill:#3fb950}.run{stroke:#4493f8;fill:#161b22}.runfill{fill:#4493f8}.track{fill:#30363d}
+      .ask{fill:#d29922}.ok{fill:#3fb950}
+    }
+  </style>
+  <defs>
+    <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" width="960" height="330" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">One card through its states</text>
+  <text x="24" y="54" class="mut" font-size="13">Only the assistant moves cards. Nothing animates; the running card is the only highlight.</text>
+
+  <g font-size="13" font-weight="600" class="ink">
+    <text x="24" y="84">waiting</text><text x="264" y="84">todo</text><text x="504" y="84">doing</text><text x="744" y="84">done</text>
+  </g>
+
+  <!-- waiting -->
+  <g transform="translate(24,94)" opacity="0.55">
+    <rect class="card" width="200" height="104" rx="8" stroke-dasharray="4 3"/>
+    <rect class="core" width="5" height="104" rx="2.5"/>
+    <text x="16" y="26" class="ink" font-size="13"><tspan font-weight="700">C4</tspan>  threshold rule</text>
+    <text x="16" y="50" class="mut" font-size="12">after C2, not done yet</text>
+  </g>
+  <!-- todo -->
+  <g transform="translate(264,94)">
+    <rect class="card" width="200" height="104" rx="8"/>
+    <rect class="core" width="5" height="104" rx="2.5"/>
+    <text x="16" y="26" class="ink" font-size="13"><tspan font-weight="700">C4</tspan>  threshold rule</text>
+    <text x="16" y="50" class="mut" font-size="12">unit · rule</text>
+    <text x="16" y="70" class="mut" font-size="12">ready to start</text>
+  </g>
+  <!-- doing -->
+  <g transform="translate(504,94)">
+    <rect class="run" width="200" height="104" rx="8"/>
+    <rect class="core" x="1" y="1" width="5" height="102" rx="2.5"/>
+    <text x="16" y="26" class="ink" font-size="13">▶ <tspan font-weight="700">C4</tspan>  threshold rule</text>
+    <text x="16" y="50" class="ink mono" font-size="11.5">pytest   812 / 1220</text>
+    <rect class="track" x="16" y="60" width="168" height="4" rx="2"/>
+    <rect class="runfill" x="16" y="60" width="112" height="4" rx="2"/>
+    <text x="16" y="84" class="mut" font-size="11.5">4m12s · last line 3 s ago</text>
+  </g>
+  <!-- done -->
+  <g transform="translate(744,94)">
+    <rect class="card" width="192" height="104" rx="8"/>
+    <rect class="core" width="5" height="104" rx="2.5"/>
+    <text x="16" y="26" class="ink" font-size="13"><tspan class="ok">✓</tspan> <tspan font-weight="700">C4</tspan>  threshold rule</text>
+    <text x="16" y="50" class="mut" font-size="12">tests green · 2 files</text>
+    <text x="16" y="70" class="mut mono" font-size="11.5">commit 8e1c2a0</text>
+  </g>
+
+  <!-- arrows along the row -->
+  <path class="arrow" d="M226,146 H260" marker-end="url(#h)"/>
+  <path class="arrow" d="M466,146 H500" marker-end="url(#h)"/>
+  <path class="arrow" d="M706,146 H740" marker-end="url(#h)"/>
+
+  <!-- needs you -->
+  <path class="arrow" d="M574,200 V236" marker-end="url(#h)"/>
+  <path class="arrow" d="M634,236 V200" marker-end="url(#h)"/>
+  <text x="566" y="222" class="mut" font-size="11" text-anchor="end">asks</text>
+  <text x="642" y="222" class="mut" font-size="11">you answer</text>
+  <g transform="translate(504,240)">
+    <rect class="card" width="200" height="74" rx="8"/>
+    <rect class="ask" width="5" height="74" rx="2.5"/>
+    <text x="16" y="24" class="ink" font-size="13"><tspan class="ask">?</tspan> <tspan font-weight="700">C4</tspan>  threshold rule</text>
+    <text x="16" y="45" class="ink" font-size="12">2 % of close, or of open?</text>
+    <text x="16" y="63" class="mut" font-size="11.5">answer in chat</text>
+  </g>
+  <text x="494" y="282" class="ink" font-size="13" font-weight="600" text-anchor="end">needs you</text>
+
+  <!-- progress legend -->
+  <g transform="translate(24,246)" font-size="12">
+    <text class="ink" font-weight="600">The progress line</text>
+    <rect class="track" x="0" y="14" width="60" height="4" rx="2"/><rect class="runfill" x="0" y="14" width="40" height="4" rx="2"/>
+    <text x="72" y="20" class="mut">a bar only when the tool printed a total</text>
+    <text x="0" y="40" class="ink mono" font-size="11.5">418 lines</text>
+    <text x="72" y="40" class="mut">otherwise a count and the last line</text>
+    <text x="0" y="60" class="ink" font-size="11.5">47 s ago</text>
+    <text x="72" y="60" class="mut">a line older than 30 s shows its age</text>
+  </g>
+</svg>
