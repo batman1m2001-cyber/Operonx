@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 688" width="960" height="688" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.grp{fill:#f6f8fa;stroke:#d0d7de}.card{fill:#ffffff;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}.rule{stroke:#d0d7de}
+    .ui{fill:#8250df}.web{fill:#0969da}.core{fill:#1a7f37}.data{fill:#9a6700}.ai{fill:#bf3989}.plat{fill:#6e7781}.none{fill:#d0d7de}
+    .ok{fill:#1a7f37}.bad{fill:#cf222e}
+    .arrow{stroke:#8c959f;stroke-width:1.6;fill:none}.head{fill:#8c959f}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.grp{fill:#161b22;stroke:#30363d}.card{fill:#0d1117;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}.rule{stroke:#30363d}
+      .ui{fill:#a371f7}.web{fill:#4493f8}.core{fill:#3fb950}.data{fill:#d29922}.ai{fill:#db61a2}.plat{fill:#8b949e}.none{fill:#30363d}
+      .ok{fill:#3fb950}.bad{fill:#f85149}
+      .arrow{stroke:#6e7681}.head{fill:#6e7681}
+    }
+  </style>
+  <defs><marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect class="bg" width="960" height="688" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">One repo, one tree</text>
+  <text x="24" y="54" class="mut" font-size="13">Nothing loose at the root. Data or out? Ask: <tspan class="ink">would a delete hurt?</tspan> Yes → <tspan class="mono" font-size="12">data/</tspan>, no → <tspan class="mono" font-size="12">out/</tspan>.</text>
+  <g font-size="11.5" font-weight="600" class="mut"><text x="40" y="84">path</text><text x="230" y="84">what goes there</text><text x="936" y="84" text-anchor="end">in git</text></g>
+  <line class="rule" x1="24" x2="936" y1="92" y2="92"/>
+  <text x="24" y="112" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">BACKEND · PYTHON</text>
+  <g transform="translate(0,120)"><rect class="web" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">app/main.py</text><text x="230" y="19" class="ink" font-size="12.5">services, jobs, one static mount for web/</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,148)"><rect class="core" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">src/&lt;feature&gt;/</text><text x="230" y="19" class="ink" font-size="12.5">the feature&#x27;s code, the shape in §2</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,176)"><rect class="plat" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">src/_shared/</text><text x="230" y="19" class="ink" font-size="12.5">config · db · errors · auth</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,204)"><rect class="none" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">tests/&lt;feature&gt;/</text><text x="230" y="19" class="ink" font-size="12.5">mirrors src/; fakes in tests/fakes/</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <text x="24" y="252" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">FRONTEND · BROWSER</text>
+  <g transform="translate(0,260)"><rect class="ui" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">web/</text><text x="230" y="19" class="ink" font-size="12.5">static files only, no Python (next picture)</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <text x="24" y="308" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">DATA AND RESOURCES</text>
+  <g transform="translate(0,316)"><rect class="data" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">data/seed/</text><text x="230" y="19" class="ink" font-size="12.5">small inputs the app needs to start</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,344)"><rect class="data" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">data/</text><text x="230" y="19" class="ink" font-size="12.5">runtime state: sqlite, kb index, uploads</text><text x="936" y="19" class="bad" font-size="12" text-anchor="end" font-weight="600">✗ ignored</text></g>
+  <g transform="translate(0,372)"><rect class="data" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">datasets/</text><text x="230" y="19" class="ink" font-size="12.5">inputs for jobs and evals (jsonl)</text><text x="936" y="19" class="mut" font-size="12" text-anchor="end" font-weight="600">✓ if small</text></g>
+  <g transform="translate(0,400)"><rect class="ai" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">models/</text><text x="230" y="19" class="ink" font-size="12.5">local weights (onnx); big ones fetched by a script</text><text x="936" y="19" class="mut" font-size="12" text-anchor="end" font-weight="600">✓ if small</text></g>
+  <g transform="translate(0,428)"><rect class="ai" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">evals/</text><text x="230" y="19" class="ink" font-size="12.5">eval cases and gold answers</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,456)"><rect class="none" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">out/</text><text x="230" y="19" class="ink" font-size="12.5">generated: logs, run outputs, exports</text><text x="936" y="19" class="bad" font-size="12" text-anchor="end" font-weight="600">✗ ignored</text></g>
+  <text x="24" y="504" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">EVERYTHING ELSE</text>
+  <g transform="translate(0,512)"><rect class="none" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">docs/</text><text x="230" y="19" class="ink" font-size="12.5">docs; their images in docs/assets/</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,540)"><rect class="none" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">scripts/</text><text x="230" y="19" class="ink" font-size="12.5">one-off tools; nothing imports them</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,568)"><rect class="plat" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">deploy/</text><text x="230" y="19" class="ink" font-size="12.5">Dockerfile · compose.yml · stack files</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <g transform="translate(0,596)"><rect class="plat" x="24" y="4" width="4" height="20" rx="2"/><text x="40" y="19" class="ink mono" font-size="12.5">./</text><text x="230" y="19" class="ink" font-size="12.5">README · AGENTS.md · pyproject · operonx.toml · resources.yaml · .env.example</text><text x="936" y="19" class="ok" font-size="12" text-anchor="end" font-weight="600">✓ git</text></g>
+  <line class="rule" x1="24" x2="936" y1="638" y2="638"/>
+  <text x="24" y="664" class="mut" font-size="12.5">mr-finance today: <tspan class="ink" font-weight="600">17</tspan> loose files at the root (client docx/pdf, a zip, a db, two BRDs), <tspan class="ink" font-weight="600">57 MB</tspan> in data/ with no seed/ split, an iOS .ipa inside web/.</text>
+</svg>

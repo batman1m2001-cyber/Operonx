@@ -69,9 +69,27 @@ APP = Application(
 `operonx serve --list` still prints every endpoint. A unit file over **500 lines** means the feature does two
 jobs: split the feature, not the file (today: mr-finance `assistant/ops.py` 589, callbot `call/ops.py` 1,038).
 
+## 3. The whole repo
+
+![One repo, one tree: backend, frontend, data and resources, each in one place](project-convention/tree.svg)
+
+Backend and frontend are split by folder: Python in `app/` + `src/`, the browser in `web/`. Generated files never
+sit next to code: anything a run writes goes to `data/` (keep) or `out/` (throw away), both ignored by git.
+Binaries live only in `web/assets/`, `docs/assets/`, `models/` and `data/`.
+
 ---
 
-## 3. Who may import whom
+## 4. The web part
+
+![Inside web/, and one click followed from the page to the op](project-convention/web.svg)
+
+No build step by default: plain ES modules, served by one static mount in `app/main.py`. A project that needs one
+(React, Vite) makes `web/` a node project: the same folders under `web/src/`, built to `web/dist/` (ignored), and
+the mount points at `dist/`.
+
+---
+
+## 5. Who may import whom
 
 ![Imports point down inside a feature; another feature only through its door](project-convention/imports.svg)
 
@@ -80,13 +98,13 @@ The door is the feature's `__init__.py`: the names it exports are the feature's 
 
 ---
 
-## 4. Why this makes debugging short
+## 6. Why this makes debugging short
 
 ![The same 500, followed with the convention and today](project-convention/debug.svg)
 
 ---
 
-## 5. The rules, each one checked
+## 7. The rules, each one checked
 
 | # | rule | new lint check | mr-finance today | callbot today |
 |---|---|---|---|---|
@@ -97,13 +115,16 @@ The door is the feature's `__init__.py`: the names it exports are the feature's 
 | R5 | env is read only in `_shared/config.py` (or `resources.yaml`) | C17 | 51 reads, 20 files | 30 reads, 10 files |
 | R6 | `tests/<feature>/test_<unit>.py` mirrors `src/` · warn | C18 | 88 flat | 1 flat |
 | R7 | a unit file stays under 500 lines · warn | C19 | 1 | 1 |
+| R8 | the root holds only the allow-listed files; generated files only in `data/` or `out/` | C20 | 17 loose | 17 loose (Dockerfiles, compose, stack, `.env_*`) |
+| R9 | `web/`: only `lib/api.js` calls `fetch`; a page is named after a feature · warn | C21 | 3 files | no web |
+| R10 | binaries only in `assets/`, `models/`, `data/`; nothing tracked over 5 MB | C22 | 1 (.ipa in `web/`) | 2 (denoise `.onnx`, 7–9 MB) |
 
 The unit names: `routes` `jobs` `graph` `ops` `rules` `store` `source` `prompts` `agent`, and `__init__`. They go
 in `operonx lint` (core), not `practices.toml`, which v2 cuts.
 
 ---
 
-## 6. Existing projects: a ratchet, no big bang
+## 8. Existing projects: a ratchet, no big bang
 
 mr-finance runs on :8030 and callbot runs on staging. Neither moves all at once.
 
@@ -121,11 +142,11 @@ That takes 197 of its 629 imports between features off the count.
 
 ---
 
-## 7. Phases
+## 9. Phases
 
 ```mermaid
 flowchart LR
-  K1["<b>K1</b> templates<br/><small>_shared/ · routes.py · tests/&lt;feature&gt;/<br/>AGENTS.md layout</small>"] --> K2["<b>K2</b> lint<br/><small>C13–C19 · --baseline</small>"]
+  K1["<b>K1</b> templates<br/><small>_shared/ · routes.py · tests/&lt;feature&gt;/<br/>web/ · deploy/ · AGENTS.md layout</small>"] --> K2["<b>K2</b> lint<br/><small>C13–C22 · --baseline</small>"]
   K2 --> K3["<b>K3</b> operonx add<br/><small>= v2 V1, into the fixed files</small>"]
   K3 --> K4["<b>K4</b> small projects<br/><small>tipcalc · qc · meeting-prep ×2</small>"]
   K4 --> K5["<b>K5</b> ratchet<br/><small>mr-finance · callbot</small>"]
@@ -133,7 +154,7 @@ flowchart LR
 
 | | gate |
 |---|---|
-| K1 | the four `init` templates pass the new checks; their tests are green |
+| K1 | the four `init` templates pass the new checks (`http` and `chat` stamp `web/` and `deploy/`); their tests are green |
 | K2 | a baseline for each of the six projects; lint is green; one deep import added on purpose turns it red |
 | K3 | `operonx add rule news threshold` adds `threshold` to `src/news/rules.py` and a red test to `tests/news/test_rules.py` |
 | K4 | every count at 0; each project's tests green |

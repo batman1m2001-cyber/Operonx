@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 488" width="960" height="488" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.grp{fill:#f6f8fa;stroke:#d0d7de}.card{fill:#ffffff;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}.rule{stroke:#d0d7de}
+    .ui{fill:#8250df}.web{fill:#0969da}.core{fill:#1a7f37}.data{fill:#9a6700}.ai{fill:#bf3989}.plat{fill:#6e7781}.none{fill:#d0d7de}
+    .ok{fill:#1a7f37}.bad{fill:#cf222e}
+    .arrow{stroke:#8c959f;stroke-width:1.6;fill:none}.head{fill:#8c959f}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.grp{fill:#161b22;stroke:#30363d}.card{fill:#0d1117;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}.rule{stroke:#30363d}
+      .ui{fill:#a371f7}.web{fill:#4493f8}.core{fill:#3fb950}.data{fill:#d29922}.ai{fill:#db61a2}.plat{fill:#8b949e}.none{fill:#30363d}
+      .ok{fill:#3fb950}.bad{fill:#f85149}
+      .arrow{stroke:#6e7681}.head{fill:#6e7681}
+    }
+  </style>
+  <defs><marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+  <rect class="bg" width="960" height="488" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">The web part: frontend and backend, one name</text>
+  <text x="24" y="54" class="mut" font-size="13">The browser half lives in <tspan class="mono" font-size="12">web/</tspan>; the server half in <tspan class="mono" font-size="12">src/&lt;feature&gt;/routes.py</tspan>. The feature name joins them.</text>
+  <rect class="grp" x="24" y="72" width="440" height="330" rx="8"/>
+  <text x="40" y="94" class="ink mono" font-size="12.5" font-weight="700">web/</text>
+  <g transform="translate(0,104)"><rect class="ui" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">index.html</text><text x="216" y="19" class="mut" font-size="12">the one shell page</text></g>
+  <g transform="translate(0,136)"><rect class="ui" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">app.js</text><text x="216" y="19" class="mut" font-size="12">router · header · nav</text></g>
+  <g transform="translate(0,168)"><rect class="ui" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">pages/news.js</text><text x="216" y="19" class="mut" font-size="12">one page per feature, named after it</text></g>
+  <g transform="translate(0,200)"><rect class="ui" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">components/</text><text x="216" y="19" class="mut" font-size="12">UI used by 2+ pages: charts, tables</text></g>
+  <g transform="translate(0,232)"><rect class="web" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">lib/api.js</text><text x="216" y="19" class="mut" font-size="12">the only file that calls fetch</text></g>
+  <g transform="translate(0,264)"><rect class="ui" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">lib/i18n.js · lang/</text><text x="216" y="19" class="mut" font-size="12">en.json · vi.json</text></g>
+  <g transform="translate(0,296)"><rect class="ui" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">styles/</text><text x="216" y="19" class="mut" font-size="12">tokens.css · base.css</text></g>
+  <g transform="translate(0,328)"><rect class="data" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">assets/</text><text x="216" y="19" class="mut" font-size="12">img/ · icons/ · fonts/</text></g>
+  <g transform="translate(0,360)"><rect class="none" x="40" y="4" width="4" height="20" rx="2"/><text x="54" y="19" class="ink mono" font-size="12">vendor/</text><text x="216" y="19" class="mut" font-size="12">third-party copies, pinned</text></g>
+  <text x="520" y="94" class="ink" font-size="13" font-weight="600">One click, followed</text>
+  <g transform="translate(520,104)"><rect class="card" width="416" height="58" rx="8"/><rect class="ui" width="5" height="58" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="12.5" font-weight="600">web/pages/news.js</text><text x="16" y="44" class="mut mono" font-size="11.5">api(&quot;news/dismiss&quot;, ids)</text></g>
+  <path class="arrow" d="M560,164 V178" marker-end="url(#h)"/>
+  <g transform="translate(520,180)"><rect class="card" width="416" height="58" rx="8"/><rect class="web" width="5" height="58" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="12.5" font-weight="600">web/lib/api.js</text><text x="16" y="44" class="mut mono" font-size="11.5">POST /api/news/dismiss</text></g>
+  <path class="arrow" d="M560,240 V254" marker-end="url(#h)"/>
+  <text x="576" y="251" class="mut" font-size="11">browser → server</text>
+  <g transform="translate(520,256)"><rect class="card" width="416" height="58" rx="8"/><rect class="web" width="5" height="58" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="12.5" font-weight="600">src/news/routes.py</text><text x="16" y="44" class="mut mono" font-size="11.5">Service(&quot;news/dismiss&quot;, graph)</text></g>
+  <path class="arrow" d="M560,316 V330" marker-end="url(#h)"/>
+  <g transform="translate(520,332)"><rect class="card" width="416" height="58" rx="8"/><rect class="core" width="5" height="58" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="12.5" font-weight="600">src/news/graph.py → ops.py</text><text x="16" y="44" class="mut mono" font-size="11.5">a traced run in the studio</text></g>
+  <text x="520" y="416" class="mut" font-size="12">news is the page, the URL and the folder.</text>
+  <line class="rule" x1="24" x2="936" y1="436" y2="436"/>
+  <text x="24" y="462" class="mut" font-size="12.5">Today: mr-finance <tspan class="ink" font-weight="600">7</tspan> loose files at web/ top, <tspan class="ink" font-weight="600">3</tspan> files call fetch past core.js · studio <tspan class="ink" font-weight="600">73</tspan> files in one folder (56 js, 11 png, 2 css, 4 html).</text>
+</svg>
