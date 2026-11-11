@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="960" height="520" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.grp{fill:#f6f8fa;stroke:#d0d7de}.card{fill:#ffffff;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}.rule{stroke:#d0d7de}
+    .ui{fill:#8250df}.web{fill:#0969da}.core{fill:#1a7f37}.ai{fill:#bf3989}.plat{fill:#6e7781}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.grp{fill:#161b22;stroke:#30363d}.card{fill:#0d1117;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}.rule{stroke:#30363d}
+      .ui{fill:#a371f7}.web{fill:#4493f8}.core{fill:#3fb950}.ai{fill:#db61a2}.plat{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" width="960" height="520" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">operonx init: one template, up to three flags</text>
+  <text x="24" y="54" class="mut" font-size="13">The template picks the AI side. A flag adds what is around it. What is not asked for is not written.</text>
+  <text x="24" y="90" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">1 · TEMPLATE, ONE OF</text>
+  <g transform="translate(24,102)"><rect class="card" width="290" height="72" rx="8"/><rect class="core" width="5" height="72" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">hello</text><text x="278" y="24" class="mut" font-size="11.5" text-anchor="end">default</text><text x="16" y="44" class="ink" font-size="12">ops and a graph, run as a job</text><text x="16" y="61" class="mut" font-size="11.5">offline: no server, no key</text></g>
+  <g transform="translate(24,186)"><rect class="card" width="290" height="72" rx="8"/><rect class="ai" width="5" height="72" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">chat</text><text x="16" y="44" class="ink" font-size="12">+ an LLMOp and its prompt</text><text x="16" y="61" class="mut" font-size="11.5">llm:assistant · LLM_API_KEY</text></g>
+  <g transform="translate(24,270)"><rect class="card" width="290" height="72" rx="8"/><rect class="ai" width="5" height="72" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">agent</text><text x="16" y="44" class="ink" font-size="12">+ an AgentOp and one tool</text><text x="16" y="61" class="mut" font-size="11.5">dep: operonx-agents</text></g>
+  <text x="338" y="90" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">2 · FLAGS, ANY OF</text>
+  <g transform="translate(338,102)"><rect class="card" width="290" height="72" rx="8"/><rect class="web" width="5" height="72" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">--http</text><text x="16" y="44" class="ink" font-size="12">routes.py · SERVICES in main.py</text><text x="16" y="61" class="mut" font-size="11.5">dep: operonx[serve]</text></g>
+  <g transform="translate(338,186)"><rect class="card" width="290" height="72" rx="8"/><rect class="ui" width="5" height="72" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">--web</text><text x="278" y="24" class="mut" font-size="11.5" text-anchor="end">turns on --http</text><text x="16" y="44" class="ink" font-size="12">web/: pages · lib/api.js · assets</text><text x="16" y="61" class="mut" font-size="11.5">the static mount in main.py</text></g>
+  <g transform="translate(338,270)"><rect class="card" width="290" height="72" rx="8"/><rect class="plat" width="5" height="72" rx="2.5"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">--deploy</text><text x="16" y="44" class="ink" font-size="12">deploy/Dockerfile · compose.yml</text><text x="16" y="61" class="mut" font-size="11.5">serves if --http, else runs the job</text></g>
+  <text x="652" y="90" class="mut" font-size="11.5" font-weight="600" letter-spacing=".4">3 · ALWAYS</text>
+  <rect class="grp" x="652" y="102" width="284" height="240" rx="8"/>
+  <text x="668" y="128" class="ink mono" font-size="11.5">app/main.py</text>
+  <text x="668" y="155" class="ink mono" font-size="11.5">src/_shared/config.py</text>
+  <text x="668" y="182" class="ink mono" font-size="11.5">src/&lt;feature&gt;/  __init__ · graph · ops</text>
+  <text x="668" y="209" class="ink mono" font-size="11.5">tests/&lt;feature&gt;/</text>
+  <text x="668" y="236" class="ink mono" font-size="11.5">operonx.toml  parts = [ … ]</text>
+  <text x="668" y="263" class="ink mono" font-size="11.5">resources.yaml · .env.example</text>
+  <text x="668" y="290" class="ink mono" font-size="11.5">AGENTS.md  only what is on</text>
+  <text x="668" y="317" class="ink mono" font-size="11.5">docs/brd/</text>
+  <line class="rule" x1="24" x2="936" y1="368" y2="368"/>
+  <g transform="translate(24,384)"><rect class="grp" width="290" height="72" rx="8" stroke-dasharray="4 4"/><text x="16" y="24" class="ink mono" font-size="13" font-weight="700">operonx init . --web</text><text x="16" y="44" class="ink" font-size="12">a flag later: only missing files</text><text x="16" y="61" class="mut" font-size="11.5">a file you edited: the line is printed</text></g>
+  <text x="338" y="408" class="ink mono" font-size="12">operonx init pricing</text>
+  <text x="560" y="408" class="mut" font-size="12">→ hello, offline</text>
+  <text x="338" y="432" class="ink mono" font-size="12">operonx init shop --web</text>
+  <text x="560" y="432" class="mut" font-size="12">→ hello + http + web/</text>
+  <text x="338" y="456" class="ink mono" font-size="12">operonx init desk --template agent --http</text>
+  <text x="660" y="456" class="mut" font-size="12">→ an agent behind HTTP</text>
+  <text x="24" y="500" class="mut" font-size="12.5">3 templates × (none, http, http + web) × deploy or not = <tspan class="ink" font-weight="600">18</tspan> shapes, each tested.  Today: 4 fixed templates, all four install the HTTP server.</text>
+</svg>
