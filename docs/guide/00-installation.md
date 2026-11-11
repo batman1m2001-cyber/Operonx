@@ -9,11 +9,11 @@ work in at once.
 With [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uvx operonx init myapp        # or --template http | chat | agent
+uvx operonx init myapp        # or -t chat | agent; --http, --web, --deploy
 cd myapp
 uv sync
 uv run pytest                 # the generated tests run offline
-uv run operonx serve --list   # the services the app declares
+uv run operonx run --list     # the jobs the app declares
 ```
 
 With pip only (no uv, e.g. behind a company mirror):
@@ -26,7 +26,7 @@ python -m venv .venv
 source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -e ".[test]"
 pytest
-operonx serve --list
+operonx run --list
 ```
 
 `init` writes the commands of the toolchain you use into the project's
@@ -38,13 +38,20 @@ operonx-project builds from. `--no-brd` leaves it out.
 
 | Template | What the first feature is |
 |---|---|
-| `hello` (default) | Pure compute, run as a job and served over HTTP; no model |
-| `http` | An HTTP service on a doors graph, tested in-process |
+| `hello` (default) | Pure compute, run as a job over `data/people.jsonl`; no model |
 | `chat` | An `LLMOp` on an `llm:assistant` resource; tested against a fake model |
 | `agent` | An agent with one `@tool` (operonx-agents); tested with a scripted model |
 
-Existing files are never overwritten unless you pass `--force`; on an
-existing project `init` only adds what is missing.
+| Flag | What it adds |
+|---|---|
+| `--http` | `routes.py`: the feature as a POST service, and `operonx serve` |
+| `--web` | `web/`: a page that calls the service (brings `--http`) |
+| `--deploy` | `deploy/`: a Dockerfile and a compose file |
+
+Plain `init` is offline: no service. The choice is kept in `operonx.toml`
+(`parts = ["hello", "http"]`). `operonx init . --web` on an existing project
+writes the missing files, rewrites those still as init wrote them, and for a
+file you edited prints the lines to add; `--force` overwrites.
 
 ## What the project holds
 
@@ -55,9 +62,10 @@ myapp/
 ├── app/main.py          the map: every service and job, in one Application
 ├── src/greeting/        one feature, one folder
 │   ├── graph.py         the wiring
-│   └── ops.py           the logic
-├── tests/               the feature's tests; no test calls a real model
-├── datasets/            what jobs run over (.jsonl)
+│   ├── ops.py           the logic
+│   └── jobs.py          the job (routes.py: the service, with --http)
+├── tests/greeting/      the feature's tests; no test calls a real model
+├── data/                what jobs run over (.jsonl); out/ is what they write
 ├── resources.yaml       models and stores, by key; secrets as ${VAR}
 ├── .env.example         the secrets resources.yaml names; copy to .env
 ├── operonx.toml         points the operonx command at app.main:APP
@@ -122,7 +130,7 @@ the guide page
 ## Extras
 
 Provider SDKs are extras. A project names them on the `operonx[...]` line of
-its `pyproject.toml` (`init` writes `operonx[serve]`); add one there, e.g.
+its `pyproject.toml` (`init --http` writes `operonx[serve]`); add one there, e.g.
 `operonx[serve,openai]`, then `uv sync` (with pip, `pip install -e ".[test]"`).
 
 | Extra | Contents |

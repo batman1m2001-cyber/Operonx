@@ -4,11 +4,10 @@ import asyncio
 
 from operonx.agents import Runner
 from operonx.agents.testing import ScriptedLLM, asks, says, scripted
-from operonx.app.serve.app import build_app
-from starlette.testclient import TestClient
+from operonx.app.jobs import Job
 
-from app.main import APP
-from assistant.graph import ASSISTANT
+from assistant.agent import ASSISTANT
+from assistant.graph import ask_flow
 from assistant.ops import word_count
 
 
@@ -25,8 +24,9 @@ def test_the_agent_calls_the_tool_and_answers():
     assert tool_said == "3"
 
 
-def test_the_service_answers_over_http():
+def test_the_job_answers_every_question(tmp_path):
+    job = Job("t", graph=ask_flow, items=[{"input": "hi"}], key="input", record_dir=tmp_path)
     with scripted(assistant=ScriptedLLM(says("Hello!"))):
-        with TestClient(build_app(APP.services)) as client:
-            reply = client.post("/ask", json={"input": "hi"}).json()
-    assert reply["status"] == "completed" and reply["output"] == "Hello!"
+        run = asyncio.run(job.run())
+    assert run.status == "ok"
+    assert run.results == {"hi": {"output": "Hello!", "status": "completed", "error": None}}

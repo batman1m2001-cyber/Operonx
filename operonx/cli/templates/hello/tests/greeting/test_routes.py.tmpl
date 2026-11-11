@@ -1,0 +1,23 @@
+{{#http}}
+from pathlib import Path
+
+from operonx.app import Application
+from starlette.testclient import TestClient
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_the_route_answers_and_refuses_a_field_it_does_not_take():
+    app = Application.find(ROOT)  # loads operonx.toml, then the APP it names
+    with TestClient(app.asgi()) as client:
+        ok = client.post("/greet", json={"id": "x", "full_name": "grace"})
+        bad = client.post("/greet", json={"id": "x", "nme": "grace"})
+{{#web}}
+        page = client.get("/")  # web/index.html
+{{/web}}
+    assert ok.status_code == 200 and ok.json() == {"id": "x", "greeting": "Hello, Grace!"}
+    assert bad.status_code == 400 and bad.json()["field"] == "nme"
+{{#web}}
+    assert page.status_code == 200 and "lib/api.js" in page.text
+{{/web}}
+{{/http}}

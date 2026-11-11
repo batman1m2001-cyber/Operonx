@@ -1,0 +1,17 @@
+{{#http}}
+"""The chat feature's routes: its graph behind HTTP."""
+
+from operonx.app import Service, http
+
+from _shared.config import PORT
+from chat.graph import chat_flow
+
+SERVICES = [
+    Service(
+        "chat",
+        http("POST", "/chat", port=PORT),
+        graph=chat_flow,  # the JSON body fills its parameters
+        description="POST {question}, get {answer, error}.",
+    ),
+]
+{{/http}}

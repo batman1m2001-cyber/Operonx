@@ -1,8 +1,9 @@
 # 5. Project layout and conventions
 
 A product built on operonx looks like this. The files below are a complete,
-working project, and `operonx init` writes this layout (with a feature of
-its own) for you.
+working project. `operonx init` writes the same layout with a feature of its
+own, plus `jobs.py` (and `routes.py` with `--http`) in the feature,
+`src/_shared/config.py`, `data/` for what jobs read and `tests/<feature>/`.
 
 ```text
 scorer/
@@ -35,9 +36,8 @@ cards and their status are written to `docs/brd/board/`, in git, by the
 engine only; never edit it. The engine's runtime state is
 `.operonx/project/`, outside git, and is rebuilt from the board on a fresh
 clone. The studio's Board tab shows the checklist, before the first
-milestone too. How to build with it, and how to work a card yourself
-(`take`/`submit`), is operonx-project's guide: `project/01-project.md` in
-`.operonx/guide/` when it is installed.
+milestone too. More is in operonx-project's guide: `project/01-project.md`
+in `.operonx/guide/` when it is installed.
 
 ## The rules
 

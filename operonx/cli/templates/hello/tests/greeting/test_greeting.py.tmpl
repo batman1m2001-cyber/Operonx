@@ -1,9 +1,6 @@
 import asyncio
-from pathlib import Path
 
-from operonx.app import Application
 from operonx.app.jobs import Job
-from starlette.testclient import TestClient
 
 from greeting.graph import greet_flow
 from greeting.ops import greet
@@ -28,12 +25,3 @@ def test_the_flow_greets_every_person(tmp_path):
         "a": {"id": "a", "greeting": "Hello, Ada!"},
         "b": {"id": "b", "greeting": "Hello, stranger!"},
     }
-
-
-def test_the_service_answers_and_refuses_a_field_it_does_not_take():
-    app = Application.find(Path(__file__).resolve().parent.parent)
-    with TestClient(app.asgi()) as client:
-        ok = client.post("/greet", json={"id": "x", "full_name": "grace"})
-        bad = client.post("/greet", json={"id": "x", "nme": "grace"})
-    assert ok.status_code == 200 and ok.json() == {"id": "x", "greeting": "Hello, Grace!"}
-    assert bad.status_code == 400 and bad.json()["field"] == "nme"

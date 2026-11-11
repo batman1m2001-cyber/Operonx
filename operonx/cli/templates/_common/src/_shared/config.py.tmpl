@@ -1,0 +1,15 @@
+"""What every feature reads: the project's folders and its settings. The
+environment is read here and nowhere else."""
+
+from pathlib import Path
+{{#http}}
+
+from operonx.app import env
+{{/http}}
+
+ROOT = Path(__file__).resolve().parents[2]
+DATA = ROOT / "data"  # what runs read, and what they keep
+OUT = ROOT / "out"  # what runs write; safe to delete
+{{#http}}
+PORT = env("PORT", 8000)  # every route listens here
+{{/http}}

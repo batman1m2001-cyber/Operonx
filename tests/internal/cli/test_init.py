@@ -20,7 +20,7 @@ import pytest
 
 import operonx
 from operonx import guide
-from operonx.cli.init import plan
+from operonx.cli.init import PARTS, plan
 from operonx.cli.main import TEMPLATES, main
 
 pytestmark = pytest.mark.unit
@@ -30,17 +30,35 @@ BIN = Path(sys.executable).parent
 #: What each template's application declares — the test fails if a
 #: template drops one, and if the CLIs do not list one.
 DECLARED = {
-    "hello": {"services": ["greet"], "jobs": ["greet_people"]},
-    "http": {"services": ["stats"], "jobs": []},
-    "chat": {"services": ["chat"], "jobs": []},
-    "agent": {"services": ["assistant"], "jobs": []},
+    "hello": {"service": "greet", "job": "greet_people"},
+    "chat": {"service": "chat", "job": "answer_questions"},
+    "agent": {"service": "assistant", "job": "ask_assistant"},
 }
+
+#: Every shape init makes: a template and its flags (none, --http, --web;
+#: --deploy or not). One shape per template runs by default, all with -m slow.
+FLAGS = [(*a, *b) for a in ((), ("--http",), ("--web",)) for b in ((), ("--deploy",))]
+FAST = {("hello",), ("chat", "--http"), ("agent", "--web", "--deploy")}
+SHAPES = [
+    pytest.param(
+        (t, *f),
+        id="-".join([t, *(x[2:] for x in f)]),
+        marks=[] if (t, *f) in FAST else [pytest.mark.slow],
+    )
+    for t in DECLARED
+    for f in FLAGS
+]
+
+#: operonx-agents' source in this repo: the agent template's code imports it.
+AGENTS_SRC = Path(__file__).resolve().parents[3] / "packages" / "operonx-agents"
 
 
 def _env(project: Path) -> dict:
     env = {**os.environ, "OPERONX_RUNS_DIR": str(project / ".operonx" / "runs")}
     for var in ("VIRTUAL_ENV", "PYTHONPATH", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
         env.pop(var, None)
+    if AGENTS_SRC.is_dir():
+        env["PYTHONPATH"] = str(AGENTS_SRC)
     return env
 
 
@@ -70,6 +88,7 @@ def _snapshot(root: Path) -> dict:
 
 def test_every_template_is_declared_here():
     assert sorted(TEMPLATES) == sorted(DECLARED)
+    assert len(SHAPES) == 18
 
 
 #: What a template's generated code needs besides operonx: its tests and
@@ -83,17 +102,22 @@ def _installed(module: str) -> bool:
     return importlib.util.find_spec(module) is not None
 
 
-@pytest.fixture(scope="module", params=sorted(DECLARED))
+@pytest.fixture(scope="module", params=SHAPES)
 def project(request, tmp_path_factory):
-    """One fresh project per template, made through the CLI's entry point."""
-    root = tmp_path_factory.mktemp(request.param) / "myapp"
-    assert main(["init", str(root), "--template", request.param]) == 0
-    return request.param, root
+    """One fresh project per shape, made through the CLI's entry point."""
+    template, *flags = request.param
+    root = tmp_path_factory.mktemp(template) / "myapp"
+    assert main(["init", str(root), "--template", template, *flags]) == 0
+    return template, root
+
+
+def _parts(root: Path) -> list:
+    return re.search(r"^parts = (\[.*?\])", (root / "operonx.toml").read_text(), re.M)[1]
 
 
 def _needs_its_package(template: str) -> None:
     module = NEEDS.get(template)
-    if module and not _installed(module):
+    if module and not _installed(module) and not AGENTS_SRC.is_dir():
         pytest.skip(f"the {template} template's code imports {module}, which is not installed")
 
 
@@ -102,17 +126,29 @@ def test_the_agent_template_is_built_on_operonx_agents(tmp_path):
     the package is declared and imported by its short name, and nothing
     uses the removed built-in agents API."""
     root = tmp_path / "bot"
-    assert main(["init", str(root), "--template", "agent"]) == 0
+    assert main(["init", str(root), "--template", "agent", "--http"]) == 0
     pyproject = (root / "pyproject.toml").read_text()
     assert '"operonx-agents>=' in pyproject
     code = {p.relative_to(root).as_posix(): p.read_text() for p in root.rglob("*.py")}
     assert not [p for p, t in code.items() if "build_react_agent" in t or "operonx_agents" in t]
-    assert "from operonx.agents import" in code["src/assistant/graph.py"]
-    assert "agent_service(" in code["app/main.py"]
-    assert "Agent(" in code["src/assistant/graph.py"]
-    assert "operonx.agents.testing" in code["tests/test_assistant.py"]
-    for other in ("hello", "http", "chat"):
-        assert b"operonx-agents" not in plan(other, "x")["pyproject.toml"]
+    assert "AgentOp.of(" in code["src/assistant/graph.py"]
+    assert "agent_service(" in code["src/assistant/routes.py"]
+    assert "Agent(" in code["src/assistant/agent.py"]
+    assert "operonx.agents.testing" in code["tests/assistant/test_assistant.py"]
+    for other in ("hello", "chat"):
+        assert b"operonx-agents" not in plan(other, "x", parts=PARTS)["pyproject.toml"]
+
+
+def test_the_parts_decide_the_files_and_the_dependency():
+    files = {flags: plan("hello", "x", parts=flags) for flags in ((), ("web",), ("deploy",))}
+    assert "src/greeting/routes.py" not in files[()] and "web/index.html" not in files[()]
+    assert {"src/greeting/routes.py", "web/lib/api.js"} <= set(files[("web",)])  # web brings http
+    assert "deploy/Dockerfile" in files[("deploy",)] and "deploy/Dockerfile" not in files[()]
+    assert b'"operonx>=' in files[()]["pyproject.toml"]  # offline: no serve extra
+    assert b'"operonx[serve]>=' in files[("web",)]["pyproject.toml"]
+    assert b'"operonx[serve,openai]>=' in plan("chat", "x", parts=["http"])["pyproject.toml"]
+    assert b'parts = ["hello", "http", "web"]' in files[("web",)]["operonx.toml"]
+    assert not [rel for f in files.values() for rel, text in f.items() if b"{{" in text]
 
 
 class TestTheGeneratedProject:
@@ -125,6 +161,11 @@ class TestTheGeneratedProject:
     def test_the_clis_list_every_service_and_job(self, project):
         template, root = project
         _needs_its_package(template)
+        http, web = '"http"' in _parts(root), '"web"' in _parts(root)
+        want = {
+            "services": [DECLARED[template]["service"]] * http + ["web"] * web,
+            "jobs": [DECLARED[template]["job"]],
+        }
         # what the app declares, read the way the CLIs load it
         described = _run(
             [
@@ -139,17 +180,15 @@ class TestTheGeneratedProject:
             root,
         )
         got = json.loads(described.stdout.strip().splitlines()[-1])
-        assert got == {"name": "myapp", **DECLARED[template]}
+        assert got == {"name": "myapp", **want}
 
-        served = _run([str(BIN / "operonx"), "serve", "--list"], root).stdout
         jobs = _run([str(BIN / "operonx"), "run", "--list"], root).stdout
-        assert served.splitlines()[0] == "myapp"
-        for name in DECLARED[template]["services"]:
-            assert f"    {name} " in served, served
-        for name in DECLARED[template]["jobs"]:
-            assert f"  {name} " in jobs, jobs
-        if not DECLARED[template]["jobs"]:
-            assert "no jobs" in jobs
+        assert f"  {want['jobs'][0]} " in jobs, jobs
+        if http:
+            served = _run([str(BIN / "operonx"), "serve", "--list"], root).stdout
+            assert served.splitlines()[0] == "myapp"
+            for name in want["services"]:
+                assert f"    {name} " in served, served
 
     def test_it_follows_the_layout(self, project):
         template, root = project
@@ -157,20 +196,34 @@ class TestTheGeneratedProject:
         assert 'app  = "app.main:APP"' in manifest
         assert 'src  = ["src", "."]' in manifest
         assert 'overlay = "resources.yaml"' in manifest
-        assert '[tracing]\nsinks = ["local"]' in manifest
+        assert "[tracing]" in manifest and 'sinks = ["local"]' in manifest
         assert "[[serve]]" not in manifest and "[[job]]" not in manifest
         assert "APP = Application(" in (root / "app" / "main.py").read_text()
-        features = [p for p in (root / "src").iterdir() if p.is_dir()]
-        assert len(features) == 1
-        for name in ("__init__.py", "graph.py", "ops.py"):
-            assert (features[0] / name).is_file()
-        assert list((root / "tests").glob("test_*.py"))
+        feature = TEMPLATES[template].feature
+        assert sorted(p.name for p in (root / "src").iterdir() if p.is_dir()) == [
+            "_shared",
+            feature,
+        ]
+        for name in ("__init__.py", "graph.py", "ops.py", "jobs.py"):
+            assert (root / "src" / feature / name).is_file()
+        http = '"http"' in _parts(root)
+        assert (root / "src" / feature / "routes.py").is_file() == http
+        assert (root / "web" / "index.html").is_file() == ('"web"' in _parts(root))
+        assert (root / "deploy" / "Dockerfile").is_file() == ('"deploy"' in _parts(root))
+        assert list((root / "tests" / feature).glob("test_*.py"))
+        assert list((root / "data").glob("*.jsonl"))
         pyproject = (root / "pyproject.toml").read_text()
         assert f">={operonx.__version__}" in pyproject
+        assert ("operonx[serve" in pyproject) == http
         ignored = (root / ".gitignore").read_text().split()
         for entry in (".env", ".operonx/runs/", ".venv/", "__pycache__/"):
             assert entry in ignored
         assert not (root / ".env").exists()  # secrets are the user's to write
+
+    def test_it_lints_clean(self, project):
+        template, root = project
+        _needs_its_package(template)
+        _run([str(BIN / "operonx"), "lint"], root)
 
     def test_secrets_are_variables_and_listed_in_env_example(self, project):
         _, root = project
@@ -200,7 +253,8 @@ class TestForCodingAssistants:
         for must in (
             ".operonx/guide/README.md",
             "app/main.py",
-            "src/<feature>/graph.py",
+            "src/<feature>/",
+            "graph.py",
             "resources.yaml",
             ".env",
             "print()",
@@ -236,7 +290,10 @@ class TestInit:
         assert code == 0
         assert "operonx.toml" in out.out and "AGENTS.md" in out.out
         assert "cd demo" in out.out
-        assert "pytest" in out.out and "operonx serve" in out.out
+        assert "pytest" in out.out and "operonx run greet_people" in out.out
+        assert "operonx serve\n" not in out.out  # nothing to serve without --http
+        code, out = _init(capsys, "web", "--web")
+        assert "hello + http + web" in out.out and "operonx serve\n" in out.out
 
     def test_dir_defaults_to_here_and_name_to_its_basename(self, tmp_path, capsys, monkeypatch):
         here = tmp_path / "shop"
@@ -283,7 +340,34 @@ class TestInit:
         assert (root / "app" / "main.py").read_text() == "# mine\n"  # never overwritten
         created = [line for line in out.out.splitlines() if line.startswith("  + ")]
         assert created == ["  + AGENTS.md"]
-        assert "app/main.py" in out.out  # reported as kept
+        assert "kept" in out.out
+
+    def test_a_part_added_later_matches_a_project_made_with_it(self, tmp_path, capsys):
+        later, at_once = tmp_path / "a" / "p", tmp_path / "b" / "p"
+        _init(capsys, later, "-t", "chat")
+        code, out = _init(capsys, later, "--web")
+        assert code == 0 and "chat + http + web" in out.out
+        assert "  + src/chat/routes.py" in out.out and "  ~ app/main.py" in out.out
+        _init(capsys, at_once, "-t", "chat", "--web")
+        assert _snapshot(later) == _snapshot(at_once)
+
+    def test_an_edited_file_is_kept_and_the_lines_to_add_printed(self, tmp_path, capsys):
+        root = tmp_path / "p"
+        _init(capsys, root)
+        mine = (root / "app" / "main.py").read_text() + "# mine\n"
+        (root / "app" / "main.py").write_text(mine)
+        code, out = _init(capsys, root, "--http")
+        assert code == 0
+        assert (root / "app" / "main.py").read_text() == mine
+        assert "! app/main.py" in out.out and "from greeting.routes import SERVICES" in out.out
+        assert (root / "src" / "greeting" / "routes.py").is_file()
+        assert 'parts = ["hello", "http"]' in (root / "operonx.toml").read_text()
+
+    def test_the_template_is_chosen_once(self, tmp_path, capsys):
+        root = tmp_path / "p"
+        _init(capsys, root)
+        code, out = _init(capsys, root, "-t", "chat")
+        assert code == 2 and "hello project" in out.err
 
     def test_force_overwrites(self, tmp_path, capsys):
         root = tmp_path / "app1"
@@ -592,7 +676,10 @@ class TestTheBrd:
             assert (brd / rel).is_file(), rel
         assert "# p: the living product repository" in (brd / "README.md").read_text()
         # only what is read: no stub folders a project has nothing to put in yet
-        assert not any((brd / d).exists() for d in ("features", "decisions", "ux", "testing", "assets", "templates"))
+        assert not any(
+            (brd / d).exists()
+            for d in ("features", "decisions", "ux", "testing", "assets", "templates")
+        )
         assert not (brd / "practices.toml").exists()
         agents = (root / "AGENTS.md").read_text()
         assert guide.builder_block() in agents

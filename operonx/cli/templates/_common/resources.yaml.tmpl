@@ -2,6 +2,7 @@
 # Ops name a key (`LLMOp.of(resource="assistant")`), never build a client.
 # Secrets are `${VAR}` here (`${VAR:default}` when optional) and their
 # values live in .env; list every name in .env.example.
+{{^llm}}
 #
 # A model, for when a feature needs one:
 #
@@ -10,3 +11,13 @@
 #   api_key: ${LLM_API_KEY}
 #   base_url: ${LLM_BASE_URL:https://api.openai.com/v1}
 #   model: ${LLM_MODEL:gpt-4o-mini}
+{{/llm}}
+{{#llm}}
+
+llm:assistant:
+  api_type: openai          # openai | azure | vllm | gemini | anthropic
+  api_key: ${LLM_API_KEY}
+  base_url: ${LLM_BASE_URL:https://api.openai.com/v1}
+  model: ${LLM_MODEL:gpt-4o-mini}
+  # retry: {max_attempts: 3, initial: 1}   # send a failed request again (429, 5xx)
+{{/llm}}

@@ -3,12 +3,12 @@
 from operonx import END, START, graph
 from operonx.providers.ops import LLMOp
 
-from chat._prompts import SYSTEM
 from chat.ops import clean, reply
+from chat.prompts import SYSTEM
 
 
 @graph
-def chat_flow(question):  # served: the JSON body's `question`; the reply is {answer, error}
+def chat_flow(question):  # a job item or a request body fills it; the reply is {answer, error}
     q = clean(question=question)
     llm = LLMOp.of(
         resource="assistant",  # `llm:assistant` in resources.yaml

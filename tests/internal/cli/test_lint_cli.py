@@ -27,7 +27,7 @@ def _snapshot(root: Path) -> dict:
 @pytest.fixture(scope="module", params=sorted(TEMPLATES))
 def template(request, tmp_path_factory):
     root = tmp_path_factory.mktemp(request.param) / "myapp"
-    assert main(["init", str(root), "--template", request.param]) == 0
+    assert main(["init", str(root), "--template", request.param, "--web", "--deploy"]) == 0
     return request.param, root
 
 
@@ -38,18 +38,15 @@ def test_every_init_template_lints_clean(template, capsys):
 
 
 def test_every_init_template_builds_offline(template):
-    name, root = template
-    if name == "agent":
-        import importlib.util
-
-        if importlib.util.find_spec("operonx_agents") is None:
-            pytest.skip("the agent template imports operonx_agents, which is not installed")
+    _, root = template
     env = {
         k: v
         for k, v in os.environ.items()
         if k not in ("VIRTUAL_ENV", "LLM_API_KEY", "LLM_BASE_URL")
     }
-    env["PYTHONPATH"] = str(root / "src")
+    # the agent template imports operonx_agents: its source in this repo
+    agents = Path(__file__).resolve().parents[3] / "packages" / "operonx-agents"
+    env["PYTHONPATH"] = os.pathsep.join([str(root / "src"), str(agents)])
     got = subprocess.run(
         [sys.executable, "-m", "operonx.cli.main", "lint", "--build", "."],
         cwd=root,

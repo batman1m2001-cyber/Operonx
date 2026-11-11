@@ -3,7 +3,7 @@ title: One lean plan — the project's shape and its board
 status: in_progress
 phases:
   - {id: L1, title: Cut first, status: done}
-  - {id: L2, title: "operonx init: three templates, three flags", status: open}
+  - {id: L2, title: "operonx init: three templates, three flags", status: done}
   - {id: L3, title: Four lint checks and a baseline, status: open}
   - {id: L4, title: The board, status: open}
   - {id: L5, title: mr-finance on the board and the ratchet, status: open}
@@ -113,6 +113,14 @@ parts = ["http", "web"]
   line to add.
 - **Behaviour change:** plain `operonx init` gives offline `hello`. A doc that says "init, then serve" now says
   `operonx init --http`.
+
+**L2, done.** Templates `hello` · `chat` · `agent` × `--http` · `--web` · `--deploy`; the `http` template is gone
+(`hello --http` is it). All 18 shapes pass their own tests, ruff and `operonx lint`; `init . --web` on a chat
+project gives the same files as `init -t chat --web`, and an edited `app/main.py` is kept with its missing lines
+printed. Numbers: templates 47 files / 927 lines → 52 / 930; generated, comparable shape (with a service):
+hello 15 files / 392 lines → 20 / 343, chat 16 / 402 → 22 / 383, agent 14 / 405 → 21 / 398; plain `init`
+(hello, offline) 18 / 293. `init.py` 353 → 487 and `main.py` 244 → 254: the sections and the re-init are the
+growth, and the one place this phase does not meet §0. Config keys +1 (`parts`), lint checks 0.
 
 ---
 
