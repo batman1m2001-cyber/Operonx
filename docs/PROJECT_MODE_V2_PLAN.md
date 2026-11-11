@@ -92,13 +92,15 @@ Arrow = *may import*. Domain imports nothing. Tests are not a lane: every card b
 | agent | `AgentOp` + tools + fake-model test | 30 | `templates/agent` |
 | page | `web/pages/<x>.js` + UI test | 39 | a small mr-finance page |
 
+Where each unit lives: [PROJECT_CONVENTION.md](PROJECT_CONVENTION.md) (a unit is a file name).
+
 **Admission:** ≥ 3 uses in ≥ 2 projects, or ≥ 5 in one. Seen once or twice (`judge.py`, `mcp.py`, `golden.py`, `wav.py`) → stays flexible.
 
 ```mermaid
 flowchart LR
   CMD["operonx add rule news threshold"] --> T[("_units/rule/")]
-  T --> F1["src/news/threshold.py<br/><small>a stub with the signature</small>"]
-  T --> F2["tests/news/test_threshold.py<br/><small>one red test</small>"]
+  T --> F1["src/news/rules.py<br/><small>+ threshold(): a stub with the signature</small>"]
+  T --> F2["tests/news/test_rules.py<br/><small>+ one red test</small>"]
   F1 & F2 --> C["card C4: files + done filled in"]
 ```
 
@@ -124,8 +126,8 @@ What the assistant writes in `docs/brd/board.md`:
 ```markdown
 ### C4 · threshold rule · doing
 lane: core · unit: rule · req: NEWS-07 · after: C2
-files: src/news/threshold.py, tests/news/test_threshold.py
-done: tests/news/test_threshold.py::test_gold_jump, project tests
+files: src/news/rules.py, tests/news/test_rules.py
+done: tests/news/test_rules.py::test_gold_jump, project tests
 ```
 
 ![One card through its states](project-mode-v2/states.svg)

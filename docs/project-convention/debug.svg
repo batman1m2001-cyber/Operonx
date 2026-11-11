@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 392" width="960" height="392" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.card{fill:#ffffff;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}
+    .arrow{stroke:#8c959f;stroke-width:1.6;fill:none}.head{fill:#8c959f}
+    .ok{fill:#1a7f37}.bad{fill:#cf222e}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.card{fill:#161b22;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}
+      .arrow{stroke:#6e7681}.head{fill:#6e7681}
+      .ok{fill:#3fb950}.bad{fill:#f85149}
+    }
+  </style>
+  <defs>
+    <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" width="960" height="392" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">From a bug to the line</text>
+  <text x="24" y="54" class="mut" font-size="13">The same 500, followed twice.</text>
+
+  <text x="24" y="90" class="ok" font-size="13" font-weight="600">With the convention</text>
+  <g font-size="12.5">
+    <g transform="translate(24,100)"><rect class="card" width="210" height="86" rx="8"/><rect class="ok" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">1 · the request</text>
+      <text x="16" y="48" class="ink mono" font-size="11.5">POST /api/news/dismiss</text>
+      <text x="16" y="68" class="mut" font-size="12">500 · trace 4f2a</text></g>
+    <g transform="translate(258,100)"><rect class="card" width="210" height="86" rx="8"/><rect class="ok" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">2 · its feature</text>
+      <text x="16" y="48" class="ink mono" font-size="11.5">src/news/routes.py</text>
+      <text x="16" y="68" class="mut" font-size="12">the path names the folder</text></g>
+    <g transform="translate(492,100)"><rect class="card" width="210" height="86" rx="8"/><rect class="ok" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">3 · the run's trace</text>
+      <text x="16" y="48" class="ink mono" font-size="11.5">dismiss_items <tspan class="bad">✗</tspan></text>
+      <text x="16" y="68" class="mut" font-size="12">its inputs and the error</text></g>
+    <g transform="translate(726,100)"><rect class="card" width="210" height="86" rx="8"/><rect class="ok" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">4 · the line</text>
+      <text x="16" y="48" class="ink mono" font-size="11.5">src/news/ops.py:88</text>
+      <text x="16" y="68" class="mut" font-size="12">→ rules.py, which has a test</text></g>
+  </g>
+  <path class="arrow" d="M236,143 H256" marker-end="url(#h)"/>
+  <path class="arrow" d="M470,143 H490" marker-end="url(#h)"/>
+  <path class="arrow" d="M704,143 H724" marker-end="url(#h)"/>
+
+  <text x="24" y="232" class="bad" font-size="13" font-weight="600">Today: a hand-written handler <tspan class="mut" font-weight="400">(mr-finance app/web.py)</tspan></text>
+  <g font-size="12.5">
+    <g transform="translate(24,242)"><rect class="card" width="210" height="86" rx="8"/><rect class="bad" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">1 · the request</text>
+      <text x="16" y="48" class="ink mono" font-size="11.5">GET /api/clients</text>
+      <text x="16" y="68" class="mut" font-size="12">500 · no trace id</text></g>
+    <g transform="translate(258,242)"><rect class="card" width="210" height="86" rx="8"/><rect class="bad" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">2 · where?</text>
+      <text x="16" y="48" class="ink mono" font-size="11.5">app/web.py</text>
+      <text x="16" y="68" class="mut" font-size="12">1,401 lines · 63 routes</text></g>
+    <g transform="translate(492,242)"><rect class="card" width="210" height="86" rx="8"/><rect class="bad" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">3 · the run</text>
+      <text x="16" y="48" class="ink" font-size="12">none: it is not a graph</text>
+      <text x="16" y="68" class="mut" font-size="12">nothing in the studio</text></g>
+    <g transform="translate(726,242)"><rect class="card" width="210" height="86" rx="8"/><rect class="bad" width="5" height="86" rx="2.5"/>
+      <text x="16" y="24" class="ink" font-weight="600">4 · the line</text>
+      <text x="16" y="48" class="ink" font-size="12">grep, read logs</text>
+      <text x="16" y="68" class="mut" font-size="12">add logging, run it again</text></g>
+  </g>
+  <path class="arrow" d="M236,285 H256" marker-end="url(#h)"/>
+  <path class="arrow" d="M470,285 H490" marker-end="url(#h)"/>
+  <path class="arrow" d="M704,285 H724" marker-end="url(#h)"/>
+
+  <text x="24" y="368" class="mut" font-size="12.5">Hop 2 needs fixed names. Hop 3 needs every endpoint to be a <tspan class="ink mono" font-size="11.5">Service</tspan> over a graph. Hop 4 needs logic in ops and rules, not in handlers.</text>
+</svg>
