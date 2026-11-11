@@ -136,7 +136,7 @@ class Eval(Job):
 
     origin = "eval"
     items_fail_run = False  # a failed case is a failed verdict; the gate decides
-    folder = "evals"
+    folder = ".operonx/evals"
 
     def __init__(
         self,

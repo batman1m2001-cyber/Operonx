@@ -339,7 +339,7 @@ def test_an_eval_the_application_declares_is_found_and_described(project):
     assert d["items"] == str(root / "datasets" / "labels.jsonl")
     run = app.run_sync("labels")
     assert run.status == "ok" and run.meta["eval"]["passed"] == 2  # 2/3 ≥ 0.5
-    assert run.path.parent == root / "evals" / "labels"
+    assert run.path.parent == root / ".operonx" / "evals" / "labels"
 
 
 def test_operonx_run_gates_on_an_eval(project):

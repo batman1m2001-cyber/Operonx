@@ -240,7 +240,7 @@ With `scores=`, an eval writes its experiment, each item and every
 check's score to a `ScoreStore` as it runs: `files` (JSONL plus an index,
 under the runs root) by default, or the team's ClickHouse — the database
 the runs are in. Studio and CI read experiments there instead of from one
-machine's `evals/` folder.
+machine's `.operonx/evals/` folder.
 
 ```python
 from operonx.app.evals import Eval, exact, publish
@@ -361,14 +361,14 @@ from operonx.app.evals import compare, load_experiment
 from operonx.app.evals.experiments import experiments_of
 from operonx.app.evals.report import junit, markdown
 
-newer, older = experiments_of("labels", record_dirs=["evals"])[:2]
+newer, older = experiments_of("labels", record_dirs=[".operonx/evals"])[:2]
 print(markdown(newer))  # what CI posts on the merge request
 assert junit(newer).startswith('<?xml version="1.0" encoding="UTF-8"?>')
 
 got = compare(older, newer, tolerance=0.05)  # newer against older, paired
 print(got["verdict"], got["comparison"]["tests"][0]["diff"])
 assert compare(older, newer)["verdict"] is None  # no tolerance: reported, not judged
-assert load_experiment(newer.experiment_id, record_dirs=["evals"]).eval == "labels"
+assert load_experiment(newer.experiment_id, record_dirs=[".operonx/evals"]).eval == "labels"
 ```
 
 ## Calibrate before you pick a tolerance
@@ -420,7 +420,7 @@ pytest -p operonx.app.evals.pytest_plugin test_labels.py -q --operonx-eval-name 
 - An async test writes `got = await run_case(...)`.
 - A failing check fails its test with the reason; a failing `assert` is
   recorded on the case. The session's record is
-  `evals/<--operonx-eval-name>/<run_id>`, with the gate and its reports
+  `.operonx/evals/<--operonx-eval-name>/<run_id>`, with the gate and its reports
   (`--operonx-eval-report md,json,junit`); `--operonx-eval-baseline` and
   `--operonx-eval-tolerance` compare it like an eval.
 

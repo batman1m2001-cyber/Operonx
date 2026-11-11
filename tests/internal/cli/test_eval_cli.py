@@ -123,7 +123,7 @@ def _store(root: Path):
 
 
 def _runs(root: Path):
-    base = root / "evals" / "labels"
+    base = root / ".operonx" / "evals" / "labels"
     return sorted(p.name for p in base.iterdir()) if base.is_dir() else []
 
 
@@ -206,7 +206,7 @@ def test_selection_repeats_variant_and_reports(project, capsys):
     )  # fmt: skip
     assert code == 0
     (run_id,) = _runs(project)
-    run = json.loads((project / "evals" / "labels" / run_id / "run.json").read_text())
+    run = json.loads((project / ".operonx" / "evals" / "labels" / run_id / "run.json").read_text())
     ev = run["eval"]
     assert (ev["cases"], ev["trials"], ev["repeats"]) == (10, 20, 2)
     assert ev["selection"] == {"split": "smoke"} and ev["variant"] == "v2"
@@ -228,11 +228,18 @@ def test_cases_tags_and_sample(project):
     first, second = _runs(project)
     items = [
         json.loads(line)["key"]
-        for line in (project / "evals" / "labels" / first / "items.jsonl").read_text().splitlines()
+        for line in (project / ".operonx" / "evals" / "labels" / first / "items.jsonl")
+        .read_text()
+        .splitlines()
     ]
     assert sorted(items) == ["c1", "c2"]
     assert (
-        len((project / "evals" / "labels" / second / "items.jsonl").read_text().splitlines()) == 5
+        len(
+            (project / ".operonx" / "evals" / "labels" / second / "items.jsonl")
+            .read_text()
+            .splitlines()
+        )
+        == 5
     )
     assert _eval("run", "labels", "--cases", "zz", "--no-store") == 2
 
@@ -240,7 +247,7 @@ def test_cases_tags_and_sample(project):
 def test_reports_default_to_the_record_directory(project):
     assert _eval("run", "labels", "--report", "junit", "--no-store") == 0
     (run_id,) = _runs(project)
-    assert (project / "evals" / "labels" / run_id / "junit.xml").is_file()
+    assert (project / ".operonx" / "evals" / "labels" / run_id / "junit.xml").is_file()
 
 
 # ── the other commands ──────────────────────────────────────────────────────
@@ -257,7 +264,9 @@ def test_report_and_compare(project, monkeypatch, capsys):
     assert capsys.readouterr().out.startswith("## Eval `labels`: PASS (exit 0)")
     assert _eval("report", b, "--format", "junit", "--out", "j.xml") == 0
     assert ET.parse(project / "j.xml").getroot().tag == "testsuites"
-    assert _eval("report", str(project / "evals" / "labels" / a), "--format", "json") == 0
+    assert (
+        _eval("report", str(project / ".operonx" / "evals" / "labels" / a), "--format", "json") == 0
+    )
     assert json.loads(capsys.readouterr().out)["experiment_id"] == a
 
     assert _eval("compare", a, b) == 0  # no tolerance: reported, not judged
@@ -274,7 +283,7 @@ def test_report_reads_the_store_when_the_record_is_elsewhere(project, capsys):
     (run_id,) = _runs(project)
     import shutil
 
-    shutil.rmtree(project / "evals")  # as on a machine that did not run it
+    shutil.rmtree(project / ".operonx" / "evals")  # as on a machine that did not run it
     capsys.readouterr()
     assert _eval("report", run_id) == 0
     assert "## Eval `labels`: PASS" in capsys.readouterr().out
