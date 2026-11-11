@@ -4,7 +4,7 @@ status: in_progress
 phases:
   - {id: L1, title: Cut first, status: done}
   - {id: L2, title: "operonx init: three templates, three flags", status: done}
-  - {id: L3, title: Four lint checks and a baseline, status: open}
+  - {id: L3, title: Four lint checks and a baseline, status: done}
   - {id: L4, title: The board, status: open}
   - {id: L5, title: mr-finance on the board and the ratchet, status: open}
 updated: 2026-11-11
@@ -96,6 +96,24 @@ flowchart LR
 ```
 
 New files are always clean. Old files move only when a card touches them.
+
+**L3, done.** `operonx lint` checks C13–C16 in any folder with an `operonx.toml` (`src/` for C13; tests and
+`scripts/`/`tools/` are not checked). `--baseline` writes today's count per rule into `[lint] baseline`, lint
+is red only above it and says when it can drop, `--all` ignores it. Eval records moved from a root `evals/` to
+`.operonx/evals/` (the old folder is still read), so the engine no longer breaks C16 itself. Numbers: four checks,
+in budget; `operonx lint` 1,046 → 1,303 lines; per project, errors C13 / C14 / C15 / C16 before → after:
+
+| project | before | after |
+|---|---|---|
+| tipcalc | 0 / 0 / 0 / 1 | **0** |
+| meeting-prep-operonx | 0 / 0 / 1 / 1 | **0** |
+| meeting-prep-brd | 13 / 0 / 1 / 2 | **0** |
+| qc-snatcher | 19 / 0 / 101 / 8 | `src/` **0**; 97 env reads in `deployment/` and the root held |
+| callbot | 8 / 4 / 29 / 17 | held (L5) |
+
+qc's root (`main.py`, `models.yaml`, `knowledge/`, `Dockerfile`, `deployment/`) is the bank's deploy contract:
+the Dockerfile copies those paths and `deployment/` is their ingestion code, so it stays and the baseline holds
+it, against the gate's 0. Its `src/core` became `src/_shared`.
 
 ---
 
