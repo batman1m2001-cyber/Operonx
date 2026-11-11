@@ -7,8 +7,7 @@ is the record a person reads, and the engine reads it back.
 
 A **private** source (a client's BRD) is identified only by its path and
 hash and is never committed: its path goes into the repo's
-``.git/info/exclude``, and its hash into the guard that refuses any commit
-containing its bytes, under any name (``Runtime.private``).
+``.git/info/exclude``.
 """
 
 from __future__ import annotations
@@ -18,11 +17,11 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from operonx_project.brd.readers import sha256
 
-__all__ = ["ROLES", "Source", "add_owner_request", "load_register", "private_hashes", "register_source"]
+__all__ = ["ROLES", "Source", "add_owner_request", "load_register", "register_source"]
 
 ROLES = ("authoritative", "approved", "proposed")
 
@@ -79,11 +78,6 @@ def load_register(brd: Path) -> List[Source]:
         r = next((x for x in ROLES if x in low), "authoritative")
         out.append(Source(m.group(1), title, kind, where, _SHA.findall(ident), r, "private" in low))
     return out
-
-
-def private_hashes(brd: Path) -> Dict[str, str]:
-    """sha256 → the source's title, for every private source: what the guard refuses."""
-    return {h: s.title for s in load_register(brd) if s.private for h in s.sha256}
 
 
 def _next_id(rows: List[Source]) -> str:

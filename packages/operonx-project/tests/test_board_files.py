@@ -3,8 +3,7 @@
 Store → files → store is the contract: whatever a milestone and its cards
 hold that a rebuild needs comes back equal. A lost store is rebuilt from
 the files; a milestone that was moving comes back paused, a card that was
-mid-flight comes back ready. ``start --from-board`` seeds a new milestone
-with an old one's cards as its plan.
+mid-flight comes back ready.
 """
 
 from __future__ import annotations
@@ -13,10 +12,8 @@ import subprocess
 
 from operonx_project.brd.board import read_board, write_board
 from operonx_project.model import Card, CardState, Milestone, MilestoneState, Policy, Stage
-from operonx_project.project import Project, board_seed, create_milestone
+from operonx_project.project import Project
 from operonx_project.store import Store
-from tests.life_env import Life, base_script, card_json
-from tests.test_lifecycle import M
 
 ODD = "a | pipe, a comma\nand a second line \\ with a backslash"
 
@@ -169,7 +166,7 @@ def _repo(tmp_path):
 def test_a_lost_store_is_rebuilt_from_the_files(tmp_path):
     repo = _repo(tmp_path)
     write_board(repo / "docs" / "brd", _board(_sample(tmp_path)))
-    project = Project.open(repo, worktrees=tmp_path / "wt")  # no project.db: rebuilt
+    project = Project.open(repo)  # no project.db: rebuilt
     ms = project.store.get_milestone("m1")
     assert ms.state == MilestoneState.PAUSED and "it was running" in ms.reason
     states = {c.id: c.state for c in project.store.cards("m1")}
@@ -177,47 +174,7 @@ def test_a_lost_store_is_rebuilt_from_the_files(tmp_path):
     c2 = project.store.get_card("m1", "C2")
     assert c2.stage is None and "it was running" in c2.reason
     # opened again, the store is the store: nothing is rebuilt twice
-    assert len(Project.open(repo, worktrees=tmp_path / "wt").store.milestones()) == 1
-
-
-def test_from_board_seeds_the_plan_and_skips_the_planner(tmp_path):
-    src = tmp_path / "src"
-    write_board(src, _board(_sample(tmp_path)))
-    seed = board_seed(src, "m1")
-    assert [c["id"] for c in seed["cards"]] == ["C1", "C2", "C3"]
-    assert seed["cards"][2]["deps"] == ["C1", "C2"] and "state" not in seed["cards"][0]
-
-    # a fresh calc repo, its plan from the board: the planner is never asked
-    script = base_script(**{"planner:plan": []})
-    life = Life(tmp_path / "life", script, mode="w1")
-    life.store.ms_put("m1", "seeded", {"from": "x", "cards": [card_json("C1")]})
-    life.command("start")
-    assert life.serve() == M.AWAITING_APPROVAL
-    assert life.store.ms_get("m1", "plan")["seeded_from"] == "x"
-    life.command("approve")
-    assert life.serve() == M.DONE, life.store.get_milestone("m1").reason
-    assert life.cards() == {"C1": "done"}
-
-
-def test_the_milestone_branch_carries_its_board(tmp_path):
-    life = Life(tmp_path, base_script(), mode="w1")
-    life.command("start")
-    life.serve()
-    life.command("approve")
-    assert life.serve() == M.DONE
-    integ = life.integ()
-    (bf,) = read_board(integ / "docs" / "brd")
-    assert bf.milestone.state == MilestoneState.DONE and [(c.id, c.state) for c in bf.cards] == [("C1", CardState.DONE)]
-    log = _git(integ, "log", "--format=%s")
-    assert "m1: board (C1 done)" in log and "m1: board (m1 done)" in log
-    assert _git(integ, "status", "--porcelain") == ""
-
-
-def test_create_milestone_keeps_the_seed(tmp_path):
-    repo = _repo(tmp_path)
-    project = Project.open(repo, worktrees=tmp_path / "wt")
-    create_milestone(project, "again", seed={"from": "f", "cards": [{"id": "C1"}]}, mid="m2")
-    assert project.store.ms_get("m2", "seeded")["cards"] == [{"id": "C1"}]
+    assert len(Project.open(repo).store.milestones()) == 1
 
 
 def test_brd_check_reads_the_board(tmp_path):

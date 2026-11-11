@@ -52,21 +52,6 @@ def test_only_a_running_card_has_a_stage(store):
         store.set_stage("m1", "c1", Stage.REVIEW)
 
 
-def test_state_is_never_set_around_the_table(store):
-    store.add_cards([Card("c1", "m1", "x")])
-    with pytest.raises(ValueError):
-        store.update_card("m1", "c1", state="done")
-    with pytest.raises(ValueError):
-        store.update_milestone("m1", state="done")
-
-
-def test_pause_remembers_the_stage_it_left(store):
-    store.move_milestone("m1", MilestoneState.PLANNING)
-    store.move_milestone("m1", MilestoneState.RUNNING)
-    store.move_milestone("m1", MilestoneState.PAUSED, actor="owner")
-    assert store.prior_state("m1") == MilestoneState.RUNNING
-
-
 def test_round_trip_and_a_second_process_sees_it(store, tmp_path):
     store.add_cards(
         [
@@ -84,19 +69,6 @@ def test_round_trip_and_a_second_process_sees_it(store, tmp_path):
     got = other.get_card("m1", "c1")
     assert got.criteria[0].startswith("When") and got.paths == ["src/**"] and got.detail == {"q": 1}
     assert other.get_milestone("m1").policy.start == "pull"
-
-
-def test_one_daemon_holds_the_lease(store):
-    assert store.acquire_lease("a", ttl=30)
-    assert not store.acquire_lease("b", ttl=30)
-    assert store.acquire_lease("a", ttl=30)  # renew
-    store.release_lease("a")
-    assert store.acquire_lease("b", ttl=30)
-
-
-def test_a_stale_lease_is_taken_over(store):
-    assert store.acquire_lease("a", ttl=-1)
-    assert store.acquire_lease("b", ttl=30)
 
 
 def test_policy_rejects_unknown_knobs():

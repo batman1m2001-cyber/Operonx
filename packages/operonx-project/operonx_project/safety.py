@@ -1,12 +1,9 @@
-"""What never reaches a coder session or a check command: credentials (plan §11).
+"""What never reaches a coder session: credentials (plan §11).
 
-The coder's shell and the repo's own tests run code the engine did not
-write. Their environment is the engine's minus every variable that looks
+The coder's shell runs code the engine did not write. Their environment is the engine's minus every variable that looks
 like a credential, by name: a token, a secret, a password, an API or
 access key, an auth socket; and the providers' prefixes (``ANTHROPIC_``,
-``OPENROUTER``, ``OPENAI``, ``AWS_``, …). The bot token
-(``OPERONX_TELEGRAM_TOKEN``) is one of them. A check that needs a
-credential gets it from the policy, by name, never by inheritance.
+``OPENROUTER``, ``OPENAI``, ``AWS_``, …).
 """
 
 from __future__ import annotations

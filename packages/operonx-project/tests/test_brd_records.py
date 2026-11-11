@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 
 from operonx_project.brd.checker import check
-from operonx_project.brd.diff import affected, diff_sources, mark_changed
 from operonx_project.brd.extraction import check_coverage, check_ids, check_quotes
 from operonx_project.brd.folder import init_brd, refresh_summary
 from operonx_project.brd.readers import read_source
@@ -18,7 +17,7 @@ from operonx_project.brd.records import (
     matrix_status,
     write_requirements,
 )
-from operonx_project.brd.register import add_owner_request, load_register, private_hashes, register_source
+from operonx_project.brd.register import add_owner_request, load_register, register_source
 from tests.brd_files import SAMPLE_BLOCKS, make_docx
 
 
@@ -42,7 +41,6 @@ def test_register_rows_dedupe_and_private(tmp_path):
     assert b.id == "SRC-02" and b.role == "approved"
     rows = load_register(brd)
     assert [(r.id, r.private) for r in rows] == [("SRC-01", True), ("SRC-02", False)]
-    assert private_hashes(brd) == {a.sha256[0]: "Client BRD"}
     exclude = (repo / ".git" / "info" / "exclude").read_text()
     assert "/client.docx" in exclude
     status = subprocess.run(["git", "status", "--porcelain"], cwd=repo, capture_output=True, text=True).stdout
@@ -106,25 +104,6 @@ def test_records_matrix_and_questions_pass_the_checker(tmp_path):
     # a dropped id stays, superseded
     write_requirements(brd, "brd", "Client BRD", "SRC-01", reqs[:1])
     assert {r.id: r.status for r in load_requirements(brd)}["BRD-RULE-CALL-01"] == "superseded"
-
-
-def test_a_new_source_version_marks_what_changed(tmp_path):
-    old = read_source(make_docx(tmp_path / "v1.docx", SAMPLE_BLOCKS), tmp_path / "o1")
-    blocks = list(SAMPLE_BLOCKS)
-    blocks[6] = ("p", "Không gọi điện cho phụ huynh sau 20 giờ. Mỗi phụ huynh nhận tối đa hai cuộc gọi mỗi ngày.")
-    blocks.insert(7, ("h2", "4. Báo cáo"))
-    blocks.insert(8, ("p", "Mỗi tuần gửi báo cáo cho trung tâm."))
-    new = read_source(make_docx(tmp_path / "v2.docx", blocks), tmp_path / "o2")
-    d = diff_sources(old, new)
-    assert d.changed == [("§3", "§3")] and d.added == ["§4"] and d.removed == [] and d.same >= 2
-    reqs = [_req("BRD-BR-01", "q", section="§2"), _req("BRD-RULE-CALL-01", "q", "rule", section="§3")]
-    assert affected(d, reqs) == ["BRD-RULE-CALL-01"]
-    repo = _repo(tmp_path)
-    brd = repo / "docs" / "brd"
-    init_brd(repo)
-    add_matrix_rows(brd, reqs, "BRD")
-    assert mark_changed(brd, ["BRD-RULE-CALL-01"], "SRC-02") == ["BRD-RULE-CALL-01"]
-    assert "source changed (SRC-02)" in (brd / "requirements" / "requirements_traceability.md").read_text()
 
 
 def test_a_sources_own_letter_codes_are_ids():

@@ -56,7 +56,6 @@ def _repo(tmp_path: Path) -> Path:
     (docs / "NEXT_PLAN.md").write_text(_plan("in_progress", "  - {id: N1, title: First}\n", "2026-10-22", "Next"))
     (docs / "IDEA_PLAN.md").write_text(_plan("plan", "", "2026-10-22", "An idea"))
     (docs / "LEGACY_PLAN.md").write_text("# A plan from before the block\n")
-    (repo / "docs/brd/practices.toml").write_text('[tdd]\nmode = "strict"\n', encoding="utf-8")
     git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
     subprocess.run([*git, "init", "-q"], check=True)
     subprocess.run([*git, "add", "."], check=True)
@@ -65,7 +64,7 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
-def test_the_status_reads_checklist_plans_questions_changes_and_setup(tmp_path):
+def test_the_status_reads_checklist_plans_questions_and_changes(tmp_path):
     repo = _repo(tmp_path)
     doc = status(repo)
     c = doc["checklist"]
@@ -83,7 +82,6 @@ def test_the_status_reads_checklist_plans_questions_changes_and_setup(tmp_path):
     assert doc["needs_you"] == [{"source": "brd", "id": "Q-01", "kind": "ambiguity",
                                  "text": "Rounding of a division", "state": "open — business"}]  # fmt: skip
     assert [ch["subject"] for ch in doc["changes"]] == ["E1: rows", "first: the checklist"]
-    assert doc["setup"]["practices"]["line"] == "tests written first, seen failing" and doc["setup"]["engine"] is False
     assert not (repo / ".operonx").exists()  # it only reads
 
     lines = text(doc)
@@ -92,14 +90,12 @@ def test_the_status_reads_checklist_plans_questions_changes_and_setup(tmp_path):
     assert "  Q-01  ambiguity  Rounding of a division\n" in lines
     assert "Plans: 2 in progress, 1 plan, 2 done\n" in lines
     assert "Plan docs with no status block (1): docs/LEGACY_PLAN.md\n" in lines
-    assert "engine: not used yet" in lines
 
 
 def test_a_bare_folder_has_a_status_too(tmp_path):
     doc = status(tmp_path)
     assert doc["checklist"]["total"] == 0 and doc["plans"] == [] and doc["changes"] == []
     assert text(doc).startswith("Checklist: none")
-    assert doc["setup"]["practices"]["file"] == ""
 
 
 def _cli(*args: str) -> tuple:
@@ -148,8 +144,6 @@ def _standard_repo(tmp_path: Path, summary_name: str = "CALC") -> Path:
     (repo / "tests").mkdir()
     (repo / "tests/test_calc.py").write_text("def test_add():\n    assert 1 + 1 == 2\n", encoding="utf-8")
     (repo / "docs/EXPORT_PLAN.md").write_text(_plan("plan", "  - {id: E1, title: Rows}\n", "2026-10-23", "Export"))
-    (repo / "docs/brd/practices.toml").write_text('[tdd]\nmode = "acceptance"\n\n[done]\nchecks = [{ name = "tests", cmd = "pytest -q" }]\n',
-                                                  encoding="utf-8")  # fmt: skip
     return repo
 
 
@@ -157,27 +151,27 @@ def _std(doc):
     return {x["key"]: x["ok"] for x in doc["standard"]}
 
 
-def test_a_project_up_to_the_standard_meets_all_four(tmp_path):
+def test_a_project_up_to_the_standard_meets_all_three(tmp_path):
     from operonx_project.brd.checker import check
 
     repo = _standard_repo(tmp_path)
     assert check(repo / "docs/brd")[0] == []
     doc = status(repo)
-    assert _std(doc) == {"brd": True, "check": True, "plans": True, "practices": True}
+    assert _std(doc) == {"brd": True, "check": True, "plans": True}
     assert all(x["fix"] == "" for x in doc["standard"])
-    assert "Standard: 4 of 4, all met\n" in text(doc)
+    assert "Standard: 3 of 3, all met\n" in text(doc)
 
 
 def test_each_missing_item_says_where_it_stands_and_what_fixes_it(tmp_path):
     doc = status(_repo(tmp_path))
-    assert _std(doc) == {"brd": True, "check": False, "plans": False, "practices": True}
+    assert _std(doc) == {"brd": True, "check": False, "plans": False}
     plans = next(x for x in doc["standard"] if x["key"] == "plans")
     assert plans["line"] == "1 with no status block" and "status block" in plans["fix"]
     lines = text(doc)
-    assert "Standard: 2 of 4\n" in lines and "  missing check: " in lines and "  missing plans: 1 with no status" in lines
+    assert "Standard: 1 of 3\n" in lines and "  missing check: " in lines and "  missing plans: 1 with no status" in lines
 
     bare = status(tmp_path / "nothing")
-    assert _std(bare) == {"brd": False, "check": False, "plans": True, "practices": False}
+    assert _std(bare) == {"brd": False, "check": False, "plans": True}
     assert "operonx-project adopt" in bare["standard"][0]["fix"]
 
 

@@ -1,8 +1,8 @@
 ---
 title: One lean plan — the project's shape and its board
-status: plan
+status: in_progress
 phases:
-  - {id: L1, title: Cut first, status: open}
+  - {id: L1, title: Cut first, status: done}
   - {id: L2, title: "operonx init: three templates, three flags", status: open}
   - {id: L3, title: Four lint checks and a baseline, status: open}
   - {id: L4, title: The board, status: open}
@@ -159,8 +159,13 @@ stateDiagram-v2
 | live progress (`progress.py`, runhook) | pages: Checklist · Questions · Changes · Graph |
 | `operonx init` | `hand.js` |
 
-Before each cut: grep for a second job. The Telegram bridge (0.7k lines) stays until the owner says whether
-they use it.
+Before each cut: grep for a second job. The Telegram bridge went too (the owner's call), with the daemon.
+
+**L1, done** (studio #155, this PR): the daemon, the coding stages, Telegram, practices, ship/needs/request
+and take/submit are gone; `api` keeps `plan` and `status`. Engine src 14,553 → 5,306 lines, its guide
+492 → 185, its tests 6,464 → 2,076; studio Project page 2,406 → 1,532, `mcp.py` 1,206 → 888, board tools
+12 → 3. Two keeps differ from the table: `hand.js` has a second job (it is the studio assistant's hand on every
+page, not only the board's) and stays; the plan mirror stays until L4 replaces it, as mr-finance reads it today.
 
 ## 7. Not now, and what brings it back
 

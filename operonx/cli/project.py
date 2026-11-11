@@ -1,10 +1,9 @@
-"""`operonx project` — operonx-project's commands: software built from its requirements.
+"""`operonx project` — operonx-project's commands: a project's requirements and where it stands.
 
     operonx project new DIR                    # a repo with docs/brd/ and an empty board
-    operonx project start --title T --source BRD.docx
-    operonx project daemon                     # drives the milestones, runs the queued commands
-    operonx project status | show MID | approve MID | answer MID CARD A | pause | cancel ...
+    operonx project status | plans | milestones | show MID
     operonx project brd init | check | register | read | extract
+    operonx project adopt                      # an existing project: its BRD and a baseline board
 
 operonx-project is its own package (``packages/operonx-project`` in the
 operonx repository); this command only finds it and hands it the rest of

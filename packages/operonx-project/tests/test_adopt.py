@@ -64,7 +64,7 @@ def test_run_tests_reads_each_node(tmp_path):
 
 def test_adopt_verifies_only_what_passed_and_draws_the_baseline(tmp_path):
     repo = _repo(tmp_path)
-    project = Project.open(repo, worktrees=tmp_path / "wt")
+    project = Project.open(repo)
     report = asyncio.run(adopt(project, coder=None, prefix="CALC", answer=ANSWER, python=[sys.executable]))
     brd = repo / "docs" / "brd"
     assert matrix_status(brd) == {

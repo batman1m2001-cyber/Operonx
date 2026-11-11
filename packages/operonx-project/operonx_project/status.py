@@ -1,18 +1,17 @@
 """Where the project stands, in one document (PROJECT_MODE_PLAN D2).
 
-:func:`status` reads the checklist, the plan docs (:mod:`operonx_project.plans`), the engine's milestones
-when the project has any, the questions waiting for the owner, the last commits and the setup, and returns
+:func:`status` reads the checklist, the plan docs (:mod:`operonx_project.plans`), the board's milestones
+when the project has any, the BRD's open questions and the last commits, and returns
 one dict the studio's screen and its assistant both read::
 
     checklist   counts by status, the open rows (neither verified nor out of scope)
     plans       plan docs and milestones in one shape, in progress first, then planned, then the rest; a doc
                 on the board is its milestone alone, with the doc's ``path``;
                 ``unmarked``: the ``*_PLAN.md`` files with no status block yet
-    needs_you   the engine's open questions and approvals, and the BRD's open questions
+    needs_you   the BRD's open questions
     working_on  what is in progress, each with one sentence written here from the data
     changes     the last commits, newest first
-    setup       the practices in one line, the models, the daemon
-    standard    the engine's standard, item by item (brd, check, plans, practices): ok, a sentence, the fix
+    standard    the standard, item by item (brd, check, plans): ok, a sentence, the fix
 
 It only reads: a project the engine has never run keeps no ``.operonx/project`` because of it. Every
 sentence is made by code from the data; no model writes any of it.
@@ -91,8 +90,6 @@ STANDARD = (
                                   "own names them in docs/brd/brd.toml [[groups]] (name, pattern)"),
     ("plans", "every plan says where it stands", "a status block at the top of each docs/*_PLAN.md (title, status, "
                                                  "phases with their status, rows, updated)"),
-    ("practices", "how it is built", "docs/brd/practices.toml describing the project as it is: its real test "
-                                     "command as a [done] check, rules the code already keeps"),
 )
 
 _CHECKED: Dict[Path, Any] = {}  # brd dir → (the files' signature, the errors): the check re-runs when a file changes
@@ -146,46 +143,20 @@ def standard(repo: Path, doc: Dict[str, Any], brd: str = "docs/brd") -> List[Dic
             ok = has_brd and not errors
             line = ("no checklist to check" if not has_brd else "0 errors" if ok
                     else f"{len(errors)} error{'s' if len(errors) > 1 else ''}, first: {errors[0]}")  # fmt: skip
-        elif key == "plans":
+        else:
             bad = len(doc["plan_errors"]) + len(doc["unmarked"])
             ok = not bad
             line = (f"{len(doc['plans'])} plans, each with its status" if ok else
                     ", ".join(x for x in (f"{len(doc['unmarked'])} with no status block" if doc["unmarked"] else "",
                                           f"{len(doc['plan_errors'])} with a wrong one" if doc["plan_errors"] else "")
                               if x))  # fmt: skip
-        else:
-            pr = doc["setup"]["practices"]
-            ok = bool(pr.get("file")) and not pr.get("error")
-            line = pr["line"] if ok else (pr["line"] if pr.get("error") else "no docs/brd/practices.toml")
         out.append({"key": key, "name": name, "ok": ok, "line": line, "fix": "" if ok else fix})
     return out
 
 
-def _practices(repo: Path) -> Dict[str, Any]:
-    from operonx_project.practices import FILE, PracticesError, load
-
-    try:
-        p = load(repo)
-    except PracticesError as exc:
-        return {"file": FILE, "line": f"{FILE} is wrong: {exc}", "error": str(exc)}
-    if not p.source:
-        return {"file": "", "line": "no practices file (acceptance tests before the code, any architecture)"}
-    tests = {"strict": "tests written first, seen failing", "acceptance": "acceptance tests before the code",
-             "off": "no test rule"}  # fmt: skip
-    parts = [tests.get(p.tdd, p.tdd)]
-    if p.layers:
-        parts.append(f"{len(p.layers)} layers ({' → '.join(x.name for x in p.layers)})")
-    elif p.style:
-        parts.append(p.style)
-    if p.contexts:
-        parts.append(f"{len(p.contexts)} bounded contexts")
-    return {"file": p.source, "line": " · ".join(parts), "tdd": p.tdd, "enforced": p.enforced}
-
-
 def _engine(repo: Path) -> Optional[Dict[str, Any]]:
-    """The engine's milestones and open questions, when it has run here; ``None`` otherwise (and nothing
-    is created)."""
-    from operonx_project.project import STATE_DIR, load_settings
+    """The board's milestones, when the store exists; ``None`` otherwise (and nothing is created)."""
+    from operonx_project.project import STATE_DIR
 
     db = repo / STATE_DIR / "project.db"
     if not db.is_file():
@@ -200,17 +171,7 @@ def _engine(repo: Path) -> Optional[Dict[str, Any]]:
         plan = store.ms_get(ms.id, "plan")
         milestones.append({"ms": ms, "cards": cards, "columns": columns(cards),
                            "doc": plan.get("path", "") if isinstance(plan, dict) else ""})  # fmt: skip
-    questions = []
-    for i in store.interactions(states=["open"]):
-        p = i.get("payload") or {}
-        questions.append({"source": "engine", "id": i["qid"], "milestone": i["milestone"], "card": i.get("card"),
-                          "kind": i["kind"], "text": str(p.get("problem") or p.get("reason") or "")[:300],
-                          "options": [o.get("key") for o in p.get("options") or [] if isinstance(o, dict)],
-                          "recommended": p.get("recommended"), "flagged": bool(i.get("flagged")),
-                          "since": i["created"]})  # fmt: skip
-    settings = load_settings(repo / STATE_DIR)
-    return {"milestones": milestones, "questions": questions, "daemon": store.lease_holder(),
-            "settings": settings}  # fmt: skip
+    return {"milestones": milestones}
 
 
 def _milestone_plan(m: Dict[str, Any]) -> Dict[str, Any]:
@@ -290,19 +251,15 @@ def status(repo: Path, changes: int = 15, brd: str = "docs/brd") -> Dict[str, An
                    "sentence": _sentence(p, cards_of.get(p.get("milestone") or ""))}
                   for p in plans if p["status"] == "in_progress"]  # fmt: skip
 
-    needs_you: List[Dict[str, Any]] = list(engine["questions"]) if engine else []
+    needs_you: List[Dict[str, Any]] = []
     for q in load_questions(brd_dir):
         if q.state.lower().startswith("open"):
             needs_you.append({"source": "brd", "id": q.id, "kind": q.type, "text": q.topic, "state": q.state})
 
-    settings = (engine or {}).get("settings") or {}
-    setup = {"practices": _practices(repo), "engine": engine is not None,
-             "daemon": (engine or {}).get("daemon"), "model": settings.get("model", ""),
-             "models": dict(settings.get("models") or {})}  # fmt: skip
     unmarked = [w.split(": ", 1)[0] for w in plan_warnings]
     doc = {"repo": str(repo), "checklist": checklist, "plans": plans, "plan_errors": plan_errors,
            "unmarked": unmarked, "needs_you": needs_you, "working_on": working_on,
-           "changes": _git_log(repo, changes), "setup": setup}  # fmt: skip
+           "changes": _git_log(repo, changes)}  # fmt: skip
     doc["standard"] = standard(repo, doc, brd)
     return doc
 
@@ -324,8 +281,7 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
     needs = doc["needs_you"]
     out.append(f"Needs you: {len(needs)}" if needs else "Needs you: nothing")
     for q in needs:
-        where = f" ({q['milestone']}{'/' + q['card'] if q.get('card') else ''})" if q["source"] == "engine" else ""
-        out.append(f"  {q['id']}{where}  {q['kind']}  {q['text']}"[:220])
+        out.append(f"  {q['id']}  {q['kind']}  {q['text']}"[:220])
     counts = Counter(p["status"] for p in doc["plans"])
     if doc["plans"]:
         out.append("Plans: " + ", ".join(f"{counts[s]} {s.replace('_', ' ')}" for s in _ORDER if counts.get(s)))
@@ -343,10 +299,6 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
         out.append("Recent changes:")
         for ch in doc["changes"][:changes]:
             out.append(f"  {ch['sha']} {ch['at'][:10]}  {ch['subject']}"[:200])
-    s = doc["setup"]
-    engine = f"engine: daemon {'running' if s['daemon'] else 'stopped'}" if s["engine"] else "engine: not used yet"
-    model = f" · model {s['model']}" if s["model"] else ""
-    out.append(f"Setup: {s['practices']['line']} · {engine}{model}")
     std = doc.get("standard") or []
     missing = [x for x in std if not x["ok"]]
     out.append(f"Standard: {len(std) - len(missing)} of {len(std)}" + ("" if missing else ", all met"))
