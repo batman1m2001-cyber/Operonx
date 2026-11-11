@@ -1,17 +1,19 @@
 ---
 title: Project mode v2 — one board, cards from units
-status: open
+status: parked
 phases:
-  - {id: V1, title: Unit templates and operonx add, status: open}
-  - {id: V2, title: The card format, status: open}
-  - {id: V3, title: The project page is board plus chat, status: open}
-  - {id: V4, title: The assistant works card by card, status: open}
-  - {id: V5, title: The engine cut, status: open}
-  - {id: V6, title: Gate on a real task, status: open}
-updated: 2026-11-10
+  - {id: V1, title: Unit templates and operonx add, status: skipped}
+  - {id: V2, title: The card format, status: skipped}
+  - {id: V3, title: The project page is board plus chat, status: skipped}
+  - {id: V4, title: The assistant works card by card, status: skipped}
+  - {id: V5, title: The engine cut, status: skipped}
+  - {id: V6, title: Gate on a real task, status: skipped}
+updated: 2026-11-11
 ---
 
 # Project mode v2 — one board, cards from units
+
+> **Superseded** by [LEAN_PROJECT_PLAN.md](LEAN_PROJECT_PLAN.md) (2026-11-11), which cuts this scope; its phases are skipped here. The pictures here stay as its reference.
 
 **Asked** (owner, 2026-11-10). A Jira-like board. A task breaks into cards built from ready units; what no unit
 covers is *flexible*. Layers kept apart. Templates only for patterns that really repeat. The running card is

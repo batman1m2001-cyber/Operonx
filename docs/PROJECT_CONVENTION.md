@@ -1,16 +1,18 @@
 ---
 title: Project convention — one shape for every operonx project
-status: proposed
+status: parked
 phases:
-  - {id: K1, title: "operonx init: a base plus parts", status: open}
-  - {id: K2, title: operonx lint checks it, with a baseline, status: open}
-  - {id: K3, title: operonx add writes into the shape, status: open}
-  - {id: K4, title: The four small projects moved, status: open}
-  - {id: K5, title: mr-finance and callbot on the ratchet, status: open}
+  - {id: K1, title: "operonx init: a base plus parts", status: skipped}
+  - {id: K2, title: operonx lint checks it, with a baseline, status: skipped}
+  - {id: K3, title: operonx add writes into the shape, status: skipped}
+  - {id: K4, title: The four small projects moved, status: skipped}
+  - {id: K5, title: mr-finance and callbot on the ratchet, status: skipped}
 updated: 2026-11-11
 ---
 
 # Project convention: one shape for every operonx project
+
+> **Superseded** by [LEAN_PROJECT_PLAN.md](LEAN_PROJECT_PLAN.md) (2026-11-11), which cuts this scope; its phases are skipped here. The pictures here stay as its reference.
 
 **Asked** (owner, 2026-11-11). `operonx init` gives the workflow core a clear shape (`graph.py` wires, `ops.py`
 works). Give the whole project one: where each kind of code lives, who may import whom, and how a bug leads to a
