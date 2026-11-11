@@ -108,6 +108,28 @@ only the parts it is asked for.
 - **The default becomes the base.** `operonx init` with no flag gives a project that runs offline. Today's
   templates stay as names: `--template chat` means `--http --llm`.
 
+### What is configured, and what is not
+
+The shape is **not** configurable. Folder names, file names and import rules are fixed in `operonx lint`, the
+same in every project; a layout set per project would bring back six shapes. What a project configures is only
+which parts it has: one line in the `operonx.toml` it already has.
+
+```toml
+[project]
+name  = "shop"
+src   = ["src", "."]
+app   = "app.main:APP"
+parts = ["http", "web", "store"]   # new: written by init, updated by `operonx init . --web`
+```
+
+| file | change |
+|---|---|
+| `operonx.toml` | `[project] parts` added; nothing else |
+| `practices.toml [architecture]` | removed: its layers become lint C14/C15 for every project; `operonx-project arch` runs `operonx lint` |
+| `practices.toml`, other sections | unchanged here (`[tdd]`, `[language]`, `[lessons]`, `[done]`); PROJECT_MODE_V2_PLAN decides |
+| `.operonx/lint-baseline.toml` | new, only in a project on the ratchet (§9): today's count per rule, committed, only goes down |
+| `AGENTS.md` | its Layout section is written from `parts`; the board agent proposes no card for a part that is off |
+
 ---
 
 ## 6. Who may import whom
