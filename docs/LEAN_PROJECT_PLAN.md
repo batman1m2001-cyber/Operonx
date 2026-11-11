@@ -5,7 +5,7 @@ phases:
   - {id: L1, title: Cut first, status: done}
   - {id: L2, title: "operonx init: three templates, three flags", status: done}
   - {id: L3, title: Four lint checks and a baseline, status: done}
-  - {id: L4, title: The board, status: open}
+  - {id: L4, title: The board, status: done}
   - {id: L5, title: mr-finance on the board and the ratchet, status: open}
 updated: 2026-11-11
 ---
@@ -171,6 +171,17 @@ stateDiagram-v2
   ask --> doing: owner answers
   doing --> done: done tests green
 ```
+
+**L4, done.** The board is one file, `docs/brd/board.md`, and `operonx_project.board` reads and writes it
+(`put`, `move`, `check`): four fields (`req`, `after`, `files`, `done`), four states, the lane read from `files`
+and the kind from `req`. `move` refuses doing while an `after` card is open, and done with no `done` test; the
+studio runs the `done` tests before done and refuses on a red one. The milestone boards, `start`/`replan`/the
+daemon and the studio's plan mirror went; a repo's old board keeps only its open cards, as todo, and cites the SHA
+that holds the rest. The studio reads the board in-process; a turn that moves a card to doing is that card's
+turn, and the card shows its step, or its last tool. Numbers: engine 5,306 → 4,229 lines (its tests 2,076 →
+1,854); studio 55,269 → 54,843; `init` writes one file fewer; fields 6 → 4, states 5 → 4. Gate: Sonnet put four
+tipcalc cards on the board and worked them one at a time, each done on a green test (studio #156, light and dark
+screenshots). What it wrote by hand (`- req: none`) is now read as fields.
 
 ---
 
