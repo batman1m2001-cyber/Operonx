@@ -3,7 +3,7 @@
 **operonx-project** keeps a project's requirements and where it stands. The
 requirements are a living BRD in `docs/brd/` (the sources, the requirements,
 the checklist); the work is planned in `docs/*_PLAN.md` files; `status`
-reads both into one document. The work itself is done in a Claude Code
+reads both, and the board, into one document. The work itself is done in a Claude Code
 session or the studio's assistant.
 
 ```bash norun
@@ -66,31 +66,55 @@ assert errors == [] and plan.current.title == "The export service"
 operonx-project plans --repo demo        # every plan and where it stands; exit 1 when a block is wrong
 ```
 
-A plan also goes on the board, through `operonx-project api` and its
-`{"op": "plan", "path": "docs/EXPORT_PLAN.md"}` (`"text"`: the doc as it
-stands in the worktree it is worked in, when the checkout has not got it
-yet). The plan becomes a milestone and each phase a card, in the state the
-doc gives it. Each later call brings the same milestone back in line with
-the doc. The studio makes that call at the end of every assistant turn.
+## The board
+
+`docs/brd/board.md` holds one card per task, in git:
+
+```markdown
+### C4 · gold jump alert · doing
+req: NEWS-07 · after: C2
+files: src/news/rules.py, tests/news/test_rules.py
+done: tests/news/test_rules.py::test_gold_jump
+```
+
+Four fields (`req`, `after`, `files`, `done`) and four states (`todo`,
+`doing`, `needs you`, `done`). The rest is read, not written: the lane from
+`files` (`web/` UI, `routes` web, `ops`/`rules`/`graph` core,
+`store`/`source`/`jobs` data, `prompts`/`agent` AI, the rest platform), the
+kind from `req` (a requirement is *build*, none is *fix*), and whether a
+card waits (an `after` card not done). Text under the fields is the card's
+note: the question, when it needs the owner.
 
 ```python
 from pathlib import Path
 
-from operonx_project.api import act
-from operonx_project.project import Project
+from operonx_project import board
 
-doc = (Path("demo") / "docs" / "EXPORT_PLAN.md").read_text()
-got = act(Project.open(Path("demo")), {"op": "plan", "path": "docs/EXPORT_PLAN.md", "text": doc})
-print(got["message"])  # m1 · CSV export: 1 of 2 done (new)
-assert got["ok"] and got["milestone"] == "m1"
+repo = Path("demo")
+board.put(repo, title="the rows", files=["src/export/ops.py"], done=["tests/export/test_ops.py::test_rows"])
+board.put(repo, title="the export service", after=["C1"], files=["src/export/routes.py"])
+board.move(repo, "C1", "doing")
+c = board.move(repo, "C2", "needs you", note="CSV or XLSX?")
+print([(x["id"], x["state"], x["lane"], x["waits"]) for x in board.view(board.read(repo))["cards"]])
+assert c.state == "needs you" and board.read(repo)[1].note == "CSV or XLSX?"
+```
+
+`move` refuses `doing` while an `after` card is not done, and `done` for a
+card with no `done` test (the studio runs them first). A card that adds a
+file outside a feature's fixed names lands in `needs you` until the owner
+says go.
+
+```bash run
+operonx-project board --repo demo             # the cards, with lane and what each waits on
+operonx-project board C1 done --repo demo     # move one
 ```
 
 ## Where the project stands
 
 `operonx-project status` (and the api's `{"op": "status"}`) puts the whole
-project in one document: the checklist's counts and its open rows, the plans
-and milestones in one shape, the BRD's open questions, what is in progress
-with one sentence each, and the last commits. It only reads, and every
+project in one document: the checklist's counts and its open rows, the
+board, the plans, the BRD's open questions and the cards that need you, what
+is in progress with one sentence each, and the last commits. It only reads, and every
 sentence is written by code from the data, so the studio's screen and its
 assistant never disagree:
 
@@ -100,14 +124,12 @@ from pathlib import Path
 from operonx_project.status import status, text
 
 doc = status(Path("demo"))
-[m1] = [p for p in doc["plans"] if p["milestone"] == "m1"]
-print(doc["working_on"][0]["sentence"])  # E2, phase 2 of 2: The export service
-assert m1["title"] == "CSV export" and text(doc).startswith("Checklist:")
+print([w["title"] for w in doc["working_on"]])  # ['CSV export']: C1 is done
+assert doc["board"]["columns"]["needs you"] == ["C2"] and text(doc).startswith("Checklist:")
 ```
 
 ```bash run
 operonx-project status --repo demo          # the same, in plain lines; --json for the document
-operonx-project milestones --repo demo      # the board's milestones; show m1 [C1] for one
 ```
 
 ## The standard
@@ -142,11 +164,10 @@ print([(x["key"], x["fix"][:40]) for x in doc["standard"] if not x["ok"]])
 | Where | What |
 |---|---|
 | `docs/brd/` | what the product must do, and how far it is: the sources, the requirements, the checklist (`requirements/requirements_traceability.md`), the questions |
-| `docs/brd/board/` | the board: one file per milestone, its cards and their status |
-| `.operonx/project/` | outside git: the board's store (`project.db`), the extraction's journals, `settings.toml` |
+| `docs/brd/board.md` | the board: one card per task |
+| `.operonx/project/` | outside git: the extraction's journals, `settings.toml` |
 
-When `.operonx/project/` is missing (a fresh clone), the store is rebuilt
-from `docs/brd/board/`. `settings.toml` holds this machine's models:
+`settings.toml` holds this machine's models:
 
 ```toml
 model = "sonnet"       # every session's model
@@ -168,9 +189,8 @@ A read-only session reads the code, the docs and the tests. It writes
 `requirements/adopted_requirements.md`, and one checklist row each, as
 built, partial or open. The engine then runs the tests each row cites,
 with the project's `.venv` (`--python` overrides it). Only a row whose
-cited tests all pass becomes `implemented_verified`. The built work
-becomes milestone `m0 · baseline` on the board. Nothing is committed: read
+cited tests all pass becomes `implemented_verified`. Nothing is committed: read
 `docs/brd/`, then commit it.
 
 A folder inside a bigger repo is a project of its own when it is opened as
-one (`--repo monorepo/service`): its own `docs/brd/` and its own store.
+one (`--repo monorepo/service`): its own `docs/brd/` and its own `.operonx/project/`.

@@ -13,8 +13,7 @@ compared on OneWealth's own folder. Each check is an error when it fails:
 - every FEAT-, SCR-, ADR-, Q- and DEF- id referenced is defined;
 - the verbatim source copies still have their recorded SHA-256;
 - every file under ``assets/`` is registered in ``assets/README.md``;
-- every card on the board (``board/``) serves rows that are defined, and
-  depends only on cards of its own milestone;
+- every card on the board (``board.md``) names requirements that are defined and cards that exist;
 - every plan doc under the repo's ``docs/`` has a block that parses and rows
   that are defined (:mod:`operonx_project.plans`).
 
@@ -328,24 +327,21 @@ def check_source(cfg: BrdConfig, sid: str, path: Path, errors: List[str], report
 
 
 def check_board(cfg: BrdConfig, errors: List[str]) -> None:
-    from operonx_project.brd.board import read_board
+    """``board.md``: a card heading that does not parse, a duplicate id, an ``after`` naming no card, a ``req``
+    the checklist does not define, a card done with no done test."""
+    from operonx_project import board
 
-    try:
-        board = read_board(cfg.brd)
-    except (ValueError, KeyError) as exc:
-        errors.append(f"board/: unreadable ({exc}); the engine writes it, change a plan with replan")
+    f = cfg.brd / "board.md"
+    if not f.is_file():
         return
-    defined = defined_requirements(cfg) | set(matrix_rows(cfg))
-    for bf in board:
-        ids = {c.id for c in bf.cards}
-        for c in bf.cards:
-            for rid in c.rows:
-                if rid not in defined:
-                    errors.append(f"board/{bf.milestone.id}.md: {c.id} serves {rid}, which is not defined")
-            for dep in c.deps:
-                if dep not in ids:
-                    errors.append(f"board/{bf.milestone.id}.md: {c.id} depends on {dep}, not a card of "
-                                  f"{bf.milestone.id}")  # fmt: skip
+    try:
+        cards = board.parse(f.read_text(encoding="utf-8"))
+    except board.BoardError as exc:
+        errors.append(f"board.md: {exc}")
+        return
+    if cards:
+        defined = defined_requirements(cfg) | set(matrix_rows(cfg))
+        errors.extend(f"board.md: {e}" for e in board.check(cards, defined))
 
 
 def check_plans(cfg: BrdConfig, errors: List[str], report: List[str]) -> None:
@@ -366,8 +362,8 @@ def check_plans(cfg: BrdConfig, errors: List[str], report: List[str]) -> None:
 
 
 def check(brd: Path, sources: Optional[Dict[str, Path]] = None, plans: bool = True) -> Tuple[List[str], List[str]]:
-    """Every check of the docstring above; with *plans*, the plan docs too (a milestone's final verification
-    leaves them out: a plan block it never touched is not its delivery's business)."""
+    """Every check of the docstring above; with *plans*, the plan docs too (a caller checking only the BRD
+    leaves them out)."""
     cfg = BrdConfig.load(brd)
     errors: List[str] = []
     report: List[str] = []

@@ -48,7 +48,7 @@ DELEGATED = {
     "studio": ("operonx.cli.studio", "open this project in operonx-studio (starts it if needed)"),
     "project": (
         "operonx.cli.project",
-        "build a project from its requirements: milestones, a board, a living BRD (operonx-project)",
+        "a project's living BRD, its board and plans (operonx-project)",
     ),
 }
 

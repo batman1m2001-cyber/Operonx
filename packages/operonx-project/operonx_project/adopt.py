@@ -1,4 +1,4 @@
-"""``operonx-project adopt``: an existing project gets its BRD and its board (plan D12).
+"""``operonx-project adopt``: an existing project gets its BRD (plan D12).
 
 A project built by hand has requirements in its README, its docs and its
 tests, and work already done. ``adopt`` writes them down the engine's way:
@@ -12,10 +12,8 @@ tests, and work already done. ``adopt`` writes them down the engine's way:
 3. **the engine runs every cited test.** A row is ``implemented_verified``
    only when each test it cites exists and passed in this run; otherwise
    built work is ``implemented_unverified``. The model never sets a status;
-4. what is built becomes milestone ``m0 · baseline``, done, one done card
-   per feature, so the board shows the project as it is; open work becomes
-   rows ``planned`` (or ``not_implemented``), which a milestone turns into
-   cards when the owner starts one.
+4. open work becomes rows ``planned`` (or ``not_implemented``): the board's
+   cards (``docs/brd/board.md``) are written when someone works them.
 """
 
 from __future__ import annotations
@@ -25,30 +23,23 @@ import json
 import re
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from operonx.core.loggings import LOGGER
-
-from operonx_project.brd.board import write_board
 from operonx_project.brd.folder import init_brd, refresh_summary
 from operonx_project.brd.records import Requirement, add_matrix_rows, set_matrix_row, write_requirements
 from operonx_project.coder.base import Coder, CoderRequest
-from operonx_project.model import Card, CardState, Milestone, MilestoneState, Policy
 from operonx_project.project import BRD_DIR, Project
 
-__all__ = ["ADOPT_SCHEMA", "BASELINE", "adopt", "adopt_prompt", "main_report", "run_tests"]
+__all__ = ["ADOPT_SCHEMA", "adopt", "adopt_prompt", "main_report", "run_tests"]
 
-#: The milestone that holds what was built before the engine.
-BASELINE = "m0"
 _TYPES = ("business", "functional", "non_functional", "rule", "kpi")
 _STATES = ("built", "partial", "open")
 _NODE = re.compile(r"^tests/[\w./-]+\.py::\w+(::\w+)?$")
 
 ADOPT_SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "required": ["summary", "requirements", "features"],
+    "required": ["summary", "requirements"],
     "properties": {
         "summary": {"type": "string", "description": "the product in two sentences"},
         "requirements": {
@@ -71,20 +62,6 @@ ADOPT_SCHEMA: Dict[str, Any] = {
                 },
             },
         },
-        "features": {
-            "type": "array",
-            "description": "the work already built, one item per feature: the baseline's cards",
-            "items": {
-                "type": "object",
-                "required": ["title", "rows"],
-                "properties": {
-                    "title": {"type": "string"},
-                    "intent": {"type": "string"},
-                    "rows": {"type": "array", "items": {"type": "string"}},
-                    "paths": {"type": "array", "items": {"type": "string"}},
-                },
-            },
-        },
     },
 }  # fmt: skip
 
@@ -104,8 +81,6 @@ requirements a new maintainer must know, usually 10–40.
 `tests/<path>.py::<test_name>` or `tests/<path>.py::<Class>::<test_name>`, only tests that exist);
   - `partial` when part is built (`gap` says what is missing);
   - `open` when nothing is built (`gap`; `planned` true when a backlog or plan names it).
-- features: the work already built, grouped as a maintainer would describe it (5–15), each with the \
-requirement ids it meets and its main files.
 
 Never invent a test, a file or a requirement no doc or code supports. A status is not yours to decide: the \
 engine runs every test you cite, and only a test that passes makes a requirement verified."""
@@ -162,7 +137,7 @@ def _status(r: Dict[str, Any], results: Dict[str, bool]) -> str:
 async def adopt(project: Project, coder: Coder, prefix: str = "", python: Optional[List[str]] = None,
                 answer: Optional[Dict[str, Any]] = None, max_usd: float = 2.0, model: Optional[str] = None
                 ) -> Dict[str, Any]:  # fmt: skip
-    """Adopt *project*: its BRD and its baseline board. *answer* skips the
+    """Adopt *project*: its BRD. *answer* skips the
     session (a recorded answer, a test). Returns a report."""
     repo, brd = project.repo, project.repo / BRD_DIR
     name = project.git.project
@@ -176,11 +151,11 @@ async def adopt(project: Project, coder: Coder, prefix: str = "", python: Option
 
             got = load_settings(project.state)
             model = (got.get("models") or {}).get("surveyor") or got.get("model") or DEFAULT_MODELS["surveyor"]
-        d = project.state / "transcripts" / BASELINE
+        d = project.state / "transcripts" / "adopt"
         d.mkdir(parents=True, exist_ok=True)
         req = CoderRequest(prompt=adopt_prompt(name, prefix), cwd=repo, role="planner", schema=ADOPT_SCHEMA,
                            model=model, max_usd=max_usd, timeout_s=1800.0, transcript=d / "adopt.jsonl",
-                           sandbox=False, tags={"milestone": BASELINE, "step": "adopt"})  # fmt: skip
+                           sandbox=False, tags={"step": "adopt"})  # fmt: skip
         res = await coder.run(req)
         cost = res.cost_usd
         if not res.ok or not isinstance(res.output, dict):
@@ -188,7 +163,6 @@ async def adopt(project: Project, coder: Coder, prefix: str = "", python: Option
         answer = res.output
         (project.state / "adopt.json").write_text(json.dumps(answer, indent=1, ensure_ascii=False), encoding="utf-8")
     reqs = [r for r in answer.get("requirements") or [] if r.get("id") and r.get("quote")]
-    ids = {r["id"] for r in reqs}
     results = run_tests(repo, [t for r in reqs for t in r.get("tests") or []], python=python)
 
     today = _dt.date.today().isoformat()
@@ -215,36 +189,16 @@ async def adopt(project: Project, coder: Coder, prefix: str = "", python: Option
                        evidence=evidence)  # fmt: skip
     refresh_summary(brd)
 
-    cards: List[Card] = []
-    for n, f in enumerate(answer.get("features") or [], start=1):
-        rows = [x for x in f.get("rows") or [] if x in ids]
-        cards.append(Card(id=f"C{n}", milestone=BASELINE, title=str(f.get("title") or f"feature {n}"),
-                          intent=str(f.get("intent") or ""), rows=rows, paths=list(f.get("paths") or []),
-                          criteria=[next(r["quote"] for r in reqs if r["id"] == x) for x in rows],
-                          state=CardState.DONE, reason="built before the project was adopted"))  # fmt: skip
-    store = project.store
-    try:
-        store.get_milestone(BASELINE)
-        LOGGER.info(f"{name}: {BASELINE} exists; the board's baseline is kept")
-    except KeyError:
-        now = time.time()
-        ms = Milestone(id=BASELINE, project=str(repo), title="baseline", state=MilestoneState.DONE,
-                       goal=str(answer.get("summary") or ""), policy=Policy.w2(), cost_usd=cost,
-                       reason=f"adopted {today}: what was built before the engine",
-                       created=now, updated=now)  # fmt: skip
-        store.add_milestone(ms, actor="adopt")
-        store.add_cards(cards, actor="adopt")
-    write_board(brd, [(m, store.cards(m.id)) for m in store.milestones()])
     log = brd / "CHANGELOG.md"
     line = (f"- {today}: adopted (`operonx-project adopt`): {len(reqs)} requirements "
-            f"({', '.join(f'{v} {k}' for k, v in sorted(counts.items()))}), {len(cards)} baseline cards.")  # fmt: skip
+            f"({', '.join(f'{v} {k}' for k, v in sorted(counts.items()))}).")  # fmt: skip
     log.write_text(log.read_text(encoding="utf-8").rstrip("\n") + "\n" + line + "\n", encoding="utf-8")
-    return {"requirements": len(reqs), "status": counts, "cards": len(cards), "tests": results,
+    return {"requirements": len(reqs), "status": counts, "tests": results,
             "brd_files": [str(p) for p in written], "cost_usd": cost, "summary": answer.get("summary", "")}  # fmt: skip
 
 
 def main_report(report: Dict[str, Any]) -> str:
     ran = report["tests"]
     return (f"adopted: {report['requirements']} requirements {json.dumps(report['status'])}, "
-            f"{report['cards']} baseline cards; tests run {len(ran)}, passed {sum(ran.values())}; "
+            f"tests run {len(ran)}, passed {sum(ran.values())}; "
             f"${report['cost_usd']:.2f}")  # fmt: skip

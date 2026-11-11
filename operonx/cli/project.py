@@ -1,7 +1,7 @@
 """`operonx project` — operonx-project's commands: a project's requirements and where it stands.
 
     operonx project new DIR                    # a repo with docs/brd/ and an empty board
-    operonx project status | plans | milestones | show MID
+    operonx project status | plans | board [CARD STATE]
     operonx project brd init | check | register | read | extract
     operonx project adopt                      # an existing project: its BRD and a baseline board
 

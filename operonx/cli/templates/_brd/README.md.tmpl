@@ -1,6 +1,6 @@
 # {{name}}: the living product repository
 
-What the product must do, why, and how far it is. It is versioned with the code, every milestone reads and
+What the product must do, why, and how far it is. It is versioned with the code, every card reads and
 updates it, and `operonx-project brd check` checks it (the test suite runs the check).
 
 | Where | What |
@@ -8,7 +8,7 @@ updates it, and `operonx-project brd check` checks it (the test suite runs the c
 | [`sources/`](sources/README.md) | Every document the requirements come from, registered with its hash. Never edited |
 | [`requirements/requirements_traceability.md`](requirements/requirements_traceability.md) | The checklist: each requirement in its original wording, with code, test, evidence and status. This is the only place a requirement's status is stated |
 | [`requirements/open_questions.md`](requirements/open_questions.md) | Ambiguities, conflicts, divergences and gaps (`Q-nn`). A question is never deleted, and never resolved without saying so |
-| [`board/`](board/README.md) | The board: one file per milestone (a plan doc), with its cards (the phases) and their status. `operonx-project` writes these files |
+| `board.md` | The board: one card per task (`### C4 · title · todo`, then `req`, `after`, `files`, `done`). Made with the first card |
 | [`CHANGELOG.md`](CHANGELOG.md) | One line per change |
 
 Add `features/` (`FEAT-nn`), `decisions/` (`ADR-nnnn`), `ux/screen_inventory.md` (`SCR-…`), `testing/`
@@ -22,8 +22,9 @@ follows these ids when the folders exist.
 - A rule changes: never edit a source's text. Record the change in `open_questions.md`, or in an ADR.
 - A requirement is removed: keep its row, and say so in its status and note.
 - A new version of a source: register it as a new row, and keep the old one.
-- Work with more than one step: a plan doc under `docs/` with a status block. `board/` follows it; change
-  nothing there by hand.
+- Work with more than one step: a card per step on `board.md`, or a plan doc under `docs/` with a status
+  block. The assistant moves the cards (`operonx-project board C4 done`); a card is done when its `done`
+  tests pass.
 - State facts only with a source: a source section, a code path, a test or a measurement. Mark assumptions as
   assumptions. A private source is registered by path and hash only, never committed.
 
@@ -34,7 +35,7 @@ follows these ids when the folders exist.
 | `implemented_verified` | Built, and at least one test cited by name exists and passed in the recorded run |
 | `implemented_unverified` | Built, with no test that shows it |
 | `partially_implemented` | Part of it is built; the row states the gap |
-| `planned` | Not built yet; the row names the milestone or card |
+| `planned` | Not built yet; the row names the card |
 | `not_implemented` | Not built, and not planned |
 | `blocked` | Cannot be built now; the row says what blocks it and who can unblock it |
 | `out_of_scope_demo` | Deliberately left out of this phase |
@@ -43,8 +44,6 @@ follows these ids when the folders exist.
 ## Where it stands
 
 ```bash
-operonx-project status     # the checklist, the plans, the open questions, the last commits
-operonx-project plans      # every plan doc and where it stands
+operonx-project status     # the checklist, the board, the plans, the open questions, the last commits
+operonx-project board      # the board's cards
 ```
-
-`.operonx/project/` (outside git) holds the board's store. When it is missing, it is rebuilt from `board/`.

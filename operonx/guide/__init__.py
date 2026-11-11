@@ -76,9 +76,10 @@ _BUILDER = """## Building it: docs/brd and the board
   checklist, the only place a requirement's status is stated (its code, the
   test that shows it, by name, and the evidence). Questions are `Q-nn` in
   `docs/brd/requirements/open_questions.md`, never deleted.
-- `docs/brd/board/` is the board: one file per milestone, its cards and
-  their status. `operonx-project` writes it from the plan docs; never edit
-  it by hand.
+- `docs/brd/board.md` is the board: one card per task
+  (`### C4 · title · todo|doing|needs you|done`, then `req`, `after`,
+  `files`, `done`). Move a card with `operonx-project board C4 doing`; it
+  is done when its `done` tests pass.
 - When a change meets or alters a requirement, update its row (status,
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
   `docs/brd/README.md`. The checklist's summary table is counted from
@@ -88,9 +89,7 @@ _BUILDER = """## Building it: docs/brd and the board
   parked), `phases` (each `{id, title, status}`: open, in_progress, done or
   skipped) and the `rows` it serves. Change a phase's status in the commit
   that finishes it. `operonx-project plans` lists them; the studio's
-  Project mode shows them.
-- `.operonx/project/`, outside git, is the board's store; it is rebuilt
-  from `docs/brd/board/` on a fresh clone."""
+  Project mode shows them."""
 
 _HEADER = re.compile(r"<!--\s*operonx-guide\s*(.*?)\s*-->")
 
