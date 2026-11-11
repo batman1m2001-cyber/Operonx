@@ -4,14 +4,16 @@ version = "0.1.0"
 description = "{{summary}}"
 requires-python = ">=3.10"
 dependencies = [
-    "operonx[{{extras}}]>={{version}}",{{requires}}
+    "{{operonx}}>={{version}}",{{requires}}
     "python-dotenv>=1.0",  # operonx.bootstrap() reads .env with it
 ]
 
 [project.optional-dependencies]
 test = [  # pip: pip install -e ".[test]"
     "pytest>=8",
+{{#http}}
     "httpx>=0.24",  # starlette's TestClient
+{{/http}}
 ]
 
 [dependency-groups]
@@ -20,6 +22,7 @@ dev = ["{{dist}}[test]"]  # uv: `uv sync` installs the test extra too
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
+addopts = ["--import-mode=importlib"]  # tests/<feature>/ may repeat a file name
 
 [tool.ruff]
 line-length = 100

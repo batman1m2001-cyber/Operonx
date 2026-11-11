@@ -1,0 +1,49 @@
+# {{name}}
+
+{{summary}} Built on [operonx](https://pypi.org/project/operonx/).
+
+`src/{{feature}}/` is the feature: `ops.py` holds the logic, `graph.py` wires
+it, `jobs.py` runs it over `data/`{{#http}}, `routes.py` serves it{{/http}}{{#chat}}, `prompts.py` is the
+model's prompt{{/chat}}{{#agent}}, `agent.py` is the agent and its tools{{/agent}}. `app/main.py` declares
+everything that runs; `src/_shared/config.py` holds the folders and settings.
+
+## Run
+
+```bash
+{{setup}}
+{{#llm}}
+cp .env.example .env   # then set LLM_API_KEY
+{{/llm}}
+{{run}}pytest   # the tests, offline
+{{run}}operonx run {{job}}   # {{job_says}}
+```
+{{#http}}
+
+## Serve
+
+```bash
+{{run}}operonx serve --list   # what would listen, and where
+{{run}}operonx serve   # POST {{route_path}} on :8000 (PORT overrides){{#web}}; the page at /{{/web}}
+curl -s localhost:8000{{route_path}} -d '{{route_example}}'
+```
+{{#agent}}
+
+`POST /ask/resume {"run_id", "approvals"}` answers a run that waits for a
+human: a tool with `approval=` (see `src/assistant/ops.py`).
+{{/agent}}
+{{/http}}
+{{#deploy}}
+
+## Deploy
+
+```bash
+docker compose -f deploy/compose.yml up --build   # {{#http}}serves on :8000{{/http}}{{^http}}runs {{job}} once{{/http}}
+```
+{{/deploy}}
+
+## Grow it
+
+A new feature is a new folder under `src/` (`graph.py`, `ops.py`, `jobs.py`),
+its tests in `tests/<feature>/`, and one more import in `app/main.py`.
+`operonx init . --http` (or `--web`, `--deploy`) adds a part later. Read
+`AGENTS.md` and `.operonx/guide/README.md` first.

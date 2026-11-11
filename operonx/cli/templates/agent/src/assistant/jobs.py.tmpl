@@ -1,0 +1,17 @@
+"""The assistant feature's jobs: its graph, run once per item."""
+
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT
+from assistant.graph import ask_flow
+
+JOBS = [
+    Job(
+        "ask_assistant",
+        graph=ask_flow,
+        items=DATA / "questions.jsonl",  # one graph run per line
+        key="input",  # resumable: `--resume` skips the questions already answered
+        output=OUT / "answers.jsonl",
+        description="The assistant's answer to every question in data/questions.jsonl.",
+    ),
+]

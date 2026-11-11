@@ -4,11 +4,17 @@ The templates are package data under ``operonx/cli/templates/``:
 ``_common/`` holds what every project gets, ``<template>/`` what one
 template adds or replaces. A file there is ``<path>.tmpl``; a leading
 ``dot-`` in a path part becomes ``.`` (``dot-gitignore.tmpl`` →
-``.gitignore``), so no dotfile has to survive packaging. ``{{name}}``,
-``{{dist}}``, ``{{version}}``, ``{{extras}}``, ``{{requires}}`` and
-``{{summary}}`` are filled in, and the toolchain's commands (``{{run}}``,
-``{{setup}}``, ``{{upgrade}}``, ``{{add}}``, ``{{shell}}``, see
-:data:`TOOLCHAINS`); nothing else is, so Python braces need no escaping.
+``.gitignore``), so no dotfile has to survive packaging. ``{{key}}`` is
+filled from :func:`plan`'s values; nothing else is, so Python braces need
+no escaping. ``{{#x}}…{{/x}}`` is kept when *x* is on (the template's name,
+a part in :data:`PARTS`, ``llm``), ``{{^x}}…{{/x}}`` when it is off; a tag
+alone on its line takes the line with it. A file that is one section and
+renders empty is not written: ``routes.py`` exists only with ``--http``.
+
+The parts a project has are ``parts`` in its ``operonx.toml``.
+``operonx init . --web`` in a project adds the part: it writes the files
+that are missing, rewrites a file still as init wrote it, and for a file
+the owner edited reports the lines to add by hand.
 
 A project is set up and run with uv or with plain pip (``--uv`` /
 ``--pip``; by default uv when it is on PATH). Only the commands the
@@ -32,9 +38,10 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, Set
 
 __all__ = [
+    "PARTS",
     "TEMPLATES",
     "TOOLCHAINS",
     "BRD_DIR",
@@ -55,17 +62,28 @@ BRD_DIR = "docs/brd"
 _NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
+#: What a flag adds; any of them, in this order. ``web`` turns on ``http``.
+PARTS = ("http", "web", "deploy")
+
+
 @dataclass(frozen=True)
 class Template:
     name: str
     summary: str
-    extras: str
-    #: The commands after setting up — what the user runs next, in order.
-    #: ``{run}`` is the toolchain's prefix (``uv run `` or nothing).
-    next_steps: tuple
+    #: The one feature's folder under ``src/``.
+    feature: str
+    #: Its job, and what the job does (README's comment).
+    job: str
+    job_says: str
+    #: The route ``--http`` serves: its path, the body field the page sends,
+    #: the reply field it shows, what else the body carries (a JS object)
+    #: and a curl body.
+    route: tuple
     #: Packages the template's code needs besides operonx (requirement
     #: strings), added to the generated pyproject's dependencies.
     requires: tuple = ()
+    #: It calls a model: ``llm:assistant`` in resources.yaml, LLM_API_KEY.
+    llm: bool = False
 
 
 TEMPLATES: Dict[str, Template] = {
@@ -73,37 +91,31 @@ TEMPLATES: Dict[str, Template] = {
     for t in (
         Template(
             "hello",
-            "A pure-compute feature, run as a job and served over HTTP.",
-            "serve",
-            ("{run}pytest", "{run}operonx run greet_people", "{run}operonx serve"),
-        ),
-        Template(
-            "http",
-            "An HTTP service on a doors graph.",
-            "serve",
-            ("{run}pytest", "{run}operonx serve --list", "{run}operonx serve"),
+            "Pure compute: ops and a graph, run as a job. Offline, no key.",
+            "greeting",
+            "greet_people",
+            "data/people.jsonl → out/greetings.jsonl",
+            ("/greet", "full_name", "greeting", '{ id: "web" }', '{"id": "1", "full_name": "ada"}'),
         ),
         Template(
             "chat",
-            "A chat service: one LLMOp on the llm:assistant model.",
-            "serve,openai",
-            (
-                "{run}pytest",
-                "cp .env.example .env   # then set LLM_API_KEY",
-                "{run}operonx serve",
-            ),
+            "One model call (LLMOp) on llm:assistant, with its prompt.",
+            "chat",
+            "answer_questions",
+            "data/questions.jsonl → out/answers.jsonl",
+            ("/chat", "question", "answer", "{}", '{"question": "What is a graph?"}'),
+            llm=True,
         ),
         Template(
             "agent",
-            "An agent with one tool (operonx-agents), served over HTTP.",
-            "serve,openai",
-            (
-                "{run}pytest",
-                "cp .env.example .env   # then set LLM_API_KEY",
-                "{run}operonx serve",
-            ),
+            "An agent with one tool (operonx-agents).",
+            "assistant",
+            "ask_assistant",
+            "data/questions.jsonl → out/answers.jsonl",
+            ("/ask", "input", "output", "{}", '{"input": "How many words in: one two three?"}'),
             # operonx cannot depend on operonx-agents; the project does
             requires=("operonx-agents>=0.1.4",),
+            llm=True,
         ),
     )
 }
@@ -142,13 +154,26 @@ def default_toolchain() -> str:
     return "uv" if shutil.which("uv") else "pip"
 
 
-def next_steps(template: str, toolchain: str) -> List[str]:
-    """What to run after ``cd``: set up, then the template's commands."""
-    t = TOOLCHAINS[toolchain]
+def next_steps(template: str, toolchain: str, parts: Sequence[str] = ()) -> List[str]:
+    """What to run after ``cd``: set up, test, then run what the parts add."""
+    t, run = TEMPLATES[template], TOOLCHAINS[toolchain]["run"]
     return [
-        *t["setup"].split("\n"),
-        *(s.format(run=t["run"]) for s in TEMPLATES[template].next_steps),
+        *TOOLCHAINS[toolchain]["setup"].split("\n"),
+        f"{run}pytest",
+        *(["cp .env.example .env   # then set LLM_API_KEY"] if t.llm else []),
+        f"{run}operonx run {t.job}",
+        *([f"{run}operonx serve"] if "http" in parts else []),
+        *(["docker compose -f deploy/compose.yml up --build"] if "deploy" in parts else []),
     ]
+
+
+def parts_of(flags: Sequence[str]) -> List[str]:
+    """*flags* in :data:`PARTS` order, ``web`` bringing ``http``."""
+    on = set(flags) | ({"http"} if "web" in flags else set())
+    unknown = on - set(PARTS)
+    if unknown:
+        raise InitError(f"no part {', '.join(sorted(unknown))} (have: {', '.join(PARTS)})")
+    return [p for p in PARTS if p in on]
 
 
 class InitError(Exception):
@@ -161,9 +186,15 @@ class InitResult:
     name: str
     template: str
     toolchain: str = "uv"
+    parts: List[str] = field(default_factory=list)
     created: List[str] = field(default_factory=list)
     overwritten: List[str] = field(default_factory=list)
     kept: List[str] = field(default_factory=list)
+    #: Files still as init wrote them, rewritten for the new parts.
+    updated: List[str] = field(default_factory=list)
+    #: Files the owner edited that the new parts change: path → the lines
+    #: to add by hand.
+    edited: Dict[str, List[str]] = field(default_factory=dict)
 
 
 def _target(rel: Path) -> str:
@@ -176,6 +207,21 @@ def _render(text: str, values: Dict[str, str]) -> str:
     for key, value in values.items():
         text = text.replace("{{" + key + "}}", value)
     return text
+
+
+_STANDALONE = re.compile(r"^[ \t]*(\{\{[#^/]\w+\}\})[ \t]*\n", re.M)
+_SECTION = re.compile(r"\{\{([#^])(\w+)\}\}(.*?)\{\{/\2\}\}", re.S)
+
+
+def _sections(text: str, on: Set[str]) -> str:
+    """Keep ``{{#x}}`` sections whose *x* is on and ``{{^x}}`` ones whose
+    *x* is off; drop the rest. Different names nest."""
+    text = _STANDALONE.sub(r"\1", text)
+    while True:
+        new = _SECTION.sub(lambda m: m[3] if (m[2] in on) == (m[1] == "#") else "", text)
+        if new == text:
+            return text
+        text = new
 
 
 _COMMENT = re.compile(r"^(\S.*?\S|\S)\s{2,}(# .*)$")
@@ -263,14 +309,16 @@ def plan(
     template: str,
     name: str,
     *,
+    parts: Sequence[str] = (),
     root: Optional[Path] = None,
     editable: Optional[Path] = None,
     toolchain: str = "uv",
     brd: bool = True,
 ) -> Dict[str, bytes]:
-    """Every file *template* writes for a project called *name*, by path,
-    its docs naming *toolchain*'s commands. With *editable*, the project's
-    operonx is that checkout; with *brd*, it has a BRD folder (``docs/brd``)."""
+    """Every file *template* with *parts* writes for a project called
+    *name*, by path, its docs naming *toolchain*'s commands. With
+    *editable*, the project's operonx is that checkout; with *brd*, it has a
+    BRD folder (``docs/brd``)."""
     from operonx import __version__
     from operonx.guide import builder_block
 
@@ -284,13 +332,26 @@ def plan(
     if toolchain not in TOOLCHAINS:
         raise InitError(f"no toolchain {toolchain!r} (have: {', '.join(TOOLCHAINS)})")
     t = TEMPLATES[template]
+    parts = parts_of(parts)
+    on = {template, *parts, *(["llm"] if t.llm else [])}
+    extras = [x for x, yes in (("serve", "http" in on), ("openai", t.llm)) if yes]
+    path, field_, answer, body, example = t.route
     values = {
         **TOOLCHAINS[toolchain],
         "name": name,
         "dist": name.replace("_", "-").lower(),
         "version": __version__,
-        "extras": t.extras,
+        "operonx": f"operonx[{','.join(extras)}]" if extras else "operonx",
         "summary": t.summary,
+        "feature": t.feature,
+        "job": t.job,
+        "job_says": t.job_says,
+        "route_path": path,
+        "route_field": field_,
+        "route_answer": answer,
+        "route_body": body,
+        "route_example": example,
+        "parts": "[" + ", ".join(f'"{x}"' for x in [template, *parts]) + "]",
         "requires": "".join(f'\n    "{r}",' for r in t.requires),
         "sources": _sources(Path(root or "."), editable),
         "brd": "\n" + builder_block() + "\n" if brd else "",
@@ -300,7 +361,10 @@ def plan(
         base = TEMPLATE_DIR / layer
         for src in sorted(base.rglob("*.tmpl")):
             target = _target(src.relative_to(base))
-            text = _render(src.read_text(encoding="utf-8"), values)
+            raw = src.read_text(encoding="utf-8")
+            text = _render(_sections(raw, on), values)
+            if raw.startswith(("{{#", "{{^")) and not text.strip():
+                continue  # a part that is off
             if target.endswith(".md"):
                 text = _align(text)
             files[target] = text.encode("utf-8")
@@ -309,40 +373,110 @@ def plan(
     return files
 
 
+def _manifest(root: Path) -> dict:
+    """The ``[project]`` table of *root*'s operonx.toml, or ``{}``."""
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - 3.10
+        import tomli as tomllib
+
+    try:
+        return tomllib.loads((root / "operonx.toml").read_text(encoding="utf-8")).get("project", {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _as_written(text: str) -> str:
+    """*text* without the blocks ``operonx guide`` rewrites."""
+    from operonx import guide as g
+
+    for begin, end in (
+        (g.AGENTS_BEGIN, g.AGENTS_END),
+        (g.COMMANDS_BEGIN, g.COMMANDS_END),
+        (g.BUILDER_BEGIN, g.BUILDER_END),
+    ):
+        text = re.sub(re.escape(begin) + ".*?" + re.escape(end), "", text, flags=re.S)
+    return text
+
+
+def _missing(new: str, old: str) -> List[str]:
+    """The lines of *new* that *old* has not."""
+    have = {line.strip() for line in old.splitlines()}
+    return [line for line in new.splitlines() if line.strip() and line.strip() not in have]
+
+
 def init_project(
     root: Path,
     *,
-    template: str = "hello",
+    template: Optional[str] = None,
+    parts: Sequence[str] = (),
     name: str = None,
     force: bool = False,
     editable: Optional[Path] = None,
     toolchain: Optional[str] = None,
-    brd: bool = True,
+    brd: Optional[bool] = None,
 ) -> InitResult:
-    """Write *template* into *root*. An existing file is kept unless *force*.
+    """Write *template* (``hello`` by default) with *parts* into *root*.
     Its docs name *toolchain*'s commands (``"uv"`` or ``"pip"``; by default
     uv when it is installed).
 
+    In a project init made (``parts`` in its operonx.toml), the template is
+    the project's and *parts* are added to its own: a missing file is
+    written, a file still as init wrote it is rewritten, and an edited one
+    is kept, with the lines it lacks in :attr:`InitResult.edited`. Any other
+    existing file is kept unless *force*.
+
     *editable* pins operonx to that checkout (``[tool.uv.sources]``); a
     project made inside an operonx checkout pins it without being asked —
-    there, PyPI's operonx is never the one being worked on. Without *brd*,
-    no ``docs/brd/``."""
+    there, PyPI's operonx is never the one being worked on. *brd* (by
+    default: yes, or what the project has) writes ``docs/brd/``."""
     root = Path(root)
     if root.exists() and not root.is_dir():
         raise InitError(f"{root} exists and is not a directory")
+    project = _manifest(root)
+    had, old = project.get("parts"), []
+    if had:
+        if template and template != had[0]:
+            raise InitError(
+                f"{root} is a {had[0]} project; a template is chosen once (parts = {had})"
+            )
+        template, old = had[0], parts_of(had[1:])
+        name = name or project.get("name")
+        if brd is None:
+            brd = (root / BRD_DIR).is_dir()
+        if toolchain is None and (root / "AGENTS.md").is_file():
+            agents = (root / "AGENTS.md").read_text(encoding="utf-8")
+            toolchain = "uv" if "uv run " in agents else "pip"
+    template = template or "hello"
     name = name or root.resolve().name
     if editable is None:
         editable = operonx_checkout(root.resolve())
     toolchain = toolchain or default_toolchain()
-    files = plan(template, name, root=root, editable=editable, toolchain=toolchain, brd=brd)
-    result = InitResult(root=root, name=name, template=template, toolchain=toolchain)
+    brd = True if brd is None else brd
+    parts = parts_of([*old, *parts])
+    kw = dict(root=root, editable=editable, toolchain=toolchain, brd=brd)
+    files = plan(template, name, parts=parts, **kw)
+    before = plan(template, name, parts=old, **kw) if had else {}
+    result = InitResult(root=root, name=name, template=template, toolchain=toolchain, parts=parts)
     for rel, content in files.items():
         path = root / rel
         if path.exists():
-            if not force:
+            disk = path.read_bytes()
+            if force:
+                result.overwritten.append(rel)
+            elif disk == content or before.get(rel, content) == content:
                 result.kept.append(rel)
                 continue
-            result.overwritten.append(rel)
+            elif rel == "operonx.toml":
+                [line] = [x for x in content.decode().splitlines() if x.startswith("parts")]
+                text = re.sub(r"^parts\s*=.*$", line, disk.decode(), count=1, flags=re.M)
+                content = text.encode()
+                result.updated.append(rel)
+            elif _as_written(disk.decode()) == _as_written(before[rel].decode()):
+                result.updated.append(rel)
+            else:
+                result.edited[rel] = _missing(content.decode(), disk.decode())
+                continue
         else:
             result.created.append(rel)
         path.parent.mkdir(parents=True, exist_ok=True)

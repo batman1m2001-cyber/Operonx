@@ -1,0 +1,40 @@
+"""{{name}}: every job{{#http}} and service{{/http}} of the project, declared once.
+
+`operonx run {{job}}` runs the job{{#http}}; `operonx serve` serves POST {{route_path}}{{#web}}
+and the pages in web/{{/web}}{{/http}}.
+operonx.toml only points the CLIs at `APP`.
+"""
+
+{{#web}}
+from operonx.app import Application, Service, asgi
+from starlette.staticfiles import StaticFiles
+
+from _shared.config import PORT, ROOT
+{{/web}}
+{{^web}}
+from operonx.app import Application
+
+{{/web}}
+from {{feature}}.jobs import JOBS
+{{#http}}
+from {{feature}}.routes import SERVICES
+{{/http}}
+{{#web}}
+
+# web/index.html at /, beside the routes on the same port
+WEB = Service(
+    "web",
+    asgi("/", port=PORT),
+    app=StaticFiles(directory=ROOT / "web", html=True),
+    description="The pages in web/.",
+)
+{{/web}}
+
+APP = Application(
+    "{{name}}",
+    description="{{summary}}",
+    jobs=JOBS,
+{{#http}}
+    services=[*SERVICES{{#web}}, WEB{{/web}}],
+{{/http}}
+)

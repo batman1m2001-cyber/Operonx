@@ -1,0 +1,17 @@
+"""The chat feature's jobs: its graph, run once per item."""
+
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT
+from chat.graph import chat_flow
+
+JOBS = [
+    Job(
+        "answer_questions",
+        graph=chat_flow,
+        items=DATA / "questions.jsonl",  # one graph run per line
+        key="question",  # resumable: `--resume` skips the questions already answered
+        output=OUT / "answers.jsonl",
+        description="An answer to every question in data/questions.jsonl.",
+    ),
+]

@@ -1,0 +1,19 @@
+{{#http}}
+from operonx.app.serve.app import build_app
+from starlette.testclient import TestClient
+
+from app.main import APP
+
+
+def test_the_route_answers_with_the_model(fake_model):
+    with TestClient(build_app(APP.services)) as client:
+        reply = client.post("/chat", json={"question": "Hello?"})
+{{#web}}
+        page = client.get("/")  # web/index.html
+{{/web}}
+    assert reply.status_code == 200
+    assert reply.json() == {"answer": "Echo: Hello?", "error": None}
+{{#web}}
+    assert page.status_code == 200 and "lib/api.js" in page.text
+{{/web}}
+{{/http}}

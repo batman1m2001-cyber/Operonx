@@ -44,9 +44,10 @@ pytest
 
 `operonx init` writes the commands of the toolchain you use into the
 project's docs: uv when it is installed, else pip (`--uv` or `--pip` to
-choose). The first feature is `--template hello` (pure compute, a job and an
-HTTP service), `http`, `chat` (one LLM call) or `agent` (an agent with a
-tool).
+choose). The first feature is `--template hello` (pure compute, a job over
+`data/`), `chat` (one LLM call) or `agent` (an agent with a tool). Plain
+`init` is offline; `--http` adds a service, `--web` pages in `web/`,
+`--deploy` a Dockerfile (`operonx init myapp --web` to serve at once).
 
 Then open the folder in your coding assistant and ask for what you want:
 *"add a feature that scores each call in `datasets/calls.jsonl` with the
@@ -61,9 +62,10 @@ myapp/
 ├── app/main.py          the map: every service and job, in one Application
 ├── src/greeting/        one feature, one folder
 │   ├── graph.py         the wiring: which op runs after which, what feeds what
-│   └── ops.py           the logic: plain Python functions
-├── tests/               the feature's tests; no test calls a real model
-├── datasets/            what jobs run over (.jsonl)
+│   ├── ops.py           the logic: plain Python functions
+│   └── jobs.py          the job over data/ (routes.py: the service, with --http)
+├── tests/greeting/      the feature's tests; no test calls a real model
+├── data/                what jobs run over (.jsonl); out/ is what they write
 ├── resources.yaml       models and stores, by key (`llm:assistant`)
 ├── .env.example         the secrets resources.yaml names; copy to .env
 ├── operonx.toml         points the operonx command at app/main.py

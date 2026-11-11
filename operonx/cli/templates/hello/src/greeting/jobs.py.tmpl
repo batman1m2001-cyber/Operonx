@@ -1,0 +1,17 @@
+"""The greeting feature's jobs: its graph, run once per item."""
+
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT
+from greeting.graph import greet_flow
+
+JOBS = [
+    Job(
+        "greet_people",
+        graph=greet_flow,
+        items=DATA / "people.jsonl",  # one graph run per line
+        key="id",  # resumable: `operonx run greet_people --resume` skips done ids
+        output=OUT / "greetings.jsonl",
+        description="A greeting for every person in data/people.jsonl.",
+    ),
+]

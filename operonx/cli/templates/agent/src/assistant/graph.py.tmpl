@@ -1,19 +1,14 @@
-"""The assistant: who it is, what it thinks with, and which tools it owns.
+"""The assistant feature's wiring: no logic here, only ops and edges."""
 
-`ASSISTANT` is a spec — data, not a class to subclass. `app/main.py` serves
-it. Its loop runs inside one op, and every turn, model call and tool call
-is recorded under that op: a run's trace reads agent → turn → model,
-word_count.
-"""
+from operonx import END, START, graph
+from operonx.agents import AgentOp
 
-from operonx.agents import Agent, Model, UsageLimits
+from assistant.agent import ASSISTANT
+from assistant.ops import reply
 
-from assistant.ops import word_count
 
-ASSISTANT = Agent(
-    name="assistant",
-    model=Model("assistant", deadline=60),  # llm:assistant in resources.yaml
-    instructions="You are a helpful assistant. Use the tools when they help.",
-    tools=[word_count],
-    limits=UsageLimits(turns=6, tool_calls=12),
-)
+@graph
+def ask_flow(input):  # a job item fills it; the reply is {output, status, error}
+    answered = AgentOp.of(agent=ASSISTANT, input=input)
+    r = reply(output=answered["output"], status=answered["status"], error=answered["error"])
+    START >> answered >> r >> END

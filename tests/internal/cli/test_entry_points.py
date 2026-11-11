@@ -87,7 +87,7 @@ def sample_project(tmp_path_factory):
     from operonx.cli.main import main
 
     root = tmp_path_factory.mktemp("cli") / "sample"
-    assert main(["init", str(root), "--template", "hello"]) == 0
+    assert main(["init", str(root), "--template", "hello", "--http"]) == 0
     return root
 
 

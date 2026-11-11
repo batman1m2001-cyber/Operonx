@@ -1,6 +1,6 @@
 """`operonx` — the command line: one command, a subcommand each.
 
-    operonx init [DIR] [--template NAME] [--name NAME] [--force] [--uv | --pip] [--no-brd]
+    operonx init [DIR] [--template hello|chat|agent] [--http] [--web] [--deploy] [--uv | --pip] ...
     operonx guide [DIR]             # sync the installed guides into DIR/.operonx/guide/
     operonx guide --check [DIR]     # exit 1 when that copy is stale (CI)
     operonx guide --path            # where the installed core guide is
@@ -73,17 +73,24 @@ def _parser() -> argparse.ArgumentParser:
     init = sub.add_parser(
         "init",
         help="create a project: layout, app, a feature, tests, AGENTS.md and the guide",
-        description="Create an operonx project in DIR. Existing files are kept unless --force.",
+        description="Create an operonx project in DIR: one template, any of the parts. In a "
+        "project init made, add parts: `operonx init . --web`.",
     )
     init.add_argument("dir", nargs="?", default=".", help="where (default: here)")
     init.add_argument(
         "--template",
         "-t",
-        default="hello",
+        default=None,
         choices=list(TEMPLATES),
-        help="what the first feature is: "
+        help="what the first feature is (default hello): "
         + "; ".join(f"{t.name}: {t.summary}" for t in TEMPLATES.values()),
     )
+    for part, says in (
+        ("http", "serve the feature: src/<feature>/routes.py, `operonx serve`"),
+        ("web", "pages in web/, served at / (turns on --http)"),
+        ("deploy", "deploy/Dockerfile and compose.yml"),
+    ):
+        init.add_argument(f"--{part}", dest="parts", action="append_const", const=part, help=says)
     init.add_argument("--name", default=None, help="project name (default: DIR's name)")
     init.add_argument("--force", action="store_true", help="overwrite files that already exist")
     init.add_argument(
@@ -96,6 +103,7 @@ def _parser() -> argparse.ArgumentParser:
         "--no-brd",
         dest="brd",
         action="store_false",
+        default=None,  # a new project gets one; an existing one keeps what it has
         help="no docs/brd/ (the requirements checklist operonx-project builds from)",
     )
     tool = init.add_mutually_exclusive_group()
@@ -143,6 +151,7 @@ def _init(args: argparse.Namespace) -> int:
         result = init_project(
             root,
             template=args.template,
+            parts=args.parts or (),
             name=args.name,
             force=args.force,
             editable=Path(args.editable) if args.editable else None,
@@ -154,26 +163,27 @@ def _init(args: argparse.Namespace) -> int:
         return 2
 
     where = args.dir if args.dir != "." else "here"
-    if result.created or result.overwritten:
-        print(f"{result.name}: {result.template} project in {where}")
+    shape = " + ".join([result.template, *result.parts])
+    if result.created or result.overwritten or result.updated:
+        print(f"{result.name}: {shape} project in {where}")
         for rel in result.created:
             print(f"  + {rel}")
+        for rel in result.updated:
+            print(f"  ~ {rel}")
         for rel in result.overwritten:
             print(f"  ~ {rel} (overwritten)")
-        if result.kept:
-            print(f"  kept {len(result.kept)} existing file(s) (--force overwrites):")
-            for rel in result.kept:
-                print(f"    = {rel}")
+        if result.kept and not result.updated:
+            print(f"  kept {len(result.kept)} existing file(s) (--force overwrites)")
     else:
-        print(
-            f"nothing to create: every file of the {result.template} template is already in {where}"
-        )
-        print("  (--force overwrites them)")
-
+        print(f"nothing to create: every file of {shape} is already in {where}")
+    for rel, lines in result.edited.items():
+        print(f"  ! {rel} is yours, so it was not changed; add:")
+        for line in lines:
+            print(f"      {line}")
     print("\nNext:")
     if root.resolve() != Path.cwd().resolve():
         print(f"  cd {args.dir}")
-    for step in next_steps(result.template, result.toolchain):
+    for step in next_steps(result.template, result.toolchain, result.parts):
         print(f"  {step}")
     run = "uv run " if result.toolchain == "uv" else ""
     print(

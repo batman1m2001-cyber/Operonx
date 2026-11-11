@@ -1,0 +1,21 @@
+{{#http}}
+"""The assistant feature's routes: the agent behind HTTP, with a resume
+route for a run that waits for a human."""
+
+from operonx.agents import SQLiteStateStore, agent_service
+from operonx.app import http
+
+from _shared.config import PORT
+from assistant.agent import ASSISTANT
+
+SERVICES = [
+    agent_service(
+        ASSISTANT,
+        http("POST", "/ask", port=PORT),
+        # where a run that waits for an approval is kept until its resume
+        store=SQLiteStateStore(".operonx/agent_runs.db"),
+        description="POST {input}: the agent's reply. Accept: text/event-stream for "
+        "its events as they happen.",
+    ),
+]
+{{/http}}

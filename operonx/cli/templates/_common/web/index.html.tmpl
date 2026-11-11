@@ -1,0 +1,37 @@
+{{#web}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{name}}</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <main>
+    <h1>{{name}}</h1>
+    <form id="ask">
+      <input name="{{route_field}}" placeholder="{{route_field}}" autocomplete="off" required autofocus>
+      <button>Send</button>
+    </form>
+    <output id="answer"></output>
+  </main>
+  <script type="module">
+    import { post } from "./lib/api.js";
+
+    const form = document.getElementById("ask");
+    const answer = document.getElementById("answer");
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      answer.textContent = "…";
+      try {
+        const reply = await post("{{route_path}}", { ...{{route_body}}, {{route_field}}: form.{{route_field}}.value });
+        answer.textContent = reply.{{route_answer}} ?? JSON.stringify(reply);
+      } catch (error) {
+        answer.textContent = error.message;
+      }
+    });
+  </script>
+</body>
+</html>
+{{/web}}

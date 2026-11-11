@@ -1,0 +1,17 @@
+{{#http}}
+"""The greeting feature's routes: its graph behind HTTP."""
+
+from operonx.app import Service, http
+
+from _shared.config import PORT
+from greeting.graph import greet_flow
+
+SERVICES = [
+    Service(
+        "greet",
+        http("POST", "/greet", port=PORT),
+        graph=greet_flow,  # the JSON body fills its parameters
+        description="POST {id, full_name}, get {id, greeting}.",
+    ),
+]
+{{/http}}

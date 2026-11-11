@@ -1,10 +1,12 @@
-"""The assistant's tools: functions the model may call.
+"""The assistant's logic: its tools (functions the model may call) and the
+ops its graph runs.
 
 `@tool` (operonx-agents) reads what the model is shown from the signature
 and the docstring, and validates the model's arguments before the function
 runs. A tool is still a plain function: call it to test it.
 """
 
+from operonx import op
 from operonx.agents import tool
 
 
@@ -18,9 +20,17 @@ def word_count(text: str) -> int:
     return len(text.split())
 
 
+@op
+def reply(output: str = None, status: str = "", error: str = None) -> dict:
+    """What a run keeps of the agent's answer."""
+    return {"output": output, "status": status, "error": error}
+{{#http}}
+
+
 # A tool with side effects can wait for a human: the run ends
 # `interrupted`, and `POST /ask/resume` answers it (see README.md).
 #
 # @tool(idempotent=False, approval=lambda ctx, args: args["amount"] > 500)
 # def refund(order_id: str, amount: int) -> str:
 #     """Refund an order."""
+{{/http}}
