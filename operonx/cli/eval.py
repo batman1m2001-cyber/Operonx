@@ -131,7 +131,7 @@ class _Project:
 
     def record_dirs(self) -> List[Path]:
         dirs = [Path(e["record_dir"]) for e in self.evals()]
-        dirs.append(self.root / "evals")
+        dirs += [self.root / ".operonx" / "evals", self.root / "evals"]  # evals/: the old place
         return list(dict.fromkeys(d.resolve() for d in dirs if d.is_dir()))
 
     # -- stores --------------------------------------------------------------

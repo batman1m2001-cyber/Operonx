@@ -34,7 +34,7 @@ id (a test is one case: a second ``run_case`` in it raises — parametrise
 instead); tests that did not are not part of it.
 
 At the end of the session the record is finished like an eval's —
-``<rootdir>/evals/<name>/<run_id>``, with the counts, metrics,
+``<rootdir>/.operonx/evals/<name>/<run_id>``, with the counts, metrics,
 fingerprint and gate — and the terminal summary says the verdict and
 where. Options:
 
@@ -271,7 +271,7 @@ class _Experiment:
         self.record_dir = (
             (Path(where) if Path(where).is_absolute() else self.root / where)
             if where
-            else self.root / "evals"
+            else self.root / ".operonx" / "evals"
         )
         baseline = config.getoption("operonx_eval_baseline")
         tolerance = config.getoption("operonx_eval_tolerance")

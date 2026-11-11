@@ -67,7 +67,7 @@ def project(pytester):
 
 
 def _record(root: Path, name: str = "pytest"):
-    runs = sorted((root / "evals" / name).iterdir())
+    runs = sorted((root / ".operonx" / "evals" / name).iterdir())
     run = runs[-1]
     meta = json.loads((run / "run.json").read_text())
     items = [json.loads(x) for x in (run / "items.jsonl").read_text().splitlines()]
@@ -88,7 +88,7 @@ async def test_one(run_case):
     got = project.runpytest()
     got.assert_outcomes(errors=1)
     assert "fixture 'run_case' not found" in got.stdout.str()
-    assert not (project.path / "evals").exists()
+    assert not (project.path / ".operonx" / "evals").exists()
 
 
 def test_a_session_is_one_experiment_and_verdicts_are_outcomes(project):

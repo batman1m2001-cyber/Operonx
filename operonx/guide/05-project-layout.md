@@ -157,7 +157,7 @@ def score_flow(id, text):
 """The scorer: one HTTP service and the batch job over the same graph.
 
 POST /score:8017 ──► score_flow ──► {id, words, verdict}
-operonx run score_calls ──► score_flow per line of calls.jsonl ──► out/scored.jsonl
+operonx run score_calls ──► score_flow per line of data/calls.jsonl ──► out/scored.jsonl
 """
 
 from operonx.app import Application, Service, env, http
@@ -172,7 +172,7 @@ APP = Application(
         Job(
             "score_calls",
             graph=score_flow,
-            items="calls.jsonl",
+            items="data/calls.jsonl",
             output="out/scored.jsonl",
             key="id",
         )
@@ -180,7 +180,7 @@ APP = Application(
 )
 ```
 
-```json file=calls.jsonl
+```json file=data/calls.jsonl
 {"id": "c1", "text": "yes I can talk now"}
 {"id": "c2", "text": "busy"}
 ```
@@ -221,9 +221,16 @@ operonx run score_calls
 
 `operonx lint` checks the conventions of this page and of the project's
 `AGENTS.md` (no `print()`, no graph inside a function, no logic in a
-graph's body, the edges written out, every secret in `.env.example`, ...);
-`operonx lint --rules` lists them, and `operonx lint --build` also loads the
-application and builds every graph with the network blocked.
+graph's body, the edges written out, every secret in `.env.example`, ...)
+and the project's shape: code in `src/` reaches another feature only through
+its `__init__` names or its graph, every endpoint is a `Service`, the
+environment is read only in `src/_shared/config.py`, and the root holds only
+the folders and files above (plus `data/`, `out/`, `web/`, `deploy/`,
+`scripts/`). `operonx lint --rules` lists them, and `operonx lint --build`
+also loads the application and builds every graph with the network blocked.
+A project older than a rule runs `operonx lint --baseline` once: today's
+count per rule goes in `operonx.toml`, and lint is red only when a count
+goes up.
 
 ## Growing it
 

@@ -7,7 +7,7 @@ one shape — ``summary`` is ``run.json["eval"]``'s, ``items`` one dict per
 trial — so the reports, ``compare``, ``calibrate`` and ``power`` never ask
 where it came from::
 
-    exp = load_experiment("20261004T101500-000001", store=store, record_dirs=["evals"])
+    exp = load_experiment("20261004T101500-000001", store=store, record_dirs=[".operonx/evals"])
     exp.summary["gate"]["verdict"], exp.outcomes()["refund-1"].passed
 
 :func:`merge_base` and :func:`find_baseline` are how ``Gate(baseline=
