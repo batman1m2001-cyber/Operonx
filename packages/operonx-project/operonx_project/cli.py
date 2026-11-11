@@ -1,12 +1,12 @@
 """``operonx-project`` (and ``operonx project``): the BRD, the plans and the board, read and kept.
 
-    operonx-project new DIR [--name N]                 # a repo with docs/brd/ and an empty board
-    operonx-project adopt [--repo .] [--prefix P]       # an existing project: its BRD and its baseline board
-    operonx-project status [--repo .] [--json]         # checklist, plans, what needs you, changes (read-only)
+    operonx-project new DIR [--name N]                 # a repo with docs/brd/
+    operonx-project adopt [--repo .] [--prefix P]       # an existing project: its BRD from its docs and tests
+    operonx-project status [--repo .] [--json]         # checklist, board, plans, what needs you (read-only)
     operonx-project plans [--repo .] [--json]          # the plan docs under docs/ and where each stands
-    operonx-project milestones [--repo .] [--json]     # every milestone on the board
-    operonx-project show MID [CARD] [--repo .] [--json]
-    operonx-project api JSON [--repo .]                # one action for the studio: see operonx_project.api
+    operonx-project board [--repo .] [--json]          # the board's cards (docs/brd/board.md)
+    operonx-project board CARD STATE [--note TEXT]     # move a card: todo, doing, "needs you", done
+    operonx-project api '{"op": "status"}' [--repo .]  # status as JSON, for the studio
 
 The living BRD::
 
@@ -99,7 +99,7 @@ def _brd(args) -> int:
         from operonx_project.flows.brd_flow import BrdRuntime
 
         state = args.state.resolve()
-        # the engine's store stays denied; the figures the session must look at live beside it
+        # the engine's state stays denied; the figures the session must look at live beside it
         rt = BrdRuntime(
             coder=ClaudeCodeCoder(state_dirs=[str(state)]), data_dir=state.parent / "brd", settings_dir=state
         )
@@ -109,49 +109,39 @@ def _brd(args) -> int:
     return 2
 
 
-# ── milestones ─────────────────────────────────────────────────────────────
+# ── the project ────────────────────────────────────────────────────────────
 
 
 def _repo_arg(p) -> None:
     p.add_argument("--repo", type=Path, default=Path("."), help="the project's repo (default: here)")
 
 
-def _milestone_parsers(sub) -> None:
-    p = sub.add_parser("new", help="a new project: a git repo with docs/brd/ and an empty board")
+def _project_parsers(sub) -> None:
+    p = sub.add_parser("new", help="a new project: a git repo with docs/brd/")
     p.add_argument("dir", type=Path)
     p.add_argument("--name")
     p = sub.add_parser("plans", help="the plan docs under docs/ and where each stands (their status blocks)")
     _repo_arg(p)
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("adopt", help="an existing project: its BRD from its docs and tests, its baseline board")
+    p = sub.add_parser("adopt", help="an existing project: its BRD from its docs and tests")
     _repo_arg(p)
     p.add_argument("--prefix", default="", help="the requirement id prefix (default: from the project name)")
     p.add_argument("--answer", type=Path, default=None, help="a recorded answer (JSON) instead of the session")
     p.add_argument("--max-usd", type=float, default=2.0)
     p.add_argument("--model", default=None)
     p.add_argument("--python", default=None, help="the interpreter the cited tests run with (default: its .venv)")
-    p = sub.add_parser("api", help="one action as JSON in, JSON out (for the studio): see operonx_project.api")
+    p = sub.add_parser("api", help='\'{"op": "status"}\': the status as JSON (for the studio)')
     _repo_arg(p)
     p.add_argument("request", help="the request as JSON, or - to read it from stdin")
-    p.add_argument("--actor", default="studio", help="who acts (recorded in the events)")
-    p = sub.add_parser("status", help="where the project stands: checklist, plans, what needs you, recent changes")
+    p = sub.add_parser("status", help="where the project stands: checklist, board, plans, what needs you, changes")
     _repo_arg(p)
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("milestones", help="every milestone: state, board, cost, what waits for you")
+    p = sub.add_parser("board", help="the board's cards; with CARD STATE, move a card")
     _repo_arg(p)
-    p.add_argument("--json", action="store_true")
-    p = sub.add_parser("show", help="one milestone (its cards and last events), or one card")
-    _repo_arg(p)
-    p.add_argument("milestone")
     p.add_argument("card", nargs="?")
+    p.add_argument("state", nargs="?", help="todo, doing, needs you, done")
+    p.add_argument("--note", default=None, help="the card's note: the question, or the owner's answer")
     p.add_argument("--json", action="store_true")
-    p.add_argument("--events", type=int, default=15)
-
-
-def _open(args):
-    from operonx_project.project import Project
-
-    return Project.open(args.repo)
 
 
 def _coder(state: Path):
@@ -169,51 +159,8 @@ def _coder(state: Path):
     return ClaudeCodeCoder(state_dirs=[str(state)])
 
 
-def status_data(project) -> List[dict]:
-    from operonx_project.board import columns
-
-    out = []
-    for ms in project.store.milestones():
-        cards = project.store.cards(ms.id)
-        cols = columns(cards)
-        waiting = []
-        for c in cols["waiting"]:
-            q = c.detail.get("question") or {}
-            waiting.append({"card": c.id, "question": q.get("problem") or q.get("reason") or c.reason})
-        out.append({
-            "id": ms.id, "title": ms.title, "state": ms.state.value, "reason": ms.reason,
-            "mode": "w1" if ms.policy.horizon == "all" else "w2", "cost_usd": round(ms.cost_usd, 4),
-            "budget_usd": ms.policy.budget.max_usd, "cards": len(cards),
-            "columns": {k: len(v) for k, v in cols.items()}, "waiting": waiting,
-        })  # fmt: skip
-    return out
-
-
-def show_data(project, mid: str, cid: Optional[str], events: int) -> dict:
-    store = project.store
-    ms = store.get_milestone(mid)
-    if cid:
-        c = store.get_card(mid, cid)
-        detail = {k: v for k, v in c.detail.items() if k not in ("baseline", "heldout")}
-        held = c.detail.get("heldout") or {}
-        detail["heldout"] = {"files": len(held.get("files") or [])} if held else None  # never the tests themselves
-        evs = [e for e in store.events(mid, limit=100_000) if e["card"] == cid][-events:]
-        return {"milestone": mid, "id": c.id, "title": c.title, "state": c.state.value,
-                "stage": c.stage.value if c.stage else None, "reason": c.reason, "rows": c.rows,
-                "criteria": c.criteria, "deps": c.deps, "paths": c.paths, "kind": c.kind, "risk": c.risk,
-                "reopens": c.reopens, "run_id": c.run_id, "cost_usd": round(c.cost_usd, 4), "detail": detail,
-                "events": evs}  # fmt: skip
-    cards = store.cards(mid)
-    return {"id": ms.id, "title": ms.title, "goal": ms.goal, "state": ms.state.value, "reason": ms.reason,
-            "cost_usd": round(ms.cost_usd, 4), "replans": ms.replans, "policy": ms.policy.to_dict(),
-            "cards": [{"id": c.id, "state": c.state.value, "stage": c.stage.value if c.stage else None,
-                       "title": c.title, "deps": c.deps, "cost_usd": round(c.cost_usd, 4), "reason": c.reason}
-                      for c in cards],
-            "events": store.events(mid, limit=100_000)[-events:]}  # fmt: skip
-
-
 def _plans(args) -> int:
-    """``plans``: files only, no store. Exit 1 when a block is wrong."""
+    """``plans``: files only. Exit 1 when a block is wrong."""
     from operonx_project.plans import find
 
     out = sys.stdout
@@ -235,21 +182,50 @@ def _plans(args) -> int:
     return 1 if errors else 0
 
 
-def _status(args) -> int:
-    """``status``: the project in one document (PROJECT_MODE_PLAN D2), read-only: no store is made."""
-    from operonx_project.status import status, text
+def _board(args) -> int:
+    """``board``: print the cards, or move one (``board C4 done``). Exit 1 when the move is refused."""
+    from operonx_project import board
 
-    doc = status(args.repo)
-    sys.stdout.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n" if args.json else text(doc))
+    out = sys.stdout
+    try:
+        if args.card:
+            if not args.state:
+                raise board.BoardError("move a card with: board CARD STATE")
+            c = board.move(args.repo, args.card, args.state, note=args.note)
+            out.write(f"{c.id} · {c.title} · {c.state}\n" + (f"  {c.note}\n" if c.note else ""))
+            return 0
+        cards = board.read(args.repo)
+    except (board.BoardError, OSError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
+    if cards is None:
+        out.write(f"no board yet ({board.PATH}): the first card makes it\n")
+        return 0
+    view = board.view(cards)
+    if args.json:
+        out.write(json.dumps(view, indent=1, ensure_ascii=False) + "\n")
+        return 0
+    for c in view["cards"]:
+        waits = f"  after {', '.join(c['waits'])}" if c["waits"] else ""
+        out.write(f"{c['id']:<4} {c['state']:<9} {c['lane']:<8} {c['kind']:<5} {c['title']}{waits}\n")
+        if c["note"]:
+            out.write(f"     {c['note'].splitlines()[0][:200]}\n")
+    out.write(" · ".join(f"{len(ids)} {s}" for s, ids in view["columns"].items()) + "\n")
     return 0
 
 
-def _milestones(args) -> int:
+def _run(args) -> int:
+    from operonx_project.status import status, text
+
     out = sys.stdout
     if args.cmd == "plans":
         return _plans(args)
+    if args.cmd == "board":
+        return _board(args)
     if args.cmd == "status":
-        return _status(args)
+        doc = status(args.repo)
+        out.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n" if args.json else text(doc))
+        return 0
     if args.cmd == "api":
         raw = sys.stdin.read() if args.request == "-" else args.request
         try:
@@ -257,76 +233,31 @@ def _milestones(args) -> int:
         except ValueError as exc:
             out.write(json.dumps({"ok": False, "status": "invalid", "message": f"not JSON: {exc}"}) + "\n")
             return 2
-        if isinstance(req, dict) and req.get("op") == "status":  # read-only: before a store is opened
-            from operonx_project.status import status, text
-
-            doc = status(args.repo, changes=int(req.get("changes", 15)))
-            # the same in plain lines: what an assistant reads (the studio's project_status tool)
-            out.write(json.dumps({"ok": True, "project": doc, "text": text(doc)}, ensure_ascii=False) + "\n")
-            return 0
+        if not isinstance(req, dict) or req.get("op") != "status":
+            out.write(json.dumps({"ok": False, "status": "invalid", "message": "the one op is status"}) + "\n")
+            return 2
+        doc = status(args.repo, changes=int(req.get("changes", 15)))
+        # the same in plain lines: what an assistant reads (the studio's project_status tool)
+        out.write(json.dumps({"ok": True, "project": doc, "text": text(doc)}, ensure_ascii=False) + "\n")
+        return 0
     if args.cmd == "new":
         from operonx_project.project import new_project
 
         proj = new_project(args.dir, name=args.name)
-        out.write(f"{proj.repo}: a project with docs/brd/ and an empty board. Next: operonx-project brd register "
+        out.write(f"{proj.repo}: a project with docs/brd/. Next: operonx-project brd register "
                   f"<requirements> --repo {proj.repo}\n")  # fmt: skip
         return 0
-    proj = _open(args)
     if args.cmd == "adopt":
         from operonx_project.adopt import adopt, main_report
+        from operonx_project.project import Project
 
+        proj = Project.open(args.repo)
         answer = json.loads(args.answer.read_text(encoding="utf-8")) if args.answer else None
         report = asyncio.run(adopt(proj, _coder(proj.state), prefix=args.prefix, answer=answer,
                                    python=[args.python] if args.python else None, max_usd=args.max_usd,
                                    model=args.model))  # fmt: skip
         out.write(main_report(report) + "\n")
-        out.write(f"Read {proj.repo / 'docs' / 'brd'} and commit it; the studio's Board shows it.\n")
-        return 0
-    if args.cmd == "milestones":
-        data = status_data(proj)
-        if args.json:
-            out.write(json.dumps(data, indent=1) + "\n")
-            return 0
-        if not data:
-            out.write("no milestone yet: operonx-project adopt, or a plan doc sent with operonx-project api\n")
-        for m in data:
-            out.write(f"{m['id']}  {m['state']:<18} {m['title']}  ({m['mode']}, ${m['cost_usd']:.2f} of "
-                      f"${m['budget_usd']:.0f})\n")  # fmt: skip
-            if m["reason"]:
-                out.write(f"    {m['reason'][:200]}\n")
-            out.write("    " + " · ".join(f"{k} {v}" for k, v in m["columns"].items()) + "\n")
-            for w in m["waiting"]:
-                out.write(f"    waits on you: {w['card']} — {str(w['question'])[:160]}\n")
-        return 0
-    if args.cmd == "api":
-        from operonx_project.api import act
-
-        result = act(proj, req if isinstance(req, dict) else {}, actor=args.actor)
-        out.write(json.dumps(result) + "\n")
-        return 0 if result["ok"] else 1
-    if args.cmd == "show":
-        data = show_data(proj, args.milestone, args.card, args.events)
-        if args.json:
-            out.write(json.dumps(data, indent=1, default=str) + "\n")
-            return 0
-        if args.card:
-            out.write(f"{data['milestone']}/{data['id']}  {data['state']}{'/' + data['stage'] if data['stage'] else ''}"
-                      f"  {data['title']}  (${data['cost_usd']:.2f}, re-opened {data['reopens']}×)\n")  # fmt: skip
-            for k in ("reason", "rows", "deps", "paths", "criteria", "run_id"):
-                if data[k]:
-                    out.write(f"  {k}: {data[k]}\n")
-            if data["detail"].get("question"):
-                out.write(f"  question: {json.dumps(data['detail']['question'], ensure_ascii=False)[:600]}\n")
-        else:
-            out.write(f"{data['id']}  {data['state']}  {data['title']}  (${data['cost_usd']:.2f}, "
-                      f"{data['replans']} replan(s))\n")  # fmt: skip
-            if data["reason"]:
-                out.write(f"  {data['reason'][:300]}\n")
-            for c in data["cards"]:
-                st = c["state"] + (f"/{c['stage']}" if c["stage"] else "")
-                out.write(f"  {c['id']:<6} {st:<18} {c['title'][:50]:<50} {c['reason'][:70]}\n")
-        for e in data["events"]:
-            out.write(f"  · {e['seq']:>5} {e['kind']:<22} {(e['card'] or ''):<6} {json.dumps(e['data'])[:110]}\n")
+        out.write(f"Read {proj.repo / 'docs' / 'brd'} and commit it; the studio shows it.\n")
         return 0
     return 2
 
@@ -341,12 +272,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(prog="operonx-project")
     sub = ap.add_subparsers(dest="cmd", required=True)
     _brd_parser(sub)
-    _milestone_parsers(sub)
+    _project_parsers(sub)
     ns = ap.parse_args(args)
     if ns.cmd == "brd":
         return _brd(ns)
     try:
-        return _milestones(ns)
+        return _run(ns)
     except KeyError as exc:
         sys.stderr.write(f"error: {exc.args[0] if exc.args else exc}\n")
         return 2

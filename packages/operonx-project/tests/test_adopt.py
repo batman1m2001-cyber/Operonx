@@ -11,7 +11,6 @@ import subprocess
 import sys
 
 from operonx_project.adopt import adopt, run_tests
-from operonx_project.brd.board import read_board
 from operonx_project.brd.checker import check
 from operonx_project.brd.records import matrix_status
 from operonx_project.project import Project
@@ -49,8 +48,6 @@ ANSWER = {
         {"id": "CALC-REQ-MATH-04", "type": "functional", "quote": "Adds", "location": "README.md", "state": "built",
          "tests": ["tests/test_calc.py::test_invented"]},
     ],
-    "features": [{"title": "arithmetic", "rows": ["CALC-REQ-MATH-01", "CALC-REQ-MATH-02", "NOT-A-ROW-01"],
-                  "paths": ["calc.py"]}],
 }  # fmt: skip
 
 
@@ -62,7 +59,7 @@ def test_run_tests_reads_each_node(tmp_path):
                    "tests/test_calc.py::test_invented": False}  # fmt: skip
 
 
-def test_adopt_verifies_only_what_passed_and_draws_the_baseline(tmp_path):
+def test_adopt_verifies_only_what_passed(tmp_path):
     repo = _repo(tmp_path)
     project = Project.open(repo)
     report = asyncio.run(adopt(project, coder=None, prefix="CALC", answer=ANSWER, python=[sys.executable]))
@@ -74,16 +71,7 @@ def test_adopt_verifies_only_what_passed_and_draws_the_baseline(tmp_path):
         "CALC-REQ-MATH-04": "implemented_unverified",
     }  # its test does not exist
     assert report["status"]["implemented_verified"] == 1
-    (bf,) = read_board(brd)
-    assert (bf.milestone.id, bf.milestone.state.value) == ("m0", "done")
-    assert [(c.id, c.state.value, c.rows) for c in bf.cards] == [
-        ("C1", "done", ["CALC-REQ-MATH-01", "CALC-REQ-MATH-02"])
-    ]  # the unknown row is dropped
     errors, _ = check(brd)
     assert errors == [], errors
     assert "adopted (`operonx-project adopt`): 4 requirements" in (brd / "CHANGELOG.md").read_text()
-    assert project.store.get_milestone("m0").state.value == "done"
-
-    # adopted again: the baseline is kept, no second m0
-    asyncio.run(adopt(project, coder=None, prefix="CALC", answer=ANSWER, python=[sys.executable]))
-    assert [m.id for m in project.store.milestones()] == ["m0"]
+    assert not (brd / "board.md").exists()  # the board starts with the first card someone works

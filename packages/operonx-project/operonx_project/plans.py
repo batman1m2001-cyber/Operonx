@@ -13,7 +13,7 @@ says where it stands in YAML front matter, which GitHub renders as a table::
     updated: 2026-10-22
     ---
 
-:func:`find` reads every plan under ``docs/`` (the engine's own ``docs/brd/board/`` is not plans), with what
+:func:`find` reads every plan under ``docs/`` (an old ``docs/brd/board/`` is not plans), with what
 is wrong in a block (an error) and the ``*_PLAN.md`` files that have none (a warning: a project adopts the
 block at its own pace). A phase's status changes in the commit that finishes it, as a checklist row does.
 """
@@ -33,7 +33,7 @@ __all__ = ["PHASE_STATUSES", "PLAN_STATUSES", "Phase", "Plan", "PlanError", "fin
 PLAN_STATUSES = ("plan", "in_progress", "done", "parked")
 PHASE_STATUSES = ("open", "in_progress", "done", "skipped")
 _HEAD = 8192  # a block is at the top: a big doc is not read whole to find out it has none
-_SKIP = ("brd/board/", "brd/sources/")  # the engine's board files; verbatim copies of the client's sources
+_SKIP = ("brd/board/", "brd/sources/")  # an old milestone board's files; verbatim copies of the client's sources
 
 
 class PlanError(ValueError):

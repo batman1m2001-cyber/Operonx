@@ -1,20 +1,19 @@
 """Where the project stands, in one document (PROJECT_MODE_PLAN D2).
 
-:func:`status` reads the checklist, the plan docs (:mod:`operonx_project.plans`), the board's milestones
-when the project has any, the BRD's open questions and the last commits, and returns
+:func:`status` reads the checklist, the plan docs (:mod:`operonx_project.plans`), the board
+(``docs/brd/board.md``) when the project has one, the BRD's open questions and the last commits, and returns
 one dict the studio's screen and its assistant both read::
 
     checklist   counts by status, the open rows (neither verified nor out of scope)
-    plans       plan docs and milestones in one shape, in progress first, then planned, then the rest; a doc
-                on the board is its milestone alone, with the doc's ``path``;
+    plans       plan docs, in progress first, then planned, then the rest;
                 ``unmarked``: the ``*_PLAN.md`` files with no status block yet
-    needs_you   the BRD's open questions
-    working_on  what is in progress, each with one sentence written here from the data
+    board       the board's cards (:func:`operonx_project.board.view`), or ``None``
+    needs_you   the BRD's open questions and the cards that need the owner
+    working_on  the cards doing and the plans in progress, each with one sentence written here from the data
     changes     the last commits, newest first
     standard    the standard, item by item (brd, check, plans): ok, a sentence, the fix
 
-It only reads: a project the engine has never run keeps no ``.operonx/project`` because of it. Every
-sentence is made by code from the data; no model writes any of it.
+It only reads. Every sentence is made by code from the data; no model writes any of it.
 """
 
 from __future__ import annotations
@@ -22,8 +21,9 @@ from __future__ import annotations
 import subprocess
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
+from operonx_project.board import PATH, lane, read, view
 from operonx_project.brd.records import MATRIX, STATUSES, _split, load_questions
 from operonx_project.plans import find
 
@@ -32,7 +32,6 @@ __all__ = ["CLOSED", "STANDARD", "standard", "status", "text"]
 #: Row statuses that need no more work.
 CLOSED = ("implemented_verified", "out_of_scope_demo", "not_applicable")
 _ORDER = {"in_progress": 0, "plan": 1, "parked": 2, "done": 3}
-_MS_STATUS = {"done": "done", "cancelled": "parked", "created": "plan", "failed": "parked"}
 _WHAT = ("requirement", "metric", "title", "what")  # the column that says what a row is, by its header
 _NOTE = ("gap", "note", "evidence")  # in this order: "Evidence, gaps" and "Notes" before "Tests / evidence"
 
@@ -154,66 +153,9 @@ def standard(repo: Path, doc: Dict[str, Any], brd: str = "docs/brd") -> List[Dic
     return out
 
 
-def _engine(repo: Path) -> Optional[Dict[str, Any]]:
-    """The board's milestones, when the store exists; ``None`` otherwise (and nothing is created)."""
-    from operonx_project.project import STATE_DIR
-
-    db = repo / STATE_DIR / "project.db"
-    if not db.is_file():
-        return None
-    from operonx_project.board import columns
-    from operonx_project.store import Store
-
-    store = Store(db)
-    milestones = []
-    for ms in store.milestones():
-        cards = store.cards(ms.id)
-        plan = store.ms_get(ms.id, "plan")
-        milestones.append({"ms": ms, "cards": cards, "columns": columns(cards),
-                           "doc": plan.get("path", "") if isinstance(plan, dict) else ""})  # fmt: skip
-    return {"milestones": milestones}
-
-
-def _milestone_plan(m: Dict[str, Any]) -> Dict[str, Any]:
-    ms, cards = m["ms"], m["cards"]
-    state = ms.state.value
-    status = _MS_STATUS.get(state, "in_progress")
-    done = sum(1 for c in cards if c.state.value in ("done", "cancelled"))
-    running = [c for c in cards if c.state.value in ("running", "waiting_human", "verified")]
-    cur = running[0] if running else next((c for c in cards if c.state.value in ("ready", "pending")), None)
-    return {"path": m.get("doc", ""), "source": "engine", "milestone": ms.id, "title": ms.title, "status": status,
-            "state": state, "reason": ms.reason, "updated": _iso(ms.updated), "rows": list(ms.rows),
-            "done": done, "total": len(cards), "current": cur.id if cur and status == "in_progress" else None,
-            "cost_usd": round(ms.cost_usd, 4), "budget_usd": ms.policy.budget.max_usd,
-            "columns": {k: len(v) for k, v in m["columns"].items()},
-            "phases": [{"id": c.id, "title": c.title, "status": _card_phase(c.state.value)} for c in cards]}  # fmt: skip
-
-
-def _card_phase(state: str) -> str:
-    if state in ("done",):
-        return "done"
-    if state in ("cancelled",):
-        return "skipped"
-    if state in ("running", "waiting_human", "verified"):
-        return "in_progress"
-    return "open"
-
-
-def _iso(ts: float) -> str:
-    import datetime as dt
-
-    return dt.datetime.fromtimestamp(ts).date().isoformat() if ts else ""
-
-
-def _sentence(plan: Dict[str, Any], cards: Optional[List[Any]] = None) -> str:
+def _sentence(plan: Dict[str, Any]) -> str:
     """One line of what a plan in progress is doing, from its data."""
     phases = {p["id"]: p for p in plan["phases"]}
-    if plan["source"] == "engine":
-        state = plan["state"].replace("_", " ")
-        cur = next((c for c in cards or [] if c.id == plan["current"]), None)
-        where = f"{cur.id} {cur.state.value.replace('_', ' ')}: {cur.title}" if cur else state
-        money = f"${plan['cost_usd']:.2f} of ${plan['budget_usd']:.0f}"
-        return f"{plan['done']} of {plan['total']} cards done · {where} · {money}"
     cur = phases.get(plan["current"] or "")
     if not plan["total"]:
         return "in progress (no phases listed)"
@@ -236,29 +178,30 @@ def status(repo: Path, changes: int = 15, brd: str = "docs/brd") -> Dict[str, An
                  "file": f"{brd}/{MATRIX}" if rows else ""}  # fmt: skip
 
     docs, plan_errors, plan_warnings = find(repo)
-    engine = _engine(repo)
-    mirrored = {m["doc"] for m in engine["milestones"] if m["doc"]} if engine else set()
-    # a plan on the board (api ``plan``) is its milestone, listed once: the board has its cards and runs
-    plans = [{**p.as_dict(), "source": "doc"} for p in docs if p.path not in mirrored]
-    cards_of: Dict[str, List[Any]] = {}
-    if engine:
-        for m in engine["milestones"]:
-            plans.append(_milestone_plan(m))
-            cards_of[m["ms"].id] = m["cards"]
+    plans = [{**p.as_dict(), "source": "doc"} for p in docs]
     plans.sort(key=lambda p: p["updated"] if p["status"] == "done" else "", reverse=True)  # done: newest first
     plans.sort(key=lambda p: _ORDER.get(p["status"], 9))  # stable: in progress, planned, parked, done
-    working_on = [{"title": p["title"], "source": p["source"], "path": p["path"], "milestone": p.get("milestone"),
-                   "sentence": _sentence(p, cards_of.get(p.get("milestone") or ""))}
-                  for p in plans if p["status"] == "in_progress"]  # fmt: skip
+    cards = read(repo)
+    board = view(cards) if cards is not None else None
+    done = sum(1 for c in cards or [] if c.state == "done")
+    working_on = [{"title": f"{c.id} · {c.title}", "source": "board", "path": PATH, "card": c.id,
+                   "sentence": f"doing · {lane(c.files)} · {done} of {len(cards)} cards done"}
+                  for c in cards or [] if c.state == "doing"]  # fmt: skip
+    working_on += [{"title": p["title"], "source": p["source"], "path": p["path"], "sentence": _sentence(p)}
+                   for p in plans if p["status"] == "in_progress"]  # fmt: skip
 
     needs_you: List[Dict[str, Any]] = []
     for q in load_questions(brd_dir):
         if q.state.lower().startswith("open"):
             needs_you.append({"source": "brd", "id": q.id, "kind": q.type, "text": q.topic, "state": q.state})
+    for c in cards or []:
+        if c.state == "needs you":
+            needs_you.append({"source": "board", "id": c.id, "kind": "card", "text": c.note or c.title,
+                              "state": "open"})  # fmt: skip
 
     unmarked = [w.split(": ", 1)[0] for w in plan_warnings]
     doc = {"repo": str(repo), "checklist": checklist, "plans": plans, "plan_errors": plan_errors,
-           "unmarked": unmarked, "needs_you": needs_you, "working_on": working_on,
+           "unmarked": unmarked, "board": board, "needs_you": needs_you, "working_on": working_on,
            "changes": _git_log(repo, changes)}  # fmt: skip
     doc["standard"] = standard(repo, doc, brd)
     return doc
@@ -274,6 +217,13 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
             out.append(f"  {r['id']}  {r['status']}  {r['what'] or r['note']}"[:220])
     else:
         out.append("Checklist: none (no docs/brd matrix)")
+    b = doc.get("board")
+    if b:
+        out.append("Board: " + ", ".join(f"{len(ids)} {s}" for s, ids in b["columns"].items() if ids))
+        for card in b["cards"]:
+            if card["state"] != "done":
+                waits = f"  (after {', '.join(card['waits'])})" if card["waits"] else ""
+                out.append(f"  {card['id']:<4} {card['state']:<9} {card['lane']:<8} {card['title']}{waits}"[:220])
     if doc["working_on"]:
         out.append("Working on:")
         for w in doc["working_on"]:
@@ -287,10 +237,7 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
         out.append("Plans: " + ", ".join(f"{counts[s]} {s.replace('_', ' ')}" for s in _ORDER if counts.get(s)))
         for p in doc["plans"]:
             if p["status"] != "done":
-                where = p["path"] or f"milestone {p['milestone']}, {p['state'].replace('_', ' ')}"
-                out.append(f"  {p['status']:<12} {p['done']}/{p['total']}  {p['title']}  ({where})")
-                if p.get("reason"):
-                    out.append(f"      {p['reason']}"[:220])
+                out.append(f"  {p['status']:<12} {p['done']}/{p['total']}  {p['title']}  ({p['path']})")
     for e in doc["plan_errors"]:
         out.append(f"  ERROR {e}")
     if doc["unmarked"]:

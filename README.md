@@ -83,10 +83,9 @@ myapp/
 
 `docs/brd/` is the project's living BRD: a checklist with one row per
 requirement, its status, and the test that proves it. The assistant keeps
-the rows true as it changes code. **operonx-project** builds the open rows
-as milestones of cards on a board (`docs/brd/board/`), with coding agents,
-review and held-out tests. The studio's Board tab is where you run it and
-answer its questions, or tell its assistant what to build
+the rows true as it changes code. The board (`docs/brd/board.md`)
+holds one card per task, in four states (todo, doing, needs you, done);
+the studio's Board shows it and its assistant moves the cards
 (`packages/operonx-project/`).
 
 `AGENTS.md` tells the assistant to read the guide before it uses an operonx

@@ -1,4 +1,4 @@
-"""Two projects in one repo (plan D11): each folder with its own BRD and store."""
+"""Two projects in one repo (plan D11): each folder with its own BRD and state."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ def test_each_subfolder_is_its_own_project(tmp_path):
     a, b = Project.open(repo / "alpha"), Project.open(repo / "beta")
     assert a.repo == repo / "alpha" and a.state == repo / "alpha" / ".operonx" / "project"
     assert (a.git.sub, b.git.sub, a.git.project) == ("alpha", "beta", "alpha")
-    assert a.state != b.state and (a.state / "project.db").is_file()
+    assert a.state != b.state and a.state.is_dir()
     exclude = (repo / ".git" / "info" / "exclude").read_text()
     assert "/alpha/.operonx/project/" in exclude and "/beta/.operonx/runs/" in exclude
 

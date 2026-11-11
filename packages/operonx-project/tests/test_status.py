@@ -105,7 +105,7 @@ def _cli(*args: str) -> tuple:
     return code, buf.getvalue()
 
 
-def test_the_api_op_and_the_cli_read_without_making_a_store(tmp_path):
+def test_the_api_op_and_the_cli_only_read(tmp_path):
     repo = _repo(tmp_path)
     code, out = _cli("api", "--repo", str(repo), '{"op": "status", "changes": 1}')
     got = json.loads(out)

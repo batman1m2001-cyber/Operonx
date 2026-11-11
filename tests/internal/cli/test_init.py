@@ -672,7 +672,7 @@ class TestTheBrd:
         assert _init(capsys, root)[0] == 0
         brd = root / "docs" / "brd"
         for rel in ("README.md", "CHANGELOG.md", "requirements/requirements_traceability.md",
-                    "requirements/open_questions.md", "board/README.md", "sources/owner_requests/.gitkeep"):  # fmt: skip
+                    "requirements/open_questions.md", "sources/owner_requests/.gitkeep"):  # fmt: skip
             assert (brd / rel).is_file(), rel
         assert "# p: the living product repository" in (brd / "README.md").read_text()
         # only what is read: no stub folders a project has nothing to put in yet
