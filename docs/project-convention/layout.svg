@@ -1,0 +1,129 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640" width="960" height="640" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.grp{fill:#f6f8fa;stroke:#d0d7de}.chip{fill:#ffffff;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}.rule{stroke:#d0d7de}
+    .ui{fill:#8250df}.web{fill:#0969da}.core{fill:#1a7f37}.data{fill:#9a6700}.ai{fill:#bf3989}.plat{fill:#6e7781}.none{fill:#d0d7de}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.grp{fill:#161b22;stroke:#30363d}.chip{fill:#0d1117;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}.rule{stroke:#30363d}
+      .ui{fill:#a371f7}.web{fill:#4493f8}.core{fill:#3fb950}.data{fill:#d29922}.ai{fill:#db61a2}.plat{fill:#8b949e}.none{fill:#30363d}
+    }
+  </style>
+  <rect class="bg" width="960" height="640" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">One project, one shape</text>
+  <text x="24" y="54" class="mut" font-size="13">A file's name says its unit; its unit says its lane. Anything else in a feature is private: <tspan class="mono" font-size="12">_name.py</tspan>.</text>
+
+  <g font-size="11.5" font-weight="600" class="mut">
+    <text x="40" y="84">path</text><text x="340" y="84">what lives there</text><text x="700" y="84">unit</text><text x="800" y="84">lane</text>
+  </g>
+  <line class="rule" x1="24" x2="936" y1="92" y2="92"/>
+
+  <!-- app -->
+  <g transform="translate(0,96)">
+    <rect class="web" x="24" y="4" width="4" height="22" rx="2"/>
+    <text x="40" y="20" class="ink mono" font-size="12.5">app/main.py</text>
+    <text x="340" y="20" class="ink" font-size="12.5">the map: one line per feature</text>
+    <text x="800" y="20" class="mut" font-size="12">web backend</text>
+  </g>
+  <g transform="translate(0,126)">
+    <rect class="plat" x="24" y="4" width="4" height="22" rx="2"/>
+    <text x="40" y="20" class="ink mono" font-size="12.5">src/_shared/</text>
+    <text x="340" y="20" class="ink" font-size="12.5">config · db · errors · auth · no ops, no graphs</text>
+    <text x="800" y="20" class="mut" font-size="12">platform</text>
+  </g>
+
+  <!-- one feature -->
+  <rect class="grp" x="32" y="160" width="904" height="340" rx="8"/>
+  <text x="40" y="180" class="ink mono" font-size="12.5" font-weight="700">src/news/</text>
+  <text x="340" y="180" class="mut" font-size="12.5">one feature = one folder</text>
+
+  <g font-size="12.5">
+    <g transform="translate(0,186)">
+      <rect class="none" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">__init__.py</text><text x="340" y="20" class="ink">the names other features may use</text>
+    </g>
+    <g transform="translate(0,214)">
+      <rect class="web" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">routes.py</text><text x="340" y="20" class="ink">SERVICES: Service(...) and each body</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">route</text>
+      <text x="800" y="20" class="mut" font-size="12">web backend</text>
+    </g>
+    <g transform="translate(0,242)">
+      <rect class="web" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">jobs.py</text><text x="340" y="20" class="ink">JOBS: Job(...)</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">job</text>
+      <text x="800" y="20" class="mut" font-size="12">web backend</text>
+    </g>
+    <g transform="translate(0,270)">
+      <rect class="core" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">graph.py</text><text x="340" y="20" class="ink">wiring only</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">flow</text>
+      <text x="800" y="20" class="mut" font-size="12">core · flow</text>
+    </g>
+    <g transform="translate(0,298)">
+      <rect class="core" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">ops.py</text><text x="340" y="20" class="ink">the steps; every one traced</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">op</text>
+      <text x="800" y="20" class="mut" font-size="12">core · flow</text>
+    </g>
+    <g transform="translate(0,326)">
+      <rect class="core" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">rules.py</text><text x="340" y="20" class="ink">pure: no I/O, no operonx</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">rule</text>
+      <text x="800" y="20" class="mut" font-size="12">core · domain</text>
+    </g>
+    <g transform="translate(0,354)">
+      <rect class="data" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">store.py</text><text x="340" y="20" class="ink">this feature's tables</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">store</text>
+      <text x="800" y="20" class="mut" font-size="12">data</text>
+    </g>
+    <g transform="translate(0,382)">
+      <rect class="data" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">source.py</text><text x="340" y="20" class="ink">fetch → normalise</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">source</text>
+      <text x="800" y="20" class="mut" font-size="12">data</text>
+    </g>
+    <g transform="translate(0,410)">
+      <rect class="ai" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">prompts.py</text><text x="340" y="20" class="ink">prompt text for its LLMOps</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">llm</text>
+      <text x="800" y="20" class="mut" font-size="12">AI</text>
+    </g>
+    <g transform="translate(0,438)">
+      <rect class="ai" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">agent.py</text><text x="340" y="20" class="ink">AgentOp and its tools</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">agent</text>
+      <text x="800" y="20" class="mut" font-size="12">AI</text>
+    </g>
+    <g transform="translate(0,466)">
+      <rect class="none" x="40" y="4" width="4" height="22" rx="2"/>
+      <text x="56" y="20" class="ink mono">_dedupe.py</text><text x="340" y="20" class="ink">private helper, only this feature imports it</text>
+      <text x="728" y="20" class="mut" font-size="11.5" text-anchor="middle">flexible</text>
+    </g>
+  </g>
+
+  <!-- outside src -->
+  <g font-size="12.5">
+    <g transform="translate(0,508)">
+      <rect class="ui" x="24" y="4" width="4" height="22" rx="2"/>
+      <text x="40" y="20" class="ink mono">web/pages/news.js</text><text x="340" y="20" class="ink">the feature's page</text>
+      <rect class="chip" x="690" y="4" width="76" height="22" rx="11"/><text x="728" y="19" class="ink mono" font-size="11.5" text-anchor="middle">page</text>
+      <text x="800" y="20" class="mut" font-size="12">UI/UX</text>
+    </g>
+    <g transform="translate(0,536)">
+      <rect class="none" x="24" y="4" width="4" height="22" rx="2"/>
+      <text x="40" y="20" class="ink mono">tests/news/test_rules.py</text><text x="340" y="20" class="ink">mirrors <tspan class="mono" font-size="12">src/news/rules.py</tspan>; fakes in <tspan class="mono" font-size="12">tests/fakes/</tspan></text>
+    </g>
+    <g transform="translate(0,564)">
+      <rect class="none" x="24" y="4" width="4" height="22" rx="2"/>
+      <text x="40" y="20" class="ink mono">scripts/</text><text x="340" y="20" class="ink">one-off tools; nothing imports them</text>
+    </g>
+    <g transform="translate(0,592)">
+      <rect class="plat" x="24" y="4" width="4" height="22" rx="2"/>
+      <text x="40" y="20" class="ink mono">resources.yaml · operonx.toml</text><text x="340" y="20" class="ink">models and keys by name; secrets in .env</text>
+      <text x="800" y="20" class="mut" font-size="12">platform</text>
+    </g>
+  </g>
+</svg>

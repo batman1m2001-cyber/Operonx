@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 476" width="960" height="476" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+  <style>
+    .bg{fill:#ffffff}.grp{fill:#f6f8fa;stroke:#d0d7de}.card{fill:#ffffff;stroke:#d0d7de}
+    .ink{fill:#1f2328}.mut{fill:#59636e}
+    .arrow{stroke:#8c959f;stroke-width:1.5;fill:none}.head{fill:#8c959f}
+    .okl{stroke:#1a7f37;stroke-width:1.8;fill:none}.okh{fill:#1a7f37}.ok{fill:#1a7f37}
+    .badl{stroke:#cf222e;stroke-width:1.8;fill:none;stroke-dasharray:5 4}.badh{fill:#cf222e}.bad{fill:#cf222e}
+    .web{fill:#0969da}.core{fill:#1a7f37}.data{fill:#9a6700}.ai{fill:#bf3989}.plat{fill:#6e7781}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    @media (prefers-color-scheme:dark){
+      .bg{fill:#0d1117}.grp{fill:#161b22;stroke:#30363d}.card{fill:#0d1117;stroke:#30363d}
+      .ink{fill:#e6edf3}.mut{fill:#9198a1}
+      .arrow{stroke:#6e7681}.head{fill:#6e7681}
+      .okl{stroke:#3fb950}.okh{fill:#3fb950}.ok{fill:#3fb950}
+      .badl{stroke:#f85149}.badh{fill:#f85149}.bad{fill:#f85149}
+      .web{fill:#4493f8}.core{fill:#3fb950}.data{fill:#d29922}.ai{fill:#db61a2}.plat{fill:#8b949e}
+    }
+  </style>
+  <defs>
+    <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="head" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="okh" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="bad" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="badh" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" width="960" height="476" rx="12"/>
+  <text x="24" y="34" class="ink" font-size="18" font-weight="600">Who may import whom</text>
+  <text x="24" y="54" class="mut" font-size="13">Arrow = may import. Imports only point down, and another feature is reached only through its door.</text>
+
+  <!-- ===== inside one feature ===== -->
+  <text x="40" y="84" class="ink" font-size="13" font-weight="600">Inside one feature</text>
+  <g font-size="12.5">
+    <g transform="translate(40,94)"><rect class="card" width="200" height="32" rx="6"/><rect class="web" width="4" height="32" rx="2"/><text x="16" y="21" class="ink mono">routes.py</text></g>
+    <g transform="translate(252,94)"><rect class="card" width="192" height="32" rx="6"/><rect class="web" width="4" height="32" rx="2"/><text x="16" y="21" class="ink mono">jobs.py</text></g>
+    <g transform="translate(40,150)"><rect class="card" width="404" height="32" rx="6"/><rect class="core" width="4" height="32" rx="2"/><text x="16" y="21" class="ink mono">graph.py</text><text x="388" y="21" class="mut" font-size="11.5" text-anchor="end">wires ops, nothing else</text></g>
+    <g transform="translate(40,206)"><rect class="card" width="404" height="32" rx="6"/><rect class="core" width="4" height="32" rx="2"/><text x="16" y="21" class="ink mono">ops.py</text><text x="388" y="21" class="mut" font-size="11.5" text-anchor="end">calls the parts below</text></g>
+    <g transform="translate(40,262)"><rect class="card" width="95" height="32" rx="6"/><rect class="core" width="4" height="32" rx="2"/><text x="14" y="21" class="ink mono" font-size="12">rules.py</text></g>
+    <g transform="translate(143,262)"><rect class="card" width="95" height="32" rx="6"/><rect class="data" width="4" height="32" rx="2"/><text x="14" y="21" class="ink mono" font-size="12">store.py</text></g>
+    <g transform="translate(246,262)"><rect class="card" width="95" height="32" rx="6"/><rect class="data" width="4" height="32" rx="2"/><text x="14" y="21" class="ink mono" font-size="12">source.py</text></g>
+    <g transform="translate(349,262)"><rect class="card" width="95" height="32" rx="6"/><rect class="ai" width="4" height="32" rx="2"/><text x="14" y="21" class="ink mono" font-size="12">prompts.py</text></g>
+    <g transform="translate(40,338)"><rect class="card" width="404" height="32" rx="6"/><rect class="plat" width="4" height="32" rx="2"/><text x="16" y="21" class="ink mono">src/_shared/</text><text x="388" y="21" class="mut" font-size="11.5" text-anchor="end">config · db · errors · auth</text></g>
+  </g>
+  <path class="arrow" d="M140,126 V148" marker-end="url(#g)"/>
+  <path class="arrow" d="M348,126 V148" marker-end="url(#g)"/>
+  <path class="arrow" d="M242,182 V204" marker-end="url(#g)"/>
+  <path class="arrow" d="M242,238 L87,260" marker-end="url(#g)"/>
+  <path class="arrow" d="M242,238 L190,260" marker-end="url(#g)"/>
+  <path class="arrow" d="M242,238 L293,260" marker-end="url(#g)"/>
+  <path class="arrow" d="M242,238 L396,260" marker-end="url(#g)"/>
+  <path class="arrow" d="M190,294 V336" marker-end="url(#g)"/>
+  <path class="arrow" d="M293,294 V336" marker-end="url(#g)"/>
+  <path class="arrow" d="M396,294 V336" marker-end="url(#g)"/>
+  <text x="87" y="314" class="mut" font-size="11" text-anchor="middle">stdlib only</text>
+  <text x="40" y="396" class="mut" font-size="12">Every file but <tspan class="ink mono" font-size="11.5">rules.py</tspan> may also import <tspan class="ink mono" font-size="11.5">_shared</tspan>.</text>
+  <text x="40" y="414" class="mut" font-size="12"><tspan class="ink mono" font-size="11.5">_shared</tspan> imports no feature.</text>
+
+  <!-- ===== between features ===== -->
+  <text x="500" y="84" class="ink" font-size="13" font-weight="600">Between features</text>
+  <rect class="grp" x="500" y="94" width="180" height="194" rx="8"/>
+  <text x="514" y="114" class="ink mono" font-size="12.5" font-weight="700">src/news/</text>
+  <rect class="grp" x="756" y="94" width="180" height="194" rx="8"/>
+  <text x="770" y="114" class="ink mono" font-size="12.5" font-weight="700">src/wealth/</text>
+  <g font-size="12">
+    <g transform="translate(515,128)"><rect class="card" width="150" height="28" rx="5"/><text x="12" y="19" class="ink mono">ops.py</text></g>
+    <g transform="translate(515,168)"><rect class="card" width="150" height="28" rx="5"/><text x="12" y="19" class="ink mono">graph.py</text></g>
+    <g transform="translate(515,208)"><rect class="card" width="150" height="28" rx="5"/><text x="12" y="19" class="ink mono">_alerts.py</text></g>
+    <g transform="translate(771,128)"><rect class="card" width="150" height="28" rx="5" stroke-width="2"/><text x="12" y="19" class="ink mono">__init__.py</text><text x="140" y="19" class="mut" font-size="11" text-anchor="end">door</text></g>
+    <g transform="translate(771,168)"><rect class="card" width="150" height="28" rx="5"/><text x="12" y="19" class="ink mono">graph.py</text></g>
+    <g transform="translate(771,208)"><rect class="card" width="150" height="28" rx="5"/><text x="12" y="19" class="ink mono">store.py</text></g>
+    <g transform="translate(771,248)"><rect class="card" width="150" height="28" rx="5"/><text x="12" y="19" class="ink mono">_money.py</text></g>
+  </g>
+  <path class="okl" d="M665,142 H769" marker-end="url(#ok)"/>
+  <text x="717" y="136" class="ok" font-size="11" text-anchor="middle" font-weight="600">✓ a name</text>
+  <path class="okl" d="M665,182 H769" marker-end="url(#ok)"/>
+  <text x="717" y="176" class="ok" font-size="11" text-anchor="middle" font-weight="600">✓ subgraph</text>
+  <path class="badl" d="M665,222 H769" marker-end="url(#bad)"/>
+  <text x="717" y="216" class="bad" font-size="11" text-anchor="middle" font-weight="600">✗ inside</text>
+
+  <g transform="translate(500,312)"><rect class="card" width="436" height="32" rx="6"/><rect class="plat" width="4" height="32" rx="2"/><text x="16" y="21" class="ink mono" font-size="12.5">src/_shared/</text></g>
+  <path class="okl" d="M590,288 V310" marker-end="url(#ok)"/>
+  <path class="okl" d="M846,288 V310" marker-end="url(#ok)"/>
+
+  <g font-size="12">
+    <text x="500" y="372" class="ok" font-weight="600">✓</text><text x="516" y="372" class="ink mono" font-size="11.5">from wealth import money_of</text><text x="736" y="372" class="mut">a name the door exports</text>
+    <text x="500" y="392" class="ok" font-weight="600">✓</text><text x="516" y="392" class="ink mono" font-size="11.5">wealth.graph</text><text x="736" y="392" class="mut">used as a subgraph</text>
+    <text x="500" y="412" class="bad" font-weight="600">✗</text><text x="516" y="412" class="ink mono" font-size="11.5">from wealth.store import rows</text><text x="736" y="412" class="mut">reaches inside</text>
+  </g>
+
+  <line x1="24" x2="936" y1="436" y2="436" stroke="#d0d7de" opacity="0.6"/>
+  <text x="24" y="460" class="mut" font-size="12.5">mr-finance today: <tspan class="ink" font-weight="600">629</tspan> imports between features. <tspan class="ink" font-weight="600">197</tspan> go into code that belongs in <tspan class="mono" font-size="12">_shared</tspan>, <tspan class="ink" font-weight="600">31</tspan> are subgraphs, <tspan class="ink" font-weight="600">401</tspan> reach inside.</text>
+</svg>
