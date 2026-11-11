@@ -40,6 +40,15 @@ def test_parse_and_render_round_trip():
     assert board.render(cards, board._top(TEXT)).startswith("# Board\n\nText above the cards is kept.\n")
 
 
+def test_hand_written_fields_are_read():
+    # the demo's card: fields as list items, "none" for an empty one; they are fields, not the note
+    c = board.parse("### C1 · sentences · todo\n- req: none · after: none\n- files: src/t/ops.py\n"
+                    "- done: tests/test_t.py::test_sentences\n")[0]
+    assert (c.req, c.after, c.files, c.note) == ([], [], ["src/t/ops.py"], "")
+    assert c.done == ["tests/test_t.py::test_sentences"]
+    assert c.kind == "fix"
+
+
 def test_a_bad_heading_is_an_error():
     with pytest.raises(BoardError, match="line 1"):
         board.parse("### C1 · no state")
@@ -62,7 +71,7 @@ def test_check_names_what_is_wrong():
     assert "C4: two cards have this id" in errors
     assert "C4: after C9, which is no card" in errors
     assert "C4: req NOPE is not a requirement" in errors
-    assert "C4: done, with no done test" in errors
+    assert "C4: done, with no done test (a `done:` line under its heading)" in errors
 
 
 def _repo(tmp_path):
@@ -87,7 +96,7 @@ def test_move_follows_the_states(tmp_path):
     repo = _repo(tmp_path)
     with pytest.raises(BoardError, match="waits on C4"):
         board.move(repo, "C5", "doing")
-    with pytest.raises(BoardError, match="no done test"):
+    with pytest.raises(BoardError, match="no done test: give it one first"):
         board.move(repo, "C5", "done")
     assert board.move(repo, "C4", "done").state == "done"
     assert board.move(repo, "C5", "doing", note="").state == "doing"

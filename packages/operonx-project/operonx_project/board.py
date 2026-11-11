@@ -89,6 +89,10 @@ def waits_on(card: Card, cards: List[Card]) -> List[str]:
 
 
 def _list(value: str) -> List[str]:
+    """``a, b`` → ``["a", "b"]``; ``none`` (or ``-``) is an empty field, as a hand-written card often says."""
+    value = value.strip()
+    if value.lower().startswith("none") or value in ("-", "—"):
+        return []
     return [x.strip() for x in value.split(",") if x.strip()]
 
 
@@ -104,7 +108,8 @@ def parse(text: str) -> List[Card]:
         if not cards or (not line.strip() and not cards[-1].note):
             continue
         c = cards[-1]
-        parts = [p.split(":", 1) for p in line.split(" · ")]
+        bare = line[2:] if line.startswith(("- ", "* ")) else line  # a field line written as a list item
+        parts = [p.split(":", 1) for p in bare.split(" · ")]
         if not c.note and all(len(p) == 2 and p[0].strip() in FIELDS for p in parts):
             for key, value in parts:
                 setattr(c, key.strip(), _list(value))
@@ -150,7 +155,7 @@ def check(cards: List[Card], defined: Optional[set] = None) -> List[str]:
         if defined is not None:
             errors += [f"{c.id}: req {r} is not a requirement" for r in c.req if r not in defined]
         if c.state == "done" and not c.done:
-            errors.append(f"{c.id}: done, with no done test")
+            errors.append(f"{c.id}: done, with no done test (a `done:` line under its heading)")
         if c.state == "doing" and waits_on(c, cards):
             errors.append(f"{c.id}: doing, but {', '.join(waits_on(c, cards))} is not done")
     return errors
@@ -204,7 +209,8 @@ def move(repo: Path, cid: str, to: str, note: Optional[str] = None) -> Card:
         to = "needs you"
         note = f"Adds {', '.join(new_names(c))}, outside the fixed names: go?"
     if to == "done" and not c.done:
-        raise BoardError(f"{cid} has no done test")
+        raise BoardError(f"{cid} has no done test: give it one first (a `done:` line under its heading, "
+                         "e.g. `done: tests/test_x.py::test_y`)")
     c.state = to
     if note is not None:
         c.note = note.strip()
