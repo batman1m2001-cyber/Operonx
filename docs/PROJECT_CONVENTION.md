@@ -2,7 +2,7 @@
 title: Project convention — one shape for every operonx project
 status: proposed
 phases:
-  - {id: K1, title: The init templates stamp the shape, status: open}
+  - {id: K1, title: "operonx init: a base plus parts", status: open}
   - {id: K2, title: operonx lint checks it, with a baseline, status: open}
   - {id: K3, title: operonx add writes into the shape, status: open}
   - {id: K4, title: The four small projects moved, status: open}
@@ -87,9 +87,30 @@ No build step by default: plain ES modules, served by one static mount in `app/m
 (React, Vite) makes `web/` a node project: the same folders under `web/src/`, built to `web/dist/` (ignored), and
 the mount points at `dist/`.
 
+## 5. `operonx init`: a base, plus the parts you ask for
+
+![The base is always there; each part is a flag; the four templates become names for sets of parts](project-convention/init.svg)
+
+Not every project wants a web page, an HTTP server, an LLM or an agent. So `init` writes a small base and adds
+only the parts it is asked for.
+
+- **A part that is off leaves nothing.** No file, no empty folder, no key in `.env.example`, no dependency, no
+  section in `AGENTS.md`. An agent reading the project never sees a `web/` it should not grow.
+- **Parts compose.** `init` builds `app/main.py`, `resources.yaml`, `.env.example` and `pyproject.toml` from
+  the parts that are on. It never copies one template's whole file over another's.
+- **A part may need another, and turns it on.** `--web` turns on `--http`; `--agent` turns on `--llm`. `init`
+  prints what it added.
+- **`operonx.toml` records the parts:** `parts = ["http", "web", "store"]`. `operonx lint` and `operonx add`
+  read it: `operonx add page` without `web` says to run `operonx init . --web` first, and a `web/` folder in a
+  project without `web` is flagged.
+- **A part later:** `operonx init . --web` writes only the missing files. It leaves a shared file you edited
+  (`app/main.py`) alone and prints the line to add.
+- **The default becomes the base.** `operonx init` with no flag gives a project that runs offline. Today's
+  templates stay as names: `--template chat` means `--http --llm`.
+
 ---
 
-## 5. Who may import whom
+## 6. Who may import whom
 
 ![Imports point down inside a feature; another feature only through its door](project-convention/imports.svg)
 
@@ -98,13 +119,13 @@ The door is the feature's `__init__.py`: the names it exports are the feature's 
 
 ---
 
-## 6. Why this makes debugging short
+## 7. Why this makes debugging short
 
 ![The same 500, followed with the convention and today](project-convention/debug.svg)
 
 ---
 
-## 7. The rules, each one checked
+## 8. The rules, each one checked
 
 | # | rule | new lint check | mr-finance today | callbot today |
 |---|---|---|---|---|
@@ -124,7 +145,7 @@ in `operonx lint` (core), not `practices.toml`, which v2 cuts.
 
 ---
 
-## 8. Existing projects: a ratchet, no big bang
+## 9. Existing projects: a ratchet, no big bang
 
 mr-finance runs on :8030 and callbot runs on staging. Neither moves all at once.
 
@@ -142,11 +163,11 @@ That takes 197 of its 629 imports between features off the count.
 
 ---
 
-## 9. Phases
+## 10. Phases
 
 ```mermaid
 flowchart LR
-  K1["<b>K1</b> templates<br/><small>_shared/ · routes.py · tests/&lt;feature&gt;/<br/>web/ · deploy/ · AGENTS.md layout</small>"] --> K2["<b>K2</b> lint<br/><small>C13–C22 · --baseline</small>"]
+  K1["<b>K1</b> init: base + parts<br/><small>--http --web --jobs --store<br/>--llm --agent --deploy</small>"] --> K2["<b>K2</b> lint<br/><small>C13–C22 · --baseline</small>"]
   K2 --> K3["<b>K3</b> operonx add<br/><small>= v2 V1, into the fixed files</small>"]
   K3 --> K4["<b>K4</b> small projects<br/><small>tipcalc · qc · meeting-prep ×2</small>"]
   K4 --> K5["<b>K5</b> ratchet<br/><small>mr-finance · callbot</small>"]
@@ -154,7 +175,7 @@ flowchart LR
 
 | | gate |
 |---|---|
-| K1 | the four `init` templates pass the new checks (`http` and `chat` stamp `web/` and `deploy/`); their tests are green |
+| K1 | `init` is a base plus parts: all 72 allowed sets of parts pass the new checks; the base, each part alone and the four templates have green tests; `operonx init . --web` on an existing project adds only missing files |
 | K2 | a baseline for each of the six projects; lint is green; one deep import added on purpose turns it red |
 | K3 | `operonx add rule news threshold` adds `threshold` to `src/news/rules.py` and a red test to `tests/news/test_rules.py` |
 | K4 | every count at 0; each project's tests green |
