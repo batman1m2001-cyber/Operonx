@@ -8,7 +8,7 @@ updates it, and `operonx-project brd check` checks it (the test suite runs the c
 | [`sources/`](sources/README.md) | Every document the requirements come from, registered with its hash. Never edited |
 | [`requirements/requirements_traceability.md`](requirements/requirements_traceability.md) | The checklist: each requirement in its original wording, with code, test, evidence and status. This is the only place a requirement's status is stated |
 | [`requirements/open_questions.md`](requirements/open_questions.md) | Ambiguities, conflicts, divergences and gaps (`Q-nn`). A question is never deleted, and never resolved without saying so |
-| [`board/`](board/README.md) | How the product is built: one file per milestone, with each card's intent, rows, criteria, dependencies, files and status. The engine writes these files |
+| [`board/`](board/README.md) | The board: one file per milestone (a plan doc), with its cards (the phases) and their status. `operonx-project` writes these files |
 | [`CHANGELOG.md`](CHANGELOG.md) | One line per change |
 
 Add `features/` (`FEAT-nn`), `decisions/` (`ADR-nnnn`), `ux/screen_inventory.md` (`SCR-…`), `testing/`
@@ -22,8 +22,8 @@ follows these ids when the folders exist.
 - A rule changes: never edit a source's text. Record the change in `open_questions.md`, or in an ADR.
 - A requirement is removed: keep its row, and say so in its status and note.
 - A new version of a source: register it as a new row, and keep the old one.
-- A milestone is planned, or a card moves: change nothing by hand. The engine rewrites `board/`, and
-  `operonx-project replan` changes a plan.
+- Work with more than one step: a plan doc under `docs/` with a status block. `board/` follows it; change
+  nothing there by hand.
 - State facts only with a source: a source section, a code path, a test or a measurement. Mark assumptions as
   assumptions. A private source is registered by path and hash only, never committed.
 
@@ -40,16 +40,11 @@ follows these ids when the folders exist.
 | `out_of_scope_demo` | Deliberately left out of this phase |
 | `not_applicable` | Does not apply to this product; the row says why |
 
-## The project builder
-
-`operonx-project` (the Project tab in `operonx studio`) builds what the checklist leaves open, one milestone at a
-time:
+## Where it stands
 
 ```bash
-operonx-project start --title "v1" --goal "..." --rows <ID> <ID>   # a milestone for these rows
-operonx-project daemon                                            # plans the cards, builds and checks them
-operonx-project status                                            # where every milestone is
+operonx-project status     # the checklist, the plans, the open questions, the last commits
+operonx-project plans      # every plan doc and where it stands
 ```
 
-`.operonx/project/` (outside git) holds only what the running engine needs. When it is missing, it is rebuilt
-from `board/`.
+`.operonx/project/` (outside git) holds the board's store. When it is missing, it is rebuilt from `board/`.

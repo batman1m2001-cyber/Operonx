@@ -182,12 +182,6 @@ class Store:
             rows = self._db.execute("SELECT * FROM milestones ORDER BY created").fetchall()
         return [self._ms_obj(r) for r in rows]
 
-    def prior_state(self, mid: str) -> Optional[MilestoneState]:
-        """The stage a paused or waiting milestone left (what a resume returns to)."""
-        with self._lock:
-            row = self._db.execute("SELECT prior FROM milestones WHERE id=?", (mid,)).fetchone()
-        return MilestoneState(row[0]) if row and row[0] else None
-
     def move_milestone(self, mid: str, to: MilestoneState, reason: str = "", actor: str = "engine") -> Milestone:
         to = MilestoneState(to)
         with self._tx() as db:
@@ -223,27 +217,6 @@ class Store:
         if since is not None:
             total += (time.time() if now is None else now) - since
         return total
-
-    def update_milestone(self, mid: str, actor: str = "engine", **values: Any) -> Milestone:
-        if "state" in values:
-            raise ValueError("change a milestone's state with move_milestone")
-        bad = set(values) - set(_MS_COLS)
-        if bad:
-            raise ValueError(f"unknown milestone fields: {sorted(bad)}")
-        enc = {k: self._enc_ms(k, v) for k, v in values.items()}
-        with self._tx() as db:
-            db.execute(
-                f"UPDATE milestones SET {', '.join(f'{k}=?' for k in enc)}, updated=? WHERE id=?",
-                [*enc.values(), time.time(), mid],
-            )
-            self._event(db, mid, None, "milestone.update", actor, {k: v for k, v in values.items() if k != "policy"})
-        return self.get_milestone(mid)
-
-    def add_cost(self, mid: str, usd: float, card: Optional[str] = None) -> None:
-        with self._tx() as db:
-            db.execute("UPDATE milestones SET cost_usd = cost_usd + ? WHERE id=?", (usd, mid))
-            if card is not None:
-                db.execute("UPDATE cards SET cost_usd = cost_usd + ? WHERE milestone=? AND id=?", (usd, mid, card))
 
     # ── cards ───────────────────────────────────────────────────────────────
     def add_cards(self, cards: Iterable[Card], actor: str = "planner") -> List[Card]:
@@ -332,21 +305,6 @@ class Store:
             )
             self._event(db, mid, cid, "card.stage", actor, {"stage": stage.value})
 
-    def update_card(self, mid: str, cid: str, actor: str = "engine", **values: Any) -> Card:
-        if {"state", "stage"} & set(values):
-            raise ValueError("change a card's state with move_card, its stage with set_stage")
-        bad = set(values) - set(_CARD_COLS)
-        if bad:
-            raise ValueError(f"unknown card fields: {sorted(bad)}")
-        enc = {k: self._enc_card(k, v) for k, v in values.items()}
-        with self._tx() as db:
-            db.execute(
-                f"UPDATE cards SET {', '.join(f'{k}=?' for k in enc)}, updated=? WHERE milestone=? AND id=?",
-                [*enc.values(), time.time(), mid, cid],
-            )
-            self._event(db, mid, cid, "card.update", actor, {k: v for k, v in values.items() if k != "detail"})
-        return self.get_card(mid, cid)
-
     def note(self, mid: str, kind: str, data: Dict[str, Any], card: Optional[str] = None, actor: str = "engine") -> int:
         """An event that is not a state change: a round's result, a cost, a message sent."""
         with self._tx() as db:
@@ -394,30 +352,6 @@ class Store:
         "release",
     )
 
-    def enqueue(self, mid: str, kind: str, payload: Optional[Dict[str, Any]] = None, card: Optional[str] = None,
-                actor: str = "owner") -> int:  # fmt: skip
-        """Queue a command; it survives a crash until the daemon runs it."""
-        if kind not in self.COMMANDS:
-            raise ValueError(f"unknown command {kind!r}; one of {self.COMMANDS}")
-        with self._tx() as db:
-            cur = db.execute(
-                "INSERT INTO commands (at, milestone, card, kind, payload, actor, status) VALUES (?,?,?,?,?,?,?)",
-                (time.time(), mid, card, kind, json.dumps(payload or {}), actor, "pending"),
-            )
-            self._event(db, mid, card, "command", actor, {"kind": kind, "seq": cur.lastrowid})
-            return int(cur.lastrowid)
-
-    def pending_commands(self, mid: Optional[str] = None) -> List[Dict[str, Any]]:
-        sql = "SELECT * FROM commands WHERE status='pending'" + (" AND milestone=?" if mid else "") + " ORDER BY seq"
-        with self._lock:
-            rows = self._db.execute(sql, (mid,) if mid else ()).fetchall()
-        return [{**dict(r), "payload": json.loads(r["payload"] or "{}")} for r in rows]
-
-    def finish_command(self, seq: int, status: str = "done", result: str = "") -> None:
-        with self._tx() as db:
-            db.execute("UPDATE commands SET status=?, result=?, done_at=? WHERE seq=?",
-                       (status, result, time.time(), seq))  # fmt: skip
-
     def commands(self, mid: str) -> List[Dict[str, Any]]:
         """Every command queued for *mid*, oldest first."""
         with self._lock:
@@ -438,20 +372,6 @@ class Store:
             d[k] = json.loads(d[k]) if d[k] else ({} if k in ("payload", "shown") else None if k == "answer" else [])
         return d
 
-    def add_interaction(self, inter: Dict[str, Any], actor: str = "engine") -> Dict[str, Any]:
-        row = {k: (json.dumps(v) if k in self._JSON_INTER else v) for k, v in inter.items()}
-        with self._tx() as db:
-            db.execute(f"INSERT INTO interactions ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})",
-                       list(row.values()))  # fmt: skip
-            self._event(db, inter["milestone"], inter.get("card"), "interaction.open", actor,
-                        {"id": inter["id"], "qid": inter.get("qid"), "kind": inter.get("kind")})  # fmt: skip
-        return self.get_interaction(inter["id"])
-
-    def get_interaction(self, iid: str) -> Optional[Dict[str, Any]]:
-        with self._lock:
-            row = self._db.execute("SELECT * FROM interactions WHERE id=? OR short=?", (iid, iid)).fetchone()
-        return None if row is None else self._inter(row)
-
     def interactions(self, mid: Optional[str] = None, states: Optional[Iterable[str]] = None) -> List[Dict[str, Any]]:
         sql, args = "SELECT * FROM interactions WHERE 1=1", []
         if mid:
@@ -462,71 +382,6 @@ class Store:
         with self._lock:
             rows = self._db.execute(sql + " ORDER BY created", args).fetchall()
         return [self._inter(r) for r in rows]
-
-    def update_interaction(self, iid: str, actor: str = "engine", **values: Any) -> Dict[str, Any]:
-        enc = {k: (json.dumps(v) if k in self._JSON_INTER else v) for k, v in values.items()}
-        with self._tx() as db:
-            row = db.execute("SELECT milestone, card, state FROM interactions WHERE id=?", (iid,)).fetchone()
-            db.execute(f"UPDATE interactions SET {', '.join(f'{k}=?' for k in enc)}, updated=? WHERE id=?",
-                       [*enc.values(), time.time(), iid])  # fmt: skip
-            if "state" in values and row is not None and values["state"] != row["state"]:
-                self._event(db, row["milestone"], row["card"], "interaction.state", actor,
-                            {"id": iid, "from": row["state"], "to": values["state"]})  # fmt: skip
-        return self.get_interaction(iid)
-
-    def answer_interaction(self, iid: str, answer: Any, actor: str, kind: str, payload: Dict[str, Any],
-                           card: Optional[str] = None) -> Optional[int]:  # fmt: skip
-        """Record the answer and queue its command in one transaction: the
-        answer is in the store before anything acts on it (plan §9.5).
-        ``None`` when the interaction was no longer open."""
-        now = time.time()
-        with self._tx() as db:
-            row = db.execute("SELECT milestone, state FROM interactions WHERE id=?", (iid,)).fetchone()
-            if row is None or row["state"] != "open":
-                return None
-            mid = row["milestone"]
-            cur = db.execute(
-                "INSERT INTO commands (at, milestone, card, kind, payload, actor, status) VALUES (?,?,?,?,?,?,?)",
-                (now, mid, card, kind, json.dumps({**payload, "interaction": iid}), actor, "pending"),
-            )
-            db.execute("UPDATE interactions SET state='answered', answer=?, answered_by=?, answered_at=?, command=?, "
-                       "updated=? WHERE id=?", (json.dumps(answer), actor, now, cur.lastrowid, now, iid))  # fmt: skip
-            self._event(db, mid, card, "interaction.answered", actor, {"id": iid, "command": cur.lastrowid})
-            return int(cur.lastrowid)
-
-    def find_interaction_by_message(self, chat: Any, message_id: int) -> Optional[Dict[str, Any]]:
-        for inter in self.interactions():
-            if any(str(m.get("chat")) == str(chat) and m.get("id") == message_id for m in inter["messages"]):
-                return inter
-        return None
-
-    def first_update(self, update_id: int) -> bool:
-        """``True`` the first time an update id is seen: each is handled once."""
-        with self._tx() as db:
-            if db.execute("SELECT 1 FROM updates WHERE update_id=?", (update_id,)).fetchone():
-                return False
-            db.execute("INSERT INTO updates VALUES (?, ?)", (update_id, time.time()))
-            return True
-
-    # ── the daemon's lease: one daemon drives a project ─────────────────────
-    def acquire_lease(self, owner: str, ttl: float = 30.0, name: str = "daemon") -> bool:
-        now = time.time()
-        with self._tx() as db:
-            row = db.execute("SELECT owner, until FROM lease WHERE name=?", (name,)).fetchone()
-            if row is not None and row["owner"] != owner and row["until"] > now:
-                return False
-            db.execute("INSERT OR REPLACE INTO lease VALUES (?, ?, ?)", (name, owner, now + ttl))
-            return True
-
-    def lease_holder(self, name: str = "daemon") -> Optional[str]:
-        """Who holds the lease now (a daemon driving the project), or ``None``."""
-        with self._lock:
-            row = self._db.execute("SELECT owner, until FROM lease WHERE name=?", (name,)).fetchone()
-        return row["owner"] if row is not None and row["until"] > time.time() else None
-
-    def release_lease(self, owner: str, name: str = "daemon") -> None:
-        with self._tx() as db:
-            db.execute("DELETE FROM lease WHERE name=? AND owner=?", (name, owner))
 
     # ── encoding ────────────────────────────────────────────────────────────
     @staticmethod

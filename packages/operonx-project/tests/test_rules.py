@@ -33,12 +33,3 @@ def test_no_rules_no_flag_and_a_long_file_is_cut(tmp_path, monkeypatch):
     (tmp_path / "AGENTS.md").write_text("x" * (LIMIT + 50), encoding="utf-8")
     assert standing_rules(tmp_path).endswith("… (cut)")
 
-
-def test_the_reviewer_is_told_the_rules_are_the_bar():
-    from operonx_project.model import Card
-    from operonx_project.prompts import reviewer_prompt
-
-    card = Card(id="C1", milestone="m1", title="t", intent="i")
-    assert "a change that breaks one is a major finding" in reviewer_prompt(card, "diff", "ok", [])
-    told = reviewer_prompt(card, "diff", "ok", [], "tests/acceptance/C1")
-    assert "tests/acceptance/C1 holds the card's acceptance tests" in told and "not outside" in told

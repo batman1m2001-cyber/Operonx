@@ -112,7 +112,7 @@ def test_a_plan_is_on_the_board_as_its_doc_says(tmp_path):
     from tests.flow_env import git, make_repo
 
     repo = make_repo(tmp_path)
-    proj = Project.open(repo, worktrees=tmp_path / "wt")
+    proj = Project.open(repo)
     rel = "docs/CSV_PLAN.md"
     assert act(proj, {"op": "plan", "path": rel})["status"] == "unknown"  # not in the checkout: send its text
     head = git(repo, "rev-parse", "HEAD")
@@ -135,8 +135,6 @@ def test_a_plan_is_on_the_board_as_its_doc_says(tmp_path):
     from operonx_project.status import status
 
     assert [(p["source"], p["path"], p["milestone"]) for p in status(repo)["plans"]] == [("engine", rel, "m1")]
-    # the engine does not work it: an act on the milestone is refused, the doc is changed instead
-    assert act(proj, {"op": "unpause", "milestone": "m1"})["status"] == "refused"
 
     # the doc moves on and one phase is skipped: the same milestone says so, nothing else is made
     _doc(

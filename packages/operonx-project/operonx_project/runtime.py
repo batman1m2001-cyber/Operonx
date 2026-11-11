@@ -1,72 +1,31 @@
-"""What a card's run works with, outside the graph's inputs.
+"""What a run works with, outside the graph's inputs, and the model each role runs on.
 
-``task_flow`` is journalled, so its inputs are plain JSON: a runtime key, the
-milestone and the card. The ops look the rest up here: the store, the
-project's git, the coder, the check commands. A process that resumes a run
-registers a runtime under the same key first (the key is the project's
-name by default), and the run goes on with that process's objects.
+``brd_flow`` is journalled, so its inputs are plain JSON: a runtime key and the source. The ops look the
+rest up here (the coder, the folders). A process that resumes a run registers a runtime under the same key
+first, and the run goes on with that process's objects.
 """
 
 from __future__ import annotations
 
-import os
-import shlex
-import sys
-import time
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from operonx.core.loggings import LOGGER
 
-from operonx_project.checks import Check
-from operonx_project.coder.base import Coder
-from operonx_project.gitops import GitOps
-from operonx_project.model import Card, Stage
-from operonx_project.store import Store
+__all__ = ["DEFAULT_MODELS", "get_runtime", "register", "role_model", "unregister"]
 
-__all__ = ["DEFAULT_MODELS", "DEFAULT_SHARED", "Runtime", "get_runtime", "register", "role_model", "unregister"]
-
-#: Files any card may change, with a warning (plan §7, step 3).
-DEFAULT_SHARED = [
-    "pyproject.toml",
-    "uv.lock",
-    "requirements*.txt",
-    "package.json",
-    "package-lock.json",
-    ".env.example",
-    "CHANGELOG.md",
-]
-
-#: Different sessions and different models, by construction (plan §2, decision 5). Sonnet codes and plans,
-#: Haiku does the light reading, and the roles that check the coder's work stay on a stronger model than it
-#: (PROJECT_SPEED_PLAN V4: on Opus the implementer was 89% of mr-finance m33's money).
+#: The model each role's session runs on, unless ``settings.toml`` says otherwise.
 DEFAULT_MODELS: Dict[str, Optional[str]] = {
-    "implementer": "sonnet",
-    "implementer:high": "opus",  # <role>:<risk>: a high-risk card's implementer
-    "reviewer": "fable",
-    "arbiter": "sonnet",
-    "triage": "haiku",
-    "test_author": "sonnet",
-    "examiner": "fable",
-    # the milestone's stages
-    "surveyor": "haiku",
-    "planner": "sonnet",
-    "plan_reviewer": "fable",
-    "replenisher": "sonnet",
-    "milestone_reviewer": "fable",
-    "retrospective": "haiku",  # the lessons a delivered milestone teaches (retro.py)
-    # the requirements, from a source (brd_flow)
-    "extractor": "sonnet",
+    "surveyor": "haiku",  # adopt: the project's BRD from its docs and tests
+    "extractor": "sonnet",  # brd_flow: the requirements, from a source
     "hunter": "fable",
 }
 
 
 def role_model(state: Path, role: str, fallback: Optional[str], risk: Optional[str] = None) -> Optional[str]:
-    """The model *role*'s session runs on: ``settings.toml``'s ``[models]`` for
-    ``<role>:<risk>`` (a card's risk), then for that role, else its ``model`` (every role),
-    else *fallback*. Read at each session's start, so the owner's change applies to the next
-    session without restarting the daemon; a file that does not parse is ignored, with a warning."""
+    """The model *role*'s session runs on: ``settings.toml``'s ``[models]`` for ``<role>:<risk>``, then for
+    that role, else its ``model`` (every role), else *fallback*. A file that does not parse is ignored, with a
+    warning."""
     from operonx_project.project import load_settings
 
     try:
@@ -78,199 +37,10 @@ def role_model(state: Path, role: str, fallback: Optional[str], risk: Optional[s
     return (risk and per.get(f"{role}:{risk}")) or per.get(role) or got.get("model") or fallback
 
 
-@dataclass
-class Runtime:
-    store: Store
-    git: GitOps
-    coder: Coder
-    checks: List[Check] = field(default_factory=list)  # the repo's own commands: tests, lint, types
-    shared: List[str] = field(default_factory=lambda: list(DEFAULT_SHARED))
-    private: Dict[str, str] = field(default_factory=dict)  # sha256 → name: sources never to commit
-    brief: str = ""  # the repo brief, written once, handed to every session
-    models: Dict[str, Optional[str]] = field(default_factory=lambda: dict(DEFAULT_MODELS))
-    acceptance_root: str = "tests/acceptance"
-    acceptance_cmd: str = "python -m pytest -q -p no:cacheprovider {dir}"
-    heldout_cmd: str = "python -m pytest -q --tb=no -rfE --assert=plain -p no:cacheprovider {dir}"
-    heldout_root: Path = field(default_factory=lambda: Path.home() / ".operonx" / "heldout")
-    data_dir: Optional[Path] = None  # transcripts; default <repo>/.operonx/project
-    check_mode: str = "host"  # how the acceptance and held-out tests run: host | docker
-    check_image: Optional[str] = None
-    check_timeout_s: float = 600.0
-    call_max_usd: float = 2.0  # --max-budget-usd per coder call (capped by what the card has left)
-    call_timeout_s: float = 1800.0
-    sandbox: bool = True
-    env: Optional[Dict[str, str]] = None  # for the checks; default the engine's minus credentials, no bytecode
-    key: str = ""
-    python: str = sys.executable  # runs the operonx checks when the target has no .venv of its own
-    stages: Dict[Tuple[str, str], Callable[[Stage], None]] = field(default_factory=dict)
-    _activity_at: Dict[Tuple[str, Optional[str]], float] = field(default_factory=dict, repr=False)
-
-    def __post_init__(self) -> None:
-        self.key = self.key or self.git.project
-        self.heldout_root = Path(self.heldout_root).expanduser()
-        self.data_dir = Path(self.data_dir or self.git.lock_dir)
-        if self.env is None:
-            from operonx_project.safety import scrub_env
-
-            self.env = {**scrub_env(os.environ), "PYTHONDONTWRITEBYTECODE": "1"}
-
-    # ── helpers the ops share ──
-
-    def card(self, mid: str, cid: str) -> Card:
-        return self.store.get_card(mid, cid)
-
-    def model_for(self, role: str, risk: Optional[str] = None) -> Optional[str]:
-        """The model a *role*'s session runs on, for a card of *risk* (:func:`role_model`)."""
-        default = (risk and self.models.get(f"{role}:{risk}")) or self.models.get(role)
-        return role_model(Path(self.data_dir), role, default, risk)
-
-    def activity_for(self, mid: str, cid: Optional[str], role: str, every_s: float = 2.0):
-        """A callback that records a session's tool calls as ``activity`` events,
-        at most one per card every *every_s* seconds (plan D10): the Board's
-        live line, and the assistant's view of a running card."""
-        key = (mid, cid)
-
-        def note(text: str) -> None:
-            now = time.time()
-            if now - self._activity_at.get(key, 0.0) < every_s:
-                return
-            self._activity_at[key] = now
-            self.store.note(mid, "activity", {"text": text[:120], "role": role}, card=cid)
-
-        return note
-
-    @property
-    def card_checks(self) -> List[Check]:
-        """The checks a card runs (its baseline, QA, the merge); ``when="final"`` ones wait for the end."""
-        return [c for c in self.checks if c.when != "final"]
-
-    @property
-    def final_checks(self) -> List[Check]:
-        """The checks the milestone's end runs on the integration branch."""
-        return [c for c in self.checks if c.when != "card"]
-
-    def integration_key(self, mid: str) -> str:
-        """The checkpoint of the checks last run on *mid*'s integration branch: ``{sha, results}``."""
-        return f"integration-baseline:{self.key}:{mid}"
-
-    def same_code(self, mid: str, a: Optional[str], b: Optional[str]) -> bool:
-        """Checks that ran on commit *a* stand for commit *b*: the same tree but
-        for the files the engine commits: the board (``<brd>/board``, :meth:`Lifecycle.board`) and the
-        owner's questions (``<brd>/requirements/open_questions.md``, ``Interactions._write_brd``)."""
-        if not a or not b:
-            return False
-        if a == b:
-            return True
-        rel = (self.store.ms_get(mid, "intake") or {}).get("brd") or "docs/brd"
-        try:
-            paths = self.git.git("diff", "--name-only", a, b).splitlines()
-        except Exception:  # noqa: BLE001 — a commit gone: nothing stands for it
-            return False
-        return all(p.startswith(f"{rel}/board/") or p == f"{rel}/requirements/open_questions.md" for p in paths if p)
-
-    def reuse(self, mid: str, saved: Optional[Dict[str, Any]], sha: Optional[str],
-              checks: List[Check]) -> Optional[List[Dict[str, Any]]]:  # fmt: skip
-        """*saved*'s results (``{sha, results}``) for *checks*, when they stand for *sha*
-        (:meth:`same_code`) and each check ran to an end there; else None (run them)."""
-        if not saved or not self.same_code(mid, saved.get("sha"), sha):
-            return None
-        rows = {r["name"]: r for r in saved.get("results") or []}
-        if any(c.name not in rows or rows[c.name].get("timed_out") for c in checks):
-            return None
-        return [rows[c.name] for c in checks]
-
-    def set_detail(self, mid: str, cid: str, **values) -> Card:
-        """Merge *values* into the card's ``detail`` (``None`` removes a key)."""
-        detail = dict(self.store.get_card(mid, cid).detail)
-        for k, v in values.items():
-            if v is None:
-                detail.pop(k, None)
-            else:
-                detail[k] = v
-        return self.store.update_card(mid, cid, detail=detail)
-
-    def stage(self, mid: str, cid: str, stage: Stage) -> None:
-        cb = self.stages.get((mid, cid))
-        if cb is None:
-            return
-        try:
-            cb(stage)
-        except Exception as exc:  # noqa: BLE001 — the board column is display; the run goes on
-            LOGGER.warning(f"card {cid}: could not show stage {stage.value}: {exc}")
-
-    @property
-    def venv(self) -> Path:
-        """A greenfield project's own environment (made after ``operonx init``), outside git."""
-        return Path(self.data_dir) / "venv"
-
-    def target_python(self) -> Path:
-        """The project's environment: the one the engine made, else the repo's ``.venv``, else the engine's."""
-        for own in (self.venv / "bin" / "python", Path(self.git.repo) / ".venv" / "bin" / "python"):
-            if own.exists():
-                return own
-        return Path(self.python)
-
-    def operonx_argv(self) -> List[str]:
-        """How to run ``operonx`` for the target (``python -m operonx`` does not exist)."""
-        py = self.target_python()
-        exe = py.parent / "operonx"
-        if exe.exists():
-            return [str(exe)]
-        return [str(py), "-c", "from operonx.cli.main import main; raise SystemExit(main())"]
-
-    def heldout_dir(self, mid: str, cid: str) -> Path:
-        return self.heldout_root / self.git.project / mid / cid
-
-    def transcript(self, mid: str, cid: str, name: str) -> Path:
-        d = Path(self.data_dir) / "transcripts" / mid / cid
-        d.mkdir(parents=True, exist_ok=True)
-        return d / f"{name}.jsonl"
-
-    def heldout_check(self, name: str, hdir: Path, wt: Path) -> Tuple[Check, str]:
-        """The held-out run of *hdir* in the worktree *wt*, and the directory as the run sees it.
-
-        The tests live outside the repo, so pytest would take its rootdir from
-        them and never read the project's config: a ``src/`` layout's
-        ``pythonpath = ["src"]`` is lost and every import fails. The project's
-        pytest config is named, and the worktree is the rootdir."""
-        docker = self.check_mode == "docker"
-        inside = "/heldout" if docker else str(hdir)
-        cmd = self.heldout_cmd.format(dir=inside)
-        ini = pytest_config(wt)
-        if ini and "pytest" in cmd and " -c " not in cmd:
-            cmd = cmd.replace(" -m pytest", f" -m pytest -c {shlex.quote(ini)} --rootdir .", 1)
-        return self.test_check(name, cmd, mounts={str(hdir): "/heldout"} if docker else None), inside
-
-    def test_check(self, name: str, cmd: str, mounts: Optional[Dict[str, str]] = None) -> Check:
-        if self.check_mode == "host" and cmd.startswith("python "):
-            # on the host, the project's interpreter: a bare `python` is whatever PATH has, or nothing
-            cmd = f"{shlex.quote(str(self.target_python()))} {cmd[len('python ') :]}"
-        return Check(
-            name=name,
-            cmd=cmd,
-            timeout_s=self.check_timeout_s,
-            mode=self.check_mode,
-            image=self.check_image,
-            mounts=mounts or {},
-            env={"COLUMNS": "1000"},  # pytest cuts its summary lines to the terminal's width
-        )
+_REGISTRY: Dict[str, Any] = {}
 
 
-def pytest_config(wt: Path) -> Optional[str]:
-    """The worktree's pytest config file, in pytest's own order of preference, or None."""
-    marks = {"pytest.ini": "", ".pytest.ini": "", "pyproject.toml": "[tool.pytest", "tox.ini": "[pytest]",
-             "setup.cfg": "[tool:pytest]"}  # fmt: skip
-    for name, mark in marks.items():
-        f = Path(wt) / name
-        if f.is_file() and (not mark or mark in f.read_text(errors="replace")):
-            return name
-    return None
-
-
-_REGISTRY: Dict[str, Runtime] = {}
-
-
-def register(rt: Runtime) -> Runtime:
+def register(rt: Any) -> Any:
     _REGISTRY[rt.key] = rt
     return rt
 
@@ -279,11 +49,11 @@ def unregister(key: str) -> None:
     _REGISTRY.pop(key, None)
 
 
-def get_runtime(key: str) -> Runtime:
+def get_runtime(key: str) -> Any:
     try:
         return _REGISTRY[key]
     except KeyError:
         raise KeyError(
             f"no runtime {key!r} in this process: register one (operonx_project.runtime.register) "
-            "before running or resuming a card's run"
+            "before running or resuming a run"
         ) from None

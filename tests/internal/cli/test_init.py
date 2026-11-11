@@ -20,7 +20,7 @@ import pytest
 
 import operonx
 from operonx import guide
-from operonx.cli.init import brd_files, plan
+from operonx.cli.init import plan
 from operonx.cli.main import TEMPLATES, main
 
 pytestmark = pytest.mark.unit
@@ -593,12 +593,7 @@ class TestTheBrd:
         assert "# p: the living product repository" in (brd / "README.md").read_text()
         # only what is read: no stub folders a project has nothing to put in yet
         assert not any((brd / d).exists() for d in ("features", "decisions", "ux", "testing", "assets", "templates"))
-        # how it is built (operonx-project): a new project's own; brd init on an existing repo writes neither
-        assert (
-            'style = "layered"' in (brd / "practices.toml").read_text()
-            and (brd / "LESSONS.md").is_file()
-        )
-        assert not {"practices.toml", "LESSONS.md"} & set(brd_files("p"))
+        assert not (brd / "practices.toml").exists()
         agents = (root / "AGENTS.md").read_text()
         assert guide.builder_block() in agents
         assert agents.index(guide.BUILDER_BEGIN) < agents.index("## Commands")
