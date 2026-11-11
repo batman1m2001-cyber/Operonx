@@ -1,12 +1,12 @@
 ---
 title: One lean plan — the project's shape and its board
-status: in_progress
+status: done
 phases:
   - {id: L1, title: Cut first, status: done}
   - {id: L2, title: "operonx init: three templates, three flags", status: done}
   - {id: L3, title: Four lint checks and a baseline, status: done}
   - {id: L4, title: The board, status: done}
-  - {id: L5, title: mr-finance on the board and the ratchet, status: open}
+  - {id: L5, title: mr-finance on the board and the ratchet, status: done}
 updated: 2026-11-11
 ---
 
@@ -233,3 +233,13 @@ flowchart LR
 | L3 | tipcalc, qc, meeting-prep ×2 at 0; one deep import added on purpose turns lint red |
 | L4 | light and dark screenshots; the assistant works one task card by card |
 | L5 | the owner follows one real mr-finance task on the board alone; its first move (`control/` and the shared parts of people/wealth → `src/_shared`) takes 197 off C13; :8030 still serves; callbot green on a baseline |
+
+**L5, done.** mr-finance #75 (045fe98): the board is `docs/brd/board.md`, and the 8 cards still open on the
+milestone boards m1–m33 are its todo cards (34 files → 1, history in git at 56013cd). `wealth/{paths,money,text,labels}`
+and `control/errors` moved to `src/_shared`; `control/roles` stays, because it imports people. C13 went 179 → 107: −72, not
+the −197 the table asks for. That 197 was counted on the 401 reaches before mr-finance #74 cut them to 179. The 107
+left are feature-to-feature reaches, held on the baseline (`C13 107, C14 63, C15 48, C16 3`). C12 went 8 → 0 (the
+env names are now in `.env.example`). Tests: 1,256 passed; the 4 that failed also fail on main. :8030 serves 045fe98.
+The callbot is green on its baseline (059962f), and its board is one empty `board.md` (24c209d). One gate item is the
+owner's and still open: following one real mr-finance task on the board alone. Its 8 cards wait on the owner, so the
+assistant did not start one; the L4 gate (studio #156, tipcalc C1–C4) showed a task worked on the board card by card.
