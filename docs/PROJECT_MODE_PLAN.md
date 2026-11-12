@@ -1,15 +1,5 @@
 ---
 title: Project mode — the studio as the place a project is built from
-status: done
-phases:
-  - {id: P0, title: The studio reaches the engine, status: done}
-  - {id: P1, title: Plans carry their status, status: done}
-  - {id: P2, title: One status for the whole project, status: done}
-  - {id: P3, title: Project mode, chat first, status: done}
-  - {id: P4, title: The pages behind the icons, status: done}
-  - {id: P5, title: The assistant works by the conventions, status: done}
-  - {id: P6, title: Gate on OneWealth and tipcalc, status: done}
-updated: 2026-10-23
 ---
 
 # Project mode: the studio as the place a project is built from

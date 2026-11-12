@@ -1,12 +1,5 @@
 ---
 title: A card's round pays for the full suite once
-status: done
-phases:
-  - {id: V1, title: Review before the full checks, status: done}
-  - {id: V2, title: Quick checks — the acceptance tests and the tests near the change, status: done}
-  - {id: V3, title: The owner's check edits stick, status: withdrawn}
-  - {id: V4, title: Sonnet and Haiku by default, status: done}
-updated: 2026-10-31
 ---
 
 # A card's round pays for the full suite once (2026-10-31)

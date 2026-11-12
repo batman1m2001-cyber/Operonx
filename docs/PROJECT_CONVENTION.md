@@ -1,13 +1,5 @@
 ---
 title: Project convention — one shape for every operonx project
-status: parked
-phases:
-  - {id: K1, title: "operonx init: a base plus parts", status: skipped}
-  - {id: K2, title: operonx lint checks it, with a baseline, status: skipped}
-  - {id: K3, title: operonx add writes into the shape, status: skipped}
-  - {id: K4, title: The four small projects moved, status: skipped}
-  - {id: K5, title: mr-finance and callbot on the ratchet, status: skipped}
-updated: 2026-11-11
 ---
 
 # Project convention: one shape for every operonx project
