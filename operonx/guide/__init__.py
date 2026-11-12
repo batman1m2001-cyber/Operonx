@@ -84,12 +84,11 @@ _BUILDER = """## Building it: docs/brd and the board
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
   `docs/brd/README.md`. The checklist's summary table is counted from
   the rows by the engine: leave it.
-- Work with more than one step gets a plan doc under `docs/` that starts
-  with a status block: `title`, `status` (plan, in_progress, done or
-  parked), `phases` (each `{id, title, status}`: open, in_progress, done or
-  skipped) and the `rows` it serves. Change a phase's status in the commit
-  that finishes it. `operonx-project plans` lists them; the studio's
-  Project mode shows them."""
+- Work with more than one step gets a plan doc under `docs/` (why and
+  how) and a cycle on the board: `operonx-project cycle open ID TITLE
+  --plan docs/X_PLAN.md`, its phases as cards (`operonx-project put --title
+  T --cycle ID`). `cycle close ID` once every card in it is done; a card
+  left open moves to the Backlog first (`put C4 --cycle Backlog`)."""
 
 _HEADER = re.compile(r"<!--\s*operonx-guide\s*(.*?)\s*-->")
 

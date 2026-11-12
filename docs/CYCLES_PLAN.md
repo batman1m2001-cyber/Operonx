@@ -1,9 +1,9 @@
 ---
 title: One board, cut into cycles
-status: planned
+status: in_progress
 phases:
-  - {id: K1, title: Cut what links to no card, status: planned}
-  - {id: K2, title: Cycles in the engine; plan status blocks go, status: planned}
+  - {id: K1, title: Cut what links to no card, status: done}
+  - {id: K2, title: Cycles in the engine; plan status blocks go, status: done}
   - {id: K3, title: The Board page is the cycles, status: planned}
   - {id: K4, title: The boards rebuilt from the plans, status: planned}
 updated: 2026-11-12

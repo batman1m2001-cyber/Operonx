@@ -1,11 +1,13 @@
-"""``operonx-project`` (and ``operonx project``): the BRD, the plans and the board, read and kept.
+"""``operonx-project`` (and ``operonx project``): the BRD and the board, read and kept.
 
     operonx-project new DIR [--name N]                 # a repo with docs/brd/
     operonx-project adopt [--repo .] [--prefix P]       # an existing project: its BRD from its docs and tests
-    operonx-project status [--repo .] [--json]         # checklist, board, plans, what needs you (read-only)
-    operonx-project plans [--repo .] [--json]          # the plan docs under docs/ and where each stands
-    operonx-project board [--repo .] [--json]          # the board's cards (docs/brd/board.md)
+    operonx-project status [--repo .] [--json]         # checklist, board, what needs you (read-only)
+    operonx-project board [--repo .] [--json]          # the board's cycles and cards (docs/brd/board.md)
     operonx-project board CARD STATE [--note TEXT]     # move a card: todo, doing, "needs you", done
+    operonx-project put [CARD] [--title T] [--cycle ID|Backlog] [--files F ...] [--req R ...] [--after C ...]
+    operonx-project cycle open ID TITLE [--plan docs/X_PLAN.md]   # a cycle: a plan's round of work
+    operonx-project cycle close ID                     # refused while a card in it is not done
     operonx-project api '{"op": "status"}' [--repo .]  # status as JSON, for the studio
 
 The living BRD::
@@ -120,9 +122,6 @@ def _project_parsers(sub) -> None:
     p = sub.add_parser("new", help="a new project: a git repo with docs/brd/")
     p.add_argument("dir", type=Path)
     p.add_argument("--name")
-    p = sub.add_parser("plans", help="the plan docs under docs/ and where each stands (their status blocks)")
-    _repo_arg(p)
-    p.add_argument("--json", action="store_true")
     p = sub.add_parser("adopt", help="an existing project: its BRD from its docs and tests")
     _repo_arg(p)
     p.add_argument("--prefix", default="", help="the requirement id prefix (default: from the project name)")
@@ -133,7 +132,7 @@ def _project_parsers(sub) -> None:
     p = sub.add_parser("api", help='\'{"op": "status"}\': the status as JSON (for the studio)')
     _repo_arg(p)
     p.add_argument("request", help="the request as JSON, or - to read it from stdin")
-    p = sub.add_parser("status", help="where the project stands: checklist, board, plans, what needs you, changes")
+    p = sub.add_parser("status", help="where the project stands: checklist, board, what needs you, changes")
     _repo_arg(p)
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("board", help="the board's cards; with CARD STATE, move a card")
@@ -142,6 +141,19 @@ def _project_parsers(sub) -> None:
     p.add_argument("state", nargs="?", help="todo, doing, needs you, done")
     p.add_argument("--note", default=None, help="the card's note: the question, or the owner's answer")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("put", help="add a card (no CARD), or change one's title, cycle or fields")
+    _repo_arg(p)
+    p.add_argument("card", nargs="?", default="")
+    p.add_argument("--title", default="")
+    p.add_argument("--cycle", default=None, help="an open cycle's id, or Backlog")
+    for k in ("req", "after", "files", "done"):
+        p.add_argument(f"--{k}", nargs="*", default=None)
+    p = sub.add_parser("cycle", help="open or close a cycle (a plan's round of work)")
+    _repo_arg(p)
+    p.add_argument("action", choices=("open", "close"))
+    p.add_argument("id")
+    p.add_argument("title", nargs="?", default="")
+    p.add_argument("--plan", default="", help="the plan doc the cycle works")
 
 
 def _coder(state: Path):
@@ -159,27 +171,32 @@ def _coder(state: Path):
     return ClaudeCodeCoder(state_dirs=[str(state)])
 
 
-def _plans(args) -> int:
-    """``plans``: files only. Exit 1 when a block is wrong."""
-    from operonx_project.plans import find
+def _put(args) -> int:
+    """``put``: add a card, or change one. Exit 1 when refused."""
+    from operonx_project import board
 
-    out = sys.stdout
-    plans, errors, warnings = find(Path(args.repo))
-    if args.json:
-        out.write(json.dumps({"plans": [p.as_dict() for p in plans], "errors": errors, "warnings": warnings},
-                             indent=1, ensure_ascii=False) + "\n")  # fmt: skip
-        return 1 if errors else 0
-    order = {"in_progress": 0, "plan": 1, "parked": 2, "done": 3}
-    for p in sorted(plans, key=lambda p: (order[p.status], p.path)):
-        cur = p.current if p.status == "in_progress" else None
-        step = f" · now {cur.id} {cur.title}".rstrip() if cur else ""
-        out.write(f"{p.status:<12} {p.done}/{len(p.phases)}  {p.title}{step}  ({p.path})\n")
-    for w in warnings:
-        out.write(f"warning: {w}\n")
-    for e in errors:
-        out.write(f"ERROR {e}\n")
-    out.write(f"{len(plans)} plan(s), {len(warnings)} without a status block, {len(errors)} error(s)\n")
-    return 1 if errors else 0
+    fields = {k: getattr(args, k) for k in ("req", "after", "files", "done") if getattr(args, k) is not None}
+    try:
+        c = board.put(args.repo, args.card, args.title, cycle=args.cycle, **fields)
+    except (board.BoardError, OSError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
+    sys.stdout.write(f"{c.id} · {c.title} · {c.state} · {c.cycle or board.BACKLOG}\n")
+    return 0
+
+
+def _cycle(args) -> int:
+    """``cycle open|close``. Exit 1 when refused (a close with cards not done)."""
+    from operonx_project import board
+
+    try:
+        y = (board.open_cycle(args.repo, args.id, args.title, plan=args.plan) if args.action == "open"
+             else board.close(args.repo, args.id))  # fmt: skip
+    except (board.BoardError, OSError) as exc:
+        sys.stderr.write(f"error: {exc}\n")
+        return 1
+    sys.stdout.write(f"{y.id} · {y.title} · {y.state}\n")
+    return 0
 
 
 def _board(args) -> int:
@@ -194,20 +211,25 @@ def _board(args) -> int:
             c = board.move(args.repo, args.card, args.state, note=args.note)
             out.write(f"{c.id} · {c.title} · {c.state}\n" + (f"  {c.note}\n" if c.note else ""))
             return 0
-        cards = board.read(args.repo)
+        got = board.read_all(args.repo)
     except (board.BoardError, OSError) as exc:
         sys.stderr.write(f"error: {exc}\n")
         return 1
-    if cards is None:
+    if got is None:
         out.write(f"no board yet ({board.PATH}): the first card makes it\n")
         return 0
-    view = board.view(cards)
+    view = board.view(got[1], got[0])
     if args.json:
         out.write(json.dumps(view, indent=1, ensure_ascii=False) + "\n")
         return 0
+    shut = {y["id"] for y in view["cycles"] if y["state"] == "closed"}
+    for y in view["cycles"]:
+        out.write(f"## {y['id']} · {y['title']} · {y['state']} · {y['done']}/{len(y['cards'])} done\n")
     for c in view["cards"]:
+        if c["cycle"] in shut:
+            continue
         waits = f"  after {', '.join(c['waits'])}" if c["waits"] else ""
-        out.write(f"{c['id']:<4} {c['state']:<9} {c['lane']:<8} {c['kind']:<5} {c['title']}{waits}\n")
+        out.write(f"{c['id']:<4} {c['state']:<9} {c['cycle'] or 'Backlog':<8} {c['lane']:<8} {c['kind']:<5} {c['title']}{waits}\n")
         if c["note"]:
             out.write(f"     {c['note'].splitlines()[0][:200]}\n")
     out.write(" · ".join(f"{len(ids)} {s}" for s, ids in view["columns"].items()) + "\n")
@@ -218,8 +240,10 @@ def _run(args) -> int:
     from operonx_project.status import status, text
 
     out = sys.stdout
-    if args.cmd == "plans":
-        return _plans(args)
+    if args.cmd == "put":
+        return _put(args)
+    if args.cmd == "cycle":
+        return _cycle(args)
     if args.cmd == "board":
         return _board(args)
     if args.cmd == "status":

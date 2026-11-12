@@ -1,8 +1,9 @@
-"""operonx-project: a project's requirements, plans and board, read and kept.
+"""operonx-project: a project's requirements and board, read and kept.
 
-A **project** is the product repo. It keeps a living BRD and a checklist in ``docs/brd/``, its plans as
-``docs/*_PLAN.md`` with a status block, and its board in ``docs/brd/board.md``: one card per task, moved by
-the assistant that works it (:mod:`operonx_project.board`). The plan of record is ``docs/LEAN_PROJECT_PLAN.md``
+A **project** is the product repo. It keeps a living BRD and a checklist in ``docs/brd/``, and its board in
+``docs/brd/board.md``: cycles (a plan's round of work, its phases as cards) and a Backlog, each card moved by
+the assistant that works it (:mod:`operonx_project.board`). A plan doc (``docs/*_PLAN.md``) says why and how;
+where it stands is its cycle. The plan of record is ``docs/LEAN_PROJECT_PLAN.md``
 in the operonx repo.
 """
 

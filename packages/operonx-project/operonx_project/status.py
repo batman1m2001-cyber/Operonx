@@ -1,17 +1,16 @@
 """Where the project stands, in one document (PROJECT_MODE_PLAN D2).
 
-:func:`status` reads the checklist, the plan docs (:mod:`operonx_project.plans`), the board
-(``docs/brd/board.md``) when the project has one, the BRD's open questions and the last commits, and returns
-one dict the studio's screen and its assistant both read::
+:func:`status` reads the checklist, the board (``docs/brd/board.md``, cut into cycles: CYCLES_PLAN) when the
+project has one and the last commits, and returns one dict the studio's screen and its assistant both read::
 
     checklist   counts by status, the open rows (neither verified nor out of scope)
-    plans       plan docs, in progress first, then planned, then the rest;
-                ``unmarked``: the ``*_PLAN.md`` files with no status block yet
-    board       the board's cards (:func:`operonx_project.board.view`), or ``None``
-    needs_you   the BRD's open questions and the cards that need the owner
-    working_on  the cards doing and the plans in progress, each with one sentence written here from the data
+    board       the board's cycles and cards (:func:`operonx_project.board.view`), or ``None``
+    needs_you   the cards in *needs you*
+    working_on  the cards in *doing*, each with one sentence written here from the data
     changes     the last commits, newest first
-    standard    the standard, item by item (brd, check, plans): ok, a sentence, the fix
+    standard    the standard, item by item (brd, check): ok, a sentence, the fix
+
+A plan doc says why and how; where the work stands is its cycle on the board.
 
 It only reads. Every sentence is made by code from the data; no model writes any of it.
 """
@@ -23,15 +22,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
 
-from operonx_project.board import PATH, lane, read, view
-from operonx_project.brd.records import MATRIX, STATUSES, _split, load_questions
-from operonx_project.plans import find
+from operonx_project.board import PATH, lane, read_all, view
+from operonx_project.brd.records import MATRIX, STATUSES, _split
 
 __all__ = ["CLOSED", "STANDARD", "standard", "status", "text"]
 
 #: Row statuses that need no more work.
 CLOSED = ("implemented_verified", "out_of_scope_demo", "not_applicable")
-_ORDER = {"in_progress": 0, "plan": 1, "parked": 2, "done": 3}
 _WHAT = ("requirement", "metric", "title", "what")  # the column that says what a row is, by its header
 _NOTE = ("gap", "note", "evidence")  # in this order: "Evidence, gaps" and "Notes" before "Tests / evidence"
 
@@ -87,8 +84,6 @@ STANDARD = (
                            "writes one from the code)"),
     ("check", "brd check passes", "fix what operonx-project brd check reports; a summary table with sets of its "
                                   "own names them in docs/brd/brd.toml [[groups]] (name, pattern)"),
-    ("plans", "every plan says where it stands", "a status block at the top of each docs/*_PLAN.md (title, status, "
-                                                 "phases with their status, rows, updated)"),
 )
 
 _CHECKED: Dict[Path, Any] = {}  # brd dir → (the files' signature, the errors): the check re-runs when a file changes
@@ -101,7 +96,6 @@ def _signature(brd: Path) -> Any:
     files = [*brd.rglob("*")]
     if cfg.tests.is_dir():
         files += cfg.tests.rglob("test_*.py")
-    files += (cfg.root / "docs").glob("**/*_PLAN.md")
     sig = []
     for f in files:
         try:
@@ -137,33 +131,13 @@ def standard(repo: Path, doc: Dict[str, Any], brd: str = "docs/brd") -> List[Dic
         if key == "brd":
             ok = has_brd
             line = f"{doc['checklist']['total']} rows in {doc['checklist']['file']}" if ok else f"no checklist in {brd}"
-        elif key == "check":
+        else:
             errors = _check_errors(brd_dir) if has_brd else []
             ok = has_brd and not errors
             line = ("no checklist to check" if not has_brd else "0 errors" if ok
                     else f"{len(errors)} error{'s' if len(errors) > 1 else ''}, first: {errors[0]}")  # fmt: skip
-        else:
-            bad = len(doc["plan_errors"]) + len(doc["unmarked"])
-            ok = not bad
-            line = (f"{len(doc['plans'])} plans, each with its status" if ok else
-                    ", ".join(x for x in (f"{len(doc['unmarked'])} with no status block" if doc["unmarked"] else "",
-                                          f"{len(doc['plan_errors'])} with a wrong one" if doc["plan_errors"] else "")
-                              if x))  # fmt: skip
         out.append({"key": key, "name": name, "ok": ok, "line": line, "fix": "" if ok else fix})
     return out
-
-
-def _sentence(plan: Dict[str, Any]) -> str:
-    """One line of what a plan in progress is doing, from its data."""
-    phases = {p["id"]: p for p in plan["phases"]}
-    cur = phases.get(plan["current"] or "")
-    if not plan["total"]:
-        return "in progress (no phases listed)"
-    if cur is None:
-        return f"{plan['done']} of {plan['total']} phases done, none in progress"
-    n = list(phases).index(cur["id"]) + 1
-    verb = "" if cur["status"] == "in_progress" else "next: "
-    return f"{verb}{cur['id']}, phase {n} of {plan['total']}: {cur['title'] or cur['id']}"
 
 
 def status(repo: Path, changes: int = 15, brd: str = "docs/brd") -> Dict[str, Any]:
@@ -177,32 +151,28 @@ def status(repo: Path, changes: int = 15, brd: str = "docs/brd") -> Dict[str, An
                  "counts": {s: counts[s] for s in STATUSES if counts.get(s)}, "open": open_rows,
                  "file": f"{brd}/{MATRIX}" if rows else ""}  # fmt: skip
 
-    docs, plan_errors, plan_warnings = find(repo)
-    plans = [{**p.as_dict(), "source": "doc"} for p in docs]
-    plans.sort(key=lambda p: p["updated"] if p["status"] == "done" else "", reverse=True)  # done: newest first
-    plans.sort(key=lambda p: _ORDER.get(p["status"], 9))  # stable: in progress, planned, parked, done
-    cards = read(repo)
-    board = view(cards) if cards is not None else None
-    done = sum(1 for c in cards or [] if c.state == "done")
-    working_on = [{"title": f"{c.id} · {c.title}", "source": "board", "path": PATH, "card": c.id,
-                   "sentence": f"doing · {lane(c.files)} · {done} of {len(cards)} cards done"}
-                  for c in cards or [] if c.state == "doing"]  # fmt: skip
-    working_on += [{"title": p["title"], "source": p["source"], "path": p["path"], "sentence": _sentence(p)}
-                   for p in plans if p["status"] == "in_progress"]  # fmt: skip
+    got = read_all(repo)
+    cycles, cards = got if got is not None else ([], [])
+    board = view(cards, cycles) if got is not None else None
+    titles = {y.id: y for y in cycles}
+    closed = {y.id for y in cycles if y.state == "closed"}
+    live = [c for c in cards if c.cycle not in closed]
 
-    needs_you: List[Dict[str, Any]] = []
-    for q in load_questions(brd_dir):
-        if q.state.lower().startswith("open"):
-            needs_you.append({"source": "brd", "id": q.id, "kind": q.type, "text": q.topic, "state": q.state})
-    for c in cards or []:
-        if c.state == "needs you":
-            needs_you.append({"source": "board", "id": c.id, "kind": "card", "text": c.note or c.title,
-                              "state": "open"})  # fmt: skip
+    def where(c) -> str:
+        y = titles.get(c.cycle)
+        if y is None:
+            return "Backlog"
+        mine = [x for x in cards if x.cycle == y.id]
+        return f"{y.id} {sum(1 for x in mine if x.state == 'done')}/{len(mine)}"
 
-    unmarked = [w.split(": ", 1)[0] for w in plan_warnings]
-    doc = {"repo": str(repo), "checklist": checklist, "plans": plans, "plan_errors": plan_errors,
-           "unmarked": unmarked, "board": board, "needs_you": needs_you, "working_on": working_on,
-           "changes": _git_log(repo, changes)}  # fmt: skip
+    working_on = [{"title": f"{c.id} · {c.title}", "source": "board", "path": PATH, "card": c.id, "cycle": c.cycle,
+                   "sentence": f"doing · {lane(c.files)} · {where(c)}"}
+                  for c in live if c.state == "doing"]  # fmt: skip
+    needs_you = [{"source": "board", "id": c.id, "kind": "card", "text": c.note or c.title, "state": "open",
+                  "cycle": c.cycle}
+                 for c in live if c.state == "needs you"]  # fmt: skip
+    doc = {"repo": str(repo), "checklist": checklist, "board": board, "needs_you": needs_you,
+           "working_on": working_on, "changes": _git_log(repo, changes)}  # fmt: skip
     doc["standard"] = standard(repo, doc, brd)
     return doc
 
@@ -219,11 +189,19 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
         out.append("Checklist: none (no docs/brd matrix)")
     b = doc.get("board")
     if b:
-        out.append("Board: " + ", ".join(f"{len(ids)} {s}" for s, ids in b["columns"].items() if ids))
+        out.append("Board: " + (", ".join(f"{len(ids)} {s}" for s, ids in b["columns"].items() if ids) or "empty"))
+        shut = {y["id"] for y in b["cycles"] if y["state"] == "closed"}
+        for y in b["cycles"]:
+            if y["state"] == "open":
+                out.append(f"  cycle {y['id']} · {y['title']} · {y['done']}/{len(y['cards'])} done"
+                           + (f" ({y['plan']})" if y["plan"] else ""))  # fmt: skip
         for card in b["cards"]:
-            if card["state"] != "done":
+            if card["state"] != "done" and card["cycle"] not in shut:
                 waits = f"  (after {', '.join(card['waits'])})" if card["waits"] else ""
-                out.append(f"  {card['id']:<4} {card['state']:<9} {card['lane']:<8} {card['title']}{waits}"[:220])
+                at = card["cycle"] or "Backlog"
+                out.append(f"  {card['id']:<4} {card['state']:<9} {at:<8} {card['lane']:<8} {card['title']}{waits}"[:220])
+        if shut:
+            out.append(f"  closed cycles: {', '.join(sorted(shut))}")
     if doc["working_on"]:
         out.append("Working on:")
         for w in doc["working_on"]:
@@ -232,16 +210,6 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
     out.append(f"Needs you: {len(needs)}" if needs else "Needs you: nothing")
     for q in needs:
         out.append(f"  {q['id']}  {q['kind']}  {q['text']}"[:220])
-    counts = Counter(p["status"] for p in doc["plans"])
-    if doc["plans"]:
-        out.append("Plans: " + ", ".join(f"{counts[s]} {s.replace('_', ' ')}" for s in _ORDER if counts.get(s)))
-        for p in doc["plans"]:
-            if p["status"] != "done":
-                out.append(f"  {p['status']:<12} {p['done']}/{p['total']}  {p['title']}  ({p['path']})")
-    for e in doc["plan_errors"]:
-        out.append(f"  ERROR {e}")
-    if doc["unmarked"]:
-        out.append(f"Plan docs with no status block ({len(doc['unmarked'])}): {', '.join(doc['unmarked'])}")
     if doc["changes"]:
         out.append("Recent changes:")
         for ch in doc["changes"][:changes]:

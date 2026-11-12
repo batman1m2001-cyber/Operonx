@@ -118,3 +118,86 @@ def test_view_marks_what_waits(tmp_path):
     c5 = v["cards"][2]
     assert (c5["lane"], c5["kind"], c5["waits"]) == ("UI", "fix", ["C4"])
     assert v["columns"] == {"todo": ["C5"], "doing": ["C4"], "needs you": [], "done": ["C1"]}
+
+
+# ── cycles (CYCLES_PLAN): a cycle is a plan's round of work, its phases are its cards ──
+
+CYCLES = """# Board
+
+### C1 · a leftover · todo
+
+## FF · One flow per feature · open
+plan: docs/FEATURE_FLOWS_PLAN.md · opened: 2026-11-03
+
+### C2 · pin the contracts · done
+done: tests/test_c.py::test_pin
+
+### C3 · pages and the assistant · doing
+after: C2
+files: src/pages/routes.py
+
+## Backlog
+
+### C4 · later · todo
+
+## LP · One lean plan · closed
+plan: docs/LEAN_PROJECT_PLAN.md · opened: 2026-11-11 · closed: 2026-11-11
+
+### C5 · cut the plans · done
+"""
+
+
+def test_cycles_parse_and_render_round_trip():
+    cycles, cards = board.parse_all(CYCLES)
+    assert [(y.id, y.state, y.plan, y.closed) for y in cycles] == [
+        ("FF", "open", "docs/FEATURE_FLOWS_PLAN.md", ""), ("LP", "closed", "docs/LEAN_PROJECT_PLAN.md", "2026-11-11")]
+    assert [(c.id, c.cycle) for c in cards] == [("C1", ""), ("C2", "FF"), ("C3", "FF"), ("C4", ""), ("C5", "LP")]
+    again = board.render(cards, board._top(CYCLES), cycles)
+    cy, ca = board.parse_all(again)
+    assert cy == cycles and sorted(ca, key=lambda c: c.id) == cards
+    # open cycles, then the Backlog, then the closed ones with their cards as heading lines only
+    assert again.index("## FF") < again.index("## Backlog") < again.index("## LP")
+    assert board.parse(CYCLES) == cards  # cards only, as before cycles
+
+
+def test_a_cycle_closes_only_when_every_card_is_done(tmp_path):
+    (tmp_path / "docs/brd").mkdir(parents=True)
+    (tmp_path / board.PATH).write_text(CYCLES, encoding="utf-8")
+    with pytest.raises(BoardError, match="cycle FF has cards not done: C3"):
+        board.close(tmp_path, "FF")
+    board.put(tmp_path, "C3", cycle="Backlog")
+    y = board.close(tmp_path, "FF")
+    assert y.state == "closed" and y.closed
+    with pytest.raises(BoardError, match="closed"):
+        board.move(tmp_path, "C2", "todo")
+    with pytest.raises(BoardError, match="cycle FF is closed"):
+        board.put(tmp_path, "C4", cycle="FF")
+    view = board.view(*reversed(board.read_all(tmp_path)))
+    assert [(y["id"], y["state"], y["done"]) for y in view["cycles"]] == [("FF", "closed", 1), ("LP", "closed", 1)]
+    assert view["columns"]["doing"] == ["C3"] and "C2" not in view["columns"]["done"]  # closed cycles leave the columns
+
+
+def test_open_cycle_and_put_into_it(tmp_path):
+    y = board.open_cycle(tmp_path, "EX", "CSV export", plan="docs/EXPORT_PLAN.md")
+    assert (y.state, y.plan) == ("open", "docs/EXPORT_PLAN.md") and y.opened
+    c = board.put(tmp_path, title="the rows", cycle="EX")
+    d = board.put(tmp_path, title="a stray fix")
+    assert (c.cycle, d.cycle) == ("EX", "")  # a new card goes to the Backlog unless a cycle is given
+    with pytest.raises(BoardError, match="already"):
+        board.open_cycle(tmp_path, "EX", "again")
+    with pytest.raises(BoardError, match="capitals"):
+        board.open_cycle(tmp_path, "ex", "lower")
+    with pytest.raises(BoardError, match="no cycle ZZ"):
+        board.put(tmp_path, "C1", cycle="ZZ")
+
+
+def test_the_cli_opens_and_closes_cycles(tmp_path):
+    from operonx_project.cli import main
+
+    repo = str(tmp_path)
+    assert main(["cycle", "open", "EX", "CSV export", "--repo", repo]) == 0
+    assert main(["put", "--title", "the rows", "--cycle", "EX", "--done", "tests/t.py::test_rows", "--repo", repo]) == 0
+    assert main(["cycle", "close", "EX", "--repo", repo]) == 1  # C1 is not done
+    assert main(["board", "C1", "done", "--repo", repo]) == 0
+    assert main(["cycle", "close", "EX", "--repo", repo]) == 0
+    assert board.read_all(tmp_path)[0][0].state == "closed"
