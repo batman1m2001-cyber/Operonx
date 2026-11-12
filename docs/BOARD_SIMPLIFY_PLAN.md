@@ -1,12 +1,5 @@
 ---
 title: A lighter board and BRD folder
-status: done
-phases:
-  - {id: B1, title: A card is a few lines, status: done}
-  - {id: B2, title: The BRD scaffold keeps what is read, status: done}
-  - {id: B3, title: The boarded projects rewritten, status: done}
-  - {id: B4, title: OneWealth's board from its plans, status: done}
-updated: 2026-10-30
 ---
 
 # A lighter board and BRD folder (2026-10-30)

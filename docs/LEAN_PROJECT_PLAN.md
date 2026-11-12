@@ -1,13 +1,5 @@
 ---
 title: One lean plan — the project's shape and its board
-status: done
-phases:
-  - {id: L1, title: Cut first, status: done}
-  - {id: L2, title: "operonx init: three templates, three flags", status: done}
-  - {id: L3, title: Four lint checks and a baseline, status: done}
-  - {id: L4, title: The board, status: done}
-  - {id: L5, title: mr-finance on the board and the ratchet, status: done}
-updated: 2026-11-11
 ---
 
 # One lean plan: the project's shape and its board

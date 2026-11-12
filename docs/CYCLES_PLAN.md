@@ -1,12 +1,5 @@
 ---
 title: One board, cut into cycles
-status: in_progress
-phases:
-  - {id: K1, title: Cut what links to no card, status: done}
-  - {id: K2, title: Cycles in the engine; plan status blocks go, status: done}
-  - {id: K3, title: The Board page is the cycles, status: planned}
-  - {id: K4, title: The boards rebuilt from the plans, status: planned}
-updated: 2026-11-12
 ---
 
 # One board, cut into cycles
@@ -113,6 +106,9 @@ A plan doc keeps the why and the how. It no longer says where it stands.
 - Add the tabs, the Backlog, and the Completed menu with its read-only report.
 - The side column becomes card filters. The stop hook and mcp read cards, not plans.
 - Gate: screenshots in light and dark, on mr-finance and on a second project.
+- Outcome: studio #164 (with K2's studio half). One tab per open cycle plus Backlog; `Completed (n)` opens a
+  report (facts, cards, the commits naming the cycle or its cards). Lines +953 −876 with #265, 77 over the rule:
+  the tabs, the report and its route are new. An assistant question with no card is no longer listed.
 
 **K4: The boards rebuilt from the plans.**
 - A script turns every plan doc with a status block into a cycle: *done* becomes closed, anything else becomes
@@ -122,6 +118,9 @@ A plan doc keeps the why and the how. It no longer says where it stands.
 - The other plan docs (32 in mr-finance) get no board. They stay as docs.
 - mr-finance changes only by PR. No operonx CLI runs inside `~/mr-finance`.
 - Gate: the owner opens the Board and sees `[ FF 6/7 ] [ Backlog 8 ]  Completed ▾`, with nothing else on the page.
+- Outcome: mr-finance #76 shows `[ FF 6/7 ] [ Backlog 8 ]`; `Completed` is hidden while no cycle is closed.
+  operonx-studio #165: PS open, L E S W closed. Operon: this PR, P B V L K closed. Parked plans
+  (PROJECT_CONVENTION, PROJECT_MODE_V2) get no cycle; their status blocks are stripped.
 
 ## 6. Out of scope
 
