@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **operonx-project: the board is cut into cycles; plan status blocks are gone.** A cycle is a plan's round of work: a `## ID · title · open|closed` section of `docs/brd/board.md` (with `plan:`, `opened:`, `closed:`), its phases as cards. Cards before any `##`, or under `## Backlog`, are the Backlog; card ids stay global. `operonx-project cycle open ID TITLE [--plan]` and `cycle close ID` (refused while a card in it is not done: move it to the Backlog or another open cycle with `put C4 --cycle Backlog`); `operonx-project put` adds or changes a card. A closed cycle keeps its cards as heading lines only and leaves the columns. `status` gives the cycles; *working on* is the cards in *doing*, *needs you* the cards in *needs you*. Removed: `operonx_project.plans`, `operonx-project plans`, the standard's `plans` item, and the BRD questions in *needs you* (a question reaches it through a card) (CYCLES_PLAN K2).
+
 ## [1.38.0] - 2026-11-01
 
 ### Added

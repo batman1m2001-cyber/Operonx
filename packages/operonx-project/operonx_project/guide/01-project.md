@@ -29,42 +29,7 @@ operonx-project brd extract SRC-01 brd.docx --prefix BRD --title "Client BRD" --
 ```
 
 `brd check` checks the links, the ids, the checklist matrix, the tests each
-verified row cites, and the plans' status blocks.
-
-## Plans
-
-Work is planned in a Markdown file under `docs/`, and the plan says where it
-stands in a block at its top. A phase's status changes in the commit that
-finishes it, as a checklist row does, so the status stays true whoever did
-the work:
-
-```python
-from pathlib import Path
-
-from operonx_project.plans import find
-
-(Path("demo") / "docs").mkdir(exist_ok=True)
-(Path("demo") / "docs" / "EXPORT_PLAN.md").write_text("""---
-title: CSV export
-status: in_progress            # plan | in_progress | done | parked
-phases:
-  - {id: E1, title: The rows, status: done}          # open | in_progress | done | skipped
-  - {id: E2, title: The export service, status: in_progress}
-rows: []                       # the checklist rows it serves
-updated: 2026-10-23
----
-
-# CSV export
-""")
-plans, errors, warnings = find(Path("demo"))
-[plan] = plans
-print(plan.title, plan.status, f"{plan.done}/{len(plan.phases)}", plan.current.id)  # CSV export in_progress 1/2 E2
-assert errors == [] and plan.current.title == "The export service"
-```
-
-```bash run
-operonx-project plans --repo demo        # every plan and where it stands; exit 1 when a block is wrong
-```
+verified row cites, and the board.
 
 ## The board
 
@@ -109,12 +74,56 @@ operonx-project board --repo demo             # the cards, with lane and what ea
 operonx-project board C1 done --repo demo     # move one
 ```
 
+## Cycles
+
+A plan doc under `docs/` says why and how. Where it stands is its **cycle**:
+a `##` section of `board.md` whose cards are the plan's phases. Cards before
+any `##`, or under `## Backlog`, are the Backlog. Card ids stay global, so
+`after:` works across cycles.
+
+```markdown
+## EX · CSV export · open
+plan: docs/EXPORT_PLAN.md · opened: 2026-11-12
+
+### C3 · the download button · doing
+files: web/export.js
+```
+
+`close` refuses while a card in the cycle is not done: move each to the
+Backlog or another open cycle first. A closed cycle stays in the file, its
+cards as heading lines only, and `status` skips it.
+
+```python
+from pathlib import Path
+
+from operonx_project import board
+
+repo = Path("demo")
+board.open_cycle(repo, "EX", "CSV export", plan="docs/EXPORT_PLAN.md")
+board.put(repo, title="the download button", cycle="EX", files=["web/export.js"], done=["tests/test_web.py::test_dl"])
+board.put(repo, "C2", cycle="EX")
+try:
+    board.close(repo, "EX")
+except board.BoardError as exc:
+    print(exc)  # cycle EX has cards not done: C2, C3. ...
+board.move(repo, "C3", "done")
+board.put(repo, "C2", cycle="Backlog")
+y = board.close(repo, "EX")
+assert y.state == "closed" and [(c.id, c.cycle) for c in board.read(repo)] == [("C1", ""), ("C2", ""), ("C3", "EX")]
+```
+
+```bash run
+operonx-project cycle open NX "Next round" --repo demo   # --plan docs/NEXT_PLAN.md
+operonx-project put C2 --cycle NX --repo demo            # a card into a cycle; put --title T adds one
+operonx-project board --repo demo
+```
+
 ## Where the project stands
 
 `operonx-project status` (and the api's `{"op": "status"}`) puts the whole
 project in one document: the checklist's counts and its open rows, the
-board, the plans, the BRD's open questions and the cards that need you, what
-is in progress with one sentence each, and the last commits. It only reads, and every
+board's cycles and cards, the cards that need you, the cards in progress
+with one sentence each, and the last commits. It only reads, and every
 sentence is written by code from the data, so the studio's screen and its
 assistant never disagree:
 
@@ -124,8 +133,8 @@ from pathlib import Path
 from operonx_project.status import status, text
 
 doc = status(Path("demo"))
-print([w["title"] for w in doc["working_on"]])  # ['CSV export']: C1 is done
-assert doc["board"]["columns"]["needs you"] == ["C2"] and text(doc).startswith("Checklist:")
+print([y["id"] for y in doc["board"]["cycles"]])  # ['NX', 'EX']: EX is closed
+assert doc["board"]["columns"]["needs you"] == ["C2"] and doc["working_on"] == [] and text(doc).startswith("Checklist:")
 ```
 
 ```bash run
@@ -134,7 +143,7 @@ operonx-project status --repo demo          # the same, in plain lines; --json f
 
 ## The standard
 
-What a project needs for the studio to read it: three items, in the status
+What a project needs for the studio to read it: two items, in the status
 document as `standard` and as one line of `text()`. Each says where it
 stands and, when it is missing, what fixes it.
 
@@ -147,7 +156,6 @@ stands and, when it is missing, what fixes it.
    name = "BRD numbered (BR, FR, NFR)"    # the summary row's first cell, exactly
    pattern = "BRD-(BR|FR|NFR)-"           # a regex the row ids of that set match from their start
    ```
-3. **`plans`**: every `docs/*_PLAN.md` has a valid status block.
 
 ```python
 from pathlib import Path
@@ -155,7 +163,7 @@ from pathlib import Path
 from operonx_project.status import status
 
 doc = status(Path("demo"))
-assert [x["key"] for x in doc["standard"]] == ["brd", "check", "plans"]
+assert [x["key"] for x in doc["standard"]] == ["brd", "check"]
 print([(x["key"], x["fix"][:40]) for x in doc["standard"] if not x["ok"]])
 ```
 
