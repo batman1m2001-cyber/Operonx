@@ -10,10 +10,12 @@ files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/cli/init.py, docs/c
 done: tests/internal/cli/test_init.py::TestForCodingAssistants::test_every_guide_reference_in_agents_md_names_a_page_and_a_heading
 
 ### C34 · K3 operonx check: one verify call · done
-files: operonx/cli/check.py,operonx/app/serve/app.py,operonx/app/serve/runner.py,operonx/cli/templates/_common/AGENTS.md.tmpl,docs/cost/K3.md
-done: tests/internal/cli/test_check_cli.py,tests/internal/app/serve/test_path_and_status.py
+files: operonx/cli/check.py, operonx/app/serve/app.py, operonx/app/serve/runner.py, operonx/cli/templates/_common/AGENTS.md.tmpl, docs/cost/K3.md
+done: tests/internal/cli/test_check_cli.py, tests/internal/app/serve/test_path_and_status.py
 
-### C35 · K2 operonx add: reuse as one command · todo
+### C35 · K2 operonx add: reuse as one command · done
+files: operonx/cli/add.py,operonx/cli/templates/_common/AGENTS.md.tmpl,docs/cost/K2.md
+done: tests/internal/cli/test_add_cli.py
 
 ### C36 · K4 One file per feature · todo
 

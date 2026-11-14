@@ -38,6 +38,22 @@ read it first.
 
 ## Recipes
 
+**Start a feature with `{{run}}operonx add`**: it writes the op, the graph and
+their wiring{{#http}} into `APP`{{/http}}, then prints the `TODO` lines to fill in. What it writes
+passes `operonx check` as it is.
+
+```bash
+{{#http}}{{run}}operonx add route create_ticket POST /tickets --in text --llm  # model call, then an op
+{{run}}operonx add route find_ticket GET /tickets/{id}   # {id} is an input
+{{/http}}{{run}}operonx add job daily_summary --llm --at 07:00      # a Job (on a clock)
+{{run}}operonx add llm classify --feature tickets           # a model call, as a graph
+{{#web}}{{run}}operonx add page stats --data /tickets              # web/stats/: a table, linked from /
+{{/web}}```
+
+`--feature F` picks the `src/` package{{#http}} (a route: the path's first part){{/http}}. A model call
+turns on `llm:assistant`, its `.env.example` names, the `openai` extra and a fake
+model for the tests.
+
 An op is one step; it returns a dict literal. A graph wires ops with `>>`;
 its parameters are its inputs (a job item{{#http}}, a request body{{/http}}), and the outputs
 of the ops wired to `END` are its answer. See `src/` for a working pair.
@@ -134,6 +150,7 @@ Guide: `08-runs.md` (traces, slow runs, durable runs); `04-gotchas.md`
 
 <!-- operonx:commands -->
 {{shell}}```bash
+{{run}}operonx add WHAT NAME   # route, job, llm, page: wired code + what to fill in
 {{run}}operonx check          # lint, tests, graphs, routes: one verdict (--call, --no-tests)
 {{run}}pytest                 # the tests: keep them green
 {{run}}operonx lint           # the rules below, checked (operonx lint --rules)

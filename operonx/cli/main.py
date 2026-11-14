@@ -9,11 +9,12 @@
     operonx play ...                # drive a served door    (operonx.app.play)
     operonx eval ...                # experiments: run, compare, report (operonx.cli.eval)
     operonx lint [DIR] [--build]    # check the project's conventions  (operonx.cli.lint)
+    operonx add route|job|llm|page  # a feature's wired code, then what to fill in (operonx.cli.add)
     operonx check [DIR] [--call]    # lint, tests, graphs, routes: one verdict (operonx.cli.check)
     operonx studio [DIR]            # open the project in operonx-studio (operonx.cli.studio)
     operonx project ...             # build a project from its requirements (operonx-project)
 
-``run``, ``serve``, ``play``, ``eval``, ``lint``, ``check``, ``studio`` and ``project`` are handed the rest of the
+``run``, ``serve``, ``play``, ``eval``, ``lint``, ``add``, ``check``, ``studio`` and ``project`` are handed the rest of the
 command line untouched: each is its module's own ``main(argv)`` (for the
 first three, the one the deprecated ``operonx-<name>`` alias calls too),
 so there is one parser per command and two spellings cannot differ.
@@ -45,6 +46,10 @@ DELEGATED = {
     "lint": (
         "operonx.cli.lint",
         "check the project against the operonx conventions (its AGENTS.md rules)",
+    ),
+    "add": (
+        "operonx.cli.add",
+        "add a route, a job, a model call or a page: the wired code, then what to fill in",
     ),
     "check": (
         "operonx.cli.check",

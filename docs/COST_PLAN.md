@@ -118,3 +118,28 @@ Done 2026-11-15, board C34. Before/after flow and code changes: [cost/K3.md](cos
   sets the code. The route recipe is a `Service` again. The K5 "full paths in one Starlette at
   `/`" text is gone. What stays from it is "list the web mount last", which `check` also catches.
 - **Not measured yet.** Gate 1 (the full A' run, about $2) comes after K2.
+
+## K2 result
+
+Done 2026-11-15, board C35. Before/after flow and code changes: [cost/K2.md](cost/K2.md).
+
+- **Shipped.** `operonx add route NAME METHOD PATH`, `add job NAME`, `add llm NAME`, `add page
+  NAME`. `route` and `job` write an op and its graph into the feature's `ops.py` / `graph.py` and
+  a `Service` / `Job` into `routes.py` / `jobs.py`, then wire the feature's list into `APP` ahead
+  of a mount at `/`. The command prints only its own `TODO` lines, and the next command:
+  `operonx check --call`. The code runs as written (the op answers its inputs), so the check
+  passes before anything is filled in. A taken name, or a route in a project with no port, is
+  exit 2 with nothing written.
+- **Beyond the plan's four lines, each forced by the bench tasks:**
+  - `--llm` on `route` and `job`. T1–T3 are all "a model call, then an op". A model job with no
+    inputs (T2's `daily_summary`) gets an `<name>_input` op in front that gathers what the model
+    reads.
+  - `--in a,b` for body fields; path `{params}` become inputs by themselves (K3's door change).
+  - `--feature F`, so T2's job and route share one package (lint C13 refuses reaching across).
+  - A model call writes `tests/conftest.py` with the fake model. The first run of `check` after
+    `add route --llm` failed the hello template's own route test: `llm:assistant` now needed
+    `LLM_API_KEY`. The conftest sets a placeholder and installs the fake. Shown to hold through
+    `Application.find` (the reply was `Echo: hi`).
+- **K4 hook.** `_feature_files()` is the one mapping from a part (`ops`, `graph`, `routes`,
+  `jobs`) to its file. K4's one-file-per-feature shape changes that function, not the generators.
+- **Not measured yet.** Gate 1 (the full A' run) is next.
