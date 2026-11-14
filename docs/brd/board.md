@@ -25,8 +25,11 @@ done: tests/internal/lint/test_shape.py, packages/operonx-project/tests/test_boa
 files: operonx/cli/templates/_brd/knowledge.md.tmpl, operonx/guide/__init__.py
 done: tests/internal/guide/test_catalog.py, tests/internal/lint/test_shape.py::test_stale_knowledge_is_a_warning
 
-### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · todo
-files: packages/operonx-project/operonx_project/board.py
+### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · doing
+files: packages/operonx-project/operonx_project/search.py, operonx-studio:operonx_studio/assistant.py
+
+### C32 · E8 Lint after every step (owner) · todo
+files: operonx-studio:operonx_studio/stophook.py
 
 ### C30 · E7 Does OperonX save tokens? (BRD 3) · todo
 files: bench/token_ab/

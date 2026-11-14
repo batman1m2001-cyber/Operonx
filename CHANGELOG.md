@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`operonx-project search` and `read`: search before reading a whole doc (ENGINEERING_ENV_PLAN E6).** `operonx-project search retry tts` ranks the sections of the board, the BRD, the plans (`docs/*.md`), `.operonx/guide/`, the catalog and AGENTS.md, and answers each as its heading, the three lines that hold the query and `path:line`; `--json` for tools. `operonx-project read docs/brd/board.md C29` prints one section (the whole file without a heading). Python API: `operonx_project.search.search(root, query)`, `read(root, path, heading)`. `knowledge.md` gains the kind `decision` (what the owner chose and why, so a new conversation does not ask again); the builder block says to search first.
+
 ### Changed
 
 - **A project keeps what building it taught (ENGINEERING_ENV_PLAN E5).** `operonx init` writes `docs/brd/knowledge.md`: one entry per reusable thing, `### K3 · title · pattern|pitfall|replaced`, then `where:` (files), `use:`, `instead:` (for `replaced`); a pitfall carries its symptom so a search finds it. `operonx guide` (and `init`) also generates `.operonx/catalog.md` from `src/` and `app/`: every op and graph with its signature and docstring's first sentence, every job and service with its graph, each with `file:line` (git-ignored; nobody maintains it). `operonx-project board C4 done` asks "anything reusable, or a pitfall?"; the builder block says to search both files before writing something new and to edit an entry, never add a second. Lint C18 warns on an entry whose `where` file is gone.

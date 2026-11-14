@@ -9,6 +9,8 @@
     operonx-project cycle open ID TITLE [--plan docs/X_PLAN.md]   # a cycle: a plan's round of work
     operonx-project cycle close ID                     # refused while a card in it is not done
     operonx-project api '{"op": "status"}' [--repo .]  # status as JSON, for the studio
+    operonx-project search QUERY... [--limit 8]        # board, BRD, plans, knowledge, guide, best first
+    operonx-project read PATH [HEADING]                # one section of a doc (the whole doc without HEADING)
 
 The living BRD::
 
@@ -154,6 +156,15 @@ def _project_parsers(sub) -> None:
     p.add_argument("id")
     p.add_argument("title", nargs="?", default="")
     p.add_argument("--plan", default="", help="the plan doc the cycle works")
+    p = sub.add_parser("search", help="one ranked search over the board, BRD, plans, knowledge and guide")
+    _repo_arg(p)
+    p.add_argument("query", nargs="+")
+    p.add_argument("--limit", type=int, default=8)
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("read", help="one section of a doc: PATH [HEADING]")
+    _repo_arg(p)
+    p.add_argument("path")
+    p.add_argument("heading", nargs="?", default=None)
 
 
 def _coder(state: Path):
@@ -248,6 +259,22 @@ def _run(args) -> int:
         return _cycle(args)
     if args.cmd == "board":
         return _board(args)
+    if args.cmd in ("search", "read"):
+        from operonx_project import search
+
+        if args.cmd == "read":
+            try:
+                out.write(search.read(args.repo, args.path, args.heading) + "\n")
+            except (KeyError, OSError) as exc:
+                sys.stderr.write(f"error: {exc.args[0] if exc.args else exc}\n")
+                return 1
+            return 0
+        hits = search.search(args.repo, " ".join(args.query), limit=args.limit)
+        if args.json:
+            out.write(json.dumps([vars(h) for h in hits], indent=1, ensure_ascii=False) + "\n")
+        else:
+            out.write(search.text(hits) + "\n")
+        return 0
     if args.cmd == "status":
         doc = status(args.repo)
         out.write(json.dumps(doc, indent=1, ensure_ascii=False) + "\n" if args.json else text(doc))

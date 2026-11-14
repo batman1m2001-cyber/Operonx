@@ -88,11 +88,16 @@ _BUILDER = """## Building it: docs/brd and the board
   `docs/brd/README.md`. The checklist's summary table is counted from
   the rows by the engine: leave it.
 - `docs/brd/knowledge.md` is what the project learned: `### K3 · title ·
-  pattern|pitfall|replaced`, then `where` (files), `use` (when; a pitfall's
-  symptom first), `instead` (for `replaced`). Before writing something new,
-  search it and `.operonx/catalog.md` (every op, graph and job; `operonx
-  guide` rewrites it). When a card is done, add what is reusable or a
-  pitfall; when a pattern is replaced, edit its entry, never add a second.
+  pattern|pitfall|replaced|decision`, then `where` (files), `use` (when; a
+  pitfall's symptom first; a decision's why), `instead` (for `replaced`).
+  Before writing something new, search it and `.operonx/catalog.md` (every
+  op, graph and job; `operonx guide` rewrites it). When a card is done, add
+  what is reusable or a pitfall; when the owner decides something, add a
+  `decision`; when a pattern is replaced, edit its entry, never add a second.
+- Search before reading a whole doc: `operonx-project search QUERY` ranks
+  the sections of the board, the BRD, the plans, knowledge and the guide
+  (heading, 3 lines, `path:line`); `operonx-project read PATH HEADING`
+  prints one section.
 - Work with more than one step gets a plan doc under `docs/` (why and
   how) and a cycle on the board: `operonx-project cycle open ID TITLE
   --plan docs/X_PLAN.md`, its phases as cards (`operonx-project put --title
