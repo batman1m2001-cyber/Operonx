@@ -99,13 +99,15 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="use the operonx checkout at PATH instead of PyPI (default inside a checkout)",
     )
-    init.add_argument(
-        "--no-brd",
+    brd = init.add_mutually_exclusive_group()
+    brd.add_argument(
+        "--brd",
         dest="brd",
-        action="store_false",
-        default=None,  # a new project gets one; an existing one keeps what it has
-        help="no docs/brd/ (the requirements checklist operonx-project builds from)",
+        action="store_true",
+        default=None,  # a new project has none; an existing one keeps what it has
+        help="add docs/brd/ (the requirements checklist and board operonx-project builds from)",
     )
+    brd.add_argument("--no-brd", dest="brd", action="store_false", help="no docs/brd/")
     tool = init.add_mutually_exclusive_group()
     tool.add_argument(
         "--uv",

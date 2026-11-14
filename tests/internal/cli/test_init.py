@@ -268,6 +268,26 @@ class TestForCodingAssistants:
             assert must in agents, must
         assert (root / "CLAUDE.md").read_text().strip() == "@AGENTS.md"
 
+    @pytest.mark.parametrize("parts", [(), ("http", "web")])
+    def test_every_guide_reference_in_agents_md_names_a_page_and_a_heading(self, parts):
+        """AGENTS.md's recipes end in `Guide: 01-ops.md § LLMOp`: the way to
+        more than a recipe says. A renamed page or heading must fail here, not
+        send an assistant to a section that is not there."""
+        from operonx.cli.init import plan
+
+        text = " ".join(plan("hello", "p", parts=parts)["AGENTS.md"].decode().split())
+        page, seen = None, []
+        ref = r"`(\d\d-[\w-]+\.md)`|`Guide: (\d\d-[\w-]+\.md)`|§\s*([^,;(]+?)(?=\s*[,;(]|\.\s|\.$)"
+        for m in re.finditer(ref, text):
+            if m.group(1) or m.group(2):
+                page = guide.path() / (m.group(1) or m.group(2))
+                assert page.is_file(), page.name
+                continue
+            heads = re.findall(r"^## (.+)$", page.read_text(encoding="utf-8"), re.M)
+            assert any(h.startswith(m.group(3)) for h in heads), (page.name, m.group(3))
+            seen.append(m.group(3))
+        assert len(seen) >= 10  # the recipes are all referenced
+
     def test_agents_md_block_names_the_installed_packages(self, project):
         _, root = project
         agents = (root / "AGENTS.md").read_text()
@@ -665,12 +685,12 @@ def test_the_durable_block_is_off_and_parses_once_uncommented():
 
 
 class TestTheBrd:
-    """``docs/brd/`` and its board, written by default (``--no-brd`` skips it),
+    """``docs/brd/`` and its board, written with ``--brd`` (not by default),
     and AGENTS.md's builder block, kept current by ``operonx guide``."""
 
     def test_init_writes_the_brd_its_board_and_the_builder_block(self, tmp_path, capsys):
         root = tmp_path / "p"
-        assert _init(capsys, root)[0] == 0
+        assert _init(capsys, root, "--brd")[0] == 0
         brd = root / "docs" / "brd"
         for rel in ("README.md", "CHANGELOG.md", "requirements/requirements_traceability.md",
                     "requirements/open_questions.md", "sources/owner_requests/.gitkeep"):  # fmt: skip
@@ -687,9 +707,10 @@ class TestTheBrd:
         assert agents.index(guide.BUILDER_BEGIN) < agents.index("## Commands")
         assert ".operonx/project/" in (root / ".gitignore").read_text()
 
-    def test_no_brd_writes_neither(self, tmp_path, capsys):
+    @pytest.mark.parametrize("flags", [(), ("--no-brd",)])
+    def test_without_brd_it_writes_neither(self, tmp_path, capsys, flags):
         root = tmp_path / "p"
-        assert _init(capsys, root, "--no-brd")[0] == 0
+        assert _init(capsys, root, *flags)[0] == 0
         assert not (root / "docs").exists()
         assert guide.BUILDER_BEGIN not in (root / "AGENTS.md").read_text()
         guide.sync(root)  # no docs/brd: the block is not added later either

@@ -2,43 +2,41 @@
 
 One card per task (LEAN_PROJECT_PLAN §5). The assistant moves the cards; edit a card's fields, not its state.
 
-## E · One engineering environment — menu, workflow, knowledge, tokens · open
-plan: docs/ENGINEERING_ENV_PLAN.md · opened: 2026-11-14
+## T · Cost: an operonx project costs less than an empty folder · open
+plan: docs/COST_PLAN.md · opened: 2026-11-15
 
-### C25 · E1 Five items in the menu (studio) · done
-done: operonx-studio:tests/js/choreo.test.mjs
-Shipped as studio #184 (bff376a).
+### C33 · K5+K1 Recipes in AGENTS.md, BRD opt-in, then a pilot · done
+files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/cli/init.py, docs/cost/K5_K1.md
+done: tests/internal/cli/test_init.py::TestForCodingAssistants::test_every_guide_reference_in_agents_md_names_a_page_and_a_heading
 
-### C26 · E2 Project mode is the Project hub (studio) · done
-done: operonx-studio:tests/js/choreo.test.mjs
-Shipped as studio #184 (bff376a).
+### C34 · K3 operonx check: one verify call · todo
 
-### C27 · E3 The assistant: tone, models, colours (studio) · done
-done: operonx-studio:tests/studio/test_assistant.py
-Shipped as studio #185 (005223d).
+### C35 · K2 operonx add: reuse as one command · todo
 
-### C28 · E4 The workflow every project starts with (BRD 1) · done
-files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/guide/__init__.py
-done: tests/internal/lint/test_shape.py, packages/operonx-project/tests/test_board.py::test_a_move_rewrites_only_that_card
+### C36 · K4 One file per feature · todo
 
-### C29 · E5 Knowledge the workflow keeps (BRD 2) · done
-files: operonx/cli/templates/_brd/knowledge.md.tmpl, operonx/guide/__init__.py
-done: tests/internal/guide/test_catalog.py, tests/internal/lint/test_shape.py::test_stale_knowledge_is_a_warning
-
-### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · done
-files: packages/operonx-project/operonx_project/search.py, operonx-studio:operonx_studio/assistant.py
-Studio half shipped as studio #187; gates 1 (continuity, 2/2), 2 (10.2 KB from 22.1 KB) and 3 (20 turns: max context 107k then saved, dearest turn $0.30 against $3.99, $0.094 a turn against $0.14) met. The cost meter fix is studio #188.
-
-### C32 · E8 Lint after every step (owner) · done
-files: operonx-studio:operonx_studio/stophook.py
-done: operonx-studio:tests/studio/test_stophook.py
-Shipped as studio #186.
-
-### C30 · E7 Does OperonX save tokens? (BRD 3) · done
-files: bench/token_ab/
-Arm A (operonx init) cost 2.3× arm B (empty folder) on the support triager. All 28 sessions passed, at $4.80 + $0.56 pilot. The table is in ENGINEERING_ENV_PLAN §4 E7.
+### C37 · E7b Tasks where reuse should win (gate 2) · todo
 
 ## Backlog
+
+## E · One engineering environment — menu, workflow, knowledge, tokens · closed
+plan: docs/ENGINEERING_ENV_PLAN.md · opened: 2026-11-14 · closed: 2026-11-15
+
+### C25 · E1 Five items in the menu (studio) · done
+
+### C26 · E2 Project mode is the Project hub (studio) · done
+
+### C27 · E3 The assistant: tone, models, colours (studio) · done
+
+### C28 · E4 The workflow every project starts with (BRD 1) · done
+
+### C29 · E5 Knowledge the workflow keeps (BRD 2) · done
+
+### C30 · E7 Does OperonX save tokens? (BRD 3) · done
+
+### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · done
+
+### C32 · E8 Lint after every step (owner) · done
 
 ## P · Project mode — the studio as the place a project is built from · closed
 plan: docs/PROJECT_MODE_PLAN.md · opened: 2026-10-23 · closed: 2026-10-23
