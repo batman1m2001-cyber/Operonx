@@ -1,0 +1,18 @@
+{{#web}}
+// One screen. A page wires components to the server; it calls the server only through lib/api.js.
+import { post } from "../lib/api.js";
+import { askForm } from "../components/ask.js";
+
+const page = document.getElementById("page");
+page.append(
+  askForm("{{route_field}}", async (value, show) => {
+    show("…");
+    try {
+      const reply = await post("{{route_path}}", { ...{{route_body}}, {{route_field}}: value });
+      show(reply.{{route_answer}} ?? JSON.stringify(reply));
+    } catch (error) {
+      show(error.message);
+    }
+  }),
+);
+{{/web}}
