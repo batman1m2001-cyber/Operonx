@@ -165,3 +165,9 @@ E4–E6).
 - **E1 + E2** (studio #184, bff376a): rail Project · Flow · Runs · Monitor · Settings; `#prail` and
   the back button gone; Environments and the project page under Settings; old addresses land. 69 lines
   in, 92 out; 194 JS tests; desk + phone, dark + light.
+- **E3** (studio #185, 005223d): models Fable 5.2 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5, 1M windows per
+  the API reference; `knowledge.md` tone block (result first, no recap, no narrated next steps, no headers
+  for a short answer), one line shorter, 14.6 KB; on glass the composer no longer sits over the words (the
+  log fades under it with a mask — no fill can hide text on a see-through surface); inline code chip on
+  `--border` (it was invisible on light glass). No new tokens; 194 JS tests, 58 assistant tests; desk +
+  phone, dark + light.
