@@ -14,6 +14,6 @@ def test_the_route_answers_with_the_model(fake_model):
     assert reply.status_code == 200
     assert reply.json() == {"answer": "Echo: Hello?", "error": None}
 {{#web}}
-    assert page.status_code == 200 and "lib/api.js" in page.text
+    assert page.status_code == 200 and "pages/home.js" in page.text
 {{/web}}
 {{/http}}

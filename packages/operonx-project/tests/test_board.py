@@ -106,6 +106,41 @@ def test_move_follows_the_states(tmp_path):
         board.move(repo, "C5", "waiting")
 
 
+HAND = """# Board
+
+## A · first cycle · open
+plan: docs/A_PLAN.md
+
+### C7 · written out of order · todo
+- req: none · after: none
+- files: src/t/ops.py
+
+
+### C2 · an earlier card · doing
+files: src/t/graph.py
+done: tests/t/test_graph.py::test_wires
+
+Why it waits.
+
+## Backlog
+
+### C9 · later · todo
+"""
+
+
+def test_a_move_rewrites_only_that_card(tmp_path):
+    # a studio move is a git diff of the card it moved: the hand-written order, spacing and field forms stay
+    (tmp_path / "docs/brd").mkdir(parents=True)
+    f = tmp_path / board.PATH
+    f.write_text(HAND, encoding="utf-8")
+    board.move(tmp_path, "C7", "doing")
+    assert f.read_text() == HAND.replace("written out of order · todo", "written out of order · doing")
+    board.move(tmp_path, "C2", "needs you", note="Which test?")
+    want = HAND.replace("written out of order · todo", "written out of order · doing").replace(
+        "an earlier card · doing", "an earlier card · needs you").replace("Why it waits.", "Which test?")
+    assert f.read_text() == want
+
+
 def test_a_new_file_name_needs_the_owner(tmp_path):
     board.put(tmp_path, title="a helper", files=["src/news/helpers.py", "src/news/_text.py"])
     c = board.move(tmp_path, "C1", "doing")

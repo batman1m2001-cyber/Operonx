@@ -17,8 +17,9 @@ Shipped as studio #184 (bff376a).
 done: operonx-studio:tests/studio/test_assistant.py
 Shipped as studio #185 (005223d).
 
-### C28 · E4 The workflow every project starts with (BRD 1) · todo
+### C28 · E4 The workflow every project starts with (BRD 1) · done
 files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/guide/__init__.py
+done: tests/internal/lint/test_shape.py, packages/operonx-project/tests/test_board.py::test_a_move_rewrites_only_that_card
 
 ### C29 · E5 Knowledge the workflow keeps (BRD 2) · todo
 files: operonx/cli/templates/_brd/knowledge.md.tmpl, operonx/guide/__init__.py

@@ -43,8 +43,9 @@ jobs{{#http}} and services{{/http}}.
   request dict in an op. Doors (`ingress()`) only for streams.
 {{/http}}
 {{#web}}
-- The pages are `web/`, served at `/`; they call the server only through
-  `web/lib/api.js`.
+- The pages are `web/`, served at `/`: `index.html`, one `pages/<screen>.js`
+  per screen, `components/` (functions that render, never `fetch`),
+  `lib/api.js` (the only `fetch`), `assets/`.
 {{/web}}
 
 ## Layout

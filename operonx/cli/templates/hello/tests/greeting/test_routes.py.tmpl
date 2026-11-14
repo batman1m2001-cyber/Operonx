@@ -18,6 +18,6 @@ def test_the_route_answers_and_refuses_a_field_it_does_not_take():
     assert ok.status_code == 200 and ok.json() == {"id": "x", "greeting": "Hello, Grace!"}
     assert bad.status_code == 400 and bad.json()["field"] == "nme"
 {{#web}}
-    assert page.status_code == 200 and "lib/api.js" in page.text
+    assert page.status_code == 200 and "pages/home.js" in page.text
 {{/web}}
 {{/http}}

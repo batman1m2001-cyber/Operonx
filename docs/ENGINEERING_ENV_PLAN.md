@@ -171,3 +171,10 @@ E4–E6).
   log fades under it with a mask — no fill can hide text on a see-through surface); inline code chip on
   `--border` (it was invisible on light glass). No new tokens; 194 JS tests, 58 assistant tests; desk +
   phone, dark + light.
+- **E4**: `--web` writes `index.html` + `pages/home.js` + `components/ask.js` + `lib/api.js`; lint C17
+  (`fetch(` outside `web/lib/`); AGENTS.md, guide 05 and the builder block say the layers and the card
+  lifecycle. The persistence test found a real fault: `board.move` re-rendered the whole file, so one move
+  on this board was an 11-line diff (cards re-sorted, blank lines added); it now rewrites that card only.
+  Checks: the 18 init shapes (228 tests, lint clean incl. C17), the generated page in a browser ("Hello,
+  Grace!", no console error). Adds more than it removes (+1 rule, +2 template files): BRD 1 asked for the
+  layers. mr-finance has 4 `fetch(` outside `web/lib/`; its next lint needs `--baseline` (C17 = 4).

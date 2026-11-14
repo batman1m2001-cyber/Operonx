@@ -366,8 +366,20 @@ def move(repo: Path, cid: str, to: str, note: Optional[str] = None) -> Card:
     c.state = to
     if note is not None:
         c.note = note.strip()
-    _save(f, text, cycles, cards)
+    f.write_text(_patch(text, c, note is not None), encoding="utf-8")
     return c
+
+
+def _patch(text: str, c: Card, whole: bool) -> str:
+    """*text* with card *c*'s heading line rewritten in place, or its whole block when *whole* (a new note): a
+    move touches nothing else, so a hand-written board keeps its order, spacing and field forms."""
+    lines = text.split("\n")
+    at = next(i for i, x in enumerate(lines) if (m := _HEAD.match(x)) and m.group(1) == c.id)
+    if not whole:
+        lines[at] = re.sub(r"· (todo|doing|needs you|done)\s*$", f"· {c.state}", lines[at])
+        return "\n".join(lines)
+    end = next((i for i in range(at + 1, len(lines)) if lines[i].startswith(("## ", "### "))), len(lines))
+    return "\n".join(lines[:at] + _card_lines(c) + lines[end:])
 
 
 def view(cards: List[Card], cycles: Optional[List[Cycle]] = None) -> Dict[str, object]:
