@@ -1,4 +1,4 @@
-"""The project's shape: four checks over the whole project, not one module.
+"""The project's shape: five checks over the whole project, not one module.
 
 - **C13** code in ``src/`` reaches another feature only through its
   ``__init__`` names or its ``graph``: ``from billing import charge`` and
@@ -9,15 +9,18 @@
 - **C15** the environment is read only in ``src/_shared/config.py``.
 - **C16** the root holds only the allow-list below; what a run writes goes
   in ``data/`` (kept) or ``out/`` (thrown away).
+- **C17** in ``web/``, only ``web/lib/`` calls ``fetch(``: pages and
+  components reach the server through ``web/lib/api.js``.
 
 A feature is a folder of ``src/`` whose name does not start with ``_``. Tests
 and terminal tools (``scripts/``, ``tools/``) are not checked. Like
-:mod:`operonx.lint.rules`, this reads source only (``ast``).
+:mod:`operonx.lint.rules`, this reads source only (``ast``; C17 a regex).
 """
 
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 from typing import Iterable, Iterator, List, Set
 
@@ -39,6 +42,8 @@ ROOT_ALLOWED = {
 _ROUTE_METHODS = {"get", "post", "put", "patch", "delete", "route", "websocket", "api_route"}
 _ROUTE_CALLS = {"Route", "WebSocketRoute", "add_api_route", "add_route", "add_websocket_route"}
 _CONFIG = Path("src") / "_shared" / "config.py"
+_FETCH = re.compile(r"(?<![\w.$])fetch\s*\(")
+_WEB_SOURCES = {".js", ".mjs", ".ts", ".html"}
 
 
 def _features(root: Path) -> Set[str]:
@@ -151,11 +156,28 @@ def _c16(root: Path) -> Iterator[Finding]:
         )
 
 
+def _c17(root: Path) -> Iterator[Finding]:
+    web = root / "web"
+    if not web.is_dir():
+        return
+    for path in sorted(web.rglob("*")):
+        rel = path.relative_to(web)
+        if path.suffix not in _WEB_SOURCES or rel.parts[0] == "lib" or SKIP_DIRS & set(rel.parts):
+            continue
+        source = path.read_text(encoding="utf-8", errors="replace")
+        allow = _allowed(source.replace("//", "#"))
+        for i, line in enumerate(source.splitlines(), 1):
+            if _FETCH.search(line) and "C17" not in allow.get(i, ()):
+                yield Finding(
+                    "C17", path, i, "calls fetch(): reach the server through web/lib/api.js"
+                )
+
+
 def lint_shape(root: Path, files: Iterable[Path]) -> List[Finding]:
-    """C13–C16 for the project at *root*, over its Python *files*."""
+    """C13–C17 for the project at *root*, over its Python *files* and ``web/``."""
     root = Path(root)
     features = _features(root)
-    out: List[Finding] = list(_c16(root))
+    out: List[Finding] = [*_c16(root), *_c17(root)]
     for path in files:
         rel = path.relative_to(root)
         if _is_test_file(rel) or _is_script(rel):

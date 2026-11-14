@@ -78,8 +78,10 @@ _BUILDER = """## Building it: docs/brd and the board
   `docs/brd/requirements/open_questions.md`, never deleted.
 - `docs/brd/board.md` is the board: one card per task
   (`### C4 · title · todo|doing|needs you|done`, then `req`, `after`,
-  `files`, `done`). Move a card with `operonx-project board C4 doing`; it
-  is done when its `done` tests pass.
+  `files`, `done`). Move it with `operonx-project board C4 doing` before
+  its first edit, one card in `doing` at a time; to `needs you` with the
+  question as its note when you are blocked; to `done` only when its `done`
+  tests pass.
 - When a change meets or alters a requirement, update its row (status,
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
   `docs/brd/README.md`. The checklist's summary table is counted from

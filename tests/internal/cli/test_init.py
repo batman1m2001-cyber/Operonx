@@ -142,7 +142,8 @@ def test_the_agent_template_is_built_on_operonx_agents(tmp_path):
 def test_the_parts_decide_the_files_and_the_dependency():
     files = {flags: plan("hello", "x", parts=flags) for flags in ((), ("web",), ("deploy",))}
     assert "src/greeting/routes.py" not in files[()] and "web/index.html" not in files[()]
-    assert {"src/greeting/routes.py", "web/lib/api.js"} <= set(files[("web",)])  # web brings http
+    web = {"web/index.html", "web/pages/home.js", "web/components/ask.js", "web/lib/api.js"}
+    assert {"src/greeting/routes.py", *web} <= set(files[("web",)])  # web brings http
     assert "deploy/Dockerfile" in files[("deploy",)] and "deploy/Dockerfile" not in files[()]
     assert b'"operonx>=' in files[()]["pyproject.toml"]  # offline: no serve extra
     assert b'"operonx[serve]>=' in files[("web",)]["pyproject.toml"]

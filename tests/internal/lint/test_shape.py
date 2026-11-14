@@ -1,4 +1,4 @@
-"""C13–C16, the project's shape, and ``operonx lint --baseline``."""
+"""C13–C17, the project's shape, and ``operonx lint --baseline``."""
 
 from __future__ import annotations
 
@@ -38,12 +38,15 @@ def project(tmp_path) -> Path:
             "datasets/cases.jsonl": "{}\n",
             "tests/test_x.py": 'import os\nfrom billing.ops import charge\nos.environ["A"]\n',
             "scripts/seed.py": 'import os\nos.getenv("A")\n',
+            "web/index.html": '<script type="module" src="pages/home.js"></script>\n',
+            "web/pages/home.js": 'import { post } from "../lib/api.js";\nprefetch(); api.fetch("/x");\n',
+            "web/lib/api.js": 'export const post = (p) => fetch(p, { method: "POST" });\n',
         },
     )
 
 
 def _rules(root: Path) -> list:
-    return sorted(f.rule for f in lint_path(root) if f.rule in {"C13", "C14", "C15", "C16"})
+    return sorted(f.rule for f in lint_path(root) if f.rule in {"C13", "C14", "C15", "C16", "C17"})
 
 
 def test_a_clean_project_has_no_shape_findings(project):
@@ -66,13 +69,20 @@ def test_each_rule_finds_its_case(project):
             ),
             "notes.md": "",
             "logs/run.log": "",
+            "web/components/list.js": "export async function list() { return (await fetch('/t')).json(); }\n",
+            "web/index.html": "<script>fetch ('/x')</script>\n",
         },
     )
-    assert _rules(project) == ["C13", "C13", "C14", "C14", "C15", "C15", "C16", "C16"]
+    assert _rules(project) == ["C13", "C13", "C14", "C14", "C15", "C15", "C16", "C16", "C17", "C17"]
 
 
 def test_an_opt_out_holds_one_line(project):
     _write(project, {"src/report/ops.py": "import billing.ops  # operonx: allow[C13]\n"})
+    assert _rules(project) == []
+
+
+def test_a_web_opt_out_holds_one_line(project):
+    _write(project, {"web/pages/home.js": "fetch('/health'); // operonx: allow[C17]\n"})
     assert _rules(project) == []
 
 

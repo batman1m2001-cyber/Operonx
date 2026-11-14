@@ -34,7 +34,15 @@ that shows it. Update a row when a change meets or alters its requirement.
 The board is `docs/brd/board.md`, in git: one card per task
 (`### C4 · title · todo|doing|needs you|done`, then `req`, `after`,
 `files`, `done`). The assistant moves the cards; the studio's Board shows
-them by lane, read from `files`. More is in operonx-project's guide: `project/01-project.md`
+them by lane, read from `files`. A card goes to `doing` before its first
+edit (one at a time), to `needs you` with the question when blocked, and to
+`done` only through its `done` tests.
+
+With `--web`, `web/` holds the pages, served at `/`: `index.html` loads one
+`pages/<screen>.js` per screen; a page wires `components/` (functions that
+render and report what the user did) to the server through `lib/api.js`,
+the only file that calls `fetch` (`operonx lint` C17); styles and images
+go in `assets/`. More is in operonx-project's guide: `project/01-project.md`
 in `.operonx/guide/` when it is installed.
 
 ## The rules
