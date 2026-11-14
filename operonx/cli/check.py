@@ -16,10 +16,11 @@ in this process and binds no port, so run it in the project's environment
 * **routes**: every route of every listener is resolved through the
   listener's own router, so a request that another app answers (a full path
   under an ``asgi(path)`` prefix, a route listed after the ``/`` mount) fails
-  with the name of what answers it. ``GET`` routes are called. Others are
-  only resolved, because calling them writes what they write; ``--call``
-  calls them once with placeholder values and every ``llm:`` resource
-  swapped for ``api_type: fake``, so it costs nothing and needs no key.
+  with the name of what answers it. Every ``llm:`` resource is swapped for
+  ``api_type: fake`` first, so a call costs nothing and needs no key.
+  ``GET`` routes are called. Others are only resolved, because calling them
+  writes what they write; ``--call`` calls them once with placeholder
+  values.
 """
 
 from __future__ import annotations
@@ -255,6 +256,8 @@ def _body_for(client: Any, t: _Target, path: str) -> Tuple[Any, Dict[str, Any]]:
 
 
 def _probe(client: Any, routes: Sequence[Any], t: _Target, call: bool) -> Line:
+    from starlette.routing import Mount
+
     shown = f"{t.method:4} {t.path}"
     path = _concrete(t.path)
     scope = {"type": "http", "path": path, "root_path": "", "method": t.method, "headers": []}
@@ -264,7 +267,9 @@ def _probe(client: Any, routes: Sequence[Any], t: _Target, call: bool) -> Line:
             return Line("FAIL", shown, f"404: nothing answers it. {PREFIX_HINT}")
         status = "405" if how == "partial" else "answered"
         return Line("FAIL", shown, f"{status} by {_label(leaf)}, not {t.label}. {_hint(leaf)}")
-    bare = _slash_twin(routes, t, path)
+    # an app with no routes of its own (raw asgi) is reached under its
+    # prefix (/x/...); nobody calls the bare prefix, so it is not checked
+    bare = "" if isinstance(t.leaf, Mount) else _slash_twin(routes, t, path)
     if bare:
         return Line("FAIL", shown, bare)
     has_params = path != t.path
@@ -280,8 +285,6 @@ def _probe(client: Any, routes: Sequence[Any], t: _Target, call: bool) -> Line:
         return Line("FAIL", shown, f"500: {_error(exc)}")
     code = resp.status_code
     sent_note = f" with {sent}" if sent else ""
-    from starlette.routing import Mount
-
     if code == 404 and isinstance(t.leaf, Mount):
         return Line("ok", shown, "404: no index page here")
     if code >= 500 or code == 405 or (code == 404 and not has_params):
@@ -337,8 +340,7 @@ def _routes(root: Path, call: bool) -> List[Line]:
     with _env_contract(root):
         app = Application.find(root)
         app.bootstrap()
-        if call:
-            _fake_models()
+        _fake_models()  # a GET may reach a model too
         served = [s for s in app.services if s.kind != "schedule" and (s.kind != "asgi" or s.app)]
         _SERVICES.clear()
         _SERVICES.update({(s.method or "POST", s.path): s.name for s in served if s.kind != "asgi"})
@@ -383,7 +385,9 @@ def run_check(root: Path, *, tests: bool = True, call: bool = False) -> Tuple[Li
 
 def _print(name: str, lines: List[Line]) -> None:
     print(f"operonx check: {name}")
-    routes = [x for x in lines[3:] if x.what.split()[0] in ("GET", "POST", "PUT", "PATCH", "DELETE")]
+    routes = [
+        x for x in lines[3:] if x.what.split()[0] in ("GET", "POST", "PUT", "PATCH", "DELETE")
+    ]
     hidden = 0
     for x in lines:
         if x in routes and len(routes) > ROUTE_LINES and x.state == "ok":
@@ -406,14 +410,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--call",
         action="store_true",
-        help="also call each POST/PUT/PATCH route once, with placeholder values and a fake model "
-        "(what the route writes is written)",
+        help="also call each POST/PUT/PATCH route once, with placeholder values "
+        "(what the route writes is written); models are always faked",
     )
     parser.add_argument("--no-tests", action="store_true", help="skip pytest")
     args = parser.parse_args(argv)
 
     start = Path(args.dir) if args.dir else Path.cwd()
-    root = next((p for p in (start, *start.resolve().parents) if (p / "operonx.toml").is_file()), None)
+    root = next(
+        (p for p in (start, *start.resolve().parents) if (p / "operonx.toml").is_file()), None
+    )
     if root is None:
         print(f"operonx check: no operonx.toml at or above {start}", file=sys.stderr)
         return 2

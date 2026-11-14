@@ -110,6 +110,52 @@ def test_a_prefix_mount_is_reached_only_with_a_trailing_slash(tmp_path):
     assert "[C14]" in got.stdout
 
 
+def test_a_raw_asgi_app_under_a_prefix_is_reached_where_it_is_mounted(tmp_path):
+    """COST_PLAN C41: a raw ASGI callable mounted at `/stream` answers its
+    own paths; check probed it as if `/stream` needed a trailing slash."""
+    root = _project(tmp_path)
+    extra = (
+        "async def raw(scope, receive, send):\n"
+        "    await send({'type': 'http.response.start', 'status': 200, 'headers': []})\n"
+        "    await send({'type': 'http.response.body', 'body': b'ok'})\n\n\n"
+        'RAW = Service("raw", asgi("/stream", port=PORT), app=raw)\n'
+    )
+    _main_py(root, "[*SERVICES, RAW, WEB]", extra)
+    got = _check(root, "--no-tests")
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert "/stream" in got.stdout and "FAIL" not in got.stdout
+
+
+def test_a_get_route_reaches_a_fake_model_not_the_real_one(tmp_path):
+    """COST_PLAN C41: check calls every GET; one that reaches a model must
+    not call the real one (no key here, an address nothing listens on)."""
+    root = tmp_path / "q"
+    assert main(["init", str(root), "-t", "chat", "--http"]) == 0
+    src = root / "src" / "chat.py"
+    text = src.read_text()
+    text = text.replace('http("POST", "/chat"', 'http("GET", "/chat"')
+    text = text.replace("def chat_flow(question):", 'def chat_flow(question="hi"):')
+    text = text.replace(
+        'return {"answer": None, "error": error or "the model gave no answer"}',
+        'raise RuntimeError(error or "no answer")',  # a real call would be a 500
+    )
+    src.write_text(text)
+    got = subprocess.run(
+        [sys.executable, "-m", "operonx.cli.main", "check", "--no-tests", "."],
+        cwd=root,
+        env={
+            **{k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "LLM_API_KEY")},
+            "PYTHONPATH": str(root / "src"),
+            "LLM_BASE_URL": "http://127.0.0.1:9/v1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert "GET  /chat             200" in got.stdout
+
+
 def test_an_application_that_does_not_load_fails_the_build_and_skips_routes(tmp_path):
     root = _project(tmp_path)
     (root / "app" / "main.py").write_text('"""Broken."""\n\nimport no_such_module  # noqa: F401\n')

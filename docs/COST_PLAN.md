@@ -293,3 +293,25 @@ Spent $9.26 of the $15 cap ($1.21 pilot, $3.41 gate 1, $2.23 re-run, $2.41 gate 
 
 The four causes above are cards C39–C42 in the board's Backlog, each with its measured cost. They
 are not in this plan: the owner decides whether a second round (about $5 to re-measure) is worth it.
+
+## Round 2 (the owner chose it, 2026-11-15)
+
+Fix the four measured causes, then run A' once more on all ten tasks (T1–T6 for gate 1, T7–T9 for
+gate 2) and compare it with the B rows already measured (gate 1 B $1.31, gate 2 B $0.68). Budget:
+the $5.74 left of the cap; the run stops at that.
+
+Each cause was reproduced in the A1/A2 workspaces before this plan was written:
+
+| card | reproduced | fix |
+|---|---|---|
+| C42 | `env("SUMMARY_EVERY", 3600)` raises under the build's placeholder; both tracks wrote a workaround (`_seconds()`, a str default then `isdigit()`) | the build fills a name from `.env.example`'s own value when it has one; `env()` with a number or bool default answers the default for the placeholder |
+| C41 | `operonx check` in A1: C16 on `SPEC.md`, `run.sh`, `job.sh`; `GET /summaries/` "only /summaries/ reaches function at /summaries" | C16 allows root `*.md`, `*.sh`, `Dockerfile`, compose files; the trailing-slash probe skips a mount of an app with no routes (nobody calls its bare prefix); GET routes are called with the fake model too (a GET that streams a model's text would otherwise call the real one with placeholder credentials) |
+| C40 | A2-T5a/T9: `ResourceHub.reset_instance()` + `bootstrap()` inside a test, restored in `finally` | `operonx.testing.fake_model(*script, key="llm:assistant", **config)`: a context manager that swaps one `llm:` resource for a scripted fake in the installed hub and puts the old one back; it yields the fake, whose `.calls` the test reads. AGENTS.md's Test recipe shows it |
+| C39 | a stream door on a doorless graph with `egress(item=s["content"])` sends `"SUM"` (JSON), then the egress op's own output `{"sent": [...]}` as a last event, and no closing event; it streams only with `Accept: text/event-stream` | `http(..., sse=True)`: always answers `text/event-stream`, a string item as its text, then `event: done`; a graph that sends with `egress` replies with what it sent, never also its outputs. AGENTS.md recipe "Stream a model's text", guide 02 § Service |
+
+Not in this round: the T1 scaffold teardown (A' removes the greeting and repoints `DATA`), which is
+a template question, and C38.
+
+**Built** (C39–C42 done): the fixes above as written, with one test per cause, each seen to fail
+with its fix reverted; both new recipes run in a generated `chat` project. Write-up with the
+before/after flow and the code changes: [cost/R2.md](cost/R2.md).

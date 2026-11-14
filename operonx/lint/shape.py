@@ -7,8 +7,9 @@
 - **C14** every endpoint is a ``Service``: no hand-written route
   (``@app.get("/x")``, ``Route("/x", …)``, ``add_api_route``).
 - **C15** the environment is read only in ``src/_shared/config.py``.
-- **C16** the root holds only the allow-list below; what a run writes goes
-  in ``data/`` (kept) or ``out/`` (thrown away).
+- **C16** the root holds only the allow-list below (and any ``*.md`` or
+  ``*.sh``: notes and entry scripts); what a run writes goes in ``data/``
+  (kept) or ``out/`` (thrown away).
 - **C17** in ``web/``, only ``web/lib/`` calls ``fetch(``: pages and
   components reach the server through ``web/lib/api.js``.
 - **C18** (a warning) an entry of ``docs/brd/knowledge.md`` names a ``where``
@@ -31,7 +32,7 @@ from operonx.lint.rules import SKIP_DIRS, Finding, _allowed, _is_script, _is_tes
 
 __all__ = ["ROOT_ALLOWED", "lint_shape"]
 
-#: What a project's root may hold besides dotfiles (C16).
+#: What a project's root may hold besides dotfiles, ``*.md`` and ``*.sh`` (C16).
 ROOT_ALLOWED = {
     # folders of the shape
     "app", "src", "web", "tests", "data", "datasets", "out", "docs", "deploy", "scripts",
@@ -39,6 +40,7 @@ ROOT_ALLOWED = {
     # the project's files
     "operonx.toml", "resources.yaml", "pyproject.toml", "uv.lock", "requirements.txt",
     "README.md", "AGENTS.md", "CLAUDE.md", "LICENSE", "CHANGELOG.md", "Makefile",
+    "Dockerfile", "docker-compose.yml", "compose.yaml", "Procfile",
     *SKIP_DIRS,
 }  # fmt: skip
 
@@ -157,6 +159,8 @@ def _c15(tree: ast.AST, path: Path) -> Iterator[Finding]:
 def _c16(root: Path) -> Iterator[Finding]:
     for p in sorted(root.iterdir()):
         if p.name.startswith(".") or p.name in ROOT_ALLOWED or p.name.startswith("LICENSE"):
+            continue
+        if p.is_file() and p.suffix in (".md", ".sh"):
             continue
         kind = "folder" if p.is_dir() else "file"
         yield Finding(

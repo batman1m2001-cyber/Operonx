@@ -28,6 +28,7 @@ __all__ = [
     "body_contract",
     "has_doors",
     "plain",
+    "sends",
     "serve_inputs",
 ]
 
@@ -107,6 +108,29 @@ def has_doors(target: Any) -> bool:
     if hasattr(target, "graph"):
         try:
             target._doors = found
+        except AttributeError:  # a slotted object: just not cached
+            pass
+    return found
+
+
+def sends(target: Any) -> bool:
+    """True when any op in the graph, at any depth, is an egress door: the
+    run answers with what it sends, not with its outputs. Takes what
+    :func:`has_doors` takes; the answer is kept on a compiled ``Operon``."""
+    cached = getattr(target, "_sends", None) if hasattr(target, "graph") else None
+    if cached is not None:
+        return cached
+
+    def walk(g: Any) -> bool:
+        for op in (getattr(g, "_ops", None) or {}).values():
+            if getattr(op, "door", None) == "egress" or walk(op):
+                return True
+        return False
+
+    found = walk(_graph_of(target))
+    if hasattr(target, "graph"):
+        try:
+            target._sends = found
         except AttributeError:  # a slotted object: just not cached
             pass
     return found

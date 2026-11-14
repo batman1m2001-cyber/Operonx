@@ -442,6 +442,18 @@ def test_env_reads_the_variable_in_the_defaults_type(monkeypatch):
     assert env("OPX_T_NONE", "x") == "x"
 
 
+def test_env_keeps_a_typed_default_over_the_lint_placeholder(monkeypatch):
+    """COST_PLAN C42: the offline build fills a name .env.example lists
+    without a value with the placeholder; `env("X", 2)` must not try
+    int("operonx-lint-placeholder")."""
+    from operonx.app.declare import PLACEHOLDER
+
+    monkeypatch.setenv("OPX_T_EVERY", PLACEHOLDER)
+    assert env("OPX_T_EVERY", 3600) == 3600
+    assert env("OPX_T_EVERY", 0.5) == 0.5 and env("OPX_T_EVERY", False) is False
+    assert env("OPX_T_EVERY", "x") == PLACEHOLDER  # a string default sees what is set
+
+
 def test_a_worker_loads_its_listener_from_the_project(pointed, monkeypatch):
     """What each process of a pooled listener runs: the application found
     again from the project root, that listener's app built from it."""

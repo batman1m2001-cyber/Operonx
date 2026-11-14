@@ -69,7 +69,7 @@ def test_each_rule_finds_its_case(project):
                 'd = {}.get("/not-a-route")\n'
                 'client.post("/api/send", json={})\n'
             ),
-            "notes.md": "",
+            "notes.txt": "",
             "logs/run.log": "",
             "web/components/list.js": "export async function list() { return (await fetch('/t')).json(); }\n",
             "web/index.html": "<script>fetch ('/x')</script>\n",
@@ -105,7 +105,7 @@ def test_stale_knowledge_is_a_warning(project):
 
 def test_a_folder_without_operonx_toml_is_not_a_project(project):
     (project / "operonx.toml").unlink()
-    (project / "notes.md").write_text("")
+    (project / "notes.txt").write_text("")
     assert _rules(project) == []
 
 
@@ -124,7 +124,7 @@ def test_one_deep_import_turns_lint_red(project, capsys):
 
 
 def test_a_baseline_holds_todays_count_and_goes_red_above_it(project, capsys):
-    _write(project, {"src/report/ops.py": "from billing.ops import charge\n", "notes.md": ""})
+    _write(project, {"src/report/ops.py": "from billing.ops import charge\n", "notes.txt": ""})
     before = (project / "operonx.toml").read_text()
     assert _lint(project) == 1
     assert (project / "operonx.toml").read_text() == before  # plain lint never writes
@@ -144,10 +144,10 @@ def test_a_baseline_holds_todays_count_and_goes_red_above_it(project, capsys):
     assert _lint(project) == 1
     out = capsys.readouterr().out
     assert "[C13] 2 over the baseline of 1" in out and "reaches inside" in out
-    assert "notes.md" not in out  # C16 is still held
+    assert "notes.txt" not in out  # C16 is still held
 
     # both fixed: green, and lint says the baseline can drop
-    for rel in ("src/report/_more.py", "notes.md"):
+    for rel in ("src/report/_more.py", "notes.txt"):
         (project / rel).unlink()
     _write(project, {"src/report/ops.py": "from billing import charge\n"})
     capsys.readouterr()
@@ -160,8 +160,19 @@ def test_a_baseline_holds_todays_count_and_goes_red_above_it(project, capsys):
 def test_the_baseline_joins_a_lint_table_already_there(project):
     toml = project / "operonx.toml"
     toml.write_text(toml.read_text() + "\n[lint]\n\n[tracing]\nsinks = []\n")
-    (project / "notes.md").write_text("")
+    (project / "notes.txt").write_text("")
     assert _lint(project, "--baseline") == 0
     text = toml.read_text()
     assert text.count("[lint]") == 1 and "[lint]\nbaseline = {C16 = 1}\n" in text
     assert "[tracing]\nsinks = []" in text
+
+
+def test_root_notes_scripts_and_deploy_files_are_not_c16(project):
+    """COST_PLAN C41: SPEC.md, run.sh and a Dockerfile at the root are the
+    project's own, not litter."""
+    _write(
+        project, {"SPEC.md": "", "run.sh": "", "Dockerfile": "", "compose.yaml": "", "Procfile": ""}
+    )
+    assert _rules(project) == []
+    _write(project, {"scratch.py": ""})
+    assert _rules(project) == ["C16"]
