@@ -684,7 +684,7 @@ def python_files(root: Path, skip: Iterable[str] = ()) -> Iterator[Path]:
 def lint_path(root, skip: Iterable[str] = ()) -> List[Finding]:
     """Check every module under *root* (skipping venvs and caches), the
     project's environment contract (C12) when *root* is a directory, and its
-    shape (C13–C17, :mod:`operonx.lint.shape`) when it is a project."""
+    shape (C13–C18, :mod:`operonx.lint.shape`) when it is a project."""
     root = Path(root)
     if root.is_file():
         return lint_source(root.read_text(encoding="utf-8"), root)

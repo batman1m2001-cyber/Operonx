@@ -178,3 +178,9 @@ E4–E6).
   Checks: the 18 init shapes (228 tests, lint clean incl. C17), the generated page in a browser ("Hello,
   Grace!", no console error). Adds more than it removes (+1 rule, +2 template files): BRD 1 asked for the
   layers. mr-finance has 4 `fetch(` outside `web/lib/`; its next lint needs `--baseline` (C17 = 4).
+- **E5**: `init` writes `docs/brd/knowledge.md` (format + one example in a fence); `operonx guide` writes
+  `.operonx/catalog.md` from source (`ast`, so a project that does not import still gets one; written only
+  when it changes; git-ignored): the callbot's is 11 KB. A move to `done` asks for a pitfall or a pattern;
+  the builder block says search first, edit never append; lint C18 warns on a stale `where` (a warning,
+  so no baseline). Checks: 18 init shapes, lint + `brd check` clean on a fresh project, the done hint
+  printed by the real CLI. Adds a file, a generated file and a rule; removes nothing.

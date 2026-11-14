@@ -1,0 +1,16 @@
+# Knowledge
+
+What building {{name}} taught: one entry per reusable pattern, pitfall, or replaced approach. Search it (and
+`.operonx/catalog.md`, every op, graph and job) before writing something new. When a pattern changes, edit
+its entry; never add a second one.
+
+An entry, newest last:
+
+```text
+### K1 · retry the TTS call twice · pattern
+where: src/speech/ops.py
+use: a provider call that times out now and then: `@op(retry=2)`, not a loop in the op
+```
+
+A pitfall's `use` starts with the symptom, so a search for it finds the entry. A `replaced` entry adds
+`instead:` (what to use now). `operonx lint` warns when a `where` file is gone.

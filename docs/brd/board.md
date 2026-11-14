@@ -21,8 +21,9 @@ Shipped as studio #185 (005223d).
 files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/guide/__init__.py
 done: tests/internal/lint/test_shape.py, packages/operonx-project/tests/test_board.py::test_a_move_rewrites_only_that_card
 
-### C29 · E5 Knowledge the workflow keeps (BRD 2) · todo
+### C29 · E5 Knowledge the workflow keeps (BRD 2) · done
 files: operonx/cli/templates/_brd/knowledge.md.tmpl, operonx/guide/__init__.py
+done: tests/internal/guide/test_catalog.py, tests/internal/lint/test_shape.py::test_stale_knowledge_is_a_warning
 
 ### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · todo
 files: packages/operonx-project/operonx_project/board.py
