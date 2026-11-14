@@ -6,10 +6,11 @@
     operonx add page NAME [--data /path]
 
 ``route``, ``job`` and ``llm`` write an op and the graph that wires it into
-the feature's ``ops.py`` and ``graph.py`` (created when missing). ``route``
-also adds a ``Service`` to ``routes.py``, and ``job`` adds a ``Job`` to
-``jobs.py``. The feature's list is wired into ``APP``, ahead of a mount at
-``/``. With ``--llm`` a model call on ``llm:assistant`` comes before the op,
+the feature's file, ``src/F.py`` (created when missing), above its lists.
+``route`` also adds a ``Service`` to its ``SERVICES``, and ``job`` a ``Job``
+to its ``JOBS``. A feature split into a ``src/F/`` folder gets them in
+``ops.py``, ``graph.py``, ``routes.py`` and ``jobs.py``. The feature's list
+is wired into ``APP``, ahead of a mount at ``/``. With ``--llm`` a model call on ``llm:assistant`` comes before the op,
 and the op gets its ``answer``. ``llm`` is that model call on its own, as a
 graph to run from a job, a route or ``invoke``. Whatever calls a model turns
 the resource on: ``resources.yaml``, the ``.env.example`` names, and the
@@ -216,6 +217,21 @@ def _module(path: Path, doc: str) -> str:
     return path.read_text() if path.is_file() else f'"""{doc}"""\n'
 
 
+def _above_lists(src: str, code: str) -> str:
+    """*code* (op and graph defs) above the module's ``JOBS``/``SERVICES``, which
+    name the graphs and so must come after them; at the end when it has none."""
+    tree = ast.parse(src)
+    lists = [
+        n for n in tree.body
+        if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id in ("JOBS", "SERVICES") for t in n.targets)
+    ]  # fmt: skip
+    if not lists:
+        return src.rstrip("\n") + "\n" + code
+    at = _offsets(src)[lists[0].lineno - 1]
+    return src[:at].rstrip("\n") + "\n" + code + "\n\n" + src[at:]
+
+
 # --------------------------------------------------------------------------- the project
 
 
@@ -248,13 +264,21 @@ def _toolchain(root: Path) -> str:
 
 
 def _feature_files(root: Path, feature: str) -> Dict[str, Path]:
-    """Where each part of a feature lives. One mapping, so a change of the
-    project's shape (COST_PLAN K4) changes it here only."""
+    """Where each part of a feature lives: all of it in ``src/F.py`` (COST_PLAN
+    K4), or, once the project split it into a ``src/F/`` folder, its
+    ``ops.py``, ``graph.py``, ``routes.py`` and ``jobs.py``."""
     pkg = root / "src" / feature
+    if not pkg.is_dir():
+        return dict.fromkeys(("ops", "graph", "routes", "jobs"), pkg.with_suffix(".py"))
     return {
         "init": pkg / "__init__.py",
         **{p: pkg / f"{p}.py" for p in ("ops", "graph", "routes", "jobs")},
     }
+
+
+def _module_of(root: Path, path: Path) -> str:
+    """``src/billing.py`` → ``billing``; ``src/billing/routes.py`` → ``billing.routes``."""
+    return ".".join(path.relative_to(root / "src").with_suffix("").parts)
 
 
 def _wire(root: Path, feature: str, kind: str, wrote: Dict[Path, str]) -> None:
@@ -262,15 +286,20 @@ def _wire(root: Path, feature: str, kind: str, wrote: Dict[Path, str]) -> None:
     ``APP``'s ``services=`` / ``jobs=``. Already there: nothing to do."""
     path, attr = _app_file(root)
     src = path.read_text()
+    module = _module_of(root, _feature_files(root, feature)[kind])
     list_name = {"routes": "SERVICES", "jobs": "JOBS"}[kind]
     keyword = {"routes": "services", "jobs": "jobs"}[kind]
     tree = ast.parse(src)
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module == f"{feature}.{kind}":
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module in (module, feature)  # a split feature may re-export it
+            and any(a.name == list_name for a in node.names)
+        ):
             return  # the feature's list is wired already; new entries ride along
     alias = list_name if list_name not in _imported(tree) else f"{feature.upper()}_{list_name}"
     src = _add_imports(
-        src, [(f"{feature}.{kind}", list_name if alias == list_name else f"{list_name} as {alias}")]
+        src, [(module, list_name if alias == list_name else f"{list_name} as {alias}")]
     )
     tree = ast.parse(src)
     call = next(
@@ -420,19 +449,28 @@ def _add_step(root: Path, feature: str, name: str, inputs: List[str], llm: bool,
             ast.parse(files[part].read_text())
         ):
             raise AddError(f"{name} is already in {files[part].relative_to(root)}")
-    if not files["init"].is_file():
-        _write(files["init"], f'"""The {feature} feature."""\n', wrote)
+    _start(root, feature, files, wrote)
     op_src, graph_src, graph_imports = _step_code(name, inputs, llm, route)
     src = _module(files["ops"], f"The {feature} feature's logic. Every op returns a dict literal.")
     src = _add_imports(src, [("operonx", "op")])
-    _write(files["ops"], src.rstrip("\n") + "\n" + op_src, wrote)
+    _write(files["ops"], _above_lists(src, op_src), wrote)
     src = _module(
         files["graph"], f"The {feature} feature's wiring: no logic here, only ops and edges."
     )
     ops = [name, *([f"{name}_input"] if llm and not inputs else [])]
-    src = _add_imports(src, [*graph_imports, *((f"{feature}.ops", o) for o in ops)])
-    _write(files["graph"], src.rstrip("\n") + "\n" + graph_src, wrote)
+    ops_module = _module_of(root, files["ops"])
+    src = _add_imports(src, [*graph_imports, *((ops_module, o) for o in ops)])
+    _write(files["graph"], _above_lists(src, graph_src), wrote)
     return f"{name}_flow"
+
+
+def _start(root: Path, feature: str, files: Dict[str, Path], wrote: Dict[Path, str]) -> None:
+    """A new feature's first file: ``src/F.py``, or a folder's ``__init__.py``."""
+    first = files.get("init", files["ops"])
+    if not first.is_file():
+        what = "in one file: its ops, the graphs that wire them, its jobs and routes"
+        doc = f"The {feature} feature." if "init" in files else f"The {feature} feature {what}."
+        _write(first, f'"""{doc}"""\n', wrote)
 
 
 def _add_llm_graph(
@@ -443,8 +481,7 @@ def _add_llm_graph(
         ast.parse(files["graph"].read_text())
     ):
         raise AddError(f"{name}_flow is already in {files['graph'].relative_to(root)}")
-    if not files["init"].is_file():
-        _write(files["init"], f'"""The {feature} feature."""\n', wrote)
+    _start(root, feature, files, wrote)
     lines = [
         f"\n\n@graph\ndef {name}_flow({', '.join(inputs)}):",
         *_ask_lines(name, inputs),
@@ -455,7 +492,7 @@ def _add_llm_graph(
     )
     src = _add_imports(src, [("operonx", "END"), ("operonx", "START"), ("operonx", "graph"),
                              ("operonx.providers.ops", "LLMOp")])  # fmt: skip
-    _write(files["graph"], src.rstrip("\n") + "\n" + "\n".join(lines) + "\n", wrote)
+    _write(files["graph"], _above_lists(src, "\n".join(lines) + "\n"), wrote)
 
 
 def _add_to_list(root: Path, feature: str, part: str, list_name: str, doc: str, imports, item: str,
@@ -495,7 +532,7 @@ def add_route(root, name, method, path, inputs, llm, feature) -> Dict[Path, str]
     )
     _add_to_list(root, feature, "routes", "SERVICES", f"The {feature} feature's routes: its graphs behind HTTP.",
                  [("operonx.app", "Service"), ("operonx.app", "http"), ("_shared.config", "PORT"),
-                  (f"{feature}.graph", flow)], item, wrote)  # fmt: skip
+                  (_module_of(root, _feature_files(root, feature)["graph"]), flow)], item, wrote)  # fmt: skip
     _wire(root, feature, "routes", wrote)
     return wrote
 
@@ -504,7 +541,10 @@ def add_job(root, name, inputs, llm, feature, every=None, at=None) -> Dict[Path,
     feature = (feature or name).replace("-", "_")
     wrote: Dict[Path, str] = {}
     flow = _add_step(root, feature, name, inputs, llm, False, wrote)
-    imports = [("operonx.app.jobs", "Job"), (f"{feature}.graph", flow)]
+    imports = [
+        ("operonx.app.jobs", "Job"),
+        (_module_of(root, _feature_files(root, feature)["graph"]), flow),
+    ]
     if inputs:
         items = f'items=DATA / "{name}.jsonl",  # TODO {name}: one run per line (or a list, or a function)\n    key="{inputs[0]}",\n'
         imports.append(("_shared.config", "DATA"))
@@ -512,8 +552,15 @@ def add_job(root, name, inputs, llm, feature, every=None, at=None) -> Dict[Path,
         items = f"items=[{{}}],  # one run; a list of dicts, a function that yields them, or a .jsonl path\n"
     clock = ""
     if every or at:
-        clock = f'    schedule=schedule({"every" if every else "at"}="{every or at}"),\n'
+        # on the routes' port: a clock on its own port is a second listener
+        # (a second server for `operonx serve`, and `APP.asgi()` refuses two)
+        config = root / "src" / "_shared" / "config.py"
+        served = config.is_file() and re.search(r"^PORT\b", config.read_text(), re.M)
+        port = ", port=PORT" if served else ""
+        clock = f'    schedule=schedule({"every" if every else "at"}="{every or at}"{port}),\n'
         imports.append(("operonx.app", "schedule"))
+        if served:
+            imports.append(("_shared.config", "PORT"))
     item = (
         f'Job(\n    "{name}",\n    graph={flow},\n    {items}{clock}'
         f'    description="TODO {name}: what one run does.",\n)'

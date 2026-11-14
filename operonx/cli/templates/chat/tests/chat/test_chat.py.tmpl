@@ -2,8 +2,7 @@ import asyncio
 
 from operonx.app.jobs import Job
 
-from chat.graph import chat_flow
-from chat.ops import clean, reply
+from chat import chat_flow, clean, reply
 
 
 def test_clean_collapses_whitespace():

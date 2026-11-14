@@ -143,3 +143,74 @@ Done 2026-11-15, board C35. Before/after flow and code changes: [cost/K2.md](cos
 - **K4 hook.** `_feature_files()` is the one mapping from a part (`ops`, `graph`, `routes`,
   `jobs`) to its file. K4's one-file-per-feature shape changes that function, not the generators.
 - **Not measured yet.** Gate 1 (the full A' run) is next.
+
+## Gate 1 result
+
+Run 2026-11-15 on main `fc207ae` (K5+K1, K3, K2; before K4), 2 tracks × T1–T6 of arm A', $3.41.
+Rows: [bench/token_ab/results/2026-11-15-gate1.jsonl](../bench/token_ab/results/2026-11-15-gate1.jsonl).
+
+**Gate 1 failed.** A' passed 14/14, but cost 2.6× arm B and about the same as the old arm A:
+
+| task | A' cost | A' turns | B cost | B turns | A cost | A turns |
+|---|---|---|---|---|---|---|
+| T1 new service | $1.31 | 62 (2 fixes) | $0.21 | 11 | $1.34 | 46 |
+| T2 job + route | $0.36 | 23 | $0.17 | 9 | $0.52 | 32 |
+| T3 report job | $0.33 | 21 | $0.18 | 10 | $0.35 | 16 |
+| T4 | $0.28 | 18 | $0.17 | 14 | $0.28 | 12 |
+| T5a | $0.37 | 34 | $0.20 | 21 | $0.32 | 25 |
+| T5b | $0.47 | 39 | $0.23 | 19 | $0.37 | 26 |
+| T6 | $0.29 | 23 | $0.15 | 9 | $0.33 | 18 |
+| **all** | **$3.41** | 220 | **$1.31** | 93 | $3.50 | 175 |
+
+Doc reads fell from ~101k tokens (A) to 18k. The recipes work. The money moved to building and
+debugging. From the session logs, the causes in order of cost:
+
+1. **An http door could not answer a bare JSON array: $0.90, 39 turns.** SPEC's `GET /tickets`
+   answers the list. A graph's reply is a dict, so both tracks answered `{"tickets": [...]}` and
+   failed acceptance. Both fix sessions first grepped the guide for `"$body"`, found nothing, then
+   read `operonx/app/serve/*.py` to wire `egress` by hand. **Fixed in the K4 PR:** an op that
+   outputs `"$body"` answers that value alone, with its `$status` (recipe and guide 02 say so).
+2. **A clock listened on 8000 whatever `$PORT` said.** `operonx add job --at` wrote
+   `schedule(at=...)`, and `schedule()` defaults to `port=8000`. With `$PORT=8871` (the bench sets
+   it) the app had two listeners, so `APP.asgi()` refused to build and every route test failed.
+   A1 spent T2's and T5b's middle turns finding that `env -u PORT` made the tests pass. In
+   production, the clock would start a second server on 8000. **Fixed in the K4 PR:** in a served
+   project, `add job --at/--every` writes `port=PORT`, and the recipe says why.
+3. **Reading before writing.** T1 still opens with two `cat` calls over the whole template, then
+   edits the files `add` wrote. K4 (one file per feature) is the lever for this.
+4. **Lint C16 on `SPEC.md`.** The bench copies SPEC.md into the project root, and `operonx check`
+   reports it. One track spent a turn on it. This is a bench artefact, not a product defect.
+
+**Also found, not fixed (Backlog):** uvicorn 0.54 (what `uv sync` resolves today) removed
+`Multiprocess(target=)`, so `operonx/app/serve/balance.py` cannot start a pooled listener
+(`workers>1`). `test_serve_runs_a_pooled_listener_as_worker_processes` fails on a fresh sync and
+passes on uvicorn 0.46.
+
+**Next.** Step 3 says to re-run A' when K4 changes the template, and it does. That re-run (about
+$3.40) measures K4 together with the two fixes above. Spend so far: $1.21 + $3.41 = $4.62 of the
+$15 cap. With the re-run and gate 2 (about $6), the total is about $14.
+
+## K4 result
+
+Done 2026-11-15, board C36. Before/after tree, flows and code changes: [cost/K4.md](cost/K4.md).
+
+- **Shipped.** `operonx init` writes the feature as one file, `src/<feature>.py`: ops, graphs,
+  `JOBS`, `SERVICES`, in that order (hello: 5 files → 1, chat and agent: 6 → 1). `app/main.py`
+  imports `from <feature> import JOBS, SERVICES`. `operonx add` writes into the file (code above
+  the lists, the entry into its list) or, for a feature split into `src/<feature>/`, into the
+  layered files. Lint C13 counts `src/F.py` as a feature. AGENTS.md says when and how to split
+  (~300 lines, `__init__` re-exports the lists) and points to `05-project-layout.md`, whose worked
+  project is now one file.
+- **Scope added, flagged:**
+  - The two gate 1 causes (`"$body"`, the clock's port), above. Both were measured costs on the
+    tasks K4 is judged by, so the re-run should not pay for them again.
+  - A bug on main: `.gitignore`'s `lib/` had excluded `templates/_common/web/lib/api.js.tmpl`
+    since #270. A `--web` project built from git or a wheel imports a missing `lib/api.js`. The
+    bench did not catch it because it runs on the on-disk checkout, where the file existed
+    untracked.
+- **Verified.** All six projects (hello, chat, agent; bare and `--http --web`) pass
+  `operonx check --call`, tests included. tests/internal/cli, lint, guide and app: 958 passed. The one failure
+  is the uvicorn 0.54 pooled-listener break in `balance.py`, a file this PR does not touch. The guide snippet
+  pages pass (10).
+- **Not measured yet.** The A' re-run (step 3) is next.
+

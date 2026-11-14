@@ -23,9 +23,13 @@ read it first.
 
 ## Layout
 
-- `src/<feature>/`: `graph.py` (wiring only: no logic, no I/O, no Python
-  `if`), `ops.py` (the logic), `jobs.py`{{#http}}, `routes.py`{{/http}}{{#chat}}, `prompts.py`{{/chat}}{{#agent}}, `agent.py`{{/agent}}; anything
-  else `_<name>.py`. Shared code is `src/_shared/`; `src/_shared/config.py`
+- `src/<feature>.py`: one file per feature, in this order: its ops (the
+  logic), the graphs that wire them (wiring only: no logic, no I/O, no Python
+  `if`), `JOBS`{{#http}}, `SERVICES`{{/http}}. Past ~300 lines, split it into a folder
+  `src/<feature>/`: `ops.py`, `graph.py`, `jobs.py`{{#http}}, `routes.py`{{/http}}, and an
+  `__init__.py` that re-exports `JOBS`{{#http}} and `SERVICES`{{/http}}, so `app/main.py` keeps
+  its import; `operonx add` writes into either shape. Guide:
+  `05-project-layout.md` (the rules, a worked project). Shared code is `src/_shared/`; `src/_shared/config.py`
   is the only file that reads the environment (`ROOT`, `DATA`, `OUT`{{#http}}, `PORT`{{/http}});
   a new setting is one more line there: `LIMIT = env("LIMIT", 10)`.
 - `app/main.py`: `APP = Application(...)` lists every job{{#http}} and service{{/http}}.
@@ -50,7 +54,7 @@ passes `operonx check` as it is.
 {{#web}}{{run}}operonx add page stats --data /tickets              # web/stats/: a table, linked from /
 {{/web}}```
 
-`--feature F` picks the `src/` package{{#http}} (a route: the path's first part){{/http}}. A model call
+`--feature F` picks the feature file, `src/F.py`{{#http}} (a route: the path's first part){{/http}}. A model call
 turns on `llm:assistant`, its `.env.example` names, the `openai` extra and a fake
 model for the tests.
 
@@ -96,12 +100,13 @@ A flaky op: `@op(retry=Retry(max_attempts=3))`. A whole project: `[retry]` in
 **A job**: `Job("name", graph=g, items=DATA / "x.jsonl", key="id",
 output=OUT / "x.jsonl")`. `items` can also be a list or a function that yields
 dicts. `operonx run name --resume` skips done ids. Add
-`schedule=schedule(at="07:00")` (or `every="5m"`) to run it on a clock
-inside `operonx serve`. Guide: `02-composition.md` § Job, § A job on a clock.
+`schedule=schedule(at="07:00"{{#http}}, port=PORT{{/http}})` (or `every="5m"`) to run it on a clock
+inside `operonx serve`{{#http}} (`port=PORT`: on the routes' server; without it the
+clock is a listener of its own on 8000){{/http}}. Guide: `02-composition.md` § Job, § A job on a clock.
 {{#http}}
 
 **A route**: `Service("name", http("POST", "/path", port=PORT), graph=g)` in
-`routes.py`. The JSON body fills the graph's parameters by name, and so does
+the feature's `SERVICES`. The JSON body fills the graph's parameters by name, and so does
 the path: `http("GET", "/tickets/{id}")` passes `id`. An unknown field is
 answered `400 {"field": ...}`. The reply is the graph's answer with `200`,
 unless an op outputs `"$status"` (the key is not sent):
@@ -112,6 +117,9 @@ def find(id: str) -> dict:
     ticket = TICKETS.get(id)
     return {"ticket": ticket, "$status": 200 if ticket else 404}  # 201 for a create
 ```
+
+`"$body"` is the whole reply instead, any JSON: `{"$body": tickets}` answers
+a bare array.
 
 Every route is a `Service` (lint C14), so every request has a trace: no
 hand-written Starlette route, and never unpack a request dict in an op.
@@ -170,8 +178,8 @@ Guide: `08-runs.md` (traces, slow runs, durable runs); `04-gotchas.md`
   only when other code reads it; one op per line.
 - No retry loop and no "save progress" code in an op: `retry:`/`[retry]`
   and `[durable]` do it.
-- Imports go one way: `app/` → `graph.py` → `ops.py` → helpers; `src/`
-  never imports `app/`.
+- Imports go one way: `app/` → `src/<feature>.py` → `src/_shared/`; another
+  feature only through its top-level names; `src/` never imports `app/`.
 
 ## operonx guides
 

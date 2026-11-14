@@ -17,11 +17,17 @@ done: tests/internal/cli/test_check_cli.py, tests/internal/app/serve/test_path_a
 files: operonx/cli/add.py,operonx/cli/templates/_common/AGENTS.md.tmpl,docs/cost/K2.md
 done: tests/internal/cli/test_add_cli.py
 
-### C36 · K4 One file per feature · todo
+### C36 · K4 One file per feature · done
+files: operonx/cli/templates/hello/src/greeting.py.tmpl, operonx/cli/templates/chat/src/chat.py.tmpl, operonx/cli/templates/agent/src/assistant.py.tmpl, operonx/cli/add.py, operonx/lint/shape.py, operonx/app/serve/app.py, docs/cost/K4.md
+done: tests/internal/cli/test_init.py, tests/internal/cli/test_add_cli.py, tests/internal/app/serve/test_path_and_status.py
 
 ### C37 · E7b Tasks where reuse should win (gate 2) · todo
 
 ## Backlog
+
+### C38 · Pooled listeners break on uvicorn 0.54 · todo
+files: operonx/app/serve/balance.py
+done: tests/internal/app/test_declare.py::test_serve_runs_a_pooled_listener_as_worker_processes
 
 ## E · One engineering environment — menu, workflow, knowledge, tokens · closed
 plan: docs/ENGINEERING_ENV_PLAN.md · opened: 2026-11-14 · closed: 2026-11-15

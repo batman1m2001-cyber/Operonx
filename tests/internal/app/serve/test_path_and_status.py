@@ -2,7 +2,8 @@
 
 ``http("GET", "/summaries/{date}")`` hands ``date`` to the run as an input,
 beside the body's fields. An op that outputs ``"$status": 404`` (or
-``201``) sets the reply's status code; the key is not in the body. Both
+``201``) sets the reply's status code; the key is not in the body. One
+that outputs ``"$body"`` answers that value alone (a JSON array). Both
 keep a route that needs them a ``Service`` (lint C14), traced like any run,
 instead of a hand-written Starlette route.
 """
@@ -56,6 +57,28 @@ def list_flow():
 
 
 @op
+def list_texts() -> dict:
+    return {"$body": [{"text": "printer"}, {"text": "login"}]}
+
+
+@graph
+def texts_flow():
+    texts = list_texts()
+    START >> texts >> END
+
+
+@op
+def nothing_here(id: str) -> dict:
+    return {"$body": None, "$status": 404}
+
+
+@graph
+def nothing_flow(id):
+    found = nothing_here(id=id)
+    START >> found >> END
+
+
+@op
 def bad_status(text: str) -> dict:
     return {"$status": "teapot"}
 
@@ -76,6 +99,8 @@ def _client():
                 Service("create", http("POST", "/tickets", port=port), graph=create_flow),
                 Service("list", http("GET", "/tickets", port=port), graph=list_flow),
                 Service("bad", http("POST", "/bad", port=port), graph=bad_flow),
+                Service("texts", http("GET", "/texts", port=port), graph=texts_flow),
+                Service("nothing", http("GET", "/nothing/{id}", port=port), graph=nothing_flow),
             ],
         ).asgi()
     )
@@ -102,6 +127,15 @@ def test_a_get_with_no_body_and_no_parameters_still_runs():
     with _client() as client:
         resp = client.get("/tickets")
     assert resp.status_code == 200 and resp.json() == {"tickets": []}
+
+
+def test_an_op_answers_a_bare_array_with_body():
+    with _client() as client:
+        listed = client.get("/texts")
+        missing = client.get("/nothing/7")
+    assert listed.status_code == 200
+    assert listed.json() == [{"text": "printer"}, {"text": "login"}]
+    assert missing.status_code == 404 and missing.json() is None
 
 
 def test_a_status_that_is_not_a_code_is_a_500_not_a_reply():

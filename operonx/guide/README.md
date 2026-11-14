@@ -55,8 +55,8 @@ and up to three flags: `--http` (a service), `--web` (pages in `web/`, brings
 `--http`), `--deploy` (a Dockerfile and compose file). It writes the layout of
 [project layout](05-project-layout.md): `operonx.toml` (its `parts` say what
 was chosen), `resources.yaml`, `.env.example`, `app/main.py` with the
-`Application`, one feature in `src/<feature>/` (`jobs.py`, and `routes.py`
-with `--http`), its tests in `tests/<feature>/`, and `AGENTS.md` (with
+`Application`, one feature in `src/<feature>.py` (its ops, graph and `JOBS`, and
+its `SERVICES` with `--http`), its tests in `tests/<feature>/`, and `AGENTS.md` (with
 `CLAUDE.md` pointing at it). It also copies the guide of every installed
 operonx package into `myapp/.operonx/guide/`.
 

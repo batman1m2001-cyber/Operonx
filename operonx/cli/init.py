@@ -9,7 +9,7 @@ filled from :func:`plan`'s values; nothing else is, so Python braces need
 no escaping. ``{{#x}}…{{/x}}`` is kept when *x* is on (the template's name,
 a part in :data:`PARTS`, ``llm``), ``{{^x}}…{{/x}}`` when it is off; a tag
 alone on its line takes the line with it. A file that is one section and
-renders empty is not written: ``routes.py`` exists only with ``--http``.
+renders empty is not written (a ``{{#web}}`` file without ``--web``).
 
 The parts a project has are ``parts`` in its ``operonx.toml``.
 ``operonx init . --web`` in a project adds the part: it writes the files
@@ -70,7 +70,7 @@ PARTS = ("http", "web", "deploy")
 class Template:
     name: str
     summary: str
-    #: The one feature's folder under ``src/``.
+    #: The one feature: ``src/<feature>.py``.
     feature: str
     #: Its job, and what the job does (README's comment).
     job: str

@@ -519,7 +519,7 @@ def _c10_logic_in_graph(tree: ast.Module, path: Path) -> Iterator[Finding]:
                     "C10",
                     path,
                     n.lineno,  # type: ignore[attr-defined]
-                    f"{what} in @graph {fn.name}: a graph only wires ops; the logic goes in ops.py",
+                    f"{what} in @graph {fn.name}: a graph only wires ops; the logic goes in an op",
                 )
     if path.name == "graph.py":
         for node in tree.body:

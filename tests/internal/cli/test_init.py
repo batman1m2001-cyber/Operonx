@@ -131,9 +131,8 @@ def test_the_agent_template_is_built_on_operonx_agents(tmp_path):
     assert '"operonx-agents>=' in pyproject
     code = {p.relative_to(root).as_posix(): p.read_text() for p in root.rglob("*.py")}
     assert not [p for p, t in code.items() if "build_react_agent" in t or "operonx_agents" in t]
-    assert "AgentOp.of(" in code["src/assistant/graph.py"]
-    assert "agent_service(" in code["src/assistant/routes.py"]
-    assert "Agent(" in code["src/assistant/agent.py"]
+    feature = code["src/assistant.py"]  # one file per feature (COST_PLAN K4)
+    assert "AgentOp.of(" in feature and "agent_service(" in feature and "Agent(" in feature
     assert "operonx.agents.testing" in code["tests/assistant/test_assistant.py"]
     for other in ("hello", "chat"):
         assert b"operonx-agents" not in plan(other, "x", parts=PARTS)["pyproject.toml"]
@@ -141,9 +140,10 @@ def test_the_agent_template_is_built_on_operonx_agents(tmp_path):
 
 def test_the_parts_decide_the_files_and_the_dependency():
     files = {flags: plan("hello", "x", parts=flags) for flags in ((), ("web",), ("deploy",))}
-    assert "src/greeting/routes.py" not in files[()] and "web/index.html" not in files[()]
+    assert b"SERVICES = [" not in files[()]["src/greeting.py"] and "web/index.html" not in files[()]
     web = {"web/index.html", "web/pages/home.js", "web/components/ask.js", "web/lib/api.js"}
-    assert {"src/greeting/routes.py", *web} <= set(files[("web",)])  # web brings http
+    assert web <= set(files[("web",)])
+    assert b"SERVICES = [" in files[("web",)]["src/greeting.py"]  # web brings http
     assert "deploy/Dockerfile" in files[("deploy",)] and "deploy/Dockerfile" not in files[()]
     assert b'"operonx>=' in files[()]["pyproject.toml"]  # offline: no serve extra
     assert b'"operonx[serve]>=' in files[("web",)]["pyproject.toml"]
@@ -201,14 +201,13 @@ class TestTheGeneratedProject:
         assert "[[serve]]" not in manifest and "[[job]]" not in manifest
         assert "APP = Application(" in (root / "app" / "main.py").read_text()
         feature = TEMPLATES[template].feature
-        assert sorted(p.name for p in (root / "src").iterdir() if p.is_dir()) == [
-            "_shared",
-            feature,
-        ]
-        for name in ("__init__.py", "graph.py", "ops.py", "jobs.py"):
-            assert (root / "src" / feature / name).is_file()
+        # one file per feature (COST_PLAN K4): its ops, graph, JOBS and SERVICES
+        src = sorted(p.name for p in (root / "src").iterdir() if p.name != "__pycache__")
+        assert src == ["_shared", f"{feature}.py"]
+        code = (root / "src" / f"{feature}.py").read_text()
+        assert "@graph" in code and "JOBS = [" in code
         http = '"http"' in _parts(root)
-        assert (root / "src" / feature / "routes.py").is_file() == http
+        assert ("SERVICES = [" in code) == http
         assert (root / "web" / "index.html").is_file() == ('"web"' in _parts(root))
         assert (root / "deploy" / "Dockerfile").is_file() == ('"deploy"' in _parts(root))
         assert list((root / "tests" / feature).glob("test_*.py"))
@@ -254,8 +253,7 @@ class TestForCodingAssistants:
         for must in (
             ".operonx/guide/README.md",
             "app/main.py",
-            "src/<feature>/",
-            "graph.py",
+            "src/<feature>.py",
             "resources.yaml",
             ".env",
             "print()",
@@ -368,7 +366,7 @@ class TestInit:
         _init(capsys, later, "-t", "chat")
         code, out = _init(capsys, later, "--web")
         assert code == 0 and "chat + http + web" in out.out
-        assert "  + src/chat/routes.py" in out.out and "  ~ app/main.py" in out.out
+        assert "  ~ src/chat.py" in out.out and "  ~ app/main.py" in out.out
         _init(capsys, at_once, "-t", "chat", "--web")
         assert _snapshot(later) == _snapshot(at_once)
 
@@ -380,8 +378,8 @@ class TestInit:
         code, out = _init(capsys, root, "--http")
         assert code == 0
         assert (root / "app" / "main.py").read_text() == mine
-        assert "! app/main.py" in out.out and "from greeting.routes import SERVICES" in out.out
-        assert (root / "src" / "greeting" / "routes.py").is_file()
+        assert "! app/main.py" in out.out and "from greeting import JOBS, SERVICES" in out.out
+        assert "SERVICES = [" in (root / "src" / "greeting.py").read_text()
         assert 'parts = ["hello", "http"]' in (root / "operonx.toml").read_text()
 
     def test_the_template_is_chosen_once(self, tmp_path, capsys):

@@ -14,6 +14,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!operonx/cli/templates/_common/web/lib/
 lib64/
 parts/
 sdist/

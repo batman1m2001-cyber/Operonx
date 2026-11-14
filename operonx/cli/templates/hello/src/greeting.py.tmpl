@@ -1,0 +1,49 @@
+"""The greeting feature in one file: its logic (ops), its wiring (a graph),
+its job{{#http}} and its route{{/http}}.
+
+Split it into a src/greeting/ folder only when it passes ~300 lines
+(AGENTS.md says how)."""
+
+from operonx import END, START, graph, op
+{{#http}}
+from operonx.app import Service, http
+{{/http}}
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}
+
+
+@op
+def greet(id: str, full_name: str = "") -> dict:
+    """Every op returns a dict literal: its keys are the op's outputs."""
+    name = " ".join(str(full_name or "").split()).title() or "stranger"
+    return {"id": id, "greeting": f"Hello, {name}!"}
+
+
+@graph
+def greet_flow(id, full_name=""):  # a job item or a request body fills these
+    g = greet(id=id, full_name=full_name)  # a graph only wires: no logic, no I/O
+    START >> g >> END
+
+
+JOBS = [
+    Job(
+        "greet_people",
+        graph=greet_flow,
+        items=DATA / "people.jsonl",  # one graph run per line
+        key="id",  # resumable: `operonx run greet_people --resume` skips done ids
+        output=OUT / "greetings.jsonl",
+        description="A greeting for every person in data/people.jsonl.",
+    ),
+]
+{{#http}}
+
+SERVICES = [
+    Service(
+        "greet",
+        http("POST", "/greet", port=PORT),
+        graph=greet_flow,  # the JSON body fills its parameters
+        description="POST {id, full_name}, get {id, greeting}.",
+    ),
+]
+{{/http}}
