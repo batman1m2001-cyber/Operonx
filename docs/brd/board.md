@@ -34,8 +34,9 @@ files: operonx-studio:operonx_studio/stophook.py
 done: operonx-studio:tests/studio/test_stophook.py
 Shipped as studio #186.
 
-### C30 · E7 Does OperonX save tokens? (BRD 3) · todo
+### C30 · E7 Does OperonX save tokens? (BRD 3) · done
 files: bench/token_ab/
+Arm A (operonx init) cost 2.3× arm B (empty folder) on the support triager. All 28 sessions passed, at $4.80 + $0.56 pilot. The table is in ENGINEERING_ENV_PLAN §4 E7.
 
 ## Backlog
 

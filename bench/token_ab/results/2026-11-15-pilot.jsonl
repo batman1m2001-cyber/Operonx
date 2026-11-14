@@ -1,0 +1,2 @@
+{"track": "B1", "arm": "B", "task": "T1", "cost": 0.09905800000000001, "turns": 5, "input": 8, "output": 3806, "cache_read": 76940, "cache_write": 13322, "doc_tokens": 0, "seconds": 30, "session": "880b3a68-38ed-4f1b-8494-18cfe9971297", "error": "", "pass": true, "why": "", "fixed": false}
+{"track": "A1", "arm": "A", "task": "T1", "cost": 0.4654921, "turns": 26, "input": 38, "output": 12653, "cache_read": 1088501, "cache_write": 57509, "doc_tokens": 16924, "seconds": 128, "session": "3327d8cb-41bf-4b12-87e0-16f0b4271e8c", "error": "", "pass": true, "why": "", "fixed": false}
