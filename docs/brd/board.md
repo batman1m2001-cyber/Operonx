@@ -27,6 +27,7 @@ done: tests/internal/guide/test_catalog.py, tests/internal/lint/test_shape.py::t
 
 ### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · doing
 files: packages/operonx-project/operonx_project/search.py, operonx-studio:operonx_studio/assistant.py
+Studio half shipped as studio #187; gates 1 (continuity, 2/2) and 2 (10.2 KB from 22.1 KB) met. Open: gate 3, the context meter over the next 20 real turns.
 
 ### C32 · E8 Lint after every step (owner) · done
 files: operonx-studio:operonx_studio/stophook.py

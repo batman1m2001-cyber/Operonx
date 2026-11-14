@@ -204,8 +204,29 @@ E4–E6).
   matches exactly or by its start: `read docs/brd/board.md C29`). 0.47 s on this repo. knowledge.md has
   the kind `decision` (what the owner chose and why); the builder block says search before reading a
   whole doc. Checks: 4 search tests, 58 guide + lint, the 18 init shapes (228).
+- **E6, studio** (studio #187): Save & start fresh replaces Compact and `_summarize`. A turn that starts
+  above 100k context (`OPERONX_STUDIO_SAVE_AT`), the Save button or `/save`, and New conversation with
+  unsaved work run a save turn on the old session: open work to the board, decisions to
+  `docs/brd/knowledge.md` (`### K<n> · title · decision`, `where:`), and a handoff of ≤ 1 KB. The next
+  turn starts without `--resume`, seeded by the board's open cards and that handoff; the chat shows one
+  "Saved to the project · C1, knowledge.md" line with the handoff folded under it. `knowledge.md` is
+  pointers (3.0 KB, from 14.6): its sections went to five guide pages (`guide/operonx.md`, `building.md`,
+  `steps.md`, `board.md`, `page.md`) that claude reads through `--add-dir`; the briefing names graphs,
+  not their ops; MCP `project_search` / `project_read` run E6-engine's search.
+  - Gate 1, continuity (runline-lab copy, Sonnet, 2 runs): decide (log through LOGGER), half-build a
+    card (`shout_twice`, step 1 of 3), save; a new conversation asked "Where are we, what's next?"
+    answered from the board and handoff both times: C1, step 1 done in `src/lab/ops.py`, steps 2–3 left,
+    the open question. $0.47 and $0.51 for the 4 turns. Run 1 found two faults, fixed before run 2: the
+    guide pages were refused (outside the project; now `--add-dir`), and the save wrote knowledge.md in a
+    format of its own (the save prompt now names the entry format).
+  - Gate 2, the fixed prompt per turn (appended prompt + AGENTS.md, runline-lab, bytes/4): 22,062 B
+    (~5.5k tokens) on main → 10,205 B (~2.6k); the appended part 17,570 → 5,713 B. A board and a handoff
+    add ≤ ~1.5 KB on the first turn of a fresh session only.
+  - Gate 3, the context meter on the next 20 real turns: open — it needs those turns on :8766.
+  - Before / after, the save flow and the files changed: [engineering_env/E6.md](engineering_env/E6.md).
 - **E8** (studio #186): the Stop hook's check L1 runs `operonx lint` (in the project's `.venv` when it has
   one) on each operonx project a turn edited, and sends the turn back once with the errors in the files it
   edited or a root folder it made; errors elsewhere, warnings and baseline-held rules do not. 1.1 s end to
   end on runline-lab; the hook timeout went 10 → 30 s. Real turn (Sonnet, $0.10): asked to add a `print()`,
   it was sent back with `src/lab/ops.py:186: [C8]` and answered why it kept it (the prompt asked for it).
+  Flow and files: [engineering_env/E8.md](engineering_env/E8.md).
