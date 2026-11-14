@@ -1,0 +1,19 @@
+{{#web}}
+// A component renders and reports what the user did; it never calls the server.
+export function askForm(field, onAsk) {
+  const form = document.createElement("form");
+  const input = Object.assign(document.createElement("input"), {
+    name: field, placeholder: field, autocomplete: "off", required: true, autofocus: true,
+  });
+  const send = Object.assign(document.createElement("button"), { textContent: "Send" });
+  const answer = document.createElement("output");
+  form.append(input, send);
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    onAsk(input.value, (text) => { answer.textContent = text; });
+  });
+  const box = document.createElement("section");
+  box.append(form, answer);
+  return box;
+}
+{{/web}}
