@@ -34,8 +34,10 @@ def fake_model(*script: Any, key: str = "llm:assistant", **config: Any) -> Itera
 
     It swaps the resource in the installed hub (one is installed for the
     block when there is none), in this process only: ``resources.yaml`` is
-    not touched. Yields the fake model; its ``calls`` hold the messages of
-    every call it answered.
+    not touched. Ops that already ran (an engine warmed up by a session
+    fixture) take the fake inside the block and what was there after it.
+    Yields the fake model; its ``calls`` hold the messages of every call it
+    answered.
     """
     from operonx.core.registry.resource_hub import ResourceHub
     from operonx.providers.llms.config import FakeConfig
@@ -59,3 +61,4 @@ def fake_model(*script: Any, key: str = "llm:assistant", **config: Any) -> Itera
             hub._cache[key] = before
         else:
             hub._cache.pop(key, None)
+        ResourceHub.revision += 1

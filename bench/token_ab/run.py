@@ -123,7 +123,10 @@ def read_log(log: Path, seconds: float) -> dict:
                 res["doc_tokens"] += len(text) // 4
         if ev.get("type") == "result":
             u = ev.get("usage") or {}
-            res.update(cost=float(ev.get("total_cost_usd") or 0), turns=int(ev.get("num_turns") or 0),
+            # a session that waited on a background task ends more than once: the cost is cumulative,
+            # the turns are per result
+            res["turns"] += int(ev.get("num_turns") or 0)
+            res.update(cost=float(ev.get("total_cost_usd") or 0),
                        input=u.get("input_tokens", 0), output=u.get("output_tokens", 0),
                        cache_read=u.get("cache_read_input_tokens", 0),
                        cache_write=u.get("cache_creation_input_tokens", 0),
@@ -140,8 +143,11 @@ def track(name: str, i: int, args, budget: Budget, results: list, lock: threadin
     fake = subprocess.Popen([sys.executable, str(HERE / "fake_llm.py"), str(llm_port)])
     env = session_env(name, ws, out / "bin", llm_port, port)
     try:
+        order = [t for t, _ in TASKS + E7B]
         for task, prompt in TASKS + E7B:
             if task not in args.tasks if args.tasks else task in dict(E7B):
+                continue
+            if name in args.start and order.index(task) < order.index(args.start[name]):
                 continue
             if not budget.may_start():
                 with lock:
@@ -180,8 +186,10 @@ def main() -> None:
     ap.add_argument("--tasks", default="")
     ap.add_argument("--cap", type=float, default=40.0)
     ap.add_argument("--ws", default="", help="TRACK=DIR,...: go on in a workspace an earlier run left (gate 2)")
+    ap.add_argument("--start", default="", help="TRACK=TASK,...: with --ws, go on from TASK (a run that was cut off)")
     args = ap.parse_args()
     args.ws = dict(p.split("=", 1) for p in args.ws.split(",") if p)
+    args.start = dict(p.split("=", 1) for p in args.start.split(",") if p)
     args.tasks = [t for t in args.tasks.split(",") if t]
     out = Path(args.out)
     (out / "bin").mkdir(parents=True, exist_ok=True)

@@ -18,7 +18,7 @@ from operonx.core.media import Media
 from operonx.core.ops import BaseOp
 from operonx.core.ops.base import shorthand, should_emit_for_channel, split_shorthand_kwargs
 from operonx.core.policy import _http_status, resource_retry, retry_call
-from operonx.core.registry.resource_hub import invalidate_token, refresh_token
+from operonx.core.registry.resource_hub import ResourceHub, invalidate_token, refresh_token
 from operonx.core.runtime import _current_ctx
 from operonx.core.states._scratch_var import _current_state_var
 from operonx.core.utils.common import Param
@@ -222,6 +222,7 @@ class LLMOp(BaseOp):
         "_fallback_llms",
         "_rng",
         "_initialized",
+        "_hub_revision",
         # Structured-output layer (merged from the deleted ParserOp in 1.0.0)
         "fields",
         "parser",
@@ -484,6 +485,9 @@ class LLMOp(BaseOp):
         self._fallback_llms: List["BaseLLM"] = []
         self._batch_coordinator = None
         self._initialized = False
+        self._hub_revision = (
+            None  # the hub's revision when the models were taken from it; None: set by hand
+        )
 
         # Core: stream → _stream_core, else → _generate_core
         core = "_stream_core" if self.stream else "_generate_core"
@@ -599,9 +603,10 @@ class LLMOp(BaseOp):
         self._ensure_initialized()
 
     def _ensure_initialized(self):
-        """Lazy-init LLM backends from ResourceHub on first use."""
-        if self._initialized:
+        """Lazy-init LLM backends from ResourceHub on first use, and again after the hub changed."""
+        if self._initialized and self._hub_revision in (None, ResourceHub.revision):
             return
+        revision = ResourceHub.revision
         hub = resolve_hub()
 
         if isinstance(self.resource, list):
@@ -634,6 +639,7 @@ class LLMOp(BaseOp):
             )
 
         self._initialized = True
+        self._hub_revision = revision
 
     # =========================================================================
     # LLM selection

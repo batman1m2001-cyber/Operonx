@@ -2,28 +2,20 @@
 
 One card per task (LEAN_PROJECT_PLAN §5). The assistant moves the cards; edit a card's fields, not its state.
 
-## T · Cost: an operonx project costs less than an empty folder · open
-plan: docs/COST_PLAN.md · opened: 2026-11-15
+## T · Cost: an operonx project costs less than an empty folder · closed
+plan: docs/COST_PLAN.md · opened: 2026-11-15 · closed: 2026-11-15
 
 ### C33 · K5+K1 Recipes in AGENTS.md, BRD opt-in, then a pilot · done
-files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/cli/init.py, docs/cost/K5_K1.md
-done: tests/internal/cli/test_init.py::TestForCodingAssistants::test_every_guide_reference_in_agents_md_names_a_page_and_a_heading
 
 ### C34 · K3 operonx check: one verify call · done
-files: operonx/cli/check.py, operonx/app/serve/app.py, operonx/app/serve/runner.py, operonx/cli/templates/_common/AGENTS.md.tmpl, docs/cost/K3.md
-done: tests/internal/cli/test_check_cli.py, tests/internal/app/serve/test_path_and_status.py
 
 ### C35 · K2 operonx add: reuse as one command · done
-files: operonx/cli/add.py,operonx/cli/templates/_common/AGENTS.md.tmpl,docs/cost/K2.md
-done: tests/internal/cli/test_add_cli.py
 
 ### C36 · K4 One file per feature · done
-files: operonx/cli/templates/hello/src/greeting.py.tmpl, operonx/cli/templates/chat/src/chat.py.tmpl, operonx/cli/templates/agent/src/assistant.py.tmpl, operonx/cli/add.py, operonx/lint/shape.py, operonx/app/serve/app.py, docs/cost/K4.md
-done: tests/internal/cli/test_init.py, tests/internal/cli/test_add_cli.py, tests/internal/app/serve/test_path_and_status.py
 
 ### C37 · E7b Tasks where reuse should win (gate 2) · done
-files: bench/token_ab/tasks.py, bench/token_ab/accept.py, bench/token_ab/fake_llm.py, bench/token_ab/run.py, docs/cost/E7b.md
-done: bench/token_ab/results/2026-11-15-gate2.jsonl
+
+### C43 · Round 2: C39–C42, then both gates re-measured · done
 
 ## Backlog
 
@@ -38,8 +30,9 @@ done: tests/internal/app/serve/test_sse_text.py
 
 ### C40 · A test scripts the fake model for itself · done
 intent: T5a and T9 spent ~15 turns each proving a retry: `operonx.bootstrap` is idempotent, so a test cannot replace conftest's script. A fixture or call that sets the script for one test.
-files: operonx/testing.py, operonx/cli/templates/_common/AGENTS.md.tmpl
-done: tests/internal/test_testing.py
+files: operonx/testing.py, operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/core/registry/resource_hub.py, operonx/providers/ops/llm.py
+done: tests/internal/test_testing.py::test_an_engine_that_already_ran_answers_from_the_block
+outcome: round 2 found the block missed an engine that had already run (T9, 52 turns); `ResourceHub.revision` makes an `LLMOp` take its model again
 
 ### C41 · operonx check: no red on what the agent did not cause · done
 intent: the asgi-mount probe fails when StaticFiles at / answers the bare prefix; C16 flags files the owner put at the root on purpose (SPEC.md). Both tracks ended gate 2 on FAIL.

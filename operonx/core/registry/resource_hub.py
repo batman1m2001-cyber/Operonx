@@ -192,6 +192,10 @@ class ResourceHub:
     """
 
     _instance: ClassVar[Optional["ResourceHub"]] = None
+    #: Goes up whenever a resource is registered or removed, or another hub is installed. An op that
+    #: holds what it took from the hub (``LLMOp``) takes it again when this has moved, so a swap
+    #: (``operonx.testing.fake_model``) reaches ops that already ran.
+    revision: ClassVar[int] = 0
 
     def __init__(self, storage: ConfigStorage, source_path: Optional[Path] = None):
         """Initialize hub with storage backend.
@@ -306,11 +310,13 @@ class ResourceHub:
     def set_instance(cls, hub: "ResourceHub") -> None:
         """Install *hub* as the global singleton (used by ``Operon(...)``)."""
         cls._instance = hub
+        ResourceHub.revision += 1
 
     @classmethod
     def reset_instance(cls) -> None:
         """Clear the global singleton. For tests only."""
         cls._instance = None
+        ResourceHub.revision += 1
 
     @classmethod
     def guard(cls, prefix: str, fn: Any) -> Any:
@@ -667,6 +673,7 @@ class ResourceHub:
         # Create instance immediately
         instance = REGISTRY.create(config)
         self._cache[registry_key] = CacheEntry(config=config, instance=instance)
+        ResourceHub.revision += 1
 
         # Persist to storage (no type field needed - category is in the key)
         if persist:
@@ -690,6 +697,7 @@ class ResourceHub:
 
         if key in self._cache:
             del self._cache[key]
+            ResourceHub.revision += 1
 
         self._storage.remove(key)
         LOGGER.debug("Removed: %s", key)
@@ -699,6 +707,7 @@ class ResourceHub:
         """Clear all resources from registry and storage."""
         keys = list(self._cache.keys())
         self._cache.clear()
+        ResourceHub.revision += 1
         for key in keys:
             self._storage.remove(key)
         LOGGER.debug("Cleared all resources")

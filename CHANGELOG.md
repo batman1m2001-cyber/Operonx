@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`operonx.testing.fake_model` reaches an engine that already ran (COST_PLAN round 2).** An `LLMOp` took its model from the hub once and kept it, so a block opened after the template's session fixture had warmed the engine changed nothing: the op answered from conftest's script. `ResourceHub.revision` goes up when a resource is registered, removed or swapped, or another hub is installed, and an `LLMOp` takes its models again when it has moved. In the round 2 re-measure, T9 cost both tracks 52 turns (B 14) debugging exactly this.
 - **`operonx init --web` from git or a wheel wrote a page importing a missing `web/lib/api.js`.** The repository's `.gitignore` entry `lib/` had excluded `operonx/cli/templates/_common/web/lib/api.js.tmpl` since it was added; it is tracked now.
 
 ## [1.38.0] - 2026-11-01

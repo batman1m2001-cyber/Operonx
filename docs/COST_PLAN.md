@@ -315,3 +315,53 @@ a template question, and C38.
 **Built** (C39–C42 done): the fixes above as written, with one test per cause, each seen to fail
 with its fix reverted; both new recipes run in a generated `chat` project. Write-up with the
 before/after flow and the code changes: [cost/R2.md](cost/R2.md).
+
+## Round 2 result
+
+Run 2026-11-15 on main `b381ceb7` (C39–C42), 2 tracks × T1–T9 of arm A', every session passing
+first time (20/20, no fix session). Rows:
+[bench/token_ab/results/2026-11-15-round2.jsonl](../bench/token_ab/results/2026-11-15-round2.jsonl).
+Turns are counted over every result event of a session (`run.py` counted only the last one, which
+undercounts a session that waited on a background task); the cost was right before.
+
+| task | A' round 1 | A' round 2 | B |
+|---|---|---|---|
+| T1 new service | $0.42 · 28 | $0.35 · 20 | $0.21 · 11 |
+| T2 | $0.31 · 20 | $0.33 · 27 | $0.17 · 9 |
+| T3 | $0.23 · 11 | $0.29 · 19 | $0.18 · 10 |
+| T4 | $0.20 · 11 | $0.24 · 15 | $0.17 · 14 |
+| T5a retry (C40) | $0.42 · 34 | **$0.17 · 11** | $0.20 · 21 |
+| T5b | $0.38 · 28 | $0.31 · 25 | $0.23 · 19 |
+| T6 | $0.26 · 20 | $0.24 · 15 | $0.15 · 9 |
+| **gate 1** | $2.23 · 152 | **$1.94 · 132** | **$1.31 · 93** |
+| T7 trace | $0.24 · 14 | $0.25 · 10 | $0.21 · 11 |
+| T8 stream (C39) | $0.81 · 49 | **$0.32 · 21** | $0.21 · 10 |
+| T9 clock + resume | $0.67 · 46 | $0.72 · 52 | $0.27 · 14 |
+| **gate 2** | $1.72 · 109 | **$1.29 · 83** | **$0.68 · 35** |
+
+**Both gates still fail.** Gate 1 is 1.5× B (was 1.7×), gate 2 1.9× (was 2.5×).
+
+- **What the fixes bought.** T8 fell from $0.81 to $0.32: both tracks used `sse=True` and nobody read
+  operonx's source. T5a fell from $0.42 to $0.17, below B: the retry test is one `fake_model` block.
+- **T9 is a bug in the C40 fix.** Both tracks wrote the resume test with `testing.fake_model` after
+  `conftest.py`'s session fixture had warmed the engine. An `LLMOp` took its model from the hub once
+  (`_ensure_initialized`) and kept it, so the block's script never reached it; A1 read `testing.py`
+  and `llm.py` and then built the app inside the block. Fixed after the run: `ResourceHub.revision`
+  goes up on every swap and the op takes its model again
+  (`test_an_engine_that_already_ran_answers_from_the_block`, seen to fail without it). Not
+  re-measured: at B's own T9 cost, gate 2 would still be about $1.07 against $0.68, and gate 1 has
+  no T9.
+- **What is left is turns, not context.** A turn costs the same in both arms ($0.0147 in A' against
+  $0.0141 in B on gate 1; $0.016 against $0.019 on gate 2). A' takes 42% more turns on gate 1 and
+  2.4× on gate 2. AGENTS.md and the guide no longer make each turn dearer. The extra turns are
+  verifying: every A' session ran `operonx check`, 41 calls in 20 sessions (1–5 each, again after
+  each fix), with the project's tests beside it, and T1 still tears down the scaffold (A' removes
+  the greeting and repoints `DATA`, left out of round 2). Outside the two T9s, operonx's source was
+  read once per track: a `grep "def env"` in T1 (`env()`'s signature is not in AGENTS.md). No
+  session wrote a C41/C42 workaround.
+
+**Outcome.** The plan's rule for a failed gate 1 stands: `operonx init` defaults to the lean form
+(K4). The run was cut once after seven tasks (the driver was killed with the shell that started it);
+the two sessions in flight ($0.46) count in the spend but not in the rows, and the bench resumed
+each track at its last commit with the new `run.py --start TRACK=TASK`. Spent $3.68 this round,
+$12.94 of the $15 cap. Write-up: [cost/R2.md § Measured](cost/R2.md#measured).
