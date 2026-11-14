@@ -23,6 +23,7 @@ from operonx.app.doors import (
     body_contract,
     has_doors,
     plain,
+    sends,
     serve_inputs,
 )
 from operonx.app.manifest import STREAM_KINDS, ManifestError, ServeSpec
@@ -559,7 +560,8 @@ class ServeRunner:
                 request,
                 metadata=metadata,
                 on_start=lambda h: _note_trace_id(session, h),
-                reply=doorless,
+                # a graph that sends with `egress` has answered already
+                reply=doorless and not sends(engine),
                 resume=resume,
                 keep=("$status", "$body") if self.spec.kind == "http" else (),
             )

@@ -161,6 +161,12 @@ def echo_flow():
 `schedule` and jobs take either. A graph with doors gets the item through
 `ingress` and answers with what `egress` sent.
 
+A graph with no `ingress` may still send with `egress`: its parameters are
+filled as usual (the body, the path), and it answers with what it sent,
+never also its outputs. That is how a route streams a model's text:
+`s = LLMOp.of(..., stream=True)`, `egress(item=s["content"])`, served on
+`http("GET", "/summaries/{date}/stream", sse=True)` (§ Service).
+
 ## Job — one run per item
 
 ```python
@@ -366,6 +372,12 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   `?callback=https://hooks.example.com/…`; when the run ends that URL gets
   `{run_id, service, status, output, errors}` — from whichever replica ended
   it. A host not on the list is answered `400`.
+- `http(..., sse=True)` always answers server-sent events, whatever the
+  caller's `Accept`: a string item is its text (a `data:` line per line;
+  an empty string sends nothing), anything else is JSON, and `event: done`
+  (with an empty `data:`) ends the stream. Without `sse=True`, a caller
+  that sends `Accept: text/event-stream` gets each item JSON-encoded and
+  no closing event.
 - An `http` door streamed as server-sent events numbers each event (`id:`).
   A reader that dropped sends the same request with `?run_id=<id>&after_seq=N`
   (or `Last-Event-ID: N`) and gets the events after N, then the rest live.

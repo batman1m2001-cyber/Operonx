@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from operonx.app.declare import PLACEHOLDER
 from operonx.cli.main import TEMPLATES, main
-from operonx.lint.build import no_network
+from operonx.lint.build import _env_contract, no_network
 
 pytestmark = pytest.mark.unit
 
@@ -123,3 +124,25 @@ def test_a_build_that_reaches_the_network_is_c2(tmp_path):
         cwd=root, env=env, capture_output=True, text=True, timeout=180,
     )  # fmt: skip
     assert got.returncode == 1 and "example.com" in got.stdout, got.stdout + got.stderr
+
+
+def test_the_build_fills_env_example_names_with_their_value_there(tmp_path, monkeypatch):
+    """COST_PLAN C42: `SUMMARY_EVERY=3600` in .env.example is what the build
+    sees, not the placeholder; a name with no value gets the placeholder;
+    the shell wins; all of it is gone after the build."""
+    (tmp_path / ".env.example").write_text(
+        "SUMMARY_EVERY=3600\nLLM_API_KEY=\nNAME='quoted'  # a note\nSET=example\n"
+    )
+    for k in ("SUMMARY_EVERY", "LLM_API_KEY", "NAME"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("SET", "shell")
+    with _env_contract(tmp_path) as added:
+        got = {k: os.environ[k] for k in ("SUMMARY_EVERY", "LLM_API_KEY", "NAME", "SET")}
+    assert got == {
+        "SUMMARY_EVERY": "3600",
+        "LLM_API_KEY": PLACEHOLDER,
+        "NAME": "quoted",
+        "SET": "shell",
+    }
+    assert sorted(added) == ["LLM_API_KEY", "NAME", "SUMMARY_EVERY"]
+    assert "SUMMARY_EVERY" not in os.environ and os.environ["SET"] == "shell"

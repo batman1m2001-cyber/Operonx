@@ -24,6 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterator, List, Optional, Tuple
 
+# what a name `.env.example` lists with no value, and the environment lacks, holds while building
+from operonx.app.declare import PLACEHOLDER
+
 __all__ = ["BuildReport", "NetworkAttempt", "SLOW_BUILD_SECONDS", "check_build", "no_network"]
 
 SLOW_BUILD_SECONDS = 1.0
@@ -120,16 +123,13 @@ def no_network(record: List[NetworkAttempt]) -> Iterator[None]:
         socket.getaddrinfo = real_getaddrinfo  # type: ignore[assignment]
 
 
-#: what a name `.env.example` lists, but the environment lacks, holds while building
-PLACEHOLDER = "operonx-lint-placeholder"
-
-
 @contextmanager
 def _env_contract(root: Path) -> Iterator[List[str]]:
     """The project's ``.env`` loaded (never overriding the shell), and every
-    name ``.env.example`` lists but nothing set filled with :data:`PLACEHOLDER`
-    for the build only: building checks the wiring, not the credentials, and
-    C12 makes sure the list is complete."""
+    name ``.env.example`` lists but nothing set filled with its value there,
+    or :data:`PLACEHOLDER` when it has none, for the build only: building
+    checks the wiring, not the credentials, and C12 makes sure the list is
+    complete."""
     added: List[str] = []
     env_file = root / ".env"
     if env_file.is_file():
@@ -144,11 +144,13 @@ def _env_contract(root: Path) -> Iterator[List[str]]:
             pass
     example = root / ".env.example"
     if example.is_file():
-        for name in re.findall(
-            r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", example.read_text(), re.M
+        for name, value in re.findall(
+            r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=[ \t]*([^\n#]*)",
+            example.read_text(),
+            re.M,
         ):
             if name not in os.environ:
-                os.environ[name] = PLACEHOLDER
+                os.environ[name] = value.strip().strip("'\"") or PLACEHOLDER
                 added.append(name)
     try:
         yield added

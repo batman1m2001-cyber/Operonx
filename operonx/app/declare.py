@@ -51,11 +51,20 @@ from .tracing import sink_name
 __all__ = ["Listener", "Service", "asgi", "env", "http", "schedule", "webhook", "websocket"]
 
 
+#: What ``operonx lint --build`` (and ``operonx check``) set a name that
+#: ``.env.example`` lists without a value to, while it builds: the wiring is
+#: checked, not the credentials.
+PLACEHOLDER = "operonx-lint-placeholder"
+
+
 def env(name: str, default: Any = None) -> Any:
     """``${NAME:default}`` for Python: the variable's value, cast to the
-    default's type when the default is a number."""
+    default's type when the default is a number or a bool. Under the
+    offline build's :data:`PLACEHOLDER` such a default is answered as is."""
     raw = os.environ.get(name)
     if raw is None or raw == "":
+        return default
+    if raw == PLACEHOLDER and isinstance(default, (bool, int, float)):
         return default
     if isinstance(default, bool):
         return raw.strip().lower() in ("1", "true", "yes", "on")
@@ -125,11 +134,19 @@ def http(
     host: str = "0.0.0.0",
     workers: int = 1,
     codec: Optional[str] = None,
+    sse: bool = False,
 ) -> Listener:
     """An HTTP door: the body is the one ingress item, decoded by ``codec``
     — ``"json"`` (the default) or ``"text"``. An empty body is ``None``; a
-    body the codec cannot read is answered ``400`` and starts no run."""
+    body the codec cannot read is answered ``400`` and starts no run.
+
+    ``sse=True`` always answers server-sent events, whatever the caller's
+    ``Accept``: one event per item the run sends with ``egress`` (a string
+    as its text, anything else as JSON), then ``event: done``. For a model's
+    text streamed to a browser or ``curl -N``."""
     options = _codec_options(codec, f"http({method!r}, {path!r})")
+    if sse:
+        options["sse"] = True
     return Listener(
         "http", path, int(port), host, str(method).upper(), _workers(workers), options=options
     )

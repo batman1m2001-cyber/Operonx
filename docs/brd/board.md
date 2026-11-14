@@ -31,21 +31,25 @@ done: bench/token_ab/results/2026-11-15-gate2.jsonl
 files: operonx/app/serve/balance.py
 done: tests/internal/app/test_declare.py::test_serve_runs_a_pooled_listener_as_worker_processes
 
-### C39 · An http door streams a model's text as plain SSE · todo
+### C39 · An http door streams a model's text as plain SSE · done
 intent: T8 cost A' $0.81 against B $0.21: the built-in SSE JSON-encodes each event and sends no closing event, so agents mount raw ASGI and read operonx's source. A recipe plus a door option for text events.
-files: operonx/app/serve/app.py, operonx/cli/templates/_common/AGENTS.md.tmpl
+files: operonx/app/serve/app.py, operonx/app/serve/runner.py, operonx/app/doors.py, operonx/app/declare.py, operonx/cli/templates/_common/AGENTS.md.tmpl
+done: tests/internal/app/serve/test_sse_text.py
 
-### C40 · A test scripts the fake model for itself · todo
+### C40 · A test scripts the fake model for itself · done
 intent: T5a and T9 spent ~15 turns each proving a retry: `operonx.bootstrap` is idempotent, so a test cannot replace conftest's script. A fixture or call that sets the script for one test.
-files: operonx/providers/llms/fake.py, operonx/cli/templates/chat/tests/chat/conftest.py.tmpl
+files: operonx/testing.py, operonx/cli/templates/_common/AGENTS.md.tmpl
+done: tests/internal/test_testing.py
 
-### C41 · operonx check: no red on what the agent did not cause · todo
+### C41 · operonx check: no red on what the agent did not cause · done
 intent: the asgi-mount probe fails when StaticFiles at / answers the bare prefix; C16 flags files the owner put at the root on purpose (SPEC.md). Both tracks ended gate 2 on FAIL.
 files: operonx/cli/check.py, operonx/lint/shape.py
+done: tests/internal/cli/test_check_cli.py::test_a_raw_asgi_app_under_a_prefix_is_reached_where_it_is_mounted, tests/internal/cli/test_check_cli.py::test_a_get_route_reaches_a_fake_model_not_the_real_one, tests/internal/lint/test_shape.py::test_root_notes_scripts_and_deploy_files_are_not_c16
 
-### C42 · env() with an int default breaks the offline build · todo
+### C42 · env() with an int default breaks the offline build · done
 intent: lint fills every variable with a placeholder string, so `env("X", 3600)` raises in the build. Cast after the placeholder, or keep the placeholder typed.
 files: operonx/app/declare.py, operonx/lint/build.py
+done: tests/internal/app/test_declare.py::test_env_keeps_a_typed_default_over_the_lint_placeholder, tests/internal/cli/test_lint_cli.py::test_the_build_fills_env_example_names_with_their_value_there
 
 ## E · One engineering environment — menu, workflow, knowledge, tokens · closed
 plan: docs/ENGINEERING_ENV_PLAN.md · opened: 2026-11-14 · closed: 2026-11-15

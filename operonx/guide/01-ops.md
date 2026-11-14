@@ -209,7 +209,9 @@ asyncio.run(main())
 
 - `prompt` is a string (one user message) or `{"system": ..., "user": ...}`
   with `{placeholders}`; `messages=[...]` passes a ready message list.
-- `stream=True` makes it a streaming op that yields `content` deltas.
+- `stream=True` makes it a streaming op that yields `content` deltas
+  (to a client as server-sent events: `egress(item=s["content"])` on an
+  `http(..., sse=True)` door, [composition](02-composition.md#doors-for-streams)).
   The last frame has `final=True`, an empty `content` and the whole
   answer in `full_content`, so joining every frame's `content` gives the
   answer once. Read `full_content` for the whole text, streamed or not.
@@ -237,6 +239,11 @@ asyncio.run(main())
   lookup, args: {id: 7}}]}`, `{status: 429}` (raises the SDK's error),
   `{delay: 0.5, text: ...}`, `{echo: "Echo: "}` (the last user message
   back). No network; `hub.get("llm:<key>").calls` holds what it was sent.
+  One test scripts its own turns for a `with` block, whatever `conftest.py`
+  installed: `with operonx.testing.fake_model({"status": 503}, "ok",
+  retry={"max_attempts": 3}) as model:` (`key="llm:assistant"` by default;
+  other keywords are the resource's own, `chunk_size=` too); the old model
+  is back after the block.
 
 ## Agents — a model that calls tools
 

@@ -515,6 +515,29 @@ def sse_frame(item: Any, seq: Optional[int] = None) -> str:
     return f"{head}data: {json.dumps(item, ensure_ascii=False, default=str)}\n\n"
 
 
+def sse_text_frame(item: Any, seq: Optional[int] = None) -> str:
+    """One item of an ``sse=True`` door: a string as its text (a line per
+    ``data:``, which a reader joins back with newlines), anything else as
+    :func:`sse_frame` writes it."""
+    if not isinstance(item, str):
+        return sse_frame(item, seq)
+    if not item:  # a model's last chunk is often empty: no event for it
+        return ""
+    head = f"id: {seq}\n" if seq is not None else ""
+    return head + "".join(f"data: {line}\n" for line in item.split("\n")) + "\n"
+
+
+#: The last event of an ``sse=True`` door's stream: the run has ended.
+SSE_DONE = "event: done\ndata: \n\n"
+
+
+def _frames_of(spec: ServeSpec):
+    """How *spec*'s stream writes an item, and what it writes at the end."""
+    if spec.options.get("sse"):
+        return sse_text_frame, SSE_DONE
+    return sse_frame, ""
+
+
 def _no_output(spec: ServeSpec, trace_id: Optional[str], JSONResponse):
     # The plan's requirement, and the reason this branch exists: a run
     # that fails must not answer 200 with an empty body. An op exception
@@ -558,11 +581,15 @@ async def _stream_reply(
             )
         return _no_output(spec, session.trace_id, JSONResponse)
 
+    frame, done = _frames_of(spec)
+
     async def body():
         try:
-            yield sse_frame(first[1], first[0])
+            yield frame(first[1], first[0])
             async for seq, item in frames:
-                yield sse_frame(item, seq)
+                yield frame(item, seq)
+            if done:
+                yield done
         finally:
             await frames.aclose()
 
@@ -593,11 +620,15 @@ def _reconnect(spec: ServeSpec, transport: HttpTransport, request: Any, JSONResp
             status_code=404,
         )
 
+    frame, done = _frames_of(spec)
+
     async def body():
         frames = session.follow(after)
         try:
             async for seq, item in frames:
-                yield sse_frame(item, seq)
+                yield frame(item, seq)
+            if done:
+                yield done
         finally:
             await frames.aclose()
 
@@ -651,7 +682,8 @@ def _reply_status(reply: Any) -> Tuple[Any, int]:
 
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
-        if wants_stream(request) and "run_id" in request.query_params:
+        stream = bool(spec.options.get("sse")) or wants_stream(request)
+        if stream and "run_id" in request.query_params:
             return _reconnect(spec, transport, request, JSONResponse)
         payload, refusal = await _read_body(request, spec, JSONResponse)
         if refusal is None:
@@ -659,7 +691,7 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
         if refusal is not None:
             return refusal
         meta = _meta_from_request(request)
-        if wants_stream(request):
+        if stream:
             return await _stream_reply(spec, transport, payload, meta, JSONResponse)
 
         session = await transport.handle(payload, meta=meta)

@@ -17,7 +17,7 @@ read it first.
    installed operonx, so copy from it; never write an operonx API from memory.
 3. Verify with `{{run}}operonx check`: lint, the tests, every graph built
    offline{{#http}}, every route reached (a `GET` called; `--call` also calls
-   each `POST` once with a fake model){{/http}}, in one verdict. A `FAIL` line
+   each `POST` once; every model is faked){{/http}}, in one verdict. A `FAIL` line
    says what to fix. Then run what it cannot judge (a job's output, a page's
    look). Write a test when the task asks for one or when you fix a bug.
 
@@ -127,6 +127,34 @@ hand-written Starlette route, and never unpack a request dict in an op.
 answers every path, so a route after it is never reached.
 {{/web}}Guide: `02-composition.md` § Service; streams and websockets: `01-ops.md`
 § Doors.
+
+**Stream a model's text** as server-sent events: `stream=True`, `egress` each
+piece, and `sse=True` on the door:
+
+```python
+from operonx.app.serve import egress
+
+
+@graph
+def summary_stream(date):
+    s = LLMOp.of(resource="assistant", prompt="Summarise {date}", stream=True, date=date)
+    out = egress(item=s["content"])  # each piece of the text, as it comes
+    START >> s >> out >> END
+
+
+Service(
+    "summary_stream",
+    http("GET", "/summaries/{date}/stream", port=PORT, sse=True),
+    graph=summary_stream,
+)
+```
+
+Each piece is one `data:` event, as text (anything but a string is JSON),
+and `event: done` ends the stream, whatever the caller's `Accept`. A graph
+that sends with `egress` answers with what it sent, never also its outputs.
+Without `sse=True` a door streams JSON events, and only to a caller that
+sends `Accept: text/event-stream`. Guide: `02-composition.md` § Service
+(server-sent events).
 {{/http}}
 
 **Test**: call an op directly, `my_op(x=1)()`. Run a graph with
@@ -147,7 +175,22 @@ def fake_model(tmp_path_factory):
 ```
 
 `script:` turns can also be a string, `{status: 503}` or `{delay: 0.5, text: ...}`.
-Guide: `01-ops.md` § `LLMOp` (Tests need no model).
+One test that needs the model to fail, stall or say something in particular
+scripts it for a `with` block (`testing.`, so the name does not clash with
+the fixture):
+
+```python
+from operonx import testing
+
+
+def test_one_503_is_retried(fake_model):
+    with testing.fake_model({"status": 503}, "a summary", retry={"max_attempts": 3}) as model:
+        ...  # run the job or call the route
+    assert len(model.calls) == 2  # the messages of every call it answered
+```
+
+Its other keywords are the resource's own (`chunk_size=` splits a streamed
+answer). Guide: `01-ops.md` § `LLMOp` (Tests need no model).
 
 **Why a run failed or is slow**: an op that raises does not raise. The
 result carries `"$errors"`, and the run's record is under `.operonx/runs/`.
