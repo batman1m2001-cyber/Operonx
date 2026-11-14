@@ -204,3 +204,8 @@ E4–E6).
   matches exactly or by its start: `read docs/brd/board.md C29`). 0.47 s on this repo. knowledge.md has
   the kind `decision` (what the owner chose and why); the builder block says search before reading a
   whole doc. Checks: 4 search tests, 58 guide + lint, the 18 init shapes (228).
+- **E8** (studio #186): the Stop hook's check L1 runs `operonx lint` (in the project's `.venv` when it has
+  one) on each operonx project a turn edited, and sends the turn back once with the errors in the files it
+  edited or a root folder it made; errors elsewhere, warnings and baseline-held rules do not. 1.1 s end to
+  end on runline-lab; the hook timeout went 10 → 30 s. Real turn (Sonnet, $0.10): asked to add a `print()`,
+  it was sent back with `src/lab/ops.py:186: [C8]` and answered why it kept it (the prompt asked for it).
