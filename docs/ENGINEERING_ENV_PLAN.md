@@ -38,7 +38,9 @@ The studio (operonx-studio main 681a3f2): the rail has 7 hubs (Project, Flow, Ru
 Operate, Settings); Project mode swaps the rail for `#prail` (Now, Board, Git, Files, Terminal,
 Environments, Settings) behind a "Studio" back button — the owner could not find the way back. The
 assistant: 69 turns measured, median reply 262 chars, but the cost is context: median 25k, max 252k, the
-top 5 turns 83% of $34 ("hello ?" at 215k context cost $6.67). Replies are not the problem; long contexts
+top 5 turns 83% of $34 ("hello ?" at 215k context cost $6.67). (Corrected at E6 gate 3: those
+were the studio meter's running totals; the real spend of the 79 priced turns was $11.06, the top 5
+still 83%, the dearest $3.99 at 173k.) Replies are not the problem; long contexts
 are. The model list names fable 5-1, sonnet 5, haiku 4-5.
 
 ## 2. Phases
@@ -222,7 +224,14 @@ E4–E6).
   - Gate 2, the fixed prompt per turn (appended prompt + AGENTS.md, runline-lab, bytes/4): 22,062 B
     (~5.5k tokens) on main → 10,205 B (~2.6k); the appended part 17,570 → 5,713 B. A board and a handoff
     add ≤ ~1.5 KB on the first turn of a fresh session only.
-  - Gate 3, the context meter on the next 20 real turns: open — it needs those turns on :8766.
+  - Gate 3, the context meter on 20 real turns: **met**. Two conversations of 12 and 8 Sonnet turns
+    on an mr-finance clone (a test studio on :8786 with auth off; no 20 real turns had come on :8766,
+    and minting a session for its admin was refused). Max context 107k in the first conversation (one
+    turn past 100k, then saved: 44k), 48k in the second; the dearest turn $0.30 (baseline $3.99);
+    $0.094 a turn ($1.87 for 20 turns and 2 saves) against $0.14 on the baseline's 79. The fresh
+    conversation answered "where are we" from the board and handoff at 31k context, and found the
+    decision (ADR-0042) and the uncommitted VND function. The run found that the meter summed Claude's
+    running totals (it read $8.31 for $1.87; the baseline's $34 was $11.06): fixed in studio #188.
   - Before / after, the save flow and the files changed: [engineering_env/E6.md](engineering_env/E6.md).
 - **E7** (Operon bench/token_ab): **arm A costs more, 2.3× arm B, on a product this small.**
   4 tracks × 7 tasks = 28 sessions, Sonnet 5.5 headless, all 28 pass the hidden checks. $4.80 spent

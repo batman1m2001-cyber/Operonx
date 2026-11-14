@@ -25,9 +25,9 @@ done: tests/internal/lint/test_shape.py, packages/operonx-project/tests/test_boa
 files: operonx/cli/templates/_brd/knowledge.md.tmpl, operonx/guide/__init__.py
 done: tests/internal/guide/test_catalog.py, tests/internal/lint/test_shape.py::test_stale_knowledge_is_a_warning
 
-### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · doing
+### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · done
 files: packages/operonx-project/operonx_project/search.py, operonx-studio:operonx_studio/assistant.py
-Studio half shipped as studio #187; gates 1 (continuity, 2/2) and 2 (10.2 KB from 22.1 KB) met. Open: gate 3, the context meter over the next 20 real turns.
+Studio half shipped as studio #187; gates 1 (continuity, 2/2), 2 (10.2 KB from 22.1 KB) and 3 (20 turns: max context 107k then saved, dearest turn $0.30 against $3.99, $0.094 a turn against $0.14) met. The cost meter fix is studio #188.
 
 ### C32 · E8 Lint after every step (owner) · done
 files: operonx-studio:operonx_studio/stophook.py
