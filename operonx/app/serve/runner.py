@@ -121,7 +121,8 @@ async def serve_session(
     service run answered. Everything else is the same.
 
     ``keep`` names ``$`` keys the reply keeps: an http door keeps
-    ``$status``, which its endpoint turns into the status code.
+    ``$status`` and ``$body``, which its endpoint turns into the status
+    code and the body.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
@@ -560,7 +561,7 @@ class ServeRunner:
                 on_start=lambda h: _note_trace_id(session, h),
                 reply=doorless,
                 resume=resume,
-                keep=("$status",) if self.spec.kind == "http" else (),
+                keep=("$status", "$body") if self.spec.kind == "http" else (),
             )
             failed = bool(unhandled(handle.errors))
         except Exception as exc:  # noqa: BLE001

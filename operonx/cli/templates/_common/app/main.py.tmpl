@@ -15,10 +15,7 @@ from _shared.config import PORT, ROOT
 from operonx.app import Application
 
 {{/web}}
-from {{feature}}.jobs import JOBS
-{{#http}}
-from {{feature}}.routes import SERVICES
-{{/http}}
+from {{feature}} import JOBS{{#http}}, SERVICES{{/http}}
 {{#web}}
 
 # web/index.html at /, beside the routes on the same port

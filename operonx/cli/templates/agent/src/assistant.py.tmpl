@@ -1,0 +1,90 @@
+"""The assistant feature in one file: its tools, the agent (who it is, what
+it thinks with, which tools it owns), the graph that runs it, its job{{#http}} and
+its route{{/http}}.
+
+Split it into a src/assistant/ folder only when it passes ~300 lines
+(AGENTS.md says how).
+
+`ASSISTANT` is a spec, data rather than a class to subclass. Every turn,
+model call and tool call is recorded under its step: a run's trace reads
+agent → turn → model, word_count.
+"""
+
+from operonx import END, START, graph, op
+from operonx.agents import Agent, AgentOp, Model, {{#http}}SQLiteStateStore, {{/http}}UsageLimits, {{#http}}agent_service, {{/http}}tool
+{{#http}}
+from operonx.app import http
+{{/http}}
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}
+
+
+# `@tool` (operonx-agents) reads what the model is shown from the signature
+# and the docstring, and validates the model's arguments before the function
+# runs. A tool is still a plain function: call it to test it.
+@tool(readonly=True)  # no side effects: it never waits for an approval
+def word_count(text: str) -> int:
+    """Count the words in a text.
+
+    Args:
+        text: The text to count.
+    """
+    return len(text.split())
+{{#http}}
+
+
+# A tool with side effects can wait for a human: the run ends
+# `interrupted`, and `POST /ask/resume` answers it (see README.md).
+#
+# @tool(idempotent=False, approval=lambda ctx, args: args["amount"] > 500)
+# def refund(order_id: str, amount: int) -> str:
+#     """Refund an order."""
+{{/http}}
+
+
+ASSISTANT = Agent(
+    name="assistant",
+    model=Model("assistant", deadline=60),  # llm:assistant in resources.yaml
+    instructions="You are a helpful assistant. Use the tools when they help.",
+    tools=[word_count],
+    limits=UsageLimits(turns=6, tool_calls=12),
+)
+
+
+@op
+def reply(output: str = None, status: str = "", error: str = None) -> dict:
+    """What a run keeps of the agent's answer."""
+    return {"output": output, "status": status, "error": error}
+
+
+@graph
+def ask_flow(input):  # a job item fills it; the reply is {output, status, error}
+    answered = AgentOp.of(agent=ASSISTANT, input=input)
+    r = reply(output=answered["output"], status=answered["status"], error=answered["error"])
+    START >> answered >> r >> END
+
+
+JOBS = [
+    Job(
+        "ask_assistant",
+        graph=ask_flow,
+        items=DATA / "questions.jsonl",  # one graph run per line
+        key="input",  # resumable: `--resume` skips the questions already answered
+        output=OUT / "answers.jsonl",
+        description="The assistant's answer to every question in data/questions.jsonl.",
+    ),
+]
+{{#http}}
+
+SERVICES = [
+    agent_service(
+        ASSISTANT,
+        http("POST", "/ask", port=PORT),
+        # where a run that waits for an approval is kept until its resume
+        store=SQLiteStateStore(".operonx/agent_runs.db"),
+        description="POST {input}: the agent's reply. Accept: text/event-stream for "
+        "its events as they happen.",
+    ),
+]
+{{/http}}

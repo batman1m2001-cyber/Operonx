@@ -1,0 +1,66 @@
+"""The chat feature in one file: its prompt, its logic (ops), its wiring (a
+graph), its job{{#http}} and its route{{/http}}.
+
+Split it into a src/chat/ folder only when it passes ~300 lines
+(AGENTS.md says how)."""
+
+from operonx import END, START, graph, op
+{{#http}}
+from operonx.app import Service, http
+{{/http}}
+from operonx.app.jobs import Job
+from operonx.providers.ops import LLMOp
+
+from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}
+
+SYSTEM = "You are a helpful assistant. Answer in at most three sentences."
+
+
+@op
+def clean(question: str) -> dict:
+    """The question with its whitespace collapsed. Every op returns a dict
+    literal: its keys are the op's outputs."""
+    return {"question": " ".join(str(question).split())}
+
+
+@op
+def reply(content: str = None, error: str = None) -> dict:
+    """The answer to send back; a failed model call says so instead."""
+    if content is None:
+        return {"answer": None, "error": error or "the model gave no answer"}
+    return {"answer": content, "error": None}
+
+
+@graph
+def chat_flow(question):  # a job item or a request body fills it; the reply is {answer, error}
+    q = clean(question=question)  # a graph only wires: no logic, no I/O
+    llm = LLMOp.of(
+        resource="assistant",  # `llm:assistant` in resources.yaml
+        prompt={"system": SYSTEM, "user": "{question}"},
+        question=q["question"],  # every other keyword fills the template
+    )
+    r = reply(content=llm["content"], error=llm["error"])
+    START >> q >> llm >> r >> END
+
+
+JOBS = [
+    Job(
+        "answer_questions",
+        graph=chat_flow,
+        items=DATA / "questions.jsonl",  # one graph run per line
+        key="question",  # resumable: `--resume` skips the questions already answered
+        output=OUT / "answers.jsonl",
+        description="An answer to every question in data/questions.jsonl.",
+    ),
+]
+{{#http}}
+
+SERVICES = [
+    Service(
+        "chat",
+        http("POST", "/chat", port=PORT),
+        graph=chat_flow,  # the JSON body fills its parameters
+        description="POST {question}, get {answer, error}.",
+    ),
+]
+{{/http}}

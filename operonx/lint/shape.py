@@ -1,9 +1,9 @@
 """The project's shape: six checks over the whole project, not one module.
 
 - **C13** code in ``src/`` reaches another feature only through its
-  ``__init__`` names or its ``graph``: ``from billing import charge`` and
-  ``billing.graph`` are fine, ``billing.ops`` or ``billing._rates`` is
-  reaching inside. ``app/`` wires every feature, so it is not checked.
+  top-level names (a split feature's ``__init__`` names) or its ``graph``:
+  ``from billing import charge`` and ``billing.graph`` are fine,
+  ``billing.ops`` or ``billing._rates`` is reaching inside. ``app/`` wires every feature, so it is not checked.
 - **C14** every endpoint is a ``Service``: no hand-written route
   (``@app.get("/x")``, ``Route("/x", …)``, ``add_api_route``).
 - **C15** the environment is read only in ``src/_shared/config.py``.
@@ -14,7 +14,8 @@
 - **C18** (a warning) an entry of ``docs/brd/knowledge.md`` names a ``where``
   file that is gone: the knowledge is stale.
 
-A feature is a folder of ``src/`` whose name does not start with ``_``. Tests
+A feature is a module of ``src/`` whose name does not start with ``_``: one
+file, ``src/billing.py`` (the default), or a folder, ``src/billing/``. Tests
 and terminal tools (``scripts/``, ``tools/``) are not checked. Like
 :mod:`operonx.lint.rules`, this reads source only (``ast``; C17 a regex).
 """
@@ -54,11 +55,18 @@ def _features(root: Path) -> Set[str]:
     src = root / "src"
     if not src.is_dir():
         return set()
-    return {p.name for p in src.iterdir() if p.is_dir() and not p.name.startswith(("_", "."))}
+    return {
+        p.stem
+        for p in src.iterdir()
+        if (p.is_dir() or p.suffix == ".py") and not p.name.startswith(("_", "."))
+    }
 
 
 def _feature_of(rel: Path) -> str:
-    return rel.parts[1] if len(rel.parts) > 2 and rel.parts[0] == "src" else ""
+    if len(rel.parts) < 2 or rel.parts[0] != "src":
+        return ""
+    part = rel.parts[1]
+    return part if len(rel.parts) > 2 else part[:-3] if part.endswith(".py") else ""
 
 
 def _c13(tree: ast.AST, rel: Path, path: Path, features: Set[str]) -> Iterator[Finding]:

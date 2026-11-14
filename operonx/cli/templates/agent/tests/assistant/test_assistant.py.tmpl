@@ -6,9 +6,7 @@ from operonx.agents import Runner
 from operonx.agents.testing import ScriptedLLM, asks, says, scripted
 from operonx.app.jobs import Job
 
-from assistant.agent import ASSISTANT
-from assistant.graph import ask_flow
-from assistant.ops import word_count
+from assistant import ASSISTANT, ask_flow, word_count
 
 
 def test_word_count():

@@ -96,7 +96,7 @@ def _parser() -> argparse.ArgumentParser:
         + "; ".join(f"{t.name}: {t.summary}" for t in TEMPLATES.values()),
     )
     for part, says in (
-        ("http", "serve the feature: src/<feature>/routes.py, `operonx serve`"),
+        ("http", "serve the feature: SERVICES in src/<feature>.py, `operonx serve`"),
         ("web", "pages in web/, served at / (turns on --http)"),
         ("deploy", "deploy/Dockerfile and compose.yml"),
     ):

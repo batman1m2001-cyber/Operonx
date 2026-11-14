@@ -42,7 +42,7 @@ RULES = {
     "C10": "a graph body only wires: no Python if, try, with, await or I/O; no helpers in graph.py",
     "C11": "a graph that builds ops writes START >> ... >> END",
     "C12": "every ${NAME} in resources.yaml and every credential read is listed in .env.example",
-    "C13": "another feature only through its __init__ names or its graph",
+    "C13": "another feature only through its top-level names or its graph",
     "C14": "every endpoint is a Service: no hand-written route",
     "C15": "the environment is read only in src/_shared/config.py",
     "C16": "the root holds only the allow-list; what runs write goes in data/ or out/",

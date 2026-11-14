@@ -49,8 +49,7 @@ def _main_py(root: Path, services: str, extra: str = "") -> None:
         "from operonx.app import Application, Service, asgi\n"
         "from starlette.staticfiles import StaticFiles\n\n"
         "from _shared.config import PORT, ROOT\n"
-        "from greeting.jobs import JOBS\n"
-        "from greeting.routes import SERVICES\n"
+        "from greeting import JOBS, SERVICES\n"
         f"{extra}\n"
         'WEB = Service("web", asgi("/", port=PORT), '
         'app=StaticFiles(directory=ROOT / "web", html=True))\n\n'

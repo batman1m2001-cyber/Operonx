@@ -305,7 +305,9 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
 - An op that outputs `"$status"` sets the reply's status code, and the key
   is not sent: `{"ticket": t, "$status": 201}`, or `404` for a ticket that
   is not there. Without it the reply is `200`. A `$status` that is not a
-  code between 200 and 599 answers `500`.
+  code between 200 and 599 answers `500`. An op that outputs `"$body"`
+  answers that value alone, any JSON: `{"$body": tickets}` is a bare array
+  (with its `$status`, if any).
 - `input="payload"` hands the whole body to that one parameter instead: for a
   payload someone else shapes (a mail server's webhook), whose fields the
   graph does not declare.

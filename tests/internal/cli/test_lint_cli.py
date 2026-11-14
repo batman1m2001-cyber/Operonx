@@ -114,7 +114,7 @@ def test_no_network_records_and_refuses_but_allows_loopback():
 def test_a_build_that_reaches_the_network_is_c2(tmp_path):
     root = tmp_path / "net"
     assert main(["init", str(root), "--template", "hello"]) == 0
-    ops = root / "src" / "greeting" / "ops.py"
+    ops = root / "src" / "greeting.py"
     ops.write_text("import socket\nsocket.getaddrinfo('example.com', 80)\n" + ops.read_text())
     env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
     env["PYTHONPATH"] = str(root / "src")

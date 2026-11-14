@@ -607,6 +607,8 @@ def _reconnect(spec: ServeSpec, transport: HttpTransport, request: Any, JSONResp
 
 #: The output an http door's run sets its reply's status code with.
 STATUS_KEY = "$status"
+#: The output that is the whole body of the reply: a list, a string, any JSON.
+BODY_KEY = "$body"
 
 
 def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, Any]:
@@ -619,7 +621,9 @@ def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse)
         return params, None
     body: Dict[str, Any] = {"endpoint": spec.name}
     if not isinstance(payload, dict):
-        body["error"] = f"a path with parameters takes a JSON object body, not {type(payload).__name__}"
+        body["error"] = (
+            f"a path with parameters takes a JSON object body, not {type(payload).__name__}"
+        )
     else:
         both = sorted(set(payload) & set(params))
         if not both:
@@ -630,15 +634,19 @@ def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse)
 
 def _reply_status(reply: Any) -> Tuple[Any, int]:
     """A reply carrying ``"$status": 404`` (an op's output) is answered with
-    that code, without the key; any other reply is a ``200``."""
-    if isinstance(reply, dict) and STATUS_KEY in reply:
-        reply = dict(reply)
-        status = reply.pop(STATUS_KEY)
-        if isinstance(status, int) and not isinstance(status, bool) and 200 <= status <= 599:
-            return reply, status
-        LOGGER.error(f"[serve] {STATUS_KEY}={status!r} is not an HTTP status; answering 500")
-        return {"error": f"{STATUS_KEY}={status!r} is not an HTTP status"}, 500
-    return reply, 200
+    that code, without the key; any other reply is a ``200``. A reply
+    carrying ``"$body"`` answers that value alone, any JSON (``GET /tickets``
+    → an array), with its ``$status``."""
+    if not (isinstance(reply, dict) and (STATUS_KEY in reply or BODY_KEY in reply)):
+        return reply, 200
+    reply = dict(reply)
+    status = reply.pop(STATUS_KEY, 200)
+    if BODY_KEY in reply:
+        reply = reply[BODY_KEY]
+    if isinstance(status, int) and not isinstance(status, bool) and 200 <= status <= 599:
+        return reply, status
+    LOGGER.error(f"[serve] {STATUS_KEY}={status!r} is not an HTTP status; answering 500")
+    return {"error": f"{STATUS_KEY}={status!r} is not an HTTP status"}, 500
 
 
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):

@@ -2,8 +2,9 @@
 
 A product built on operonx looks like this. The files below are a complete,
 working project. `operonx init` writes the same layout with a feature of its
-own, plus `jobs.py` (and `routes.py` with `--http`) in the feature,
-`src/_shared/config.py`, `data/` for what jobs read and `tests/<feature>/`.
+own (its `JOBS`, and its `SERVICES` with `--http`, at the bottom of the
+feature's file), `src/_shared/config.py`, `data/` for what jobs read and
+`tests/<feature>/`.
 
 ```text
 scorer/
@@ -17,11 +18,7 @@ scorer/
 │   ├── __init__.py
 │   └── main.py           # APP = Application(...): read this file first
 ├── src/
-│   └── scoring/          # one folder per feature
-│       ├── __init__.py
-│       ├── graph.py      # @graph functions: wiring only
-│       ├── ops.py        # @op functions: the logic
-│       └── _text.py      # private helpers (leading underscore)
+│   └── scoring.py        # one file per feature: its ops, then its graphs
 ├── tests/
 │   └── test_scoring.py
 ├── datasets/             # eval cases, one .jsonl per dataset
@@ -47,11 +44,20 @@ in `.operonx/guide/` when it is installed.
 
 ## The rules
 
-- **`ops.py` holds the logic, `graph.py` only wires it.** A graph function
-  creates ops, reads their outputs and draws `>>` edges. No computation,
-  no I/O, no conditionals in Python: branch with `if_()`.
-- **Imports go one way:** `app/` → `src/<feature>/graph.py` → `ops.py` →
-  `_helpers.py`. Nothing in `src/` imports `app/`.
+- **One file per feature: `src/<feature>.py`.** Its ops (the logic) come
+  first, then the graphs that wire them, then its `JOBS` and `SERVICES` when
+  it declares them (what `operonx init` writes; this page's `app/main.py`
+  declares them inline instead). A graph function only creates ops, reads
+  their outputs and draws `>>` edges. No computation, no I/O, no
+  conditionals in Python: branch with `if_()`.
+- **Past ~300 lines, split the file into a folder** `src/<feature>/`:
+  `ops.py` (the logic), `graph.py` (wiring only), `jobs.py`, `routes.py`,
+  private helpers as `_<name>.py`, and an `__init__.py` that re-exports what
+  other code imports (`JOBS`, `SERVICES`, the graphs), so no import outside
+  the folder changes. `operonx add` writes into either shape.
+- **Imports go one way:** `app/` → `src/<feature>` → `src/_shared/`;
+  inside a split feature, `graph.py` → `ops.py` → `_helpers.py`. Nothing in
+  `src/` imports `app/`.
 - **`app/main.py` is the map of the product:** every service and job,
   with the graph each runs.
 - **Resources by key.** Ops reach models and stores through
@@ -124,30 +130,20 @@ dependencies = ["operonx[serve]>=1.13"]
 pythonpath = ["src", "."]
 ```
 
-```python file=src/scoring/__init__.py
-```
+```python file=src/scoring.py
+"""The scoring feature: its logic (ops), then its wiring (a graph)."""
 
-```python file=src/scoring/_text.py
-def word_count(text: str) -> int:
+from operonx import END, START, graph, op
+
+
+def _word_count(text: str) -> int:
     return len(text.split())
-```
-
-```python file=src/scoring/ops.py
-from operonx import op
-
-from scoring._text import word_count
 
 
 @op
 def score(id: str, text: str) -> dict:
-    words = word_count(text)
+    words = _word_count(text)
     return {"id": id, "words": words, "verdict": "engaged" if words >= 5 else "brief"}
-```
-
-```python file=src/scoring/graph.py
-from operonx import END, START, graph
-
-from scoring.ops import score
 
 
 @graph
@@ -169,7 +165,7 @@ operonx run score_calls ──► score_flow per line of data/calls.jsonl ──
 from operonx.app import Application, Service, env, http
 from operonx.app.jobs import Job
 
-from scoring.graph import score_flow
+from scoring import score_flow
 
 APP = Application(
     "scorer",
@@ -197,8 +193,7 @@ import asyncio
 from operonx import Operon
 from operonx.app.jobs import Job
 
-from scoring.graph import score_flow
-from scoring.ops import score
+from scoring import score, score_flow
 
 
 def test_score_counts_words():
@@ -229,7 +224,7 @@ operonx run score_calls
 `AGENTS.md` (no `print()`, no graph inside a function, no logic in a
 graph's body, the edges written out, every secret in `.env.example`, ...)
 and the project's shape: code in `src/` reaches another feature only through
-its `__init__` names or its graph, every endpoint is a `Service`, the
+its top-level names (a split feature's `__init__` names) or its graph, every endpoint is a `Service`, the
 environment is read only in `src/_shared/config.py`, and the root holds only
 the folders and files above (plus `data/`, `out/`, `web/`, `deploy/`,
 `scripts/`). `operonx lint --rules` lists them, and `operonx lint --build`
@@ -240,10 +235,10 @@ goes up.
 
 ## Growing it
 
-- **A second feature** is a second folder under `src/` with its own
-  `graph.py` and `ops.py`, and one more entry in `app/main.py`.
+- **A second feature** is a second file under `src/` with its own ops and
+  graphs, and one more entry in `app/main.py`.
 - **A model** is an `llm:` entry in `resources.yaml` and an
-  `LLMOp.of(resource=...)` in the feature's `graph.py`; its key goes in `.env`.
+  `LLMOp.of(resource=...)` in the feature's graph; its key goes in `.env`.
   Its provider's limits go on the entry, for the whole process:
   `rate_limit: {concurrency: 8, per_minute: 500}` (or `per_second`) — every
   op and run calling that key waits its turn; a stream holds its slot until
