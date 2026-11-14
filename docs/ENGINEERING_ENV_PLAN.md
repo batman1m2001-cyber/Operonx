@@ -150,6 +150,19 @@ are), the same task prompts word for word.
 - **Report** in §4: per task and total, both arms, and the verdict — saves, breaks even, or costs more,
   and where (docs read vs. code navigated).
 
+### E8 — Lint after every step (owner, 2026-11-15, studio)
+
+The owner asked for a fast, rule-based check, run by default when a step ends, that the code still keeps
+the conventions and the project's structure. `operonx lint` is that check (C3–C18, `ast` and regex only):
+1.1 s on runline-lab, 3.5 s on the callbot (168 files), uv start included. Nothing runs it today: the
+studio's Stop hook checks cards, failing tests, open steps and the board, never lint.
+
+- The Stop hook: when the turn edited a file, run `operonx lint` on the project (15 s timeout). An error
+  over the baseline sends the turn back once with the findings; warnings, held rules and a turn that
+  edited nothing pass. A project without operonx installed, or a timeout, ends the turn untouched.
+- **Gate:** a hook test per case (new error → back once with the finding; held by the baseline → ends;
+  no edit → no lint run), and one real turn on runline-lab that adds a `print()` is sent back with C8.
+
 ## 3. Order and gates
 
 E1 → E2 (one UI branch, screenshots) → E3 → E4 → E5 → E6 (needs E5's knowledge.md) → E7 (it measures
@@ -184,3 +197,10 @@ E4–E6).
   the builder block says search first, edit never append; lint C18 warns on a stale `where` (a warning,
   so no baseline). Checks: 18 init shapes, lint + `brd check` clean on a fresh project, the done hint
   printed by the real CLI. Adds a file, a generated file and a rule; removes nothing.
+- **E6, engine**: `operonx-project search QUERY` ranks the sections (heading to heading, never inside a
+  code fence) of `docs/brd/`, `docs/*.md`, `.operonx/guide/`, the catalog and AGENTS.md: BM25, a heading
+  word counted 3×, plurals and `-ing` folded; it answers heading, the 3 lines that hold the query and
+  `path:line`. `operonx-project read PATH [HEADING]` prints one section with its sub-sections (a heading
+  matches exactly or by its start: `read docs/brd/board.md C29`). 0.47 s on this repo. knowledge.md has
+  the kind `decision` (what the owner chose and why); the builder block says search before reading a
+  whole doc. Checks: 4 search tests, 58 guide + lint, the 18 init shapes (228).
