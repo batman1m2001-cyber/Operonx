@@ -54,7 +54,9 @@ still paid more, because of the learning and the ritual around that line, not th
 | K5 | **A small AGENTS.md** | the 5.8k extra tokens on every turn | AGENTS.md goes from 7.3 KB to ≤2.5 KB. BRD, board, CHANGELOG and knowledge rules move to `operonx init --brd`. `.operonx/runs` goes in `.gitignore`. Tests are written when a task asks for them or a bug was fixed. |
 
 K5 needs one more check: AGENTS.md is only 1.8k of the 5.8k extra. Find the rest from the
-first-turn context of an A session before cutting.
+first-turn context of an A session before cutting. (Checked: it was ~3.0k, not 1.8k. A probe turn
+in the same folder read 37,844 tokens with the old AGENTS.md, 34,818 with it empty, 34,821 in
+arm B. The rest of the 5.8k was the extra turns' cache writes, not the first turn.)
 
 ## 3. Order and measurement
 
@@ -68,3 +70,31 @@ first-turn context of an A session before cutting.
 
 If gate 1 fails after K1–K5, the project environment does not pay for itself on small products. In
 that case, `operonx init` defaults to the lean form and the layered form stays opt-in.
+
+## K5 + K1 result
+
+Done 2026-11-15, board C33. Before/after tree, flow and code changes:
+[cost/K5_K1.md](cost/K5_K1.md).
+
+- **Shipped.** AGENTS.md has "How to work here", then Recipes: code that runs for an op/graph, a
+  model call, a branch, retry, a job, a route and a Starlette route, a test with the fake model,
+  and a failed or slow run. Each recipe ends with `Guide: page § section`, and a test checks that
+  every reference names a real page and heading. `docs/brd/` and the board ritual come only with
+  `operonx init --brd`.
+- **Deviation from K5's size target.** The plan said ≤2.5 KB. The owner said not to write it too
+  lean, and to keep careful references so an agent knows where to search for more. AGENTS.md is
+  5.4 KB (jobs only) to 6.9 KB (`--http --web`), plus the 0.4 KB guide block. The money came from
+  the turns and the doc reads, not from the file's size, so the pilot judges it.
+- **Pilot, 2 tracks × T1–T3 of arm A', $1.21:**
+
+  | arm | cost | turns | doc tokens | passed |
+  |---|---|---|---|---|
+  | A | $2.20 | 94 | ~58.5k | 6/6 (1 fix) |
+  | A' | $1.21 | 67 | 4.9k | 6/6 |
+  | B | $0.56 | 30 | — | 6/6 |
+
+  This is −45% cost against A, but still 2.2× B. T2 and T3 match B. T1 (a new service) takes
+  16–25 turns against B's ~10. In T1, both tracks lost turns to the `asgi("/tickets")` prefix
+  (a 405, then reading operonx source), so the route recipe now puts full-path routes in one
+  Starlette at `/`. That fix was run in a generated project, not re-piloted. The rest is
+  building and checking a service, which goes to K3 and K2.

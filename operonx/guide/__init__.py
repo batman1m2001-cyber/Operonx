@@ -261,13 +261,11 @@ def agents_block(guides: Optional[List[Guide]] = None, toolchain: str = "uv") ->
     refresh = f"`{t['run']}operonx guide`"
     return (
         f"{AGENTS_BEGIN}\n"
-        f"Installed: {names}. Read `.operonx/guide/README.md` first: it lists every\n"
-        "page of every installed operonx package, each tested against that version.\n"
+        f"Installed: {names}. `.operonx/guide/README.md` indexes every page of every\n"
+        "installed operonx package, each tested against that version; search them with\n"
+        '`grep -n "WORD" .operonx/guide/*/*.md`.\n'
         f"Upgrade: `{t['upgrade']}`, then {refresh}\n"
         f"(after `{t['add']} operonx-agents` or `operonx-kb`, just {refresh}).\n"
-        "Names come from variables: write `name=` only when other code reads the name,\n"
-        "one op per line. Branch with `if_(cond, a).else_(b)` in the `>>` chain, never a\n"
-        "hand-built `BranchOp`.\n"
         f"{AGENTS_END}"
     )
 

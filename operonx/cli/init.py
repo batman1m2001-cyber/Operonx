@@ -23,7 +23,7 @@ tools being the ``test`` extra that uv's ``dev`` group points at.
 
 The project also gets ``.operonx/guide/``, the guides of every installed
 operonx package, so an assistant reads them beside the code (what
-``operonx guide`` writes), and, unless ``--no-brd``, ``docs/brd/``: the
+``operonx guide`` writes), and, with ``--brd``, ``docs/brd/``: the
 living BRD (requirements, their checklist, open questions) that
 ``operonx-project`` builds from and the studio's Board shows. Its template
 is ``templates/_brd/`` (:func:`brd_files`), the one ``operonx-project brd
@@ -429,7 +429,7 @@ def init_project(
     *editable* pins operonx to that checkout (``[tool.uv.sources]``); a
     project made inside an operonx checkout pins it without being asked —
     there, PyPI's operonx is never the one being worked on. *brd* (by
-    default: yes, or what the project has) writes ``docs/brd/``."""
+    default: no, or what the project has) writes ``docs/brd/``."""
     root = Path(root)
     if root.exists() and not root.is_dir():
         raise InitError(f"{root} exists and is not a directory")
@@ -452,7 +452,7 @@ def init_project(
     if editable is None:
         editable = operonx_checkout(root.resolve())
     toolchain = toolchain or default_toolchain()
-    brd = True if brd is None else brd
+    brd = False if brd is None else brd
     parts = parts_of([*old, *parts])
     kw = dict(root=root, editable=editable, toolchain=toolchain, brd=brd)
     files = plan(template, name, parts=parts, **kw)

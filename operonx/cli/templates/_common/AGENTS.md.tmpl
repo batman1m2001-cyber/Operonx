@@ -2,71 +2,141 @@
 
 This is an **operonx** project (made with operonx {{version}}). The logic is
 Python functions (ops), wired into graphs, which an application runs as
-jobs{{#http}} and services{{/http}}.
+jobs{{#http}} and services{{/http}}. `app/main.py` is the map of the product:
+read it first.
 
-## Before you write code
+## How to work here
 
-1. Read `.operonx/guide/README.md`. It indexes the guide of every installed
-   operonx package (core, and operonx-agents or operonx-kb when added), and
-   every example in them is tested against the installed version.
-2. Before you use an operonx API, re-read the guide page that covers it.
-   Do not write an operonx API from memory.
-3. Read `app/main.py`. It is the map of the product.
-
-## The ladder
-
-- **op**: `@op` in `ops.py`. One step of logic; it returns a dict literal.
-- **graph**: `@graph` in `graph.py`. Wires ops with `>>`. Its parameters
-  are what it is given (a job item{{#http}}, a request body{{/http}}); the outputs of the
-  ops wired to `END` are the answer.
-- **Job**: in `jobs.py`. Runs a graph once per item of its `items` (a list,
-  a function that yields them, or a `.jsonl` file) and keeps every result
-  in its record. `reduce=` runs one graph over all the results; `steps=[...]`
-  runs jobs in order as one command{{#http}}; `schedule=schedule(at="07:00")`
-  also runs it on a clock inside `operonx serve`{{/http}}.
-{{#http}}
-- **Service**: in `routes.py`. A graph behind `http(...)`, `webhook(...)`,
-  `schedule(...)` or `websocket(...)`.
-{{/http}}
-- **Application**: `APP` in `app/main.py`. Every job{{#http}} and service{{/http}} is
-  declared there.
-- **operonx.toml**: only points the CLIs at `APP`, plus `[tracing]`,
-  `[retry]` and `[durable]`.
-
-## Two rules the guide explains
-
-- Every `@graph` is defined at module level in `graph.py`, never inside a
-  function; a setting is a graph input, a different shape another graph.
-{{#http}}
-- A served graph's signature is the request: the body fills its parameters
-  by name and the outputs wired to `END` are the reply. Never unpack a
-  request dict in an op. Doors (`ingress()`) only for streams.
-{{/http}}
-{{#web}}
-- The pages are `web/`, served at `/`: `index.html`, one `pages/<screen>.js`
-  per screen, `components/` (functions that render, never `fetch`),
-  `lib/api.js` (the only `fetch`), `assets/`.
-{{/web}}
+1. Start from the code that is already here and from the **recipes** below.
+   They are the tested idioms for the usual changes.
+2. Need something the recipes do not show, or an error you do not
+   understand? Search the guide, then read only that section:
+   `grep -n "WORD" .operonx/guide/*/*.md`. The index is
+   `.operonx/guide/README.md`; the pages named below (`Guide: 01-ops.md`)
+   are in `.operonx/guide/core/`. Every guide example is tested against the
+   installed operonx, so copy from it; never write an operonx API from memory.
+3. Verify by running what you changed (the route, the job, the page). Write
+   a test when the task asks for one or when you fix a bug.
 
 ## Layout
 
-- One feature is one folder, `src/<feature>/`, with fixed file names:
-  `graph.py` (wiring only: no logic, no I/O, no Python `if`), `ops.py` (the
-  logic), `jobs.py`{{#http}}, `routes.py`{{/http}}{{#chat}}, `prompts.py`{{/chat}}{{#agent}}, `agent.py`{{/agent}}. Anything else is
-  `_<name>.py`, private to the feature.
-- What every feature needs goes in `src/_shared/`, which imports no
-  feature. `src/_shared/config.py` is the only file that reads the
-  environment.
-- Imports go one way: `app/` → `graph.py` → `ops.py` → helpers. Nothing in
-  `src/` imports `app/`. Another feature only through its `__init__` names
-  or its graph.
-- Runs read and keep files in `data/`, and write throwaway output to `out/`.
-- Reach models and stores by their key in `resources.yaml`
-  (`LLMOp.of(resource="assistant")`). Never build a client in code.
-- Secrets live only in `.env`, as `${VAR}` in `resources.yaml`. Add every
-  new name to `.env.example`. Never commit `.env`.
-- Tests go in `tests/<feature>/`. Call an op directly (`my_op(x=1)()`), run
-  a graph with a `Job`, and never call a real model: use a fake one.
+- `src/<feature>/`: `graph.py` (wiring only: no logic, no I/O, no Python
+  `if`), `ops.py` (the logic), `jobs.py`{{#http}}, `routes.py`{{/http}}{{#chat}}, `prompts.py`{{/chat}}{{#agent}}, `agent.py`{{/agent}}; anything
+  else `_<name>.py`. Shared code is `src/_shared/`; `src/_shared/config.py`
+  is the only file that reads the environment (`ROOT`, `DATA`, `OUT`{{#http}}, `PORT`{{/http}});
+  a new setting is one more line there: `LIMIT = env("LIMIT", 10)`.
+- `app/main.py`: `APP = Application(...)` lists every job{{#http}} and service{{/http}}.
+- Models and stores by key in `resources.yaml`; secrets in `.env` as
+  `${VAR}`, every name also in `.env.example`. Never build a client in code.
+- `data/` is kept, `out/` is throwaway. Tests: `tests/<feature>/`.{{#web}}
+- Pages: `web/` at `/`, one `pages/<screen>.js` per screen, `components/`
+  render only, `lib/api.js` is the only `fetch`.{{/web}}
+- Guide: `05-project-layout.md` § The files.
+
+## Recipes
+
+An op is one step; it returns a dict literal. A graph wires ops with `>>`;
+its parameters are its inputs (a job item{{#http}}, a request body{{/http}}), and the outputs
+of the ops wired to `END` are its answer. See `src/` for a working pair.
+Guide: `01-ops.md` § `@op`, § `@graph`; `04-gotchas.md` (read it once).
+
+**A model call**: uncomment `llm:assistant` in `resources.yaml`; a project
+with no model yet needs `{{add}} "operonx[openai]"` (the fake model too).
+
+```python
+from operonx.providers.ops import LLMOp
+
+
+@graph
+def summarise(text):
+    ask = LLMOp.of(
+        resource="assistant", prompt={"system": "One line.", "user": "{text}"}, text=text
+    )
+    START >> ask >> END  # ask["content"]; ask["error"] is set on failure
+```
+
+`fields=["intent: str"]` parses the answer into its own output;
+`stream=True` streams. Never `user=` and never a Ref in `validators=`.
+Guide: `01-ops.md` § `LLMOp`; `04-gotchas.md` § `LLMOp`.
+
+**A branch**: `START >> c >> if_(c["big"] == True, a).else_(b)`. The arms merge
+by themselves. Compare a Ref with a literal; combine with `&` `|` `~`, never
+`and`/`or`. Guide: `03-control-flow.md` § if/else; `04-gotchas.md` § Combine
+conditions.
+
+**Retry a flaky model call**: on its resource, never a loop in an op:
+
+```yaml
+llm:assistant:
+  retry: {max_attempts: 3, initial: 0.5, max_interval: 10}
+```
+
+A flaky op: `@op(retry=Retry(max_attempts=3))`. A whole project: `[retry]` in
+`operonx.toml`. Guide: `06-failures.md` (also timeouts and error edges).
+
+**A job**: `Job("name", graph=g, items=DATA / "x.jsonl", key="id",
+output=OUT / "x.jsonl")`. `items` can also be a list or a function that yields
+dicts. `operonx run name --resume` skips done ids. Add
+`schedule=schedule(at="07:00")` (or `every="5m"`) to run it on a clock
+inside `operonx serve`. Guide: `02-composition.md` § Job, § A job on a clock.
+{{#http}}
+
+**A route**: `Service("name", http("POST", "/path", port=PORT), graph=g)` in
+`routes.py`. The JSON body fills the graph's parameters by name; an unknown
+field is answered `400 {"field": ...}`. The reply is `200` with the graph's
+answer. Never unpack a request dict in an op. Guide: `02-composition.md`
+§ Service.
+
+A route that needs its own status codes (`201`, `404`) or a `GET` with
+path parameters is a Starlette route that runs the graph itself:
+
+```python
+from operonx import Operon
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+
+
+async def create(request):
+    out = await Operon(create_flow, params={"text": None}).run(inputs=await request.json())
+    return JSONResponse({"ticket": out["ticket"]}, status_code=201)  # named fields only
+
+
+ROUTES = [Route("/tickets", create, methods=["POST"])]
+```
+
+`asgi(path)` mounts a prefix: `asgi("/tickets")` answers `/tickets/`, not
+`/tickets`. So keep full paths in `ROUTES` and serve them from one Starlette
+app at `/`, listed last in `APP`:
+{{#web}}the `web` service's, before its files:
+`app=Starlette(routes=[*ROUTES, Mount("/", StaticFiles(directory=ROOT / "web", html=True))])`.{{/web}}{{^web}}`Service("api", asgi("/", port=PORT), app=Starlette(routes=ROUTES))`.{{/web}}
+Guide: `02-composition.md` § Service; streams and websockets: `01-ops.md`
+§ Doors.
+{{/http}}
+
+**Test**: call an op directly, `my_op(x=1)()`. Run a graph with
+`asyncio.run(Job("t", graph=g, items=[...], key="id", record_dir=tmp_path).run())`
+and check `run.status == "ok"` and `run.results`.{{#http}} For a route:
+`TestClient(Application.find(ROOT).asgi())`.{{/http}} Never call a real
+model: a `conftest.py` fixture installs a fake one.
+
+```python
+FAKE = "llm:assistant:\n  api_type: fake\n  script:\n    - echo: 'Echo: '\n"
+
+
+@pytest.fixture(scope="session")
+def fake_model(tmp_path_factory):
+    path = tmp_path_factory.mktemp("res") / "resources.yaml"
+    path.write_text(FAKE)
+    operonx.bootstrap(resources=path, env=False)
+```
+
+`script:` turns can also be a string, `{status: 503}` or `{delay: 0.5, text: ...}`.
+Guide: `01-ops.md` § `LLMOp` (Tests need no model).
+
+**Why a run failed or is slow**: an op that raises does not raise. The
+result carries `"$errors"`, and the run's record is under `.operonx/runs/`.
+Guide: `08-runs.md` (traces, slow runs, durable runs); `04-gotchas.md`
+§ An op that raises.
 {{brd}}
 ## Commands
 
@@ -83,20 +153,15 @@ jobs{{#http}} and services{{/http}}.
 
 ## Rules
 
-- Never `print()`. Log with `from operonx.core.loggings import LOGGER`.
-- Let names come from variables: `reply = chat(text=text)` is named `reply`.
-  Write `name=` only when other code reads that name, and build one op per
-  line.
-- Branch with `if_(cond, a).else_(b)` inside the `>>` chain. Never build a
-  `BranchOp` or `Branch` yourself.
-- An op that raises does not raise: the run's result has `"$errors"`.
-- No retry loop in an op (`[retry]`, guide page 06) and no "save progress"
-  logic (`[durable]`, guide page 08).
-- A run that is slow while its ops are fast: read its trace's metadata
-  (`backlog`, `loop_lag_ms`, `cpu_pct`) before profiling. Guide page 08.
-- To upgrade operonx: `{{upgrade}}`, then `{{run}}operonx guide`, then
-  re-read `.operonx/guide/README.md`. After adding an operonx package
-  (`{{add}} operonx-agents`), run `{{run}}operonx guide`.
+- Every `@graph` at module level, never inside a function; a setting is a
+  graph input, a different shape is another graph.
+- Never `print()`: `from operonx.core.loggings import LOGGER`.
+- Names come from variables (`reply = chat(text=text)` is `reply`); `name=`
+  only when other code reads it; one op per line.
+- No retry loop and no "save progress" code in an op: `retry:`/`[retry]`
+  and `[durable]` do it.
+- Imports go one way: `app/` → `graph.py` → `ops.py` → helpers; `src/`
+  never imports `app/`.
 
 ## operonx guides
 
