@@ -37,9 +37,9 @@ def _env(ws: Path, port: int, llm_port: int, data: Path) -> Dict[str, str]:
 
 
 @contextmanager
-def service(ws: Path, port: int, llm_port: int):
+def service(ws: Path, port: int, llm_port: int, **extra: str):
     data = Path(tempfile.mkdtemp(prefix="ab-data-"))
-    env = _env(ws, port, llm_port, data)
+    env = {**_env(ws, port, llm_port, data), **extra}
     log = open(data.parent / f"{data.name}.server.log", "w")
     proc = subprocess.Popen(["bash", "./run.sh"], cwd=ws, env=env, stdout=log, stderr=subprocess.STDOUT,
                             start_new_session=True)
@@ -55,7 +55,7 @@ def service(ws: Path, port: int, llm_port: int):
                 time.sleep(0.5)
         else:
             raise Fail("./run.sh did not answer on $PORT within 120 s: " + _tail(log.name))
-        yield httpx.Client(base_url=base, timeout=30), (lambda name: _job(ws, env, name)), data
+        yield httpx.Client(base_url=base, timeout=30), (lambda name, check=True: _job(ws, env, name, check)), data
     finally:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
@@ -75,9 +75,9 @@ def _tail(path: str, n: int = 600) -> str:
         return ""
 
 
-def _job(ws: Path, env: Dict[str, str], name: str) -> None:
+def _job(ws: Path, env: Dict[str, str], name: str, check: bool = True) -> None:
     run = subprocess.run(["bash", "./job.sh", name], cwd=ws, env=env, capture_output=True, text=True, timeout=180)
-    if run.returncode != 0:
+    if check and run.returncode != 0:
         raise Fail(f"./job.sh {name} exited {run.returncode}: {(run.stdout + run.stderr)[-600:]}")
 
 
@@ -114,8 +114,8 @@ def _calls(llm_port: int) -> dict:
     return httpx.get(f"http://127.0.0.1:{llm_port}/_calls").json()
 
 
-def _mode(llm_port: int, flaky: bool, reset: bool = False) -> None:
-    httpx.post(f"http://127.0.0.1:{llm_port}/_mode", json={"flaky": flaky, "reset": reset})
+def _mode(llm_port: int, flaky: bool, reset: bool = False, **more) -> None:
+    httpx.post(f"http://127.0.0.1:{llm_port}/_mode", json={"flaky": flaky, "reset": reset, **more})
 
 
 def t1(ws, port, llm):
@@ -228,7 +228,99 @@ def t6(ws, port, llm):
             raise Fail(f"/ has no link to /stats: {links}")
 
 
-CHECKS = {"T1": t1, "T2": t2, "T3": t3, "T4": t4, "T5a": t5a, "T5b": t5b, "T6": t6}
+def t7(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        _mode(llm, False, delay_ms=400)
+        try:
+            ids = [_post(c, text).get("id") for text in list(TICKETS)[:2]]
+        finally:
+            _mode(llm, False)
+        r = c.get("/timings")
+        rows = r.json() if r.status_code == 200 else None
+        if not isinstance(rows, list) or len(rows) < 2:
+            raise Fail(f"GET /timings → {r.status_code} {r.text[:300]}; want a list of the 2 requests")
+        if [x.get("id") for x in rows[:2]] != ids[::-1]:
+            raise Fail(f"GET /timings ids {[x.get('id') for x in rows[:2]]}; want {ids[::-1]} (newest first)")
+        for x in rows[:2]:
+            model, total = x.get("model_ms"), x.get("total_ms")
+            if not isinstance(model, (int, float)) or not isinstance(total, (int, float)):
+                raise Fail(f"GET /timings row {x}; want numbers total_ms and model_ms")
+            if not 380 <= model <= total or total > model + 1500:
+                raise Fail(f"GET /timings row {x}: the model took 400 ms; want model_ms ≈ 400 ≤ total_ms")
+
+
+def _sse(c: httpx.Client, url: str) -> tuple:
+    data, events, ctype = [], [], ""
+    with c.stream("GET", url) as r:
+        ctype = r.headers.get("content-type", "")
+        if r.status_code != 200:
+            raise Fail(f"GET {url} → {r.status_code} {r.read()[:300]!r}")
+        for line in r.iter_lines():
+            if line.startswith("data:"):
+                v = line[5:]
+                data.append(v[1:] if v.startswith(" ") else v)
+            elif line.startswith("event:"):
+                events.append(line[6:].strip())
+    return ctype, data, events
+
+
+def t8(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        _post(c, "I want a refund for invoice 42")
+        _post(c, "The app crashes when I open settings")
+        _mode(llm, False, reset=True)
+        ctype, chunks, events = _sse(c, f"/summaries/{_today()}/stream")
+        if "text/event-stream" not in ctype:
+            raise Fail(f"GET /summaries/today/stream content-type {ctype!r}; want text/event-stream")
+        if _calls(llm)["streamed"] < 1:
+            raise Fail("GET /summaries/today/stream did not ask the model with stream: true")
+        text = [d for d in chunks if d.strip() and d.strip() != "[DONE]"]
+        if len(text) < 3 or not "".join(text).lstrip().startswith("SUMMARY:"):
+            raise Fail(f"the stream's data events {chunks[:8]}; want the model's pieces, starting 'SUMMARY:'")
+        if "done" not in events:
+            raise Fail(f"the stream's events {events}; want an `event: done` at the end")
+
+
+def t9(ws, port, llm):
+    with service(ws, port, llm, SUMMARY_EVERY="2") as (c, job, data):
+        _post(c, "I want a refund for invoice 42")
+        _post(c, "The app crashes when I open settings")
+        _mode(llm, True)
+        try:
+            for _ in range(30):
+                b = c.get(f"/summaries/{_today()}")
+                if b.status_code == 200 and b.json().get("count") == 2 \
+                        and str(b.json().get("summary", "")).startswith("SUMMARY:"):
+                    break
+                time.sleep(0.5)
+            else:
+                raise Fail(f"with SUMMARY_EVERY=2, no summary of the 2 tickets within 15 s: {b.status_code} "
+                           f"{b.text[:200]}")
+        finally:
+            _mode(llm, False)
+    with service(ws, port, llm) as (c, job, data):
+        _post(c, "I want a refund for invoice 42")
+        _post(c, "I forgot my password and cannot log in")
+        _post(c, "The app crashes when I open settings")
+        _mode(llm, False, reset=True, fail_summary_after=1)
+        try:
+            job("category_report", check=False)
+        finally:
+            _mode(llm, False)
+        done_first = [k for k in ("billing", "account", "technical") if c.get(f"/reports/{k}").status_code == 200]
+        _mode(llm, False, reset=True)
+        job("category_report")
+        calls = _calls(llm)["summary"]
+        if calls != 3 - len(done_first):
+            raise Fail(f"the first run reported {done_first} before the model went down; the second run "
+                       f"called the model {calls} time(s), want {3 - len(done_first)}")
+        for k in ("billing", "account", "technical"):
+            b = c.get(f"/reports/{k}").json()
+            if b.get("count") != 1 or not str(b.get("summary", "")).startswith("SUMMARY:"):
+                raise Fail(f"after the resumed run, /reports/{k} → {b}")
+
+
+CHECKS = {"T1": t1, "T2": t2, "T3": t3, "T4": t4, "T5a": t5a, "T5b": t5b, "T6": t6, "T7": t7, "T8": t8, "T9": t9}
 
 
 def check(task: str, ws: Path, port: int, llm_port: int) -> Tuple[bool, str]:

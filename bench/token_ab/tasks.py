@@ -31,4 +31,21 @@ TASKS = [
            "it from `GET /`. Make sure it works before you stop."),
 ]
 
+# Gate 2 (COST_PLAN E7b): three tasks where reusing the framework should win, run after T6 in the
+# same workspace (``run.py --tasks T7,T8,T9 --ws TRACK=DIR,...``).
+E7B = [
+    ("T7", "Support says `POST /tickets` is sometimes slow, and nobody can tell whether the model or the "
+           "service is to blame. Add `GET /timings`: the last 20 `POST /tickets` requests, newest first, each "
+           "`{\"id\", \"total_ms\", \"model_ms\"}`, where `id` is the ticket's id, `total_ms` the whole "
+           "request and `model_ms` the time spent waiting on the model. Make sure it works before you stop."),
+    ("T8", "Add `GET /summaries/{date}/stream`: it asks the model for a fresh summary of that day's tickets "
+           "with `\"stream\": true` and passes the text on as the model generates it, as Server-Sent Events: "
+           "one `data:` event per piece of text the model sends (the event's data is that text, as is), then "
+           "one `event: done`. Make sure it works before you stop."),
+    ("T9", "Two changes to the jobs. (1) While `./run.sh` runs, it runs `daily_summary` by itself every "
+           "`$SUMMARY_EVERY` seconds (default 3600). (2) `./job.sh category_report` resumes: when a run stops "
+           "part-way because the model is down, the next run calls the model only for the categories that "
+           "have no report yet or have tickets newer than their report. Make sure it works before you stop."),
+]
+
 FIX = ("A hidden acceptance check of this task failed:\n\n{why}\n\nFix it. Make sure it works before you stop.")

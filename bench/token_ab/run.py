@@ -24,7 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import accept  # noqa: E402
-from tasks import FIX, TASKS  # noqa: E402
+from tasks import E7B, FIX, TASKS  # noqa: E402
 
 OPERON = HERE.parent.parent
 OPERONX = OPERON / ".venv" / "bin" / "operonx"
@@ -135,13 +135,13 @@ def read_log(log: Path, seconds: float) -> dict:
 
 def track(name: str, i: int, args, budget: Budget, results: list, lock: threading.Lock) -> None:
     out = Path(args.out)
-    ws = setup(name, out / "ws", out / "bin")
+    ws = Path(args.ws[name]) if name in args.ws else setup(name, out / "ws", out / "bin")
     llm_port, port, accept_port = 8870 + 10 * i, 8871 + 10 * i, 8872 + 10 * i
     fake = subprocess.Popen([sys.executable, str(HERE / "fake_llm.py"), str(llm_port)])
     env = session_env(name, ws, out / "bin", llm_port, port)
     try:
-        for task, prompt in TASKS:
-            if args.tasks and task not in args.tasks:
+        for task, prompt in TASKS + E7B:
+            if task not in args.tasks if args.tasks else task in dict(E7B):
                 continue
             if not budget.may_start():
                 with lock:
@@ -179,7 +179,9 @@ def main() -> None:
     ap.add_argument("--tracks", default="A1,A2,B1,B2")
     ap.add_argument("--tasks", default="")
     ap.add_argument("--cap", type=float, default=40.0)
+    ap.add_argument("--ws", default="", help="TRACK=DIR,...: go on in a workspace an earlier run left (gate 2)")
     args = ap.parse_args()
+    args.ws = dict(p.split("=", 1) for p in args.ws.split(",") if p)
     args.tasks = [t for t in args.tasks.split(",") if t]
     out = Path(args.out)
     (out / "bin").mkdir(parents=True, exist_ok=True)

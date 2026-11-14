@@ -3,6 +3,9 @@
 A classify call (the ticket is the last user message) answers a category by keywords; a call whose
 messages ask for a summary answers ``SUMMARY: …``. ``POST /_mode {"flaky": true}`` makes the first try
 of every distinct request answer 503 (the planted bug of T5a/T5b); ``GET /_calls`` counts the calls.
+For gate 2 (COST_PLAN E7b): ``{"delay_ms": N}`` makes every answer wait N ms (T7), ``{"fail_summary_after":
+N}`` answers 503 to every summary call after the first N (T9), and a ``"stream": true`` call streams the
+text one word per chunk and is counted under ``streamed`` (T8).
 
     python fake_llm.py PORT
 """
@@ -19,7 +22,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 KEYWORDS = (("billing", ("refund", "invoice", "charge", "payment")),
             ("account", ("password", "login", "log in", "sign in")),
             ("technical", ("crash", "error", "bug", "broken", "slow")))
-STATE = {"flaky": False, "seen": set(), "calls": {"classify": 0, "summary": 0, "failed": 0}}
+CALLS = {"classify": 0, "summary": 0, "failed": 0, "streamed": 0}
+STATE = {"flaky": False, "seen": set(), "delay_ms": 0, "fail_summary_after": None, "calls": dict(CALLS)}
 LOCK = threading.Lock()
 
 
@@ -64,8 +68,10 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 STATE["flaky"] = bool(body.get("flaky"))
                 STATE["seen"].clear()
+                STATE["delay_ms"] = int(body.get("delay_ms") or 0)
+                STATE["fail_summary_after"] = body.get("fail_summary_after")
                 if body.get("reset"):
-                    STATE["calls"] = {"classify": 0, "summary": 0, "failed": 0}
+                    STATE["calls"] = dict(CALLS)
             return self._json(200, {"flaky": STATE["flaky"]})
         if not self.path.rstrip("/").endswith("/chat/completions"):
             return self._json(404, {"error": {"message": "only /chat/completions"}})
@@ -77,13 +83,23 @@ class Handler(BaseHTTPRequestHandler):
                 STATE["calls"]["failed"] += 1
                 return self._json(503, {"error": {"message": "overloaded, try again", "type": "overloaded"}})
             kind, text = answer(messages)
+            after = STATE["fail_summary_after"]
+            if kind == "summary" and after is not None and STATE["calls"]["summary"] >= int(after):
+                STATE["calls"]["failed"] += 1
+                return self._json(503, {"error": {"message": "overloaded, try again", "type": "overloaded"}})
             STATE["calls"][kind] += 1
+            if body.get("stream"):
+                STATE["calls"]["streamed"] += 1
+            delay = STATE["delay_ms"] / 1000
+        time.sleep(delay)
         model = body.get("model") or "fake"
         if body.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
-            for chunk in ({"role": "assistant", "content": text}, {}):
+            words = text.split(" ")
+            pieces = [{"role": "assistant", "content": words[0]}] + [{"content": " " + w} for w in words[1:]]
+            for chunk in pieces + [{}]:
                 ev = {"id": "c1", "object": "chat.completion.chunk", "created": int(time.time()), "model": model,
                       "choices": [{"index": 0, "delta": chunk, "finish_reason": None if chunk else "stop"}]}
                 self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
