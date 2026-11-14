@@ -210,6 +210,8 @@ def _board(args) -> int:
                 raise board.BoardError("move a card with: board CARD STATE")
             c = board.move(args.repo, args.card, args.state, note=args.note)
             out.write(f"{c.id} · {c.title} · {c.state}\n" + (f"  {c.note}\n" if c.note else ""))
+            if c.state == "done":
+                out.write("anything reusable, or a pitfall? docs/brd/knowledge.md (edit an entry, never a second)\n")
             return 0
         got = board.read_all(args.repo)
     except (board.BoardError, OSError) as exc:

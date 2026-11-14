@@ -22,7 +22,8 @@ guides, and the commands under "## Commands" (``operonx init``'s, with the
 project's toolchain) — and the rest of that file is the user's. A project
 made before the commands were marked gets the marked block when its
 "## Commands" section holds nothing the block does not (an older copy of
-it); a section someone edited is left alone.
+it); a section someone edited is left alone. Last, it writes
+``.operonx/catalog.md`` (:mod:`operonx.guide.catalog`) from the code.
 """
 
 from __future__ import annotations
@@ -86,6 +87,12 @@ _BUILDER = """## Building it: docs/brd and the board
   code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
   `docs/brd/README.md`. The checklist's summary table is counted from
   the rows by the engine: leave it.
+- `docs/brd/knowledge.md` is what the project learned: `### K3 · title ·
+  pattern|pitfall|replaced`, then `where` (files), `use` (when; a pitfall's
+  symptom first), `instead` (for `replaced`). Before writing something new,
+  search it and `.operonx/catalog.md` (every op, graph and job; `operonx
+  guide` rewrites it). When a card is done, add what is reusable or a
+  pitfall; when a pattern is replaced, edit its entry, never add a second.
 - Work with more than one step gets a plan doc under `docs/` (why and
   how) and a cycle on the board: `operonx-project cycle open ID TITLE
   --plan docs/X_PLAN.md`, its phases as cards (`operonx-project put --title
@@ -349,6 +356,9 @@ def sync(project: Union[str, Path], toolchain: Optional[str] = None) -> List[str
             if not target.is_file() or target.read_bytes() != data:
                 target.write_bytes(data)
     _sync_agents_md(project, agents_block(guides, toolchain), commands_block(toolchain))
+    from operonx.guide import catalog
+
+    catalog.write(project)
     return done
 
 

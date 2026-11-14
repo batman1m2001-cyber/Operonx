@@ -46,7 +46,9 @@ def project(tmp_path) -> Path:
 
 
 def _rules(root: Path) -> list:
-    return sorted(f.rule for f in lint_path(root) if f.rule in {"C13", "C14", "C15", "C16", "C17"})
+    return sorted(
+        f.rule for f in lint_path(root) if f.rule in {"C13", "C14", "C15", "C16", "C17", "C18"}
+    )
 
 
 def test_a_clean_project_has_no_shape_findings(project):
@@ -84,6 +86,21 @@ def test_an_opt_out_holds_one_line(project):
 def test_a_web_opt_out_holds_one_line(project):
     _write(project, {"web/pages/home.js": "fetch('/health'); // operonx: allow[C17]\n"})
     assert _rules(project) == []
+
+
+def test_stale_knowledge_is_a_warning(project):
+    knowledge = (
+        "# Knowledge\n\n```text\n### K1 · example · pattern\nwhere: src/nowhere.py\n```\n\n"
+        "### K2 · charge once · pattern\nwhere: src/billing/ops.py:3, src/billing/_gone.py\n"
+        "use: a retried charge\n\n### K3 · tests named by node · pitfall\nwhere: tests/test_x.py::test_y\n"
+    )
+    _write(
+        project,
+        {"docs/brd/knowledge.md": knowledge, "tests/test_x.py": "def test_y():\n    pass\n"},
+    )
+    found = [f for f in lint_path(project) if f.rule == "C18"]
+    assert [(f.severity, f.line, f.message.split(":")[0]) for f in found] == [("warning", 9, "K2")]
+    assert "_gone.py" in found[0].message
 
 
 def test_a_folder_without_operonx_toml_is_not_a_project(project):
