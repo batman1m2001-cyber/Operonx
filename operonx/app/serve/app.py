@@ -605,11 +605,49 @@ def _reconnect(spec: ServeSpec, transport: HttpTransport, request: Any, JSONResp
     return StreamingResponse(body(), media_type=EVENT_STREAM, headers=headers)
 
 
+#: The output an http door's run sets its reply's status code with.
+STATUS_KEY = "$status"
+
+
+def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, Any]:
+    """``http("GET", "/tickets/{id}")``: the path's parameters are inputs of
+    the run, beside the body's fields; a name in both is refused."""
+    params = dict(request.path_params)
+    if not params:
+        return payload, None
+    if payload is None:
+        return params, None
+    body: Dict[str, Any] = {"endpoint": spec.name}
+    if not isinstance(payload, dict):
+        body["error"] = f"a path with parameters takes a JSON object body, not {type(payload).__name__}"
+    else:
+        both = sorted(set(payload) & set(params))
+        if not both:
+            return {**payload, **params}, None
+        body.update(error=f"{both[0]!r} is in both the path and the body", field=both[0])
+    return None, JSONResponse(body, status_code=400)
+
+
+def _reply_status(reply: Any) -> Tuple[Any, int]:
+    """A reply carrying ``"$status": 404`` (an op's output) is answered with
+    that code, without the key; any other reply is a ``200``."""
+    if isinstance(reply, dict) and STATUS_KEY in reply:
+        reply = dict(reply)
+        status = reply.pop(STATUS_KEY)
+        if isinstance(status, int) and not isinstance(status, bool) and 200 <= status <= 599:
+            return reply, status
+        LOGGER.error(f"[serve] {STATUS_KEY}={status!r} is not an HTTP status; answering 500")
+        return {"error": f"{STATUS_KEY}={status!r} is not an HTTP status"}, 500
+    return reply, 200
+
+
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
         if wants_stream(request) and "run_id" in request.query_params:
             return _reconnect(spec, transport, request, JSONResponse)
         payload, refusal = await _read_body(request, spec, JSONResponse)
+        if refusal is None:
+            payload, refusal = _with_path_params(payload, request, spec, JSONResponse)
         if refusal is not None:
             return refusal
         meta = _meta_from_request(request)
@@ -623,7 +661,8 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
             return JSONResponse(session.refusal[1], status_code=session.refusal[0], headers=headers)
         if not session.replies:
             return _no_output(spec, session.trace_id, JSONResponse)
-        return JSONResponse(session.reply, headers=headers)
+        reply, status = _reply_status(session.reply)
+        return JSONResponse(reply, status_code=status, headers=headers)
 
     return endpoint
 

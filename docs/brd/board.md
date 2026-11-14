@@ -9,7 +9,9 @@ plan: docs/COST_PLAN.md · opened: 2026-11-15
 files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/cli/init.py, docs/cost/K5_K1.md
 done: tests/internal/cli/test_init.py::TestForCodingAssistants::test_every_guide_reference_in_agents_md_names_a_page_and_a_heading
 
-### C34 · K3 operonx check: one verify call · todo
+### C34 · K3 operonx check: one verify call · done
+files: operonx/cli/check.py,operonx/app/serve/app.py,operonx/app/serve/runner.py,operonx/cli/templates/_common/AGENTS.md.tmpl,docs/cost/K3.md
+done: tests/internal/cli/test_check_cli.py,tests/internal/app/serve/test_path_and_status.py
 
 ### C35 · K2 operonx add: reuse as one command · todo
 

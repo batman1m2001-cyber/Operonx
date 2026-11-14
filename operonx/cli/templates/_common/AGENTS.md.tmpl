@@ -15,8 +15,11 @@ read it first.
    `.operonx/guide/README.md`; the pages named below (`Guide: 01-ops.md`)
    are in `.operonx/guide/core/`. Every guide example is tested against the
    installed operonx, so copy from it; never write an operonx API from memory.
-3. Verify by running what you changed (the route, the job, the page). Write
-   a test when the task asks for one or when you fix a bug.
+3. Verify with `{{run}}operonx check`: lint, the tests, every graph built
+   offline{{#http}}, every route reached (a `GET` called; `--call` also calls
+   each `POST` once with a fake model){{/http}}, in one verdict. A `FAIL` line
+   says what to fix. Then run what it cannot judge (a job's output, a page's
+   look). Write a test when the task asks for one or when you fix a bug.
 
 ## Layout
 
@@ -82,34 +85,23 @@ inside `operonx serve`. Guide: `02-composition.md` § Job, § A job on a clock.
 {{#http}}
 
 **A route**: `Service("name", http("POST", "/path", port=PORT), graph=g)` in
-`routes.py`. The JSON body fills the graph's parameters by name; an unknown
-field is answered `400 {"field": ...}`. The reply is `200` with the graph's
-answer. Never unpack a request dict in an op. Guide: `02-composition.md`
-§ Service.
-
-A route that needs its own status codes (`201`, `404`) or a `GET` with
-path parameters is a Starlette route that runs the graph itself:
+`routes.py`. The JSON body fills the graph's parameters by name, and so does
+the path: `http("GET", "/tickets/{id}")` passes `id`. An unknown field is
+answered `400 {"field": ...}`. The reply is the graph's answer with `200`,
+unless an op outputs `"$status"` (the key is not sent):
 
 ```python
-from operonx import Operon
-from starlette.responses import JSONResponse
-from starlette.routing import Route
-
-
-async def create(request):
-    out = await Operon(create_flow, params={"text": None}).run(inputs=await request.json())
-    return JSONResponse({"ticket": out["ticket"]}, status_code=201)  # named fields only
-
-
-ROUTES = [Route("/tickets", create, methods=["POST"])]
+@op
+def find(id: str) -> dict:
+    ticket = TICKETS.get(id)
+    return {"ticket": ticket, "$status": 200 if ticket else 404}  # 201 for a create
 ```
 
-`asgi(path)` mounts a prefix: `asgi("/tickets")` answers `/tickets/`, not
-`/tickets`. So keep full paths in `ROUTES` and serve them from one Starlette
-app at `/`, listed last in `APP`:
-{{#web}}the `web` service's, before its files:
-`app=Starlette(routes=[*ROUTES, Mount("/", StaticFiles(directory=ROOT / "web", html=True))])`.{{/web}}{{^web}}`Service("api", asgi("/", port=PORT), app=Starlette(routes=ROUTES))`.{{/web}}
-Guide: `02-composition.md` § Service; streams and websockets: `01-ops.md`
+Every route is a `Service` (lint C14), so every request has a trace: no
+hand-written Starlette route, and never unpack a request dict in an op.
+{{#web}}List the `web` service (`asgi("/")`) last in `APP`: a mount at `/`
+answers every path, so a route after it is never reached.
+{{/web}}Guide: `02-composition.md` § Service; streams and websockets: `01-ops.md`
 § Doors.
 {{/http}}
 
@@ -142,6 +134,7 @@ Guide: `08-runs.md` (traces, slow runs, durable runs); `04-gotchas.md`
 
 <!-- operonx:commands -->
 {{shell}}```bash
+{{run}}operonx check          # lint, tests, graphs, routes: one verdict (--call, --no-tests)
 {{run}}pytest                 # the tests: keep them green
 {{run}}operonx lint           # the rules below, checked (operonx lint --rules)
 {{run}}operonx serve --list   # every service, and where it listens

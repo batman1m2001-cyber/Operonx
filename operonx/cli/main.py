@@ -9,17 +9,18 @@
     operonx play ...                # drive a served door    (operonx.app.play)
     operonx eval ...                # experiments: run, compare, report (operonx.cli.eval)
     operonx lint [DIR] [--build]    # check the project's conventions  (operonx.cli.lint)
+    operonx check [DIR] [--call]    # lint, tests, graphs, routes: one verdict (operonx.cli.check)
     operonx studio [DIR]            # open the project in operonx-studio (operonx.cli.studio)
     operonx project ...             # build a project from its requirements (operonx-project)
 
-``run``, ``serve``, ``play``, ``eval``, ``lint``, ``studio`` and ``project`` are handed the rest of the
+``run``, ``serve``, ``play``, ``eval``, ``lint``, ``check``, ``studio`` and ``project`` are handed the rest of the
 command line untouched: each is its module's own ``main(argv)`` (for the
 first three, the one the deprecated ``operonx-<name>`` alias calls too),
 so there is one parser per command and two spellings cannot differ.
 
 Inside a project whose ``.operonx/guide/`` is stale — an operonx package
 was added, removed or upgraded — any command first syncs it and says so
-in one line on stderr. ``lint`` and ``project`` do not: a checker never
+in one line on stderr. ``lint``, ``check`` and ``project`` do not: a checker never
 writes, and the project engine changes a repo only through its own branches.
 """
 
@@ -45,6 +46,10 @@ DELEGATED = {
         "operonx.cli.lint",
         "check the project against the operonx conventions (its AGENTS.md rules)",
     ),
+    "check": (
+        "operonx.cli.check",
+        "lint, the tests, every graph built and every route reached: one verdict",
+    ),
     "studio": ("operonx.cli.studio", "open this project in operonx-studio (starts it if needed)"),
     "project": (
         "operonx.cli.project",
@@ -57,7 +62,7 @@ DELEGATED = {
 #: copy: a checker that changes what it checks (and, run from another
 #: environment, deletes the guide pages of packages that environment lacks);
 #: the project engine, which writes to a repo only on its own branches.
-READ_ONLY = {"lint", "project"}
+READ_ONLY = {"lint", "check", "project"}
 
 
 def _parser() -> argparse.ArgumentParser:
