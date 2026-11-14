@@ -28,8 +28,10 @@ done: tests/internal/guide/test_catalog.py, tests/internal/lint/test_shape.py::t
 ### C31 · E6 The project is the memory: save, start fresh, search (BRD 4) · doing
 files: packages/operonx-project/operonx_project/search.py, operonx-studio:operonx_studio/assistant.py
 
-### C32 · E8 Lint after every step (owner) · todo
+### C32 · E8 Lint after every step (owner) · done
 files: operonx-studio:operonx_studio/stophook.py
+done: operonx-studio:tests/studio/test_stophook.py
+Shipped as studio #186.
 
 ### C30 · E7 Does OperonX save tokens? (BRD 3) · todo
 files: bench/token_ab/
