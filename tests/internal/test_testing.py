@@ -56,3 +56,14 @@ def test_with_no_hub_one_is_installed_for_the_block():
         assert operonx.ResourceHub._instance is None
     finally:
         operonx.ResourceHub.set_instance(before)
+
+
+def test_an_engine_that_already_ran_answers_from_the_block(hub):
+    # The template's session fixture warms one engine before any test runs; T9 of round 2 (both
+    # tracks) opened `fake_model` after that and the op kept the model it had taken first.
+    engine = Operon(ask, params={"q": None})
+    run = lambda: asyncio.run(engine.run(inputs={"q": "hi"})).get("content")  # noqa: E731
+    assert run() == "Echo: hi"
+    with fake_model("from the block"):
+        assert run() == "from the block"
+    assert run() == "Echo: hi"
