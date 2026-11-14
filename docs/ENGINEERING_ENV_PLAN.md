@@ -224,6 +224,40 @@ E4–E6).
     add ≤ ~1.5 KB on the first turn of a fresh session only.
   - Gate 3, the context meter on the next 20 real turns: open — it needs those turns on :8766.
   - Before / after, the save flow and the files changed: [engineering_env/E6.md](engineering_env/E6.md).
+- **E7** (Operon bench/token_ab): **arm A costs more, 2.3× arm B, on a product this small.**
+  4 tracks × 7 tasks = 28 sessions, Sonnet 5.5 headless, all 28 pass the hidden checks. $4.80 spent
+  ($0.56 more on a 2-session pilot), against the $40 cap.
+
+  | per track | A1 | A2 | B1 | B2 |
+  |---|---|---|---|---|
+  | cost | $1.54 | $1.96 ($1.49 without a spurious fix turn) | $0.66 | $0.65 |
+  | turns | 84 | 91 | 47 | 46 |
+  | doc tokens read | 55.6k | 45.6k | 0 | 0 |
+  | cache-read tokens | 2.84M | 3.04M | 0.85M | 0.89M |
+  | wall time | 7.4 min | 8.0 min | 3.4 min | 3.3 min |
+
+  - **Per task** (A1/A2 vs B1/B2): T1 $0.45/$0.41 vs $0.10/$0.10. T2 $0.24/$0.28 vs $0.08/$0.09.
+    T3 $0.21/$0.14 vs $0.11/$0.07. T4 $0.11/$0.17 vs $0.09/$0.08. T5a $0.17/$0.15 vs $0.10/$0.10.
+    T5b $0.17/$0.20 vs $0.10/$0.13. T6 $0.19/$0.13 vs $0.09/$0.06.
+  - **The gap narrows but never closes.** Setup (T1) costs 4× more in arm A. On the later tasks
+    (T2–T6) it is still about 2× ($1.08 against $0.56 per track).
+  - **Where the cost goes.**
+    - *Docs:* every arm A session reads the guide (about 6–8k tokens each).
+    - *Code:* the operonx layout is routes + ops + graph + jobs + tests, about 760 lines, against
+      arm B's single stdlib `app.py` of 250–360 lines with no tests. Each change touches more files,
+      so it takes more turns.
+    - *Reuse:* T3 (the same shape as T2) cost less than T2 in arm A ($0.18 against $0.26) and the
+      same in arm B. T5b (the same bug class as T5a) cost more than T5a in both arms.
+    - *Search:* `operonx-project search` was used in A1 (8 calls) and never in A2.
+  - **Harness fault.** A2 T1 failed on a bug in the check, not in the product. The page shows
+    categories in upper case through CSS, and the check compared case-sensitively. The fix turn
+    ($0.47) was spurious: it moved the list to server-rendered HTML. The check now lower-cases, and it
+    passes A2's T1 commit.
+  - **Scope.** E6's save turn never fired: no session neared 100k context. The arms ran plain
+    `claude -p`, not the studio. The product is small enough to fit in one file, which favours arm B;
+    the guide's structure would have to pay back on a product larger than this one.
+
+  Flow, harness files and the numbers: [engineering_env/E7.md](engineering_env/E7.md).
 - **E8** (studio #186): the Stop hook's check L1 runs `operonx lint` (in the project's `.venv` when it has
   one) on each operonx project a turn edited, and sends the turn back once with the errors in the files it
   edited or a root folder it made; errors elsewhere, warnings and baseline-held rules do not. 1.1 s end to
