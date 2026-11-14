@@ -2,6 +2,24 @@
 
 One card per task (LEAN_PROJECT_PLAN §5). The assistant moves the cards; edit a card's fields, not its state.
 
+## E · One engineering environment — menu, workflow, knowledge, tokens · open
+plan: docs/ENGINEERING_ENV_PLAN.md · opened: 2026-11-14
+
+### C25 · E1 Five items in the menu (studio) · todo
+
+### C26 · E2 Project mode is the Project hub (studio) · todo
+
+### C27 · E3 The assistant: auto-compact, tone, models, colours (studio) · todo
+
+### C28 · E4 The workflow every project starts with (BRD 1) · todo
+files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/guide/__init__.py
+
+### C29 · E5 Knowledge the workflow keeps (BRD 2) · todo
+files: operonx/cli/templates/_brd/knowledge.md.tmpl, operonx/guide/__init__.py
+
+### C30 · E6 Does OperonX save tokens? (BRD 3) · todo
+files: bench/token_ab/
+
 ## Backlog
 
 ## P · Project mode — the studio as the place a project is built from · closed
