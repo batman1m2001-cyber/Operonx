@@ -13,7 +13,9 @@ Shipped as studio #184 (bff376a).
 done: operonx-studio:tests/js/choreo.test.mjs
 Shipped as studio #184 (bff376a).
 
-### C27 · E3 The assistant: tone, models, colours (studio) · todo
+### C27 · E3 The assistant: tone, models, colours (studio) · done
+done: operonx-studio:tests/studio/test_assistant.py
+Shipped as studio #185 (005223d).
 
 ### C28 · E4 The workflow every project starts with (BRD 1) · todo
 files: operonx/cli/templates/_common/AGENTS.md.tmpl, operonx/guide/__init__.py
