@@ -214,3 +214,82 @@ Done 2026-11-15, board C36. Before/after tree, flows and code changes: [cost/K4.
   pages pass (10).
 - **Not measured yet.** The A' re-run (step 3) is next.
 
+
+## A' re-run after K4
+
+Run 2026-11-15 on main `3d18ab9` (K4 + the gate 1 fixes), 2 tracks × T1–T6 of arm A', $2.23.
+Rows: [bench/token_ab/results/2026-11-15-k4-rerun.jsonl](../bench/token_ab/results/2026-11-15-k4-rerun.jsonl).
+
+**Gate 1 still fails, by less.** A' passed 14/14 on the first try (no fix turns, against 2 before)
+and cost $2.23, down from $3.41. The bar is A' ≤ B, and B is $1.31: A' is 1.7× B (it was 2.6×).
+
+| task | A' after K4 | A' gate 1 | B |
+|---|---|---|---|
+| T1 new service | $0.42 · 28 turns | $1.31 · 62 | $0.21 · 11 |
+| T2 job + route | $0.31 · 20 | $0.36 · 23 | $0.17 · 9 |
+| T3 report job | $0.23 · 11 | $0.33 · 21 | $0.18 · 10 |
+| T4 | $0.20 · 11 | $0.28 · 18 | $0.17 · 14 |
+| T5a retry | $0.42 · 34 | $0.37 · 34 | $0.20 · 21 |
+| T5b retry | $0.38 · 28 | $0.47 · 39 | $0.23 · 19 |
+| T6 page | $0.26 · 20 | $0.29 · 23 | $0.15 · 9 |
+| **all** | **$2.23 · 152** | $3.41 · 220 | **$1.31 · 93** |
+
+Where the remaining gap is, from the session logs:
+
+1. **T1 tears down the scaffold first.** Both tracks removed the `hello` greeting (the file, its
+   test, its import and its job in `app/main.py`) and pointed `DATA` at `$DATA_DIR` before writing
+   any ticket code. B starts empty and pays none of this. A2 also left `*TICKETS_SERVICES` twice in
+   `app/main.py` with its own string replace and spent a turn on it (not an `operonx add` bug:
+   reproduced, `add` wires the list once).
+2. **Testing a failure costs more than fixing it (T5a).** The retry itself is one line in
+   `resources.yaml`. A2 then spent ~15 turns proving it in a test: the fake model can answer
+   `{status: 503}`, but its script is set once per session by `conftest.py`, so the agent read
+   `ResourceHub` and the run store to count calls.
+3. **Manual smoke runs.** Both T1 tracks started `./run.sh`, curled it and killed it by hand after
+   `operonx check` had passed.
+
+## Gate 2 result (E7b)
+
+Run 2026-11-15, harness change and before/after: [cost/E7b.md](cost/E7b.md). Three new tasks after
+T6, each track in its own T6 workspace (A' from the re-run above, B from the 2026-11-15 E7 run), $2.41.
+Rows: [bench/token_ab/results/2026-11-15-gate2.jsonl](../bench/token_ab/results/2026-11-15-gate2.jsonl).
+
+**Gate 2 failed.** All 12 sessions passed on the first try. On the tasks where reuse should win,
+A' cost 2.5× B:
+
+| task | A' | B |
+|---|---|---|
+| T7 `GET /timings` (trace a slow request) | $0.24 · 14 turns | $0.21 · 11 |
+| T8 SSE stream of a model's summary | $0.81 · 49 | $0.21 · 10 |
+| T9 scheduled job + resumable job | $0.67 · 46 | $0.27 · 14 |
+| **all** | **$1.72 · 109** | **$0.68 · 35** |
+
+The causes, from the session logs, in order of cost:
+
+1. **The built-in SSE does not fit a plain text stream (T8, $0.60 over B).** An http door with
+   `Accept: text/event-stream` JSON-encodes each event and sends no closing event. Both tracks
+   found that, dropped to a raw `asgi()` mount, and read operonx's source to stream from a graph by
+   hand: 14 of A2's 23 calls opened `operonx/` files. The guide and the recipes have no
+   "stream a model's text to the caller" entry.
+2. **A test cannot script the model for itself (T9, T5a).** `operonx.bootstrap` is idempotent, so a
+   test that wants the fake model to fail cannot replace `conftest.py`'s script. A1-T9 tried
+   `ResourceHub.set_instance`, leaked the hub into other tests, then edited the live fake's script.
+3. **`operonx check` ends red on things the agent did not cause.** C16 on `SPEC.md` (bench
+   artefact), and the probe of an `asgi("/summaries/")` mount fails because `/summaries` is
+   answered by the StaticFiles at `/`. Both tracks spent their last turns on these and still
+   reported FAIL.
+4. **`env()` casts by the default's type.** `env("SUMMARY_EVERY", 3600)` makes an int, and lint's
+   offline build fills every variable with a placeholder string, so the build failed. The agent
+   passed a string default.
+
+## Outcome
+
+Both gates failed. After K1–K5, an operonx project still costs 1.7× an empty folder on the E7 tasks
+and 2.5× on the reuse tasks, though every session now passes first time (A: 13/14 with 101k doc
+tokens read; A': 14/14 and 12/12 with 15k). The plan's own rule for a failed gate 1 is that
+`operonx init` defaults to the lean form, which K4 made the default.
+
+Spent $9.26 of the $15 cap ($1.21 pilot, $3.41 gate 1, $2.23 re-run, $2.41 gate 2).
+
+The four causes above are cards C39–C42 in the board's Backlog, each with its measured cost. They
+are not in this plan: the owner decides whether a second round (about $5 to re-measure) is worth it.

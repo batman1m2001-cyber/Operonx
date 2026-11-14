@@ -21,13 +21,31 @@ done: tests/internal/cli/test_add_cli.py
 files: operonx/cli/templates/hello/src/greeting.py.tmpl, operonx/cli/templates/chat/src/chat.py.tmpl, operonx/cli/templates/agent/src/assistant.py.tmpl, operonx/cli/add.py, operonx/lint/shape.py, operonx/app/serve/app.py, docs/cost/K4.md
 done: tests/internal/cli/test_init.py, tests/internal/cli/test_add_cli.py, tests/internal/app/serve/test_path_and_status.py
 
-### C37 · E7b Tasks where reuse should win (gate 2) · todo
+### C37 · E7b Tasks where reuse should win (gate 2) · done
+files: bench/token_ab/tasks.py, bench/token_ab/accept.py, bench/token_ab/fake_llm.py, bench/token_ab/run.py, docs/cost/E7b.md
+done: bench/token_ab/results/2026-11-15-gate2.jsonl
 
 ## Backlog
 
 ### C38 · Pooled listeners break on uvicorn 0.54 · todo
 files: operonx/app/serve/balance.py
 done: tests/internal/app/test_declare.py::test_serve_runs_a_pooled_listener_as_worker_processes
+
+### C39 · An http door streams a model's text as plain SSE · todo
+intent: T8 cost A' $0.81 against B $0.21: the built-in SSE JSON-encodes each event and sends no closing event, so agents mount raw ASGI and read operonx's source. A recipe plus a door option for text events.
+files: operonx/app/serve/app.py, operonx/cli/templates/_common/AGENTS.md.tmpl
+
+### C40 · A test scripts the fake model for itself · todo
+intent: T5a and T9 spent ~15 turns each proving a retry: `operonx.bootstrap` is idempotent, so a test cannot replace conftest's script. A fixture or call that sets the script for one test.
+files: operonx/providers/llms/fake.py, operonx/cli/templates/chat/tests/chat/conftest.py.tmpl
+
+### C41 · operonx check: no red on what the agent did not cause · todo
+intent: the asgi-mount probe fails when StaticFiles at / answers the bare prefix; C16 flags files the owner put at the root on purpose (SPEC.md). Both tracks ended gate 2 on FAIL.
+files: operonx/cli/check.py, operonx/lint/shape.py
+
+### C42 · env() with an int default breaks the offline build · todo
+intent: lint fills every variable with a placeholder string, so `env("X", 3600)` raises in the build. Cast after the placeholder, or keep the placeholder typed.
+files: operonx/app/declare.py, operonx/lint/build.py
 
 ## E · One engineering environment — menu, workflow, knowledge, tokens · closed
 plan: docs/ENGINEERING_ENV_PLAN.md · opened: 2026-11-14 · closed: 2026-11-15
