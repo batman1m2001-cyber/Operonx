@@ -12,6 +12,9 @@ title: One engineering environment — the menu, the workflow, the knowledge, th
    that `operonx init` gives every project, whatever the assistant; (2) reusable knowledge — patterns, ops,
    pitfalls — kept by the workflow, not by memory; (3) an objective token comparison: OperonX vs. from
    scratch, same assistant.
+3. BRD point 4, "Project-aware context compaction & on-demand knowledge retrieval" (added the same day):
+   compaction writes the project's state — cards, requirements, decisions, knowledge — not a summary of
+   the chat; a new session rebuilds its context from that state; docs are searched, not injected.
 
 LEAN_PROJECT_PLAN's rule holds: **each phase removes more than it adds**, or the PR says why not.
 
@@ -28,6 +31,8 @@ LEAN_PROJECT_PLAN's rule holds: **each phase removes more than it adds**, or the
 | Any assistant | `AGENTS.md` is the cross-tool file (Codex, Cursor, Copilot, Gemini via config read it); `CLAUDE.md` is `@AGENTS.md` | — |
 | Reusable knowledge, pitfalls | nothing in projects: LESSONS.md / practices.toml went in LEAN L1 | all of BRD 2 |
 | Token comparison | nothing | all of BRD 3 |
+| Compaction into project state | the assistant's `compact` turn is Claude's `/compact`: a summary of the chat, kept in the session; on an account switch `_summarize` seeds a new session with a chat summary | nothing goes to the board, BRD or knowledge; a resumed session carries its whole history (median 25k, max 252k) |
+| On-demand retrieval | `board_status`, `board_card`, `board_plan` (MCP) | every turn carries `knowledge.md` (14.6 KB), the briefing (every graph's first 40 ops) and AGENTS.md (4.5 KB) — ~6k tokens, cached, the same whatever is asked; no search over the BRD, plans, knowledge or guide |
 
 The studio (operonx-studio main 681a3f2): the rail has 7 hubs (Project, Flow, Runs, Monitor, Improve,
 Operate, Settings); Project mode swaps the rail for `#prail` (Now, Board, Git, Files, Terminal,
@@ -61,8 +66,7 @@ its state, `ProjectMode.go` callers rerouted. Same screenshots as #183 (desktop 
 
 ### E3 — The assistant (studio)
 
-- **Auto-compact.** When a turn ends above 100k context, the next turn is preceded by the existing
-  `compact` turn (no new mechanism). Threshold a constant; shown in the chat as the compact item it is.
+- **Auto-compact** moved to E6: it saves into the project, not a chat summary.
 - **Tone.** `knowledge.md`: result first, no recap of what was done, no narration of next steps, no
   headers for a short answer. Net lines down.
 - **Models.** Fable 5.2 `claude-fable-5-2`, Opus 5.5 `claude-opus-5-5`, Sonnet 5.5 `claude-sonnet-5-5`,
@@ -92,7 +96,39 @@ its state, `ProjectMode.go` callers rerouted. Same screenshots as #183 (desktop 
   docs/brd/knowledge.md"; the builder block says the same and says to edit, not append, when a pattern
   is replaced. `operonx lint` warns on an entry whose `where` file is gone (stale knowledge).
 
-### E6 — Does OperonX save tokens? (BRD 3, measurement)
+### E6 — The project is the memory (BRD 4, studio + engine)
+
+The conversation is working memory; the project files are the memory. Example: a 180k conversation
+where the owner decided "retry the TTS twice, not three times" and C31 is half done. Today `/compact`
+keeps a chat summary and the session goes on near 40k+. After E6 the save turn writes the decision to
+`knowledge.md`, C31's outcome so far and next step to the board, and the next turn starts a **new**
+session at ~8k: the rules, a pointer list, and a handoff of a few lines ("doing C31; next: the retry test").
+
+- **Save, then start fresh.** When a turn ends above 100k context (a constant), on `/compact`, or on
+  "New conversation" with unsaved work, the next turn is a *save* turn on the old session: it maps what
+  the conversation produced to where it lives — a card's status/outcome (`board_card`), a new
+  requirement (`docs/brd/requirements/`), a decision, pattern or pitfall (`knowledge.md`, kind
+  `decision` beside E5's `pattern|pitfall|replaced`; no new file), open work (a card in `todo` or
+  `needs you` with the next step). It ends with a handoff ≤ 1 KB (active card, files touched, the open
+  question), stored with the chat. The next turn runs without `--resume`, seeded by the handoff only.
+  The chat shows one "saved to the project" item listing what was written, each a link.
+- **Goes:** Claude's `/compact` for the studio's turns and `_summarize` (the account-switch reseed uses
+  the same save + handoff).
+- **Pointers, not content.** `knowledge.md` keeps what applies every turn (tone, links, safety; target
+  ≤ 4 KB); the rest moves to guide pages read when needed. The briefing names graphs, not their ops (the
+  IR dump path stays). New MCP tools `project_search(query)` — one ranked search over the board, BRD,
+  plans, `knowledge.md` and `.operonx/guide/`, answering heading + 3 lines + `path:line` — and
+  `project_read(path, heading)` for one section. The same search is `operonx-project search <query>`, so
+  an assistant outside the studio has it too; AGENTS.md says search before reading a whole doc.
+- **A new session starts from state**: Now's "New conversation" seeds with `board_status`'s one line,
+  the `doing`/`needs you` cards and the last handoff — nothing from the old transcript.
+- **Gate.** (1) Continuity: on runline-lab, a scripted 3-step conversation (decide, half-build a card,
+  save), then a fresh session asked "where are we, what's next?" answers from the board and handoff
+  (Sonnet, 2 runs). (2) Fixed prompt per turn measured before/after (target ≤ 3k tokens from ~6k).
+  (3) The studio's context meter on the next 20 real turns: max context and $ per conversation against
+  the 69 measured in §1.
+
+### E7 — Does OperonX save tokens? (BRD 3, measurement)
 
 Same assistant both arms: Claude Code headless, **Sonnet 5.5**, one fresh session per task (as real tasks
 are), the same task prompts word for word.
@@ -110,18 +146,22 @@ are), the same task prompts word for word.
   tokens read from docs (Read results on `.operonx/guide/`, AGENTS.md, knowledge.md, chars/4).
 - **Runs:** 2 repetitions per arm → 28 sessions. **Budget cap $40 notional** (`total_cost_usd`, the
   subscription's figure); the runner stops at the cap. Harness in `bench/token_ab/`, outside the package.
+- E6's save + search is in arm A (both arms use the same assistant, so arm B gets plain Claude Code).
 - **Report** in §4: per task and total, both arms, and the verdict — saves, breaks even, or costs more,
   and where (docs read vs. code navigated).
 
 ## 3. Order and gates
 
-E1 → E2 (one UI branch, screenshots) → E3 → E4 → E5 → E6 (it measures E4 + E5).
+E1 → E2 (one UI branch, screenshots) → E3 → E4 → E5 → E6 (needs E5's knowledge.md) → E7 (it measures
+E4–E6).
 
 - Studio: `node --test tests/js/` and `pytest` green; screenshots dark + light, desktop + phone; every
   old address still lands.
 - Engine: `pytest` incl. `tests/guide`; the 18 init shapes green; lint on the projects at 0 stays at 0.
-- E6: the report table filled from real runs, under the cap.
+- E6: the three gates above. E7: the report table filled from real runs, under the cap.
 
 ## 4. Results
 
-(filled per phase)
+- **E1 + E2** (studio #184, bff376a): rail Project · Flow · Runs · Monitor · Settings; `#prail` and
+  the back button gone; Environments and the project page under Settings; old addresses land. 69 lines
+  in, 92 out; 194 JS tests; desk + phone, dark + light.
