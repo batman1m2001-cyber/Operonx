@@ -80,6 +80,7 @@ async def serve_session(
     on_start: Optional[Callable[[Any], None]] = None,
     reply: bool = False,
     resume: Optional[Tuple[str, Dict[str, Any]]] = None,
+    keep: Tuple[str, ...] = (),
 ) -> Any:
     """Run `engine` for one session, and return its handle when it ends.
 
@@ -118,6 +119,9 @@ async def serve_session(
     starting one (``engine.resume(run_id, **options)``: ``answers=``,
     ``retry_failed=``): a job item retried from its failed op, a parked
     service run answered. Everything else is the same.
+
+    ``keep`` names ``$`` keys the reply keeps: an http door keeps
+    ``$status``, which its endpoint turns into the status code.
     """
     request = request or RunRequest()
     scratch = dict(request.scratch)
@@ -174,7 +178,10 @@ async def serve_session(
                     }
                 )
             else:
-                await session.send(plain(out))
+                answer = plain(out)
+                if isinstance(answer, dict):
+                    answer.update({k: out[k] for k in keep if k in out})
+                await session.send(answer)
     finally:
         # A transport whose `close` raises must not turn a completed run
         # into a failed one. Closing is teardown; its failure is reported
@@ -553,6 +560,7 @@ class ServeRunner:
                 on_start=lambda h: _note_trace_id(session, h),
                 reply=doorless,
                 resume=resume,
+                keep=("$status",) if self.spec.kind == "http" else (),
             )
             failed = bool(unhandled(handle.errors))
         except Exception as exc:  # noqa: BLE001

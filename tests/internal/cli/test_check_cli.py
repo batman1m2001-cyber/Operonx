@@ -1,0 +1,131 @@
+"""`operonx check`: lint, tests, graphs and routes in one verdict.
+
+The route checks are the reason it exists: in the token A/B (COST_PLAN), the
+agents' costliest loop was a route another mount answered (`asgi("/tickets")`
+answers `/tickets/`, not `/tickets`; a mount at `/` listed first answers
+every path) found by serving and curling. `check` resolves every route
+through the listener's own router and names what answers it instead.
+
+Each check runs in a subprocess: it imports the project's modules, and two
+generated projects in one process would share `greeting` and `_shared`.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from operonx.cli.main import main
+
+pytestmark = pytest.mark.unit
+
+
+def _project(tmp_path: Path) -> Path:
+    root = tmp_path / "p"
+    assert main(["init", str(root), "--http", "--web"]) == 0
+    return root
+
+
+def _check(root: Path, *args: str) -> subprocess.CompletedProcess:
+    env = {k: v for k, v in os.environ.items() if k not in ("VIRTUAL_ENV", "LLM_API_KEY")}
+    env["PYTHONPATH"] = str(root / "src")
+    return subprocess.run(
+        [sys.executable, "-m", "operonx.cli.main", "check", *args, "."],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+
+def _main_py(root: Path, services: str, extra: str = "") -> None:
+    (root / "app" / "main.py").write_text(
+        '"""The application, rewired for a test."""\n\n'
+        "from operonx.app import Application, Service, asgi\n"
+        "from starlette.staticfiles import StaticFiles\n\n"
+        "from _shared.config import PORT, ROOT\n"
+        "from greeting.jobs import JOBS\n"
+        "from greeting.routes import SERVICES\n"
+        f"{extra}\n"
+        'WEB = Service("web", asgi("/", port=PORT), '
+        'app=StaticFiles(directory=ROOT / "web", html=True))\n\n'
+        f'APP = Application("p", jobs=JOBS, services={services})\n'
+    )
+
+
+def test_a_new_project_checks_clean_and_its_tests_run(tmp_path):
+    root = _project(tmp_path)
+    got = _check(root)
+    assert got.returncode == 0, got.stdout + got.stderr
+    out = got.stdout
+    assert "ok    lint" in out and "ok    build" in out
+    assert "passed" in out.split("tests", 1)[1].splitlines()[0]  # pytest ran
+    assert "POST /greet            reaches service greet" in out
+    assert "GET  /                 200" in out
+    assert out.rstrip().endswith("checks passed")
+
+
+def test_call_calls_a_post_route_filling_what_the_door_says_is_missing(tmp_path):
+    root = _project(tmp_path)
+    got = _check(root, "--call", "--no-tests")
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert "POST /greet            200 with {'id': 'check'}" in got.stdout
+
+
+def test_a_mount_at_root_listed_first_hides_every_route_after_it(tmp_path):
+    root = _project(tmp_path)
+    _main_py(root, "[WEB, *SERVICES]")
+    got = _check(root, "--no-tests")
+    assert got.returncode == 1
+    line = next(x for x in got.stdout.splitlines() if "POST /greet" in x)
+    assert line.split()[0] == "FAIL"
+    assert "by StaticFiles at /, not service greet" in line
+    assert "list it last in APP" in line
+
+
+def test_a_prefix_mount_is_reached_only_with_a_trailing_slash(tmp_path):
+    """The T1 trap: `asgi("/tickets")` around `Route("/")`; `POST /tickets`
+    goes to the static files (which answer 405)."""
+    root = _project(tmp_path)
+    extra = (
+        "from starlette.applications import Starlette\n"
+        "from starlette.responses import JSONResponse\n"
+        "from starlette.routing import Route\n\n\n"
+        "async def create(request):\n"
+        "    return JSONResponse({}, status_code=201)\n\n\n"
+        'TICKETS = Service("tickets", asgi("/tickets", port=PORT), '
+        'app=Starlette(routes=[Route("/", create, methods=["POST"])]))\n'
+    )
+    _main_py(root, "[*SERVICES, TICKETS, WEB]", extra)
+    got = _check(root, "--no-tests")
+    assert got.returncode == 1
+    line = next(x for x in got.stdout.splitlines() if "POST /tickets/" in x)
+    assert "only /tickets/ reaches create; /tickets is answered by StaticFiles at /" in line
+    assert "Make the route a Service with http(...)" in line
+    # and lint names the hand-written route (C14) on its own line
+    assert "[C14]" in got.stdout
+
+
+def test_an_application_that_does_not_load_fails_the_build_and_skips_routes(tmp_path):
+    root = _project(tmp_path)
+    (root / "app" / "main.py").write_text('"""Broken."""\n\nimport no_such_module  # noqa: F401\n')
+    got = _check(root, "--no-tests")
+    assert got.returncode == 1
+    assert "FAIL  build                  the application:" in got.stdout
+    assert "no_such_module" in got.stdout
+    assert "POST /greet" not in got.stdout
+
+
+def test_no_project_is_exit_2(tmp_path):
+    got = subprocess.run(
+        [sys.executable, "-m", "operonx.cli.main", "check", str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert got.returncode == 2 and "no operonx.toml" in got.stderr

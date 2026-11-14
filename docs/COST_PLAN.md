@@ -98,3 +98,23 @@ Done 2026-11-15, board C33. Before/after tree, flow and code changes:
   (a 405, then reading operonx source), so the route recipe now puts full-path routes in one
   Starlette at `/`. That fix was run in a generated project, not re-piloted. The rest is
   building and checking a service, which goes to K3 and K2.
+
+## K3 result
+
+Done 2026-11-15, board C34. Before/after flow and code changes: [cost/K3.md](cost/K3.md).
+
+- **Shipped.** `operonx check [DIR] [--call] [--no-tests]`: lint (baseline held), the tests when
+  there are any, every graph built offline, then every route of every listener resolved through
+  that listener's own Starlette router. A route another app answers fails, and the line names what
+  answers it and the fix. `GET` routes are called. `--call` calls each `POST`/`PUT`/`PATCH` once,
+  with the fields the door asks for and every `llm:` key swapped for the fake model in-process.
+  One line per check, a verdict, exit 1 on a failure. 5.6 s on a fresh `--http --web` project,
+  tests included. AGENTS.md's step 3 and Commands name it.
+- **Scope added: http doors take path parameters and `"$status"`.** The first run of `check` on
+  the K5 test project failed lint C14 on the K5 route recipe: it taught a hand-written Starlette
+  route for `201`/`404`/`GET /x/{id}`, and C14 (every endpoint is a `Service`) refuses those. The
+  bench tasks need all three, and http doors could do none. Rather than weaken C14, the door
+  gained them: `http("GET", "/tickets/{id}")` passes `id`, and an op output `"$status": 404`
+  sets the code. The route recipe is a `Service` again. The K5 "full paths in one Starlette at
+  `/`" text is gone. What stays from it is "list the web mount last", which `check` also catches.
+- **Not measured yet.** Gate 1 (the full A' run, about $2) comes after K2.

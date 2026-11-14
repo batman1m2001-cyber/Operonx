@@ -299,6 +299,13 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   an `http_status` of 400–499 (`class Forbidden(PermissionError):
   http_status = 403`): that status, with the exception's message as
   `error`.
+- A path with parameters, `http("GET", "/tickets/{id}")`, passes them to
+  the graph's parameters too (`id`); a name in both the path and the body is
+  refused `400`.
+- An op that outputs `"$status"` sets the reply's status code, and the key
+  is not sent: `{"ticket": t, "$status": 201}`, or `404` for a ticket that
+  is not there. Without it the reply is `200`. A `$status` that is not a
+  code between 200 and 599 answers `500`.
 - `input="payload"` hands the whole body to that one parameter instead: for a
   payload someone else shapes (a mail server's webhook), whose fields the
   graph does not declare.
