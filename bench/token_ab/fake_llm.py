@@ -5,7 +5,10 @@ messages ask for a summary answers ``SUMMARY: …``. ``POST /_mode {"flaky": tru
 of every distinct request answer 503 (the planted bug of T5a/T5b); ``GET /_calls`` counts the calls.
 For gate 2 (COST_PLAN E7b): ``{"delay_ms": N}`` makes every answer wait N ms (T7), ``{"fail_summary_after":
 N}`` answers 503 to every summary call after the first N (T9), and a ``"stream": true`` call streams the
-text one word per chunk and is counted under ``streamed`` (T8).
+text one word per chunk and is counted under ``streamed`` (T8). ``{"down": true}`` answers 503 to every
+call (the hard probes, COST_PLAN round 3). The growth tasks T10–T17 add three kinds, each by its word
+in the messages after a summary's: ``draft`` → ``DRAFT: …``, ``escalat`` → ``ESCALATION: …``, ``urgency``
+→ ``high`` when the ticket says urgent / asap / immediately / outage, else ``low``.
 
     python fake_llm.py PORT
 """
@@ -22,8 +25,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 KEYWORDS = (("billing", ("refund", "invoice", "charge", "payment")),
             ("account", ("password", "login", "log in", "sign in")),
             ("technical", ("crash", "error", "bug", "broken", "slow")))
-CALLS = {"classify": 0, "summary": 0, "failed": 0, "streamed": 0}
-STATE = {"flaky": False, "seen": set(), "delay_ms": 0, "fail_summary_after": None, "calls": dict(CALLS)}
+URGENT = ("urgent", "asap", "immediately", "outage")
+CALLS = {"classify": 0, "summary": 0, "failed": 0, "streamed": 0, "draft": 0, "escalation": 0, "urgency": 0}
+STATE = {"down": False, "flaky": False, "seen": set(), "delay_ms": 0, "fail_summary_after": None, "calls": dict(CALLS)}
 LOCK = threading.Lock()
 
 
@@ -40,6 +44,13 @@ def answer(messages) -> tuple:
         return "summary", f"SUMMARY: {min(tickets, 99)} line(s) of tickets read."
     users = [_text(m.get("content")) for m in messages if isinstance(m, dict) and m.get("role") == "user"]
     last = (users[-1] if users else "").lower()
+    # the growth tasks (COST_PLAN round 3), each asked for by its word
+    if any("draft" in t.lower() for t in texts):
+        return "draft", "DRAFT: Thank you for writing to us. We are looking into it and will reply soon."
+    if any("escalat" in t.lower() for t in texts):
+        return "escalation", "ESCALATION: this ticket waited too long and needs a senior agent."
+    if any("urgency" in t.lower() for t in texts):
+        return "urgency", "high" if any(w in last for w in URGENT) else "low"
     cat = next((c for c, words in KEYWORDS if any(w in last for w in words)), "other")
     return "classify", cat
 
@@ -67,6 +78,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/_mode"):
             with LOCK:
                 STATE["flaky"] = bool(body.get("flaky"))
+                STATE["down"] = bool(body.get("down"))
                 STATE["seen"].clear()
                 STATE["delay_ms"] = int(body.get("delay_ms") or 0)
                 STATE["fail_summary_after"] = body.get("fail_summary_after")
@@ -78,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
         messages = body.get("messages") or []
         key = hashlib.sha1(json.dumps(messages, sort_keys=True).encode()).hexdigest()
         with LOCK:
-            if STATE["flaky"] and key not in STATE["seen"]:
+            if STATE["down"] or STATE["flaky"] and key not in STATE["seen"]:
                 STATE["seen"].add(key)
                 STATE["calls"]["failed"] += 1
                 return self._json(503, {"error": {"message": "overloaded, try again", "type": "overloaded"}})

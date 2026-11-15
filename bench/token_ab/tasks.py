@@ -48,4 +48,50 @@ E7B = [
            "have no report yet or have tickets newer than their report. Make sure it works before you stop."),
 ]
 
+# Round 3 (COST_PLAN): the project grows. Eight tasks run after T9 in the same workspace
+# (``run.py --tasks T10,...,T17 --ws TRACK=DIR``), each building on what is there.
+GROWTH = [
+    ("T10", "Add support agents. `POST /agents` with `{\"name\", \"categories\"}` (a list of ticket categories) "
+            "answers 201 with `{\"id\", \"name\", \"categories\"}`; `GET /agents` lists them. Tickets get two "
+            "fields: `status` (`open` when created) and `agent` (an agent's id, or null). A new ticket is assigned "
+            "to an agent whose categories include the ticket's category: the one with the fewest open tickets, a "
+            "tie going to the agent created first; null when no agent covers it. Add `GET /tickets/{id}` (404 for "
+            "an unknown id) and `POST /tickets/{id}/close`, which sets `status` to `closed` and answers the "
+            "ticket. Make sure it works before you stop."),
+    ("T11", "Add reply drafts. `POST /tickets/{id}/draft` asks the model to draft a reply to the customer (the "
+            "prompt asks for a draft reply and says the word \"draft\", not \"summary\"; the ticket's text is in the messages) "
+            "and answers `{\"ticket\", \"draft\"}` with the ticket's id and the model's text. The latest draft "
+            "is kept and `GET /tickets/{id}` shows it as `draft`. `GET /tickets/{id}/draft/stream` does the same "
+            "with `\"stream\": true` and streams it as Server-Sent Events the way `/summaries/{date}/stream` "
+            "does (one `data:` event per piece, then `event: done`), keeping the whole text as the draft. Both "
+            "answer 404 for an unknown ticket. Make sure it works before you stop."),
+    ("T12", "Add urgency. When a ticket is created, a second model call rates its urgency: the prompt says the "
+            "word \"urgency\", the ticket's text is the last user message, and the model answers `high` or "
+            "`low`. A ticket gets `urgency`. `GET /tickets` takes optional query filters `category`, `status`, "
+            "`urgency` and `agent`, in any combination, each an exact match, still newest first. Make sure it "
+            "works before you stop."),
+    ("T13", "Add a job `escalate`: every open ticket older than `$SLA_MINUTES` minutes (default 240) that is not "
+            "escalated yet gets an escalation note from the model (the prompt asks for an escalation note and "
+            "says the word \"escalation\", not \"summary\"; the ticket's text is in the messages), and the "
+            "ticket gets `escalated: true`. `GET /escalations` answers `[{\"ticket\", \"note\", \"at\"}]` "
+            "newest first. A ticket is escalated at most once; when the model is down part-way, the next run "
+            "escalates the rest. Make sure it works before you stop."),
+    ("T14", "Add a webhook. When `$WEBHOOK_URL` is set, every ticket created or closed is sent there: a `POST` "
+            "with JSON `{\"event\": \"created\" or \"closed\", \"ticket\": {...}}`. An answer of 5xx, or "
+            "none, is retried, 3 tries in all. The webhook failing never fails the request, nor slows it by more "
+            "than a second. Make sure it works before you stop."),
+    ("T15", "Add search. `GET /tickets/search?q=TEXT` answers the tickets whose text contains TEXT, ignoring "
+            "case, newest first (`[]` when none does). Add a page `GET /search` with a search box that lists the "
+            "matching tickets, linked from `GET /`. Make sure it works before you stop."),
+    ("T16", "Two additions. (1) `GET /tickets.csv`: a CSV download (`text/csv`) with the header "
+            "`id,created,category,urgency,status,agent,text` and one row per ticket, newest first, quoted where "
+            "CSV needs it. (2) A job `agent_digest`: for every agent with open tickets, the model summarises "
+            "that agent's open tickets and the digest is kept; `GET /agents/{id}/digest` answers "
+            "`{\"agent\", \"summary\", \"count\"}`, 404 when there is none. Make sure it works before you stop."),
+    ("T17", "Keep a history of every ticket. Each change is recorded as `{\"event\", \"at\"}`, `event` being one "
+            "of `created`, `assigned` (only when an agent was assigned), `drafted`, `escalated`, `closed`. "
+            "`GET /tickets/{id}/history` answers the list oldest first, 404 for an unknown ticket. Make sure it "
+            "works before you stop."),
+]
+
 FIX = ("A hidden acceptance check of this task failed:\n\n{why}\n\nFix it. Make sure it works before you stop.")
