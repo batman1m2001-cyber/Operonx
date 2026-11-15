@@ -365,3 +365,41 @@ undercounts a session that waited on a background task); the cost was right befo
 the two sessions in flight ($0.46) count in the spend but not in the rows, and the bench resumed
 each track at its last commit with the new `run.py --start TRACK=TASK`. Spent $3.68 this round,
 $12.94 of the $15 cap. Write-up: [cost/R2.md § Measured](cost/R2.md#measured).
+
+## Round 3: why A' costs more, and what cutting it costs in quality (owner, 2026-11-15)
+
+The owner's theory: on a large project operonx should cost less, because the agent reuses more. The
+owner's question: if we cut A's tokens, do we lose correctness or stability?
+
+**What the round-2 logs already show** (free, no model calls):
+
+- A' writes about the same feature code as B. Tasks T2–T9, per track: A' 357–412 lines, B 275–369.
+  On top of that, A' writes ~230 lines of tests; B writes none.
+- A' made 35 test calls and 47 `operonx check` calls; B made 1 and 0. B checks its work with curl
+  (41 calls).
+- Those calls account for about the whole gap: roughly 70 of A's 215 turns, at $0.015 per turn.
+- Reuse shows in lines only on T8: A' 23–33 lines, B 74–79. A' still cost 1.6× there (6 test runs
+  and 6 `check` runs).
+- A'/B by task: 1.7 2.0 1.6 1.4 0.9 1.4 1.6 1.2 1.6 2.7. No downward trend.
+- B's whole app is 363–505 lines at T9. The project never gets large enough for reuse to pay.
+- **Quality baseline.** All four round-2 final workspaces pass every hidden check, T1–T9 (40/40).
+  B's zero tests cost it nothing on the current checks. Those checks are too lenient to measure
+  quality, so this round adds harder ones first.
+
+| step | what | spend |
+|---|---|---|
+| Q | `bench/token_ab/hard.py`: hidden robustness probes, run after a track. Restart keeps data, bad input is a 4xx and not a 500, 20 parallel creates, a model outage survived, a bad date, unicode, a job on an empty store, and every earlier task's check (regression). Baseline on the round-2 workspaces. | $0 |
+| L | Arm L = A' with step 3 of AGENTS.md changed: verify by hand (run it, curl it), write a test only when the task asks, `operonx check` only to explain a failure. 2 tracks × T1–T9. | ~$3 |
+| G | Growth tasks T10–T17 (agents and assignment, reply drafts + stream, urgency + filters, SLA escalation job, webhook with retry, search page, CSV + per-agent digest, ticket history), each with a hidden check. Runs from each arm's T9 workspace: A' ×2, L ×2, B ×2. | ~$13 |
+
+**Gates.** Cost alone decides nothing; a cheaper arm counts only if its quality holds.
+
+- **Quality is a gate.** First-try pass rate, fix sessions, and the hard suite plus regression after
+  T9 and after T17. An arm that loses any probe that another arm passes has lost quality, and its
+  cost is not a win.
+- **L answers "conventions or framework".** If L ≈ B on cost with A'-level quality, the tests and
+  `check` cost the money, not operonx. If L ≈ A', the framework costs it.
+- **G answers "does reuse pay as the project grows".** A'/B and L/B per task on T10–T17, against
+  project size. The theory holds if the ratio falls below 1 on the growth tasks.
+
+Cap $30 for the round (the owner's $40 rule). Write-up: [cost/R3.md](cost/R3.md).
