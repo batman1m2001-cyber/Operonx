@@ -14,6 +14,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,13 +25,19 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import accept  # noqa: E402
-from tasks import E7B, FIX, TASKS  # noqa: E402
+import hard  # noqa: E402
+from tasks import E7B, FIX, GROWTH, TASKS  # noqa: E402
 
 OPERON = HERE.parent.parent
 OPERONX = OPERON / ".venv" / "bin" / "operonx"
 PROJECT_BIN = Path(os.environ.get("OPERONX_PROJECT_BIN", "/home/thanglq/operonx-studio/.venv/bin/operonx-project"))
 DOCS = (".operonx/", "AGENTS.md", "CLAUDE.md", "docs/brd/", "README.md")
 TIMEOUT = 25 * 60
+# arm L (COST_PLAN round 3): A' with AGENTS.md step 3 made lean, verifying the way arm B does
+LEAN_STEP3 = ("3. Verify by hand, the way you would without a framework: start `./run.sh`, call what you\n"
+              "   changed (curl), run the job. Write a test only when the task asks for one.\n"
+              "   `uv run operonx check` is there to explain a failure you cannot see; it is not a\n"
+              "   step of every task.\n")
 
 
 def claude_bin() -> str:
@@ -58,12 +65,17 @@ def setup(track: str, root: Path, bindir: Path) -> Path:
     shutil.rmtree(parent, ignore_errors=True)
     parent.mkdir(parents=True)
     ws = parent / "support"
-    if track.startswith("A"):
+    if track[0] in "AL":
         env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
         subprocess.run([str(OPERONX), "init", "support", "--web", "--http", "--editable", str(OPERON)],
                        cwd=parent, env=env, check=True, capture_output=True, text=True)
     else:
         ws.mkdir()
+    if track.startswith("L"):
+        agents = (ws / "AGENTS.md").read_text()
+        lean = re.sub(r"^3\. Verify with .*?(?=^\S|^$)", LEAN_STEP3, agents, count=1, flags=re.M | re.S)
+        assert lean != agents, "AGENTS.md has no step 3 to make lean"
+        (ws / "AGENTS.md").write_text(lean)
     shutil.copy(HERE / "SPEC.md", ws / "SPEC.md")
     git = ["git", "-c", "user.name=bench", "-c", "user.email=bench@example.invalid"]
     subprocess.run(["git", "init", "-q"], cwd=ws, check=True)
@@ -76,7 +88,7 @@ def session_env(track: str, ws: Path, bindir: Path, llm_port: int, port: int) ->
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("CLAUDE") and k not in ("AI_AGENT", "VIRTUAL_ENV", "PYTHONPATH")}
     path = [p for p in env.get("PATH", "").split(":") if "/.venv/" not in p]
-    if track.startswith("A"):
+    if track[0] in "AL":
         path.insert(0, str(bindir))  # operonx-project, which AGENTS.md tells the agent to use
     env.update(PATH=":".join(path), PORT=str(port), DATA_DIR=str(ws / ".data"),
                LLM_BASE_URL=f"http://127.0.0.1:{llm_port}/v1", LLM_MODEL="fake-model", LLM_API_KEY="test-key")
@@ -89,6 +101,9 @@ def run_session(prompt: str, ws: Path, env: dict, log: Path, resume: str = "") -
            "TodoWrite", "--disallowedTools", "WebFetch", "WebSearch", "--setting-sources", "project,local"]
     if resume:
         cmd += ["--resume", resume]
+    # its own pid namespace: an agent's `pkill -f "operonx serve"` sees only its own processes, never
+    # another track's server or a check's (round 3 found A' services killed by L sessions)
+    cmd = ["unshare", "--pid", "--fork", "--mount-proc", "--kill-child"] + cmd
     t0 = time.time()
     with open(log, "w") as out:
         proc = subprocess.Popen(cmd, cwd=ws, env=env, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
@@ -139,13 +154,14 @@ def read_log(log: Path, seconds: float) -> dict:
 def track(name: str, i: int, args, budget: Budget, results: list, lock: threading.Lock) -> None:
     out = Path(args.out)
     ws = Path(args.ws[name]) if name in args.ws else setup(name, out / "ws", out / "bin")
-    llm_port, port, accept_port = 8870 + 10 * i, 8871 + 10 * i, 8872 + 10 * i
+    b = args.port_base + 10 * i  # the fake model, the agent's service, the checks' service (+3: T14's hook)
+    llm_port, port, accept_port = b, b + 1, b + 2
     fake = subprocess.Popen([sys.executable, str(HERE / "fake_llm.py"), str(llm_port)])
     env = session_env(name, ws, out / "bin", llm_port, port)
     try:
-        order = [t for t, _ in TASKS + E7B]
-        for task, prompt in TASKS + E7B:
-            if task not in args.tasks if args.tasks else task in dict(E7B):
+        order = [t for t, _ in TASKS + E7B + GROWTH]
+        for task, prompt in TASKS + E7B + GROWTH:
+            if task not in args.tasks if args.tasks else task in dict(E7B + GROWTH):
                 continue
             if name in args.start and order.index(task) < order.index(args.start[name]):
                 continue
@@ -175,6 +191,11 @@ def track(name: str, i: int, args, budget: Budget, results: list, lock: threadin
                 print(f"{name} {task} pass={row['pass']} fixed={row['fixed']} ${row['cost']:.2f} "
                       f"turns={row['turns']} docs={row['doc_tokens']} spent=${budget.spent:.2f} {row['why'][:120]}",
                       flush=True)
+        if args.hard:  # the hidden robustness probes and every earlier task, once the track is done
+            upto = [t for t in order if (t in args.tasks if args.tasks else t not in dict(E7B + GROWTH))][-1]
+            for row in hard.probe_all(ws, accept_port, llm_port, upto):
+                with lock, open(out / "hard.jsonl", "a") as f:
+                    f.write(json.dumps({"track": name, **row}) + "\n")
     finally:
         fake.terminate()
 
@@ -187,6 +208,8 @@ def main() -> None:
     ap.add_argument("--cap", type=float, default=40.0)
     ap.add_argument("--ws", default="", help="TRACK=DIR,...: go on in a workspace an earlier run left (gate 2)")
     ap.add_argument("--start", default="", help="TRACK=TASK,...: with --ws, go on from TASK (a run that was cut off)")
+    ap.add_argument("--port-base", type=int, default=8870, help="track i uses BASE+10i .. BASE+10i+3")
+    ap.add_argument("--hard", action="store_true", help="run hard.py's probes on each track when it is done")
     args = ap.parse_args()
     args.ws = dict(p.split("=", 1) for p in args.ws.split(",") if p)
     args.start = dict(p.split("=", 1) for p in args.start.split(",") if p)

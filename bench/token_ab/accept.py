@@ -37,8 +37,8 @@ def _env(ws: Path, port: int, llm_port: int, data: Path) -> Dict[str, str]:
 
 
 @contextmanager
-def service(ws: Path, port: int, llm_port: int, **extra: str):
-    data = Path(tempfile.mkdtemp(prefix="ab-data-"))
+def service(ws: Path, port: int, llm_port: int, data: Path = None, **extra: str):
+    data = data or Path(tempfile.mkdtemp(prefix="ab-data-"))
     env = {**_env(ws, port, llm_port, data), **extra}
     log = open(data.parent / f"{data.name}.server.log", "w")
     proc = subprocess.Popen(["bash", "./run.sh"], cwd=ws, env=env, stdout=log, stderr=subprocess.STDOUT,
@@ -320,7 +320,244 @@ def t9(ws, port, llm):
                 raise Fail(f"after the resumed run, /reports/{k} → {b}")
 
 
-CHECKS = {"T1": t1, "T2": t2, "T3": t3, "T4": t4, "T5a": t5a, "T5b": t5b, "T6": t6, "T7": t7, "T8": t8, "T9": t9}
+# --- Round 3 (COST_PLAN): the growth tasks T10–T17 -------------------------------------------------------
+
+
+def _ok(r: httpx.Response, what: str, codes=(200, 201)):
+    if r.status_code not in codes:
+        raise Fail(f"{what} → {r.status_code} {r.text[:300]}")
+    return r.json()
+
+
+def _agent(c: httpx.Client, name: str, cats: list) -> str:
+    a = _ok(c.post("/agents", json={"name": name, "categories": cats}), f"POST /agents {name}")
+    if a.get("name") != name or a.get("categories") != cats or "id" not in a:
+        raise Fail(f"POST /agents → {a}; want id, name {name!r}, categories {cats}")
+    return a["id"]
+
+
+def t10(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        a1, a2 = _agent(c, "Ann", ["billing"]), _agent(c, "Bob", ["billing", "account"])
+        if len(_ok(c.get("/agents"), "GET /agents")) != 2:
+            raise Fail("GET /agents does not list the 2 agents")
+        b = [_post(c, f"I want a refund for invoice {i}") for i in range(3)]
+        if [t.get("agent") for t in b] != [a1, a2, a1] or any(t.get("status") != "open" for t in b):
+            raise Fail(f"3 billing tickets got agents {[t.get('agent') for t in b]} status "
+                       f"{[t.get('status') for t in b]}; want [{a1}, {a2}, {a1}], open")
+        closed = _ok(c.post(f"/tickets/{b[0]['id']}/close"), "POST /tickets/{id}/close")
+        if closed.get("status") != "closed" or _ok(c.get(f"/tickets/{b[0]['id']}"), "GET /tickets/{id}").get("status") != "closed":
+            raise Fail(f"after close the ticket is {closed}; want status closed")
+        nxt = _post(c, "Please refund the double charge")
+        if nxt.get("agent") != a1:
+            raise Fail(f"after Ann's ticket closed (Ann 1 open, Bob 1 open) a billing ticket went to "
+                       f"{nxt.get('agent')}; want Ann {a1} (a tie goes to the agent created first)")
+        if _post(c, "I forgot my password and cannot log in").get("agent") != a2:
+            raise Fail("an account ticket did not go to Bob, the only agent covering account")
+        if _post(c, "The app crashes when I open settings").get("agent") is not None:
+            raise Fail("a technical ticket (no agent covers it) has an agent; want null")
+        if c.get("/tickets/no-such-id").status_code != 404:
+            raise Fail("GET /tickets/no-such-id is not 404")
+
+
+def t11(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        t = _post(c, "I want a refund for invoice 42")
+        d = _ok(c.post(f"/tickets/{t['id']}/draft"), "POST /tickets/{id}/draft")
+        if str(d.get("ticket")) != str(t["id"]) or not str(d.get("draft", "")).startswith("DRAFT:"):
+            raise Fail(f"POST /tickets/{{id}}/draft → {d}; want ticket {t['id']} and the model's draft")
+        if _ok(c.get(f"/tickets/{t['id']}"), "GET /tickets/{id}").get("draft") != d["draft"]:
+            raise Fail("GET /tickets/{id} does not show the draft")
+        _mode(llm, False, reset=True)
+        ctype, chunks, events = _sse(c, f"/tickets/{t['id']}/draft/stream")
+        text = [x for x in chunks if x.strip() and x.strip() != "[DONE]"]
+        if "text/event-stream" not in ctype or _calls(llm)["streamed"] < 1 or len(text) < 3 \
+                or not "".join(text).lstrip().startswith("DRAFT:") or "done" not in events:
+            raise Fail(f"the draft stream: {ctype!r}, data {chunks[:6]}, events {events}; want SSE pieces of "
+                       f"the model's streamed draft, then event: done")
+        kept = str(_ok(c.get(f"/tickets/{t['id']}"), "GET /tickets/{id}").get("draft", ""))
+        if "".join(kept.split()) != "".join("".join(text).split()):  # the framing may move spaces
+            raise Fail(f"after the stream the kept draft is {kept[:80]!r}; want the streamed text")
+        if c.post("/tickets/no-such-id/draft").status_code != 404:
+            raise Fail("POST /tickets/no-such-id/draft is not 404")
+
+
+def t12(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        a = _post(c, "URGENT: the payment failed twice, refund asap")
+        b = _post(c, "A question about my invoice")
+        t = _post(c, "The app crashes, this is urgent")
+        if [x.get("urgency") for x in (a, b, t)] != ["high", "low", "high"]:
+            raise Fail(f"urgency {[x.get('urgency') for x in (a, b, t)]}; want high, low, high")
+        q = lambda s: [x.get("id") for x in _ok(c.get(f"/tickets?{s}"), f"GET /tickets?{s}")]
+        if q("urgency=high") != [t["id"], a["id"]]:
+            raise Fail(f"GET /tickets?urgency=high → {q('urgency=high')}; want [{t['id']}, {a['id']}]")
+        if q("category=billing&urgency=low") != [b["id"]] or len(q("status=open")) != 3 or q("category=account"):
+            raise Fail("GET /tickets filters (category=billing&urgency=low, status=open, category=account) are wrong")
+
+
+def t13(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        _post(c, "I want a refund for invoice 42")
+        _mode(llm, False, reset=True)
+        job("escalate")
+        if _calls(llm)["escalation"] or _ok(c.get("/escalations"), "GET /escalations"):
+            raise Fail("with the default SLA (240 min) a new ticket was escalated")
+    with service(ws, port, llm, SLA_MINUTES="0") as (c, job, data):
+        ids = [_post(c, x)["id"] for x in ("I want a refund for invoice 42", "The app crashes when I open settings",
+                                           "I forgot my password and cannot log in")]
+        _ok(c.post(f"/tickets/{ids[2]}/close"), "POST /tickets/{id}/close")
+        _mode(llm, False, reset=True, down=True)
+        try:
+            job("escalate", check=False)
+        finally:
+            _mode(llm, False)
+        job("escalate")
+        esc = _ok(c.get("/escalations"), "GET /escalations")
+        if sorted(str(e.get("ticket")) for e in esc) != sorted(map(str, ids[:2])) \
+                or not all(str(e.get("note", "")).startswith("ESCALATION:") for e in esc):
+            raise Fail(f"after a run with the model down and one with it back, /escalations → {esc}; want the 2 "
+                       f"open tickets {ids[:2]}, each once, with the model's note")
+        _mode(llm, False, reset=True)
+        job("escalate")
+        if _calls(llm)["escalation"] or not _ok(c.get(f"/tickets/{ids[0]}"), "GET /tickets/{id}").get("escalated"):
+            raise Fail("a third run called the model again, or the ticket does not say escalated: true")
+
+
+class _Hook:
+    """A webhook receiver: the first *fail* answers are 500."""
+
+    def __init__(self, port: int):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        self.hits, self.fail, hook = [], 0, self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                import json as _j
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                try:
+                    hook.hits.append(_j.loads(body or b"{}"))
+                except ValueError:
+                    hook.hits.append({"raw": body[:100].decode(errors="replace")})
+                code = 500 if hook.fail > 0 else 200
+                hook.fail -= 1
+                self.send_response(code)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", port), H)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def wait(self, pred, secs: float = 20.0) -> list:
+        end = time.time() + secs
+        while time.time() < end:
+            got = [h for h in self.hits if pred(h)]
+            if got:
+                time.sleep(1.0)  # let any extra tries land
+                return [h for h in self.hits if pred(h)]
+            time.sleep(0.2)
+        return []
+
+
+def t14(ws, port, llm):
+    hook = _Hook(port + 3)
+    try:
+        with service(ws, port, llm, WEBHOOK_URL=f"http://127.0.0.1:{port + 3}/hook") as (c, job, data):
+            hook.fail = 1
+            t = _post(c, "I want a refund for invoice 42")
+            mine = lambda ev, tid: (lambda h: h.get("event") == ev and str((h.get("ticket") or {}).get("id")) == str(tid))
+            got = hook.wait(mine("created", t["id"]))
+            if len(got) != 2:
+                raise Fail(f"a created ticket whose webhook answered 500 once reached it {len(got)} time(s); want 2 "
+                           f"(the 500, then the retry). Hits: {hook.hits[:4]}")
+            hook.fail = 99
+            t0 = time.time()
+            t2 = _post(c, "The app crashes when I open settings")
+            if time.time() - t0 > 2.5:
+                raise Fail(f"with the webhook failing, POST /tickets took {time.time() - t0:.1f} s")
+            time.sleep(12)
+            n = len([h for h in hook.hits if mine("created", t2["id"])(h)])
+            if n != 3:
+                raise Fail(f"a webhook that always answers 500 got {n} tries for one ticket; want 3")
+            hook.fail = 0
+            _ok(c.post(f"/tickets/{t['id']}/close"), "POST /tickets/{id}/close")
+            if not hook.wait(mine("closed", t["id"])):
+                raise Fail("closing a ticket did not send a closed event")
+    finally:
+        hook.server.shutdown()
+
+
+def t15(ws, port, llm):
+    with service(ws, port, llm) as (c, job, data):
+        a = _post(c, "I want a REFUND for invoice 42")
+        _post(c, "The app crashes when I open settings")
+        b = _post(c, "Please refund the double charge")
+        got = [x.get("id") for x in _ok(c.get("/tickets/search?q=refund"), "GET /tickets/search?q=refund")]
+        if got != [b["id"], a["id"]]:
+            raise Fail(f"GET /tickets/search?q=refund → {got}; want [{b['id']}, {a['id']}] (any case, newest first)")
+        if _ok(c.get("/tickets/search?q=zebra"), "GET /tickets/search?q=zebra") != []:
+            raise Fail("GET /tickets/search?q=zebra is not []")
+        import json as _j
+        n = _j.loads(_render(f"http://127.0.0.1:{port}/search", "document.querySelectorAll('input').length"))
+        if not n:
+            raise Fail("GET /search has no search box (no <input>)")
+        links = _j.loads(_render(f"http://127.0.0.1:{port}/",
+                                 "[...document.querySelectorAll('a')].map(a => a.getAttribute('href') || '')"))
+        if not any("search" in h for h in links):
+            raise Fail(f"/ has no link to /search: {links}")
+
+
+def t16(ws, port, llm):
+    import csv
+    import io
+    with service(ws, port, llm) as (c, job, data):
+        a1 = _agent(c, "Ann", ["billing"])
+        odd = 'Refund, please: "invoice 42"\nthanks'
+        x = _post(c, odd)
+        _post(c, "Please refund the double charge")
+        _post(c, "The app crashes when I open settings")
+        r = c.get("/tickets.csv")
+        if r.status_code != 200 or "text/csv" not in r.headers.get("content-type", ""):
+            raise Fail(f"GET /tickets.csv → {r.status_code} {r.headers.get('content-type')}")
+        rows = list(csv.reader(io.StringIO(r.text)))
+        if rows[0] != ["id", "created", "category", "urgency", "status", "agent", "text"] or len(rows) != 4:
+            raise Fail(f"GET /tickets.csv header {rows[0]} and {len(rows) - 1} rows; want the 7 columns, 3 rows")
+        if rows[3][0] != str(x["id"]) or rows[3][6] != odd or rows[3][2] != "billing":
+            raise Fail(f"the oldest CSV row is {rows[3]}; want the ticket with commas/quotes/newline intact")
+        job("agent_digest")
+        d = _ok(c.get(f"/agents/{a1}/digest"), "GET /agents/{id}/digest")
+        if str(d.get("agent")) != str(a1) or d.get("count") != 2 or not str(d.get("summary", "")).startswith("SUMMARY:"):
+            raise Fail(f"GET /agents/{{id}}/digest → {d}; want agent {a1}, count 2, the model's summary")
+        a2 = _agent(c, "Cid", ["other"])
+        job("agent_digest")
+        if c.get(f"/agents/{a2}/digest").status_code != 404:
+            raise Fail("an agent with no open tickets has a digest; want 404")
+
+
+def t17(ws, port, llm):
+    with service(ws, port, llm, SLA_MINUTES="0") as (c, job, data):
+        _agent(c, "Ann", ["billing"])
+        t = _post(c, "I want a refund for invoice 42")
+        _ok(c.post(f"/tickets/{t['id']}/draft"), "POST /tickets/{id}/draft")
+        job("escalate")
+        _ok(c.post(f"/tickets/{t['id']}/close"), "POST /tickets/{id}/close")
+        h = _ok(c.get(f"/tickets/{t['id']}/history"), "GET /tickets/{id}/history")
+        ev = [x.get("event") for x in h]
+        if ev != ["created", "assigned", "drafted", "escalated", "closed"] or not all(x.get("at") for x in h):
+            raise Fail(f"history {ev}; want created, assigned, drafted, escalated, closed, each with `at`")
+        u = _post(c, "The app crashes when I open settings")
+        if [x.get("event") for x in _ok(c.get(f"/tickets/{u['id']}/history"), "history")] != ["created"]:
+            raise Fail("an unassigned ticket's history is not just [created]")
+        if c.get("/tickets/no-such-id/history").status_code != 404:
+            raise Fail("GET /tickets/no-such-id/history is not 404")
+
+
+CHECKS = {"T1": t1, "T2": t2, "T3": t3, "T4": t4, "T5a": t5a, "T5b": t5b, "T6": t6, "T7": t7, "T8": t8, "T9": t9,
+          "T10": t10, "T11": t11, "T12": t12, "T13": t13, "T14": t14, "T15": t15, "T16": t16, "T17": t17}
 
 
 def check(task: str, ws: Path, port: int, llm_port: int) -> Tuple[bool, str]:

@@ -403,3 +403,30 @@ owner's question: if we cut A's tokens, do we lose correctness or stability?
   project size. The theory holds if the ratio falls below 1 on the growth tasks.
 
 Cap $30 for the round (the owner's $40 rule). Write-up: [cost/R3.md](cost/R3.md).
+
+## Round 3 result
+
+Run 2026-11-15, 2 tracks per arm. Spent **$17.16** of $30: L $3.34, G $7.37, a G run spoiled by a
+bench bug $6.35, a namespace smoke test $0.10. Write-up: [cost/R3.md](cost/R3.md) (tables, the
+same feature in both arms, the bench bug). Rows: `bench/token_ab/results/2026-11-15-round3-*.jsonl`.
+
+| | first try | hard probes | regression T1–T17 | $ T1–T9 | $ T10–T17 |
+|---|---|---|---|---|---|
+| A' | 35/36 | 8/9 ×2 | all pass | $3.23 | $3.47 |
+| L | 34/36 | 9/9, 8/9 | all pass | $3.34 | $3.90 |
+| B | 36/36 | 9/9 ×2 | all pass | $1.99 | $2.16 |
+
+- **Quality gate.** L kept A's quality (one more fix session out of 36, inside the noise) but did not
+  get cheaper, so it is no win. B has the best quality on every measure with 0 tests.
+- **L: conventions or framework?** Both. Step 3 cut `operonx check` calls 47 → 14, yet pytest runs
+  went 40 → 44: the rest of AGENTS.md and the scaffold's test still pull the agent to write tests.
+  And operonx code is ~1.5× B's for the same features (T10–T17: ~700 lines vs ~460), an op + graph +
+  `Service` per route.
+- **G: does reuse pay as the project grows?** No. A'/B stays at 1.6 (T1–T9 1.62, T10–T17 1.61) as
+  the app grows from ~550 to ~1250 lines; no later task reused an earlier graph.
+- **Found on the way.** (1) The http door does not check a body field's type: `{"text": 5}` is
+  stored with a 201 on 3 of 4 operonx tracks (B: 400). (2) The bench let one track's
+  `pkill -f "operonx serve"` kill another's server; sessions now run in their own pid namespace.
+
+Not changed in operonx this round; what to do about (1), the per-route wrapper and the test pull is
+the owner's call.
