@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.39.0] - 2026-11-20
+
 ### Added
 
 - **`@op(reads=..., writes=...)`: an op declares the stores it reads and writes (PROJECT_DECLARATIONS_PLAN D1).** A store is a name the project gives a table, a queue or a folder: `@op(writes="inbox")`, `@op(reads=["inbox", "events"])`, or the same keywords at the call. The engine keeps them on the op (`op.reads`, `op.writes`, tuples) and does nothing else: no I/O is intercepted or checked. They are for a project picture, which draws `flow → store → flow` from them — how two flows that never call each other work together.
