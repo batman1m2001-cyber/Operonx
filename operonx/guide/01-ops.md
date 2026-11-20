@@ -89,6 +89,12 @@ frames, a long stream) frees each item once it is consumed, so memory stays
 flat. A transient output may have only one consumer, cannot feed a
 `PARENT.declare` cell, and cannot be `.collect()`ed.
 
+**Stores:** an op that reads or writes the project's own data says which:
+`@op(writes="inbox")`, `@op(reads=["inbox", "events"])`. A store is a name (a
+table, a queue, a folder); the engine does nothing with it. The studio's
+project picture draws `flow → store → flow` from these, which is how two
+flows that never call each other are seen to work together.
+
 ## `@graph` — a graph, and a graph inside a graph
 
 A `@graph` function wires ops. Its parameters are the graph's inputs, and

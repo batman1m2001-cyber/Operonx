@@ -46,6 +46,8 @@ def op(
     door: Optional[str] = None,
     retry: Optional[Retry] = None,
     timeout: Optional[Timeout] = None,
+    reads: Optional[Any] = None,
+    writes: Optional[Any] = None,
 ) -> Any:
     """Decorator that turns a plain function into a FuncOp factory.
 
@@ -104,6 +106,12 @@ def op(
             or writes to it. ``@op(door="egress")`` on a project's own door
             op is all a service and the studio need to find it; the built-in
             ``ingress()`` / ``egress()`` declare it the same way.
+        reads, writes: the project's stores this op reads and writes, by name
+            (a table, a queue, a folder): ``@op(writes="inbox")``,
+            ``@op(reads=["inbox", "events"])``. A declaration, not a check:
+            the engine does nothing with it, and a project picture draws
+            ``flow → store → flow`` from it — how two flows that never call
+            each other work together.
         retry: ``Retry(...)`` — run the op again when it fails with an error
             worth another try (by default a timeout, a connection error, an
             HTTP 429 or 5xx), after a growing pause. A generator is retried
@@ -158,6 +166,8 @@ def op(
             op_transient = init_kwargs.pop("transient", transient)
             op_show_keys = init_kwargs.pop("show_keys", show_keys)
             op_door = init_kwargs.pop("door", door)
+            op_reads = init_kwargs.pop("reads", reads)
+            op_writes = init_kwargs.pop("writes", writes)
             op_retry = init_kwargs.pop("retry", retry)
             op_timeout = init_kwargs.pop("timeout", timeout)
             eff_exclude = call_exclude if call_exclude is not None else exclude
@@ -172,6 +182,8 @@ def op(
                 transient=op_transient,
                 show_keys=op_show_keys,
                 door=op_door,
+                reads=op_reads,
+                writes=op_writes,
                 retry=op_retry,
                 timeout=op_timeout,
                 _mappings=mappings or None,
