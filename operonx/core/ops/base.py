@@ -80,6 +80,17 @@ _MISSING = object()
 _OBS_VALID_CHANNELS = frozenset({"trace", "checkpoint", _OBS_KEY_WILDCARD})
 
 
+def _normalise_names(what: str, value) -> Tuple[str, ...]:
+    """``reads=`` / ``writes=`` accept one store name or a sequence; stored as a tuple, in order, once each."""
+    if value is None:
+        return ()
+    names = (value,) if isinstance(value, str) else tuple(value)
+    for n in names:
+        if not isinstance(n, str) or not n.strip():
+            raise TypeError(f"{what} takes a store name or a sequence of names, got {n!r}")
+    return tuple(dict.fromkeys(n.strip() for n in names))
+
+
 def _normalise_show(value) -> Tuple[str, ...]:
     """``show_keys=`` accepts one key or a sequence of keys; stored as a tuple."""
     if value is None:
@@ -372,6 +383,11 @@ class BaseOp(ABC):
         # "ingress" | "egress" | None — this op is where a served graph meets
         # its caller. See door_default.
         "door",
+        # Tuples of names: the project's stores this op reads and writes (a
+        # table, a queue, a folder). Declared, never checked by the engine —
+        # a project picture draws flow → store → flow from them.
+        "reads",
+        "writes",
         # frozenset of the output keys this op can produce, when that is
         # known before it runs (a function returning dict literals), else
         # None. Graph validation checks every Ref to the op against it.
@@ -433,6 +449,8 @@ class BaseOp(ABC):
         door: Optional[str] = None,
         retry=None,
         timeout=None,
+        reads: Union[str, Sequence[str], None] = None,
+        writes: Union[str, Sequence[str], None] = None,
     ):
         if bound not in self._VALID_BOUNDS:
             raise ValueError(
@@ -463,6 +481,8 @@ class BaseOp(ABC):
         if door not in self._VALID_DOORS:
             raise ValueError(f"door must be 'ingress', 'egress' or None, got {door!r}")
         self.door = door
+        self.reads = _normalise_names("reads", reads)
+        self.writes = _normalise_names("writes", writes)
 
         # Phase 2: observability filter. Normalised to dict form:
         #   {"*": [vars]}                  — apply to both observers

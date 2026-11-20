@@ -37,6 +37,9 @@ _BASE_INIT_KEYS = frozenset(
         "show_keys",
         # The op's door — `my_op(..., door="egress")` reaches the constructor.
         "door",
+        # The stores the op reads and writes — `my_op(..., writes="inbox")`.
+        "reads",
+        "writes",
         # Phase 3 graph-only kwargs — routed to GraphOp.__init__ instead of
         # silently landing in the input mapping (BUG 6 from Phase 3 review).
         "strict_dag",
