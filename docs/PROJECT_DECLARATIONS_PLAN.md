@@ -1,6 +1,6 @@
 # Project declarations plan
 
-**Status:** D1 done (this PR). D2–D4 open.
+**Status (2026-11-20):** D1, D2 and D4 done; D3 done for the callbot, qc-snatcher and both meeting-prep projects, mr-finance on its branch `decl/stores`.
 
 **Why.** The studio's Factory picture shows a project as flows round a core, but a person cannot read
 from it how the flows work together, what each is for, or what travels between them (the owner's review,
@@ -54,3 +54,19 @@ flowchart LR
 - `operonx/core/ops/transform/func_op.py`: `@op(reads=, writes=)`, overridable at the call.
 - `operonx/core/ops/_shortcuts.py`: the two keywords are settings, not inputs.
 - `tests/internal/core/ops/test_reads_writes.py`: 3 tests; `tests/internal/core` + `tests/spec`: 1,658 pass.
+
+## D2–D4 — result
+
+- **D2** operonx-studio #214: the IR carries `graph.description`, `node.reads` / `node.writes`, `stores[]`. Write-up: operonx-studio `docs/FACTORY_DECLARATIONS.md`.
+- **D3**, widened by the owner to every project the studio opens (each also has its board, `docs/brd/board.md`):
+
+  | project | stores | where |
+  |---|---|---|
+  | educa-reminder-agent | `calls` | 63c7532 on `refactor/operonx-studio` |
+  | meeting-prep-operonx | `drafts`, `memory` | meeting-prep-projects #15 |
+  | meeting-prep-brd | `approvals`, `reports`, `kb`, `memory`, `audit` | meeting-prep-projects #15 |
+  | qc-snatcher | `corpus`, `runs`, `traces`, `baseline` | qc-snatcher #5 |
+  | mr-finance | 16, derived from the SQL each op reaches (`scripts/stores.py`, checked by a test) | branch `decl/stores` |
+
+  The lint check stayed in the project (mr-finance's `scripts/stores.py`): which tables make a store is the project's knowledge.
+- **D4** operonx-studio #215: the Factory tab, the stores in the middle, the data lines, the card. Write-up: operonx-studio `docs/FACTORY_PANELS.md`. Left out: a line cannot be clicked (what moves along it is in the card of either end); a store only jobs use is not drawn.
