@@ -151,6 +151,44 @@ async def test_an_op_with_an_inline_prompt_records_nothing_new(project):
     assert "prompts" not in next(n for n in handle.trace.nodes if n.op_name == "s").attrs
 
 
+async def test_a_prompt_rendered_upstream_is_named_on_the_llm_ops_row(project):
+    """The prompt is chosen at run time (an op renders it); the LLM op that
+    is handed the text still says which prompt, and which included one."""
+    import copy
+    import pickle
+
+    from operonx.core import op
+
+    @op
+    def compose(customer: str):
+        inner = prompt("ask").render(question="why?")
+        return {"system": prompt("intake.system").render(customer=inner)}
+
+    @graph
+    def flow(customer):
+        c = compose(customer=customer)
+        s = LLMOp.of(
+            resource="assistant", prompt={"system": "{sys}", "user": "hello"}, sys=c["system"]
+        )
+        START >> c >> s >> END
+
+    with fake_model("fine") as model:
+        handle = Operon(flow, params={"customer": None}).start({"customer": "Lan"})
+        await handle.result()
+    sent = model.calls[0]
+    sent = sent.get("messages", sent) if isinstance(sent, dict) else sent
+    assert sent[0]["content"] == 'You help Q: why?.\nAnswer with JSON only: {"ok": true}'
+    row = next(n for n in handle.trace.nodes if n.op_name == "s")
+    assert [(r["input"], r["name"]) for r in row.attrs["prompts"]] == [
+        ("sys", "intake.system"),
+        ("sys", "ask"),
+    ]
+
+    r = prompt("ask").render(question="x")
+    assert r == "Q: x" and r.refs == (prompt("ask").ref,)
+    assert pickle.loads(pickle.dumps(r)).refs == r.refs and copy.deepcopy(r).refs == r.refs
+
+
 def test_publish_label_diff_from_the_command_line(project, capsys):
     from operonx.cli.prompt import main
     from operonx.prompts import publish, set_label, versions

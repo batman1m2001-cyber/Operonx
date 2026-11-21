@@ -315,6 +315,14 @@ assert row.attrs["prompts"][0]["name"] == "intake.system"  # the run says which 
 - Every run row of that op carries `attrs.prompts`: `[{part, name, version,
   label, hash}]` (`version` is `None` for the working text; `hash` is of the
   text).
+- **A prompt chosen at run time.** When which prompt to send is only known in
+  a call (one per agent, per state), an op renders it and hands the text on:
+  `return {"system": prompt(f"{agent}/analyzer").render(rules=rules)}`, then
+  `LLMOp.of(prompt={"system": "{system}", ...}, system=ctx["system"])`. What
+  `.render` returns is a string that remembers the prompts it was made from,
+  so the LLM op's row still says them: `attrs.prompts = [{input: "system",
+  name, version, label, hash}]`. A prompt given as a value to another's
+  `.render` is listed too.
 
 ## Agents — a model that calls tools
 

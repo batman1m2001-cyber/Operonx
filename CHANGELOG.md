@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.41.0] - 2026-11-21
+
+### Added
+
+- **A prompt chosen at run time is still named on the run row (PROMPTS_PLAN P4).** `prompt("x").render(...)` returns a `RenderedPrompt`: the text, and the prompts it was made from (`.refs` — itself, and any prompt or rendered prompt among its values). An `LLMOp` handed one as an input records them: `attrs.prompts = [{input, name, version, label, hash}]`, after the prompts named in `prompt=`. Before, only a prompt named when the graph was built was recorded, so a project that picks its prompt per call (a callbot: one per agent, per state) had rows that did not say which text they were given. A frame can carry attrs for its row (`frame.attrs`), which is how the op says it.
+
 ## [1.40.0] - 2026-11-21
 
 ### Added

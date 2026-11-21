@@ -436,6 +436,10 @@ class _Frame:
         # None until one is. Recorded on this frame's trace node as
         # attrs["operonx.call_retries"].
         "retries",
+        # What the code here said of this execution, for its run row
+        # (`note_attrs`); None until something is. An LLM op notes the
+        # prompts its inputs were rendered from.
+        "attrs",
     )
 
     def __init__(
@@ -456,6 +460,7 @@ class _Frame:
         self.item: Optional[int] = None
         self.counts: Optional[Dict[str, int]] = None
         self.retries: Optional[List[Dict[str, Any]]] = None
+        self.attrs: Optional[Dict[str, Any]] = None
 
     def child_base(self) -> Tuple[str, ...]:
         """The ctx of the record a child opened now hangs under."""

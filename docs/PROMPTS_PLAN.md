@@ -1,6 +1,6 @@
 # Prompts plan — one home, names, versions
 
-Status: **approved 2026-11-21, in progress.** P1 and P2 are in operonx 1.40.0 (`operonx.prompts`, `operonx prompt`, `attrs.prompts` on the run row); P3–P5 follow. Written when nothing was built. The owner asked for it after the studio's Prompts page showed no prompt text and took most of a minute.
+Status: **done 2026-11-21 (P1–P5).** P1 and P2 are operonx 1.40.0 (`operonx.prompts`, `operonx prompt`, `attrs.prompts` on the run row); 1.41.0 added the prompt chosen at run time (P4 needed it). P3 is operonx-studio #228. P4 is the callbot's `prompts/` and `agent.yaml`. P5 is mr-finance's `prompts/`, with one part deliberately not done (see Outcome). P6 was not asked for. Written when nothing was built. The owner asked for it after the studio's Prompts page showed no prompt text and took most of a minute.
 
 ## Why
 
@@ -64,6 +64,23 @@ prompts/labels.toml                 [intake.system] production = 3, staging = 4
 | P6 mirror | optional Langfuse push/pull | a published version appears in Langfuse with the same number and label |
 
 Order: P1 → P2 → P3 → P4 → P5; P6 only if someone asks.
+
+## Outcome
+
+| Part | Where | What it came to |
+|---|---|---|
+| P1, P2 | operonx 1.40.0 (#292) | `prompts/<name>.md`, `{{var}}`, `{{> include}}`, versions as files, labels in `labels.toml`, `operonx prompt list/show/publish/label/diff/log`, `attrs.prompts` on the run row. |
+| P3 | operonx-studio #228, `docs/PROMPTS_PAGE.md` there | The Prompts page lists the named prompts with text, versions, labels, diff, save / publish / serve. The list answers in 51 ms on the callbot. |
+| P4 | callbot, `docs/PROMPTS.md` there; operonx 1.41.0 | `prompts.yaml` is `agent.yaml`; five prompt files (`<agent>/analyzer`, `classifier/system`, `classifier/user`). All 28 per-state system prompts and the user message are the same bytes (golden test); 338 tests pass (335 + 3). |
+| P5 | mr-finance, `docs/PROMPTS.md` there | 16 prompt files; 10 constants read them; all the same bytes (golden test). |
+
+Three things differ from the table above:
+
+- **P1's `operonx check` rule is the build itself.** `prompt("x")` raises `PromptNotFound` when the graph is built, which `operonx check` already runs; no separate rule was added.
+- **P4: the per-state prompt is a template filled by code, not by `{{> intent_definitions}}`.** The intents, examples and rules are the agent's data in `agent.yaml`, different per state, so they are variables (`{{intent_definitions}}`), not included prompts. And because the callbot chooses its prompt per call, the op could not name it when the graph is built: 1.41.0 makes `.render()` return a string that remembers its prompts, and the LLM op records them (`attrs.prompts[].input`).
+- **P5: the governed CIO prompts keep their database history; the label does not gate them.** `prompts/cio/` is version 1 of the `prompts` configuration kind. Its later versions are made by an Admin in the running app (two people, the eval set). Writing those into `prompts/labels.toml` would have a running server edit its own checkout, which a `git pull` deploy then conflicts with. The existing gate is unchanged; the admin screen shows the same history because nothing about it moved.
+
+Left open: the studio still lists a resource's YAML file whose field is named like a prompt (built for the callbot's `prompts.yaml`, now unused by it); `operonx init --template chat` still writes a `SYSTEM` constant; operonx-agents on PyPI (0.3.1) predates `Agent(instructions=prompt(...))`, so mr-finance passes `.text`.
 
 ## Open choices (my pick first)
 

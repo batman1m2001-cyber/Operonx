@@ -42,9 +42,19 @@ from operonx.core.states.cell import DEFAULT_CONTEXT
 def _attrs_of(op: Any, frame: Any) -> Dict[str, Any]:
     """What a run row says of this execution beyond its inputs and outputs:
     what the op declared of itself when it was built (``_record_attrs`` —
-    an LLM op's prompts, by name and version) and the frame's retries."""
+    an LLM op's prompts, by name and version), what this execution noted
+    on its frame (``frame.attrs``) and the frame's retries."""
     declared = getattr(op, "_record_attrs", None)
     attrs = dict(declared) if declared else {}
+    noted = getattr(frame, "attrs", None) if frame is not None else None
+    if noted:
+        for key, value in noted.items():
+            # a list adds to what the op declared (its named prompts, then
+            # the ones this execution's inputs were rendered from)
+            if isinstance(value, list) and isinstance(attrs.get(key), list):
+                attrs[key] = attrs[key] + [v for v in value if v not in attrs[key]]
+            else:
+                attrs[key] = value
     return _with_retries(attrs, frame) if frame is not None and frame.retries else attrs
 
 
