@@ -1,5 +1,5 @@
-"""The chat feature in one file: its prompt, its logic (ops), its wiring (a
-graph), its job{{#http}} and its route{{/http}}.
+"""The chat feature in one file: its logic (ops), its wiring (a graph),
+its job{{#http}} and its route{{/http}}.
 
 Split it into a src/chat/ folder only when it passes ~300 lines
 (AGENTS.md says how)."""
@@ -9,11 +9,13 @@ from operonx import END, START, graph, op
 from operonx.app import Service, http
 {{/http}}
 from operonx.app.jobs import Job
+from operonx.prompts import prompt
 from operonx.providers.ops import LLMOp
 
-from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}
+from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}, ROOT
 
-SYSTEM = "You are a helpful assistant. Answer in at most three sentences."
+# the text is prompts/chat/system.md; `operonx prompt publish chat/system` keeps its versions
+SYSTEM = prompt("chat/system", root=ROOT)
 
 
 @op
