@@ -30,6 +30,12 @@ Versions and labels, as Langfuse has them, are files beside the text::
 label gives its working text. So nothing changes for a project that never
 publishes, and rolling back is moving a label.
 
+A running service was built from files as they were. With a prompt store set
+(``[prompts] store`` in ``operonx.toml`` — a Postgres address), published
+versions and labels are also copied there and ``prompt(name)`` serves what the store's label
+points at — :mod:`operonx.prompt_store`. The files stay the one place a
+prompt is written.
+
 Braces: only ``{{name}}`` is a variable. Any other brace is text — the JSON
 a prompt shows the model needs no escaping, which is why this is not
 ``str.format``.
@@ -311,11 +317,31 @@ def prompt(
     chosen = label or os.environ.get("OPERONX_PROMPT_LABEL") or DEFAULT_LABEL
     used: Optional[str] = None
     if version is None:
-        version = labels(base.parent).get(name, {}).get(chosen)
+        version, raw = _labelled(base, name, chosen)
         used = chosen if version is not None else None
-    meta, body = _split(_read(base, name, version))
+    else:
+        raw = _read(base, name, version)
+    meta, body = _split(raw)
     body = _include(base, body, chosen, (name,))
     return PromptText(body.strip("\n"), name=name, version=version, label=used, meta=meta)
+
+
+def _labelled(base: Path, name: str, label: str) -> Tuple[Optional[int], str]:
+    """``(version, file text)`` *label* serves for *name*: what the prompt
+    store says when one is set and has that label (:mod:`operonx.prompt_store`
+    — a version published since this checkout was built is served from
+    there), else what the files say; ``(None, working text)`` for a prompt
+    without the label."""
+    from operonx import prompt_store
+
+    if prompt_store.configured(base.parent):
+        if not _NAME.match(name):
+            _read(base, name, None)  # says why
+        got = prompt_store.served(name, label, base.parent)
+        if got is not None:
+            return got
+    version = labels(base.parent).get(name, {}).get(label)
+    return version, _read(base, name, version)
 
 
 def _include(base: Path, body: str, label: str, seen: Tuple[str, ...]) -> str:
@@ -325,8 +351,7 @@ def _include(base: Path, body: str, label: str, seen: Tuple[str, ...]) -> str:
         other = m.group(1)
         if other in seen:
             raise PromptNotFound(f"prompts include each other: {' → '.join((*seen, other))}")
-        version = labels(base.parent).get(other, {}).get(label)
-        _, text = _split(_read(base, other, version))
+        _, text = _split(_labelled(base, other, label)[1])
         return _include(base, text, label, (*seen, other)).strip("\n")
 
     return _INCLUDE.sub(put, body)

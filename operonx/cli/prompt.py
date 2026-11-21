@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional, Sequence
 
+from operonx import prompt_store
 from operonx import prompts as P
 
 __all__ = ["main"]
@@ -36,6 +37,27 @@ def _on(name: str, root: Path) -> dict:
     for label, version in P.labels(root).get(name, {}).items():
         out.setdefault(version, []).append(label)
     return out
+
+
+def _pushed(root: Path, *, must: bool) -> List[str]:
+    """Copy to the prompt store and say what moved. A publish or a label in a
+    project with no store set says nothing (*must* false)."""
+    if not prompt_store.configured(root):
+        if must:
+            raise prompt_store.StoreError(
+                "no prompt store is set ([prompts] store in operonx.toml, or OPERONX_PROMPT_STORE)"
+            )
+        return []
+    got = prompt_store.push(root)
+    lines = [
+        f"store ({got['project']}): {len(got['versions'])} new version(s), {len(got['labels'])} label(s) moved"
+    ]
+    lines += [f"  + {n} v{v}" for n, v in got["versions"]]
+    lines += [
+        f"  {n}: {lab} = {v}" + (f" (was {b})" if b is not None else "")
+        for n, lab, v, b in got["labels"]
+    ]
+    return lines
 
 
 def _text(name: str, version: Optional[str], root: Path) -> str:
@@ -74,6 +96,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     diff.add_argument("b", nargs="?", default=None)
     log = sub.add_parser("log")
     log.add_argument("name")
+    sub.add_parser("push", help="copy the published versions and labels to the prompt store")
+    sub.add_parser("store", help="what the prompt store serves for this project")
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = _root(args.project)
     out: List[str] = []
@@ -138,9 +162,41 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     f"{v:>4}  {size:>6} chars"
                     + (f"   ← {', '.join(sorted(on[v]))}" if v in on else "")
                 )
+        elif args.cmd == "push":
+            out += _pushed(root, must=True)
+        elif args.cmd == "store":
+            got = prompt_store.status(root)
+            if not got["configured"]:
+                out.append(
+                    "no prompt store is set ([prompts] store in operonx.toml): prompts are served from the files"
+                )
+            else:
+                out.append(
+                    f"project {got['project']!r}"
+                    + (f" — not read: {got['error']}" if got["error"] else "")
+                )
+                mine = P.labels(root)
+                for row in got["serving"]:
+                    here = mine.get(row["name"], {}).get(row["label"])
+                    out.append(
+                        f"  {row['name']:<32} {row['label']} = {row['version']}"
+                        + (
+                            ""
+                            if here == row["version"]
+                            else f"   (files: {here if here is not None else 'no such label'})"
+                        )
+                    )
+                if not got["serving"] and not got["error"]:
+                    out.append("  nothing pushed yet (operonx prompt push)")
         else:
             parser.print_help()
             return 2
+        if args.cmd in ("publish", "label"):
+            out += _pushed(root, must=False)
+    except prompt_store.StoreError as exc:
+        print("\n".join(out), end="\n" if out else "")
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     except (P.PromptNotFound, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

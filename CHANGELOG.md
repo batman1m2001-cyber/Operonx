@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A prompt store: published prompts copied to Postgres, one way, for services that run from an older build.** `[prompts] store = "${PROMPT_STORE_DSN}"` in `operonx.toml` (or `OPERONX_PROMPT_STORE`). `operonx prompt publish` / `label` also push the versions and labels there; `operonx prompt push` copies all of them and `operonx prompt store` shows what is served. `prompt("name")` gives what the store's label points at, with the store's text; a prompt the store has no label for, or a store that cannot be reached, gives the files. A process reads the store once when it first asks and every 15 s in the background after (`OPERONX_PROMPT_STORE_EVERY`), so a call never waits on it; `operonx.prompt_store.generation()` goes up when what is served changed. A push is refused when the store holds a different text under the same version number. Nothing is written from the store to the files.
+
 ### Changed
 - **operonx-agents 0.3.2: an agent's instructions can be a named prompt.** `Agent(instructions=prompt("name"))` (operonx ≥ 1.40): the agent card names the prompt and its version, and an `AgentOp`'s run row records it under `attrs.prompts` (`part: instructions`). 0.3.1 predates this and records nothing.
 - `operonx init --template chat` keeps its system prompt in `prompts/chat/system.md` and asks for it by name, instead of a constant in `src/chat.py`.
