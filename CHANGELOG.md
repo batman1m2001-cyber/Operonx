@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **operonx-agents 0.3.2: an agent's instructions can be a named prompt.** `Agent(instructions=prompt("name"))` (operonx ≥ 1.40): the agent card names the prompt and its version, and an `AgentOp`'s run row records it under `attrs.prompts` (`part: instructions`). 0.3.1 predates this and records nothing.
 - `operonx init --template chat` keeps its system prompt in `prompts/chat/system.md` and asks for it by name, instead of a constant in `src/chat.py`.
 
 ### Fixed
