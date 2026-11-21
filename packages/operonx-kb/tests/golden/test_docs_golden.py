@@ -97,21 +97,24 @@ def _first_difference(made: list, kept: list) -> str:
 
 
 def _pdf_streams(pdf: bytes) -> list:
-    """Every stream of a PDF (page content, embedded fonts), inflated.
+    """Every stream of a PDF the generator wrote, inflated: page content and the fonts' character
+    maps. The embedded font programs are left out.
 
-    The files are compared by what they hold, not by their bytes: reportlab deflates each stream
-    with the zlib the interpreter was built with, and two zlibs can deflate the same content to a
-    different length — one byte, on the CI image, which shifted every offset after it.
+    A font program is a subset of the machine's own DejaVu file, and two builds of the same DejaVu
+    version are not the same bytes: on the CI image the `head` table of one face differs from the
+    one on the box that made the PDFs (its checksum in the table directory, byte 96 of the stream).
+    That deflated one byte shorter and moved every offset after it, so the files never compared
+    equal there. What the generator decides — every glyph placed on every page — is compared.
     """
     out = []
     for raw in re.findall(rb"stream\r?\n(.*?)endstream", pdf, flags=re.S):
         if raw.rstrip().endswith(b"~>"):  # a page's content: ASCII85 over deflate
             raw = base64.a85decode(raw.strip(), adobe=True)
         try:
-            out.append(
-                zlib.decompressobj().decompress(raw)
-            )  # tolerant of a newline before `endstream`
+            data = zlib.decompressobj().decompress(raw)  # tolerant of a newline before `endstream`
         except zlib.error:
-            out.append(raw)
+            data = raw
+        if data[:4] != b"\x00\x01\x00\x00":  # a TrueType program: the machine's font, not ours
+            out.append(data)
     assert out, "no stream found: not a PDF this test can read"
     return out
