@@ -312,6 +312,18 @@ assert row.attrs["prompts"][0]["name"] == "intake.system"  # the run says which 
   prompt label intake.system production 1`. Also `list`, `show`, `diff`,
   `log`. Labels are read when the graph is built: a moved label takes a
   restart. Commit `prompts/` — the history is the repository's.
+- **A service that runs from an older build.** Set a prompt store — a
+  Postgres address, as a setting of the project:
+  `[prompts]` `store = "${PROMPT_STORE_DSN}"` in `operonx.toml`, the address in
+  the environment or `.env`. `operonx prompt publish` / `label` then also copy
+  the versions and labels there (`operonx prompt push` copies all of them,
+  `operonx prompt store` shows what it serves), and `prompt("name")` in a
+  process with the store set gives what the store's label points at — a
+  version published after the image was built included. One way only: the
+  files are where a prompt is written; a store that cannot be reached serves
+  the files. A process re-reads the store every 15 s in the background
+  (`OPERONX_PROMPT_STORE_EVERY`); code that builds its prompts once compares
+  `operonx.prompt_store.generation()` and builds them again when it went up.
 - Every run row of that op carries `attrs.prompts`: `[{part, name, version,
   label, hash}]` (`version` is `None` for the working text; `hash` is of the
   text).
