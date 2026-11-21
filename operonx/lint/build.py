@@ -182,6 +182,11 @@ def _build_all(Application: Any, root: Path) -> List[BuildReport]:
     try:
         with no_network(attempts):
             app = Application.find(root)
+            # a project its manifest alone describes (no `[project] app`): `find` made it importable
+            # and its resources resolvable only for the declared kind, so a graph that names a
+            # resource failed to build with "ResourceHub not initialized"
+            if not app.manifest.app_entry:
+                app.bootstrap()
             graphs = app.graphs
     except Exception as exc:  # any project failure is a finding
         return [

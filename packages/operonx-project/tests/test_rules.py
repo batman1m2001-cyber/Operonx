@@ -32,4 +32,3 @@ def test_no_rules_no_flag_and_a_long_file_is_cut(tmp_path, monkeypatch):
     assert "--append-system-prompt" not in cmd and standing_rules(tmp_path) == ""
     (tmp_path / "AGENTS.md").write_text("x" * (LIMIT + 50), encoding="utf-8")
     assert standing_rules(tmp_path).endswith("… (cut)")
-

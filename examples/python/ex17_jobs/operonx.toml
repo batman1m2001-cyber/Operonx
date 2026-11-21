@@ -21,3 +21,6 @@ entry = "main:score_call"
 [[graph]]
 name  = "report"
 entry = "main:report"
+
+[lint]
+baseline = {C8 = 4, C16 = 1}

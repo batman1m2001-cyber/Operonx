@@ -149,13 +149,42 @@ class BalancedServer(uvicorn.Server):
             await asyncio.sleep(TICK_S)
 
 
+try:  # the supervisor's handle on one worker (uvicorn >= 0.30)
+    from uvicorn.supervisors.multiprocess import Process as _WorkerProcess
+except ImportError:  # pragma: no cover - an older uvicorn: only the `target=` form below is used
+    _WorkerProcess = object  # type: ignore[assignment,misc]
+
+
+class _BalancedProcess(_WorkerProcess):  # type: ignore[misc,valid-type]
+    """One worker of a uvicorn whose supervisor builds each worker's server itself
+    (``Multiprocess(config, sockets)``, no ``target=``): the server it runs is a
+    :class:`BalancedServer` on the shared table."""
+
+    table: Any = (
+        None  # set by `run_balanced` in the supervisor, carried to the worker with the server
+    )
+
+    def __init__(self, config: uvicorn.Config, sockets: List[socket.socket]) -> None:
+        super().__init__(config, sockets)
+        self._server = BalancedServer(config, _BalancedProcess.table)
+
+
 def run_balanced(config: uvicorn.Config) -> None:
     """``uvicorn.run(..., workers=N)``, with the workers balanced."""
+    import inspect
     import multiprocessing
 
-    from uvicorn.supervisors import Multiprocess
+    from uvicorn.supervisors import Multiprocess, multiprocess
 
     table = multiprocessing.get_context("spawn").Array("d", config.workers * _FIELDS)
-    server = BalancedServer(config, table)
     sock = config.bind_socket()
-    Multiprocess(config, target=server.run, sockets=[sock]).run()
+    if "target" in inspect.signature(Multiprocess.__init__).parameters:
+        Multiprocess(config, target=BalancedServer(config, table).run, sockets=[sock]).run()
+        return
+    # A newer uvicorn dropped `target=`: its supervisor makes a `Process` per worker — at start,
+    # on a restart, in place of one that died — and that Process makes a plain `Server`. This
+    # process exists only to supervise this listener, so the name the supervisor looks up is
+    # pointed at ours. Without it a pooled listener died at start with a TypeError.
+    _BalancedProcess.table = table
+    multiprocess.Process = _BalancedProcess  # type: ignore[misc]
+    Multiprocess(config, sockets=[sock]).run()

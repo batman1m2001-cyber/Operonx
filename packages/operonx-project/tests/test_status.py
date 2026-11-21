@@ -89,7 +89,9 @@ def test_the_status_reads_checklist_board_cycles_and_changes(tmp_path):
         ("OWN-01", "", "needs a browser run"),  # Notes, not "Tests / evidence"
     ]
     assert [(y["id"], y["state"], y["done"], len(y["cards"])) for y in doc["board"]["cycles"]] == [
-        ("EX", "open", 1, 3), ("OL", "closed", 1, 1)]
+        ("EX", "open", 1, 3),
+        ("OL", "closed", 1, 1),
+    ]
     assert [(w["card"], w["sentence"]) for w in doc["working_on"]] == [("C3", "doing · web · EX 1/3")]
     # a BRD question reaches "needs you" only through a card
     assert doc["needs_you"] == [{"source": "board", "id": "C1", "kind": "card", "text": "Round half up or half even?",

@@ -295,7 +295,8 @@ with fake_model('{"intent": "refund"}'):
     nodes = asyncio.run(main())
 
 row = next(n for n in nodes if n.op_name == "llm")
-assert row.attrs["prompts"][0]["name"] == "intake.system"  # the run says which prompt, which version
+# the run says which prompt, which version
+assert row.attrs["prompts"][0]["name"] == "intake.system"
 ```
 
 - `prompt("name")` is read when the graph is built: a name the project does

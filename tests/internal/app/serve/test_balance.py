@@ -78,13 +78,15 @@ def _ask(port: int) -> tuple:
 
 def _serve(root: Path, port: int, **env) -> subprocess.Popen:
     code = f"from operonx.app import Application; Application.find({str(root)!r}).serve()"
-    proc = subprocess.Popen(
-        [sys.executable, "-c", code],
-        cwd=root,
-        env={**os.environ, **env},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    log = root / "serve.log"  # why it did not come up, when it does not
+    with log.open("wb") as err:
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=root,
+            env={**os.environ, **env},
+            stdout=subprocess.DEVNULL,
+            stderr=err,
+        )
     deadline = time.time() + 60
     while time.time() < deadline:
         try:
@@ -94,7 +96,7 @@ def _serve(root: Path, port: int, **env) -> subprocess.Popen:
         except OSError:
             time.sleep(0.2)
     proc.kill()
-    raise AssertionError("the server did not come up")
+    raise AssertionError(f"the server did not come up:\n{log.read_text(errors='replace')[-3000:]}")
 
 
 def test_held_connections_spread_evenly_over_the_workers(tmp_path: Path):

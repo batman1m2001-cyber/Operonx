@@ -333,8 +333,10 @@ def close(repo: Path, cid: str) -> Cycle:
         raise BoardError(f"cycle {cid} is closed already")
     left = [c.id for c in cards if c.cycle == cid and c.state != "done"]
     if left:
-        raise BoardError(f"cycle {cid} has cards not done: {', '.join(left)}. Finish them, or move each to the "
-                         f"Backlog or another open cycle (put {left[0]} --cycle {BACKLOG})")
+        raise BoardError(
+            f"cycle {cid} has cards not done: {', '.join(left)}. Finish them, or move each to the "
+            f"Backlog or another open cycle (put {left[0]} --cycle {BACKLOG})"
+        )
     y.state, y.closed = "closed", date.today().isoformat()
     _save(f, text, cycles, cards)
     return y
@@ -361,8 +363,10 @@ def move(repo: Path, cid: str, to: str, note: Optional[str] = None) -> Card:
         to = "needs you"
         note = f"Adds {', '.join(new_names(c))}, outside the fixed names: go?"
     if to == "done" and not c.done:
-        raise BoardError(f"{cid} has no done test: give it one first (a `done:` line under its heading, "
-                         "e.g. `done: tests/test_x.py::test_y`)")
+        raise BoardError(
+            f"{cid} has no done test: give it one first (a `done:` line under its heading, "
+            "e.g. `done: tests/test_x.py::test_y`)"
+        )
     c.state = to
     if note is not None:
         c.note = note.strip()

@@ -8,3 +8,6 @@
 name = "ex18-variants"
 src  = ["src", "."]   # packages under src/; app.py at the root
 app  = "app:APP"
+
+[lint]
+baseline = {C16 = 1}

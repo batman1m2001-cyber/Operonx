@@ -1,7 +1,10 @@
 """K1 gate (a): every golden document parses, satisfies the span invariant, and
 matches its element-tree snapshot; both chunkers produce valid spans on it."""
 
+import base64
 import importlib.util
+import re
+import zlib
 from pathlib import Path
 
 import pytest
@@ -74,4 +77,26 @@ def test_pdf_generators_are_reproducible():
     GENERATORS = _generators("make_pdfs")
 
     for name, make in GENERATORS.items():
-        assert make(None) == (DOCS / name).read_bytes(), f"{name} differs from its generator"
+        made, kept = _pdf_streams(make(None)), _pdf_streams((DOCS / name).read_bytes())
+        assert made == kept, f"{name} differs from its generator"
+
+
+def _pdf_streams(pdf: bytes) -> list:
+    """Every stream of a PDF (page content, embedded fonts), inflated.
+
+    The files are compared by what they hold, not by their bytes: reportlab deflates each stream
+    with the zlib the interpreter was built with, and two zlibs can deflate the same content to a
+    different length — one byte, on the CI image, which shifted every offset after it.
+    """
+    out = []
+    for raw in re.findall(rb"stream\r?\n(.*?)endstream", pdf, flags=re.S):
+        if raw.rstrip().endswith(b"~>"):  # a page's content: ASCII85 over deflate
+            raw = base64.a85decode(raw.strip(), adobe=True)
+        try:
+            out.append(
+                zlib.decompressobj().decompress(raw)
+            )  # tolerant of a newline before `endstream`
+        except zlib.error:
+            out.append(raw)
+    assert out, "no stream found: not a PDF this test can read"
+    return out

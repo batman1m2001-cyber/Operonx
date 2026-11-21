@@ -147,7 +147,7 @@ Done 2026-11-15, board C35. Before/after flow and code changes: [cost/K2.md](cos
 ## Gate 1 result
 
 Run 2026-11-15 on main `fc207ae` (K5+K1, K3, K2; before K4), 2 tracks × T1–T6 of arm A', $3.41.
-Rows: [bench/token_ab/results/2026-11-15-gate1.jsonl](../bench/token_ab/results/2026-11-15-gate1.jsonl).
+Rows: [bench/token_ab/results/2026-11-15-gate1.jsonl](https://github.com/batman1m2001-cyber/Operonx/blob/main/bench/token_ab/results/2026-11-15-gate1.jsonl).
 
 **Gate 1 failed.** A' passed 14/14, but cost 2.6× arm B and about the same as the old arm A:
 
@@ -218,7 +218,7 @@ Done 2026-11-15, board C36. Before/after tree, flows and code changes: [cost/K4.
 ## A' re-run after K4
 
 Run 2026-11-15 on main `3d18ab9` (K4 + the gate 1 fixes), 2 tracks × T1–T6 of arm A', $2.23.
-Rows: [bench/token_ab/results/2026-11-15-k4-rerun.jsonl](../bench/token_ab/results/2026-11-15-k4-rerun.jsonl).
+Rows: [bench/token_ab/results/2026-11-15-k4-rerun.jsonl](https://github.com/batman1m2001-cyber/Operonx/blob/main/bench/token_ab/results/2026-11-15-k4-rerun.jsonl).
 
 **Gate 1 still fails, by less.** A' passed 14/14 on the first try (no fix turns, against 2 before)
 and cost $2.23, down from $3.41. The bar is A' ≤ B, and B is $1.31: A' is 1.7× B (it was 2.6×).
@@ -252,7 +252,7 @@ Where the remaining gap is, from the session logs:
 
 Run 2026-11-15, harness change and before/after: [cost/E7b.md](cost/E7b.md). Three new tasks after
 T6, each track in its own T6 workspace (A' from the re-run above, B from the 2026-11-15 E7 run), $2.41.
-Rows: [bench/token_ab/results/2026-11-15-gate2.jsonl](../bench/token_ab/results/2026-11-15-gate2.jsonl).
+Rows: [bench/token_ab/results/2026-11-15-gate2.jsonl](https://github.com/batman1m2001-cyber/Operonx/blob/main/bench/token_ab/results/2026-11-15-gate2.jsonl).
 
 **Gate 2 failed.** All 12 sessions passed on the first try. On the tasks where reuse should win,
 A' cost 2.5× B:
@@ -320,7 +320,7 @@ before/after flow and the code changes: [cost/R2.md](cost/R2.md).
 
 Run 2026-11-15 on main `b381ceb7` (C39–C42), 2 tracks × T1–T9 of arm A', every session passing
 first time (20/20, no fix session). Rows:
-[bench/token_ab/results/2026-11-15-round2.jsonl](../bench/token_ab/results/2026-11-15-round2.jsonl).
+[bench/token_ab/results/2026-11-15-round2.jsonl](https://github.com/batman1m2001-cyber/Operonx/blob/main/bench/token_ab/results/2026-11-15-round2.jsonl).
 Turns are counted over every result event of a session (`run.py` counted only the last one, which
 undercounts a session that waited on a background task); the cost was right before.
 

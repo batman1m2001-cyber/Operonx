@@ -49,7 +49,10 @@ jobs:
 
       - name: Install mkdocs
         if: steps.detect.outputs.has_mkdocs == 'true'
-        run: uv pip install mkdocs-material "mkdocstrings[python]"
+        # pymdown-extensions 12 changed `Highlight(...)` to need the Markdown
+        # instance; mkdocstrings 1.0 still builds it the old way and every API
+        # page fails to render. Drop the pin when mkdocstrings follows.
+        run: uv pip install mkdocs-material "mkdocstrings[python]" "pymdown-extensions<12"
 
       - name: Build docs (strict)
         id: build

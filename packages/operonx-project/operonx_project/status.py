@@ -80,10 +80,17 @@ def _git_log(repo: Path, n: int) -> List[Dict[str, str]]:
 #: The standard, in order (PROJECT_STANDARD_PLAN D1): what a project needs for the studio and the engine to read
 #: it, each with what it is called and what makes it true.
 STANDARD = (
-    ("brd", "a checklist", "docs/brd with its requirements and the checklist matrix (operonx-project adopt "
-                           "writes one from the code)"),
-    ("check", "brd check passes", "fix what operonx-project brd check reports; a summary table with sets of its "
-                                  "own names them in docs/brd/brd.toml [[groups]] (name, pattern)"),
+    (
+        "brd",
+        "a checklist",
+        "docs/brd with its requirements and the checklist matrix (operonx-project adopt writes one from the code)",
+    ),
+    (
+        "check",
+        "brd check passes",
+        "fix what operonx-project brd check reports; a summary table with sets of its "
+        "own names them in docs/brd/brd.toml [[groups]] (name, pattern)",
+    ),
 )
 
 _CHECKED: Dict[Path, Any] = {}  # brd dir → (the files' signature, the errors): the check re-runs when a file changes
@@ -199,7 +206,9 @@ def text(doc: Dict[str, Any], changes: int = 5) -> str:
             if card["state"] != "done" and card["cycle"] not in shut:
                 waits = f"  (after {', '.join(card['waits'])})" if card["waits"] else ""
                 at = card["cycle"] or "Backlog"
-                out.append(f"  {card['id']:<4} {card['state']:<9} {at:<8} {card['lane']:<8} {card['title']}{waits}"[:220])
+                out.append(
+                    f"  {card['id']:<4} {card['state']:<9} {at:<8} {card['lane']:<8} {card['title']}{waits}"[:220]
+                )
         if shut:
             out.append(f"  closed cycles: {', '.join(sorted(shut))}")
     if doc["working_on"]:
