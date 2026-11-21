@@ -678,11 +678,12 @@ def load_declared(manifest: Any) -> Any:
     return obj
 
 
-def graph_refs(manifest: Any) -> list:
+def graph_refs(manifest: Any, jobs: Any = ()) -> list:
     """Every graph the manifest names, once each, as
     ``(name, entry, used_by, bind, graph_object)`` — the ``[[graph]]``
-    blocks, then whatever services and jobs point at (a door's ``resume``
-    graph too); a door with variants contributes one per variant."""
+    blocks, then whatever services and *jobs* point at (a door's ``resume``
+    graph too, a job's steps'); a door with variants contributes one per
+    variant, and a job running that graph adds nothing beside them."""
     by_entry: Dict[str, Any] = {}
     variants: list = []
     for g in manifest.graphs:
@@ -703,6 +704,17 @@ def graph_refs(manifest: Any) -> list:
             by_entry.setdefault(entry, [entry.rpartition(":")[2], [], s.resume])[1].append(
                 f"serve:{s.name}.resume"
             )
+    varied = {entry for _name, entry, *_ in variants}
+    todo = list(jobs)
+    while todo:
+        job = todo.pop(0)
+        todo += list(getattr(job, "steps", None) or [])
+        graph = getattr(job, "graph", None)
+        if graph is None or ref_name(graph) in varied:
+            continue
+        entry = ref_name(graph)
+        obj = None if isinstance(graph, str) else graph
+        by_entry.setdefault(entry, [entry.rpartition(":")[2], [], obj])[1].append(f"job:{job.name}")
     plain = [(n, e, tuple(u), {}, obj) for e, (n, u, obj) in by_entry.items()]
     return plain + variants
 

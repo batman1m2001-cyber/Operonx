@@ -98,6 +98,7 @@ import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -501,6 +502,33 @@ def _status(trace: Any) -> Tuple[str, Optional[str]]:
     return "ok", None
 
 
+def _first_item(job: Any) -> Optional[Dict[str, Any]]:
+    """A job's first item, when it is there to read without running anything
+    (a list, a ``.jsonl`` file) and is a mapping: the example a flow's own
+    door shows. The job's constant ``inputs`` are part of it."""
+    if job is None:
+        return None
+    items, first = getattr(job, "items", None), None
+    try:
+        if isinstance(items, (list, tuple)) and items:
+            first = items[0]
+        elif isinstance(items, (str, Path)) and Path(items).is_file():
+            with Path(items).open(encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        first = json.loads(line)
+                        break
+    except Exception:  # noqa: BLE001 — no example is not an error
+        return None
+    name = getattr(job, "input", None)
+    if first is not None and not isinstance(first, dict) and name:
+        first = {name: first}
+    if not isinstance(first, dict):
+        return None
+    out = {**(getattr(job, "inputs", None) or {}), **first}
+    return _jsonable(out) if isinstance(_jsonable(out), dict) else None
+
+
 def _jsonable(value: Any) -> Any:
     return json.loads(
         json.dumps(
@@ -523,12 +551,73 @@ class Bridge:
         self._started_hooks: set = set()
         self._sessions: Dict[str, PlaySession] = {}
         self._tasks: set = set()
+        self._flow_doors: Optional[Dict[str, Tuple[Any, Dict[str, Any]]]] = None
 
     # -- what there is ---------------------------------------------------
 
+    def _flows(self) -> Dict[str, Tuple[Any, Dict[str, Any]]]:
+        """A door for every graph no service serves — a job's, or one the
+        manifest only names — so any flow can be played: ``flow:<graph>``, one
+        request per run, the JSON filling the graph's parameters (as a
+        doorless service's does). Each comes with what to say about it: the
+        graph's name, and a job's first item as an example of its input."""
+        if self._flow_doors is not None:
+            return self._flow_doors
+        from .declare import Service, http, ref_name
+
+        served = {ref_name(s.graph) for s in self.app.services if s.graph}
+        names = {s.name for s in self.app.services}
+        found: Dict[str, Tuple[str, Any, Any]] = {}  # entry → (graph name, graph, job)
+        try:
+            jobs = list(self.app.jobs)
+        except Exception:  # noqa: BLE001 — a job that cannot be settled is not a flow to play
+            jobs = []
+        for job in jobs:
+            graph = getattr(job, "graph", None)
+            if graph is not None:
+                entry = ref_name(graph)
+                found.setdefault(entry, (entry.rpartition(":")[2], graph, job))
+        for g in self.app.manifest.graphs:
+            found.setdefault(g.entry, (g.name, g.entry, None))
+        out: Dict[str, Tuple[Any, Dict[str, Any]]] = {}
+        for entry, (name, graph, job) in found.items():
+            door = f"flow:{name}"
+            if entry in served or door in names or door in out:
+                continue
+            try:
+                spec = Service(
+                    door,
+                    http("POST", f"/flow/{name}"),
+                    graph=graph,
+                    description=(
+                        f"The flow itself, run once with what you give it (job {job.name} runs it per item)."
+                        if job is not None
+                        else "The flow itself, run once with what you give it."
+                    ),
+                )
+            except Exception:  # noqa: BLE001 — a graph that cannot be a door is left out
+                continue
+            out[door] = (
+                spec,
+                {
+                    "flow": True,
+                    "graph": name,
+                    "job": getattr(job, "name", None),
+                    "example": _first_item(job),
+                },
+            )
+        self._flow_doors = out
+        return out
+
+    def _spec(self, service: str) -> Any:
+        """The service *service* — a declared one, or a flow's own door."""
+        flow = self._flows().get(service)
+        return flow[0] if flow is not None else self.app.service(service)
+
     def describe(self) -> Dict[str, Any]:
         doors = []
-        for spec in self.app.services:
+        said = {spec.name: about for spec, about in self._flows().values()}
+        for spec in (*self.app.services, *(spec for spec, _ in self._flows().values())):
             if spec.kind == "asgi":
                 continue
             try:
@@ -570,6 +659,7 @@ class Bridge:
                     "remote_trace": _remote_names(spec),
                     "query": dict(getattr(codec, "query", None) or {}) if codec else {},
                     "description": spec.description,
+                    **said.get(spec.name, {}),
                 }
             )
         return {"t": "doors", "protocol": PROTOCOL, "project": self.app.name, "doors": doors}
@@ -588,7 +678,7 @@ class Bridge:
         from .serve.memory import MemoryTransport
         from .serve.runner import ServeRunner
 
-        spec = self.app.service(service)
+        spec = self._spec(service)
         if spec.options.get("trace") is None:
             # a playground session is always a run you can open: a door
             # with no consumers declared records locally, as a job does

@@ -165,9 +165,9 @@ class Application:
 
     @property
     def graphs(self) -> List[GraphRef]:
-        """Every graph the manifest names, once each, with who uses it; a door
-        with variants contributes one graph per variant."""
-        return [GraphRef(*ref) for ref in graph_refs(self.manifest)]
+        """Every graph the application names, once each, with who uses it
+        (:func:`graph_refs`: the manifest's, then what the jobs run)."""
+        return [GraphRef(*ref) for ref in graph_refs(self.manifest, self._jobs.values())]
 
     @property
     def jobs(self) -> List[Any]:
