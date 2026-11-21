@@ -123,6 +123,17 @@ def hear_flow():
     START >> src >> h >> p >> out >> END
 
 
+@op
+def double(n: int = 0, by: int = 2) -> dict:
+    return {"n": n, "result": n * by}
+
+
+@graph
+def tally_flow(n, by=2):  # no service: only the job below runs it
+    d = double(n=n, by=by)
+    START >> d >> END
+
+
 from operonx.app import Application, Job, Listener, Service, http, websocket
 
 APP = Application(
@@ -140,7 +151,8 @@ APP = Application(
         Service("hear", websocket("/hear", port=8124), graph=hear_flow, max_inflight=4),
     ],
     jobs=[Job("nightly", graph=score_flow, items=[{"call_id": "j1", "text": "a b"}],
-              key="call_id")],
+              key="call_id"),
+          Job("tally", graph=tally_flow, items=[{"n": 4}, {"n": 5}], inputs={"by": 3})],
 )
 """
 
@@ -263,6 +275,41 @@ def test_a_doorless_service_answers_the_form_with_its_outputs(project):
     assert refused["status"] == "error" and "refused" in refused["error"]
     assert "'nope' is not a parameter" in refused["error"]
     assert not [e for e in events if e["t"] == "out" and e["sid"] == "d2"]
+
+
+def test_a_flow_no_service_serves_is_played_through_a_door_of_its_own(project):
+    """Any flow can be played: a graph only a job runs gets ``flow:<graph>`` —
+    one request per run, its parameters filled from the JSON — with the job's
+    first item as the example. A graph a service serves gets none."""
+    name, root = project
+    bridge, events = _bridge(root)
+    doors = {d["service"]: d for d in bridge.describe()["doors"]}
+    flow = doors["flow:tally_flow"]
+    assert flow["flow"] and flow["graph"] == "tally_flow" and flow["job"] == "tally"
+    assert flow["toys"] == ["form"] and flow["inputs"] == ["n", "by"] and flow["required"] == ["n"]
+    assert flow["example"] == {"by": 3, "n": 4}
+    assert "flow:score_flow" not in doors and "flow" not in doors["score"]
+
+    async def go():
+        await bridge.handle(
+            {
+                "op": "open",
+                "sid": "f1",
+                "service": "flow:tally_flow",
+                "toy": "form",
+                "send": [{"kind": "json", "value": {"n": 4, "by": 3}}],
+                "end": True,
+            }
+        )
+        return await _until(events, lambda e: e["t"] == "ended" and e["sid"] == "f1")
+
+    ended = asyncio.run(go())
+    (out,) = [e for e in events if e["t"] == "out" and e["sid"] == "f1"]
+    assert (
+        out["msg"] == {"kind": "json", "value": {"n": 4, "result": 12}} and ended["status"] == "ok"
+    )
+    md = _store(root).get_run(ended["trace_id"]).summary.metadata
+    assert md["origin"] == "playground" and md["service"] == "flow:tally_flow"
 
 
 def test_a_session_streams_its_ops_as_they_finish(project):
