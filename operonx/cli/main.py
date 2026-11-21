@@ -55,6 +55,10 @@ DELEGATED = {
         "operonx.cli.check",
         "lint, the tests, every graph built and every route reached: one verdict",
     ),
+    "prompt": (
+        "operonx.cli.prompt",
+        "the project's prompts: list them, publish a version, move a label, diff two",
+    ),
     "studio": ("operonx.cli.studio", "open this project in operonx-studio (starts it if needed)"),
     "project": (
         "operonx.cli.project",
@@ -67,7 +71,7 @@ DELEGATED = {
 #: copy: a checker that changes what it checks (and, run from another
 #: environment, deletes the guide pages of packages that environment lacks);
 #: the project engine, which writes to a repo only on its own branches.
-READ_ONLY = {"lint", "check", "project"}
+READ_ONLY = {"lint", "check", "project", "prompt"}
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -178,7 +178,9 @@ class Agent:
             "name": self.name,
             "model": list(self.model.resources),
             "instructions": {
-                "text": None if dynamic else self.instructions,
+                "text": None if dynamic else getattr(self.instructions, "text", self.instructions),
+                # asked for by name (operonx.prompts): which prompt, which version
+                "prompt": getattr(self.instructions, "ref", None),
                 "dynamic": dynamic,
                 "from": (
                     f"{self.instructions.__module__}:{self.instructions.__qualname__}"
@@ -198,6 +200,9 @@ class Agent:
 
     def system_prompt(self, ctx: RunContext) -> str:
         text = self.instructions(ctx) if callable(self.instructions) else self.instructions
+        # a prompt asked for by name is a template as a str (braces doubled for
+        # LLMOp); an agent's instructions are sent as written
+        text = getattr(text, "text", text)
         if not isinstance(text, str):
             raise TypeError(
                 f"Agent {self.name!r}: instructions(ctx) returned {type(text).__name__}, not str."

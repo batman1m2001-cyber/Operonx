@@ -209,6 +209,9 @@ class AgentOp(BaseOp):
             kwargs.setdefault("transient", True)
         super().__init__(**kwargs)
         self.agent = agent
+        ref = getattr(agent.instructions, "ref", None)
+        if ref:  # instructions asked for by name: the run row says which, and which version
+            self._record_attrs = {"prompts": [{"part": "instructions", **ref}]}
         self.stream = stream
         self.store = store
         self.sessions = sessions
