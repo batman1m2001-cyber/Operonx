@@ -1,6 +1,6 @@
 # Prompts plan — one home, names, versions
 
-Status: **proposed** (2026-11-21). Nothing is built. The owner asked for it after the studio's Prompts page showed no prompt text and took most of a minute.
+Status: **approved 2026-11-21, in progress.** P1 and P2 are in operonx 1.40.0 (`operonx.prompts`, `operonx prompt`, `attrs.prompts` on the run row); P3–P5 follow. Written when nothing was built. The owner asked for it after the studio's Prompts page showed no prompt text and took most of a minute.
 
 ## Why
 

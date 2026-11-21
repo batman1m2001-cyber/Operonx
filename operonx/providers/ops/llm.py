@@ -461,6 +461,13 @@ class LLMOp(BaseOp):
         # Checked on the *raw* mapping: _normalize_params wraps each value
         # in a Param, so a literal list is no longer a list by then.
         _check_prompt_inputs(inputs or {})
+        # A prompt asked for by name (operonx.prompts): the run row says which,
+        # and which version — the template itself is in the inputs either way.
+        from operonx.prompts import prompt_refs
+
+        refs = prompt_refs((inputs or {}).get("prompt"))
+        if refs:
+            self._record_attrs = {"prompts": refs}
 
         normalized_inputs = self._normalize_params(inputs)
         normalized_outputs = self._normalize_params(outputs)

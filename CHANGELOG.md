@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.40.0] - 2026-11-21
+
+### Added
+
+- **`operonx.prompts`: a prompt is a named file, asked for by name, with versions and labels (PROMPTS_PLAN P1, P2).** `prompts/<name>.md` holds the text as the model gets it: `{{name}}` is a variable, any other brace is text, `{{> other}}` includes another prompt, optional front matter holds a description. `LLMOp.of(prompt=prompt("intake.system"), ...)`, `{"system": prompt("guard"), "user": "{q}"}` and `Agent(instructions=prompt("declare.agent"))` take it; a name the project does not have raises `PromptNotFound` when the graph is built. The run row of that op says what it used: `attrs.prompts = [{part, name, version, label, hash}]`. `operonx prompt publish NAME [--label L]` freezes the working text as the next version (`prompts/.versions/NAME/N.md`), `operonx prompt label NAME LABEL N` points a label at one (`prompts/labels.toml`), and a process serves the label in `OPERONX_PROMPT_LABEL` (default `production`; no such label: the working text) — rolling back is moving the label. Also `list`, `show`, `diff`, `log`. Before, a prompt was a constant somewhere in the code and a run did not say which text it had been given.
+- **An op can say something of itself on every run row.** `op._record_attrs = {...}` (set when the op is built) is merged into the row's `attrs`, beside the retries. `LLMOp` and `AgentOp` use it for their prompts.
+
 ## [1.39.0] - 2026-11-20
 
 ### Added

@@ -38,6 +38,16 @@ from operonx.core.runtime import (
 )
 from operonx.core.states.cell import DEFAULT_CONTEXT
 
+
+def _attrs_of(op: Any, frame: Any) -> Dict[str, Any]:
+    """What a run row says of this execution beyond its inputs and outputs:
+    what the op declared of itself when it was built (``_record_attrs`` —
+    an LLM op's prompts, by name and version) and the frame's retries."""
+    declared = getattr(op, "_record_attrs", None)
+    attrs = dict(declared) if declared else {}
+    return _with_retries(attrs, frame) if frame is not None and frame.retries else attrs
+
+
 #: Output name for an op whose function returns a bare value rather than
 #: a dict. One fixed name because nothing should have to spell it: `if_`
 #: resolves an op-condition to its only output, whatever it is called.
@@ -337,6 +347,7 @@ class BaseOp(ABC):
     INNER_PROCESS = "__inner__"
 
     __slots__ = [
+        "_record_attrs",
         "id",
         "name",
         "_name_hint",
@@ -1442,7 +1453,7 @@ class BaseOp(ABC):
                 error="".join(traceback.format_exception(type(error), error, error.__traceback__)),
                 op_type=str(self.type),
                 attempt=attempt,
-                attrs=_with_retries({}, frame) if frame is not None and frame.retries else {},
+                attrs=_attrs_of(self, frame),
             )
         )
         if wf_trace._task_listeners:
@@ -1834,7 +1845,7 @@ class BaseOp(ABC):
                                 error=error_msg,
                                 op_type=str(self.type),
                                 attempt=frame.attempt,
-                                attrs=_with_retries({}, frame) if frame.retries else {},
+                                attrs=_attrs_of(self, frame),
                             )
                         )
                     # A transient op in a stream emits no per-item node on
@@ -1867,7 +1878,7 @@ class BaseOp(ABC):
                                 error=error_msg,
                                 op_type=str(self.type),
                                 attempt=frame.attempt,
-                                attrs=_with_retries({}, frame) if frame.retries else {},
+                                attrs=_attrs_of(self, frame),
                             )
                         )
                     if _wf_trace._task_listeners:
