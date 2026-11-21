@@ -5,7 +5,8 @@
 reportlab with ``invariant=1`` (no timestamps or random ids) and the DejaVu
 fonts embedded, so the font names (and with them bold) survive into the text
 layer. The PDFs are committed; ``test_generators_are_reproducible`` regenerates
-them when the fonts are installed and compares bytes.
+them when the fonts are installed and compares what the generator wrote: every stream but the
+embedded font programs, which are the machine's own DejaVu build.
 
 - ``two_column_report.pdf``: running header and footer, a full-width title and
   abstract, two columns with numbered headings, a bullet list, a paragraph that

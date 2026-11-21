@@ -42,8 +42,10 @@ def test_parse_and_render_round_trip():
 
 def test_hand_written_fields_are_read():
     # the demo's card: fields as list items, "none" for an empty one; they are fields, not the note
-    c = board.parse("### C1 · sentences · todo\n- req: none · after: none\n- files: src/t/ops.py\n"
-                    "- done: tests/test_t.py::test_sentences\n")[0]
+    c = board.parse(
+        "### C1 · sentences · todo\n- req: none · after: none\n- files: src/t/ops.py\n"
+        "- done: tests/test_t.py::test_sentences\n"
+    )[0]
     assert (c.req, c.after, c.files, c.note) == ([], [], ["src/t/ops.py"], "")
     assert c.done == ["tests/test_t.py::test_sentences"]
     assert c.kind == "fix"
@@ -136,8 +138,11 @@ def test_a_move_rewrites_only_that_card(tmp_path):
     board.move(tmp_path, "C7", "doing")
     assert f.read_text() == HAND.replace("written out of order · todo", "written out of order · doing")
     board.move(tmp_path, "C2", "needs you", note="Which test?")
-    want = HAND.replace("written out of order · todo", "written out of order · doing").replace(
-        "an earlier card · doing", "an earlier card · needs you").replace("Why it waits.", "Which test?")
+    want = (
+        HAND.replace("written out of order · todo", "written out of order · doing")
+        .replace("an earlier card · doing", "an earlier card · needs you")
+        .replace("Why it waits.", "Which test?")
+    )
     assert f.read_text() == want
 
 
@@ -185,7 +190,9 @@ plan: docs/LEAN_PROJECT_PLAN.md · opened: 2026-11-11 · closed: 2026-11-11
 def test_cycles_parse_and_render_round_trip():
     cycles, cards = board.parse_all(CYCLES)
     assert [(y.id, y.state, y.plan, y.closed) for y in cycles] == [
-        ("FF", "open", "docs/FEATURE_FLOWS_PLAN.md", ""), ("LP", "closed", "docs/LEAN_PROJECT_PLAN.md", "2026-11-11")]
+        ("FF", "open", "docs/FEATURE_FLOWS_PLAN.md", ""),
+        ("LP", "closed", "docs/LEAN_PROJECT_PLAN.md", "2026-11-11"),
+    ]
     assert [(c.id, c.cycle) for c in cards] == [("C1", ""), ("C2", "FF"), ("C3", "FF"), ("C4", ""), ("C5", "LP")]
     again = board.render(cards, board._top(CYCLES), cycles)
     cy, ca = board.parse_all(again)

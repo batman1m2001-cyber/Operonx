@@ -106,12 +106,13 @@ def op(
             or writes to it. ``@op(door="egress")`` on a project's own door
             op is all a service and the studio need to find it; the built-in
             ``ingress()`` / ``egress()`` declare it the same way.
-        reads, writes: the project's stores this op reads and writes, by name
-            (a table, a queue, a folder): ``@op(writes="inbox")``,
-            ``@op(reads=["inbox", "events"])``. A declaration, not a check:
-            the engine does nothing with it, and a project picture draws
-            ``flow → store → flow`` from it — how two flows that never call
-            each other work together.
+        reads: the project's stores this op reads, by name (a table, a
+            queue, a folder): ``@op(reads=["inbox", "events"])``. A
+            declaration, not a check: the engine does nothing with it, and a
+            project picture draws ``flow → store → flow`` from it — how two
+            flows that never call each other work together.
+        writes: the stores this op writes, the same way:
+            ``@op(writes="inbox")``.
         retry: ``Retry(...)`` — run the op again when it fails with an error
             worth another try (by default a timeout, a connection error, an
             HTTP 429 or 5xx), after a growing pause. A generator is retried

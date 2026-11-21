@@ -24,3 +24,6 @@ description = "The one main flow: payload in at ingress, answer out at egress."
 # Where the local trace consumer writes runs; the Traces tab reads this.
 [studio]
 traces = "/tmp/operonx_traces/ex16_rag_pipeline"
+
+[lint]
+baseline = {C8 = 2, C16 = 1}

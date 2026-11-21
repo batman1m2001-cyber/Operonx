@@ -511,17 +511,19 @@ def test_serve_runs_a_pooled_listener_as_worker_processes(tmp_path):
     (tmp_path / "operonx.toml").write_text(
         f'[project]\nname = "pooled"\nsrc = ["."]\napp = "{name}:APP"\n', encoding="utf-8"
     )
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "from operonx.app import Application; Application.find('.').serve()",
-        ],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(tmp_path)},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    log = tmp_path / "serve.log"  # why it never answered, when it does not
+    with log.open("wb") as err:
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from operonx.app import Application; Application.find('.').serve()",
+            ],
+            cwd=tmp_path,
+            env={**os.environ, "PYTHONPATH": str(tmp_path)},
+            stdout=subprocess.DEVNULL,
+            stderr=err,
+        )
     try:
         pids = set()
         deadline = time.time() + 30
@@ -536,7 +538,9 @@ def test_serve_runs_a_pooled_listener_as_worker_processes(tmp_path):
                 pids.add(int(urllib.request.urlopen(req, timeout=2).read()))
             except OSError:
                 time.sleep(0.3)
-        assert pids, "the pooled listener never answered"
+        assert pids, (
+            f"the pooled listener never answered:\n{log.read_text(errors='replace')[-3000:]}"
+        )
         assert proc.pid not in pids  # served by a worker, not the main process
     finally:
         proc.terminate()

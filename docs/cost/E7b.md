@@ -1,7 +1,7 @@
 # E7b: tasks where reuse should win (gate 2)
 
 Plan: [COST_PLAN.md § Gate 2 result](../COST_PLAN.md#gate-2-result-e7b) · board C37 · harness
-[bench/token_ab](../../bench/token_ab/README.md).
+[bench/token_ab](https://github.com/batman1m2001-cyber/Operonx/blob/main/bench/token_ab/README.md).
 
 ## The harness, before and after
 

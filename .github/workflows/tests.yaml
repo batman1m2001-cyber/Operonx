@@ -160,24 +160,17 @@ jobs:
       # `--build` constructs every declared graph with the network blocked,
       # which also holds C2: construction must not reach a service.
       - name: Lint and build every example
-        # The tooling lives in its own repo now (operonx-studio); this
-        # fetch is also the cross-repo integration gate — extraction reads
-        # operonx object internals across a subprocess seam, and this is
-        # where a core change that breaks the IR contract fails first.
-        # The studio's pyproject pins operonx to `../Operon` under
-        # `tool.uv.sources` for its own development; installed from git
-        # that path resolves inside the studio checkout and the install
-        # fails (red on every push since 2026-09-07). `--no-sources` takes
-        # operonx from PyPI instead, and the second install puts THIS
-        # checkout back — the thing under test — over the PyPI wheel.
+        # `operonx lint --build` is the core's own check (it was the studio's
+        # `operonx_project.cli`, which no longer exists by that name: red on
+        # every push). Each example holds its convention findings on a
+        # baseline in its operonx.toml — they are single-file lessons, older
+        # than the project shape — so the step is red when a graph stops
+        # building offline or a count goes up.
         run: |
-          set -e
-          uv pip install --no-sources git+https://github.com/batman1m2001-cyber/operonx-studio
-          uv pip install --no-deps -e .
           failed=0
           for dir in examples/python/ex*/; do
             echo "── ${dir}"
-              uv run python -m operonx_project.cli "${dir%/}" --build || failed=1
+            uv run operonx lint --build "${dir%/}" || failed=1
           done
           exit $failed
 

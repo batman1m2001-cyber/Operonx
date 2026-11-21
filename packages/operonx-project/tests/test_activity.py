@@ -10,4 +10,3 @@ def test_a_tool_call_is_one_short_line(tmp_path):
     assert activity_label("Bash", {"command": "uv run   pytest -q\n tests"}) == "Bash uv run pytest -q tests"
     assert activity_label("Grep", {"pattern": "def add"}) == "Grep def add"
     assert len(activity_label("Bash", {"command": "x" * 500})) <= 85
-

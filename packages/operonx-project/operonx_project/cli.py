@@ -242,7 +242,8 @@ def _board(args) -> int:
         if c["cycle"] in shut:
             continue
         waits = f"  after {', '.join(c['waits'])}" if c["waits"] else ""
-        out.write(f"{c['id']:<4} {c['state']:<9} {c['cycle'] or 'Backlog':<8} {c['lane']:<8} {c['kind']:<5} {c['title']}{waits}\n")
+        where = c["cycle"] or "Backlog"
+        out.write(f"{c['id']:<4} {c['state']:<9} {where:<8} {c['lane']:<8} {c['kind']:<5} {c['title']}{waits}\n")
         if c["note"]:
             out.write(f"     {c['note'].splitlines()[0][:200]}\n")
     out.write(" · ".join(f"{len(ids)} {s}" for s, ids in view["columns"].items()) + "\n")

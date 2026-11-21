@@ -1,7 +1,10 @@
 """K1 gate (a): every golden document parses, satisfies the span invariant, and
 matches its element-tree snapshot; both chunkers produce valid spans on it."""
 
+import base64
 import importlib.util
+import re
+import zlib
 from pathlib import Path
 
 import pytest
@@ -74,4 +77,44 @@ def test_pdf_generators_are_reproducible():
     GENERATORS = _generators("make_pdfs")
 
     for name, make in GENERATORS.items():
-        assert make(None) == (DOCS / name).read_bytes(), f"{name} differs from its generator"
+        made, kept = _pdf_streams(make(None)), _pdf_streams((DOCS / name).read_bytes())
+        assert made == kept, f"{name} differs from its generator: {_first_difference(made, kept)}"
+
+
+def _first_difference(made: list, kept: list) -> str:
+    """Where two lists of streams part: which stream, at which byte, and the bytes around it."""
+    if len(made) != len(kept):
+        return f"{len(made)} streams made, {len(kept)} kept"
+    for n, (a, b) in enumerate(zip(made, kept)):
+        if a != b:
+            at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+            lo = max(0, at - 60)
+            return (
+                f"stream {n} at byte {at} (lengths {len(a)} and {len(b)}): "
+                f"made {a[lo : at + 60]!r}, kept {b[lo : at + 60]!r}"
+            )
+    return "nothing"
+
+
+def _pdf_streams(pdf: bytes) -> list:
+    """Every stream of a PDF the generator wrote, inflated: page content and the fonts' character
+    maps. The embedded font programs are left out.
+
+    A font program is a subset of the machine's own DejaVu file, and two builds of the same DejaVu
+    version are not the same bytes: on the CI image the `head` table of one face differs from the
+    one on the box that made the PDFs (its checksum in the table directory, byte 96 of the stream).
+    That deflated one byte shorter and moved every offset after it, so the files never compared
+    equal there. What the generator decides — every glyph placed on every page — is compared.
+    """
+    out = []
+    for raw in re.findall(rb"stream\r?\n(.*?)endstream", pdf, flags=re.S):
+        if raw.rstrip().endswith(b"~>"):  # a page's content: ASCII85 over deflate
+            raw = base64.a85decode(raw.strip(), adobe=True)
+        try:
+            data = zlib.decompressobj().decompress(raw)  # tolerant of a newline before `endstream`
+        except zlib.error:
+            data = raw
+        if data[:4] != b"\x00\x01\x00\x00":  # a TrueType program: the machine's font, not ours
+            out.append(data)
+    assert out, "no stream found: not a PDF this test can read"
+    return out

@@ -23,3 +23,6 @@ description  = "Audio frames in ('payload@timestamp_ms'), TTS chunks out, per co
 # Where the local trace consumer writes runs; the Traces tab reads this.
 [studio]
 traces = "/tmp/operonx_traces/ex15_callbot_streaming"
+
+[lint]
+baseline = {C8 = 1, C16 = 1}

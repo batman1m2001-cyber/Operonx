@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.42.1] - 2026-11-21
+
+### Fixed
+- **A service with `workers > 1` died at start on a current uvicorn.** uvicorn's multi-process supervisor no longer takes `target=` (0.54 here; `uvicorn[standard]>=0.20` installs it on a fresh environment), and the balanced listener passed it: `TypeError: Multiprocess.__init__() got an unexpected keyword argument 'target'`, the port never opened. The supervisor is now driven the way the installed uvicorn expects, old or new, and the workers are still balanced. `OPERONX_SERVE_BALANCE=off` was the only way round it.
+- `operonx lint --build` on a project its manifest alone describes (no `[project] app`) failed every graph that names a resource with "ResourceHub not initialized": the project is now made importable and its resources resolvable before its graphs are built, as a declared application's already were.
+
 ## [1.42.0] - 2026-11-21
 
 ### Added

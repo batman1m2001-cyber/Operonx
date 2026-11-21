@@ -146,3 +146,17 @@ def test_the_build_fills_env_example_names_with_their_value_there(tmp_path, monk
     }
     assert sorted(added) == ["LLM_API_KEY", "NAME", "SUMMARY_EVERY"]
     assert "SUMMARY_EVERY" not in os.environ and os.environ["SET"] == "shell"
+
+
+def test_a_project_its_manifest_alone_describes_builds_a_graph_that_names_a_resource():
+    """ex03 has no `[project] app`: an operonx.toml, a `[[serve]]` and a resources.yaml. Its graph
+    names `llm:gpt-4o-mini`, and the build said "ResourceHub not initialized" — only a declared
+    application was made importable and given its resources before its graphs were built."""
+    root = Path(__file__).resolve().parents[3] / "examples" / "python" / "ex03_llm_chat"
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+    got = subprocess.run(
+        [sys.executable, "-m", "operonx.cli.main", "lint", "--build", "."],
+        cwd=root, env=env, capture_output=True, text=True, timeout=180,
+    )  # fmt: skip
+    assert "1/1 graph(s) build offline" in got.stdout, got.stdout + got.stderr
+    assert got.returncode == 0, got.stdout + got.stderr
