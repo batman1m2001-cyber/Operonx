@@ -152,6 +152,24 @@ def _is_empty_completion(result: Any) -> bool:
     return not _content_to_text(content).strip() if _textlike(content) else False
 
 
+def _note_rendered_prompts(inputs: Dict[str, Any]) -> None:
+    """An input that was rendered from a named prompt (``prompt(...).render``
+    in an upstream op) says so on this execution's run row — the prompt a
+    call used is then known even when it was chosen at run time."""
+    from operonx.core.runtime import _current_frame
+    from operonx.prompts import RenderedPrompt
+
+    refs = []
+    for key, value in inputs.items():
+        if isinstance(value, RenderedPrompt):
+            refs += [{"input": key, **ref} for ref in value.refs]
+    if not refs:
+        return
+    frame = _current_frame.get()
+    if frame is not None:
+        frame.attrs = {**(frame.attrs or {}), "prompts": refs}
+
+
 class LLMOp(BaseOp):
     """Op that formats a prompt and calls a language model via ResourceHub.
 
@@ -1133,6 +1151,7 @@ class LLMOp(BaseOp):
     def _build_llm_params(self, _inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Format prompt into messages and return LLM-ready params dict."""
         inputs_copy = dict(_inputs)
+        _note_rendered_prompts(inputs_copy)
         prompt, messages, template_vars, llm_knobs = self._extract_prompt_and_vars(inputs_copy)
         built = self._resolve_messages(prompt, messages, template_vars)
         return {"messages": built, **llm_knobs}

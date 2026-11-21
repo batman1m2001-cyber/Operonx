@@ -46,6 +46,7 @@ from typing import Any, Dict, List, Optional, Tuple
 __all__ = [
     "PromptNotFound",
     "PromptText",
+    "RenderedPrompt",
     "labels",
     "prompt",
     "prompt_names",
@@ -111,12 +112,22 @@ class PromptText(str):
         for the working text), the label that chose it, and its text's hash."""
         return {"name": self.name, "version": self.version, "label": self.label, "hash": self.hash}
 
-    def render(self, **variables: Any) -> str:
-        """The text with every ``{{name}}`` filled in from *variables*."""
+    def render(self, **variables: Any) -> "RenderedPrompt":
+        """The text with every ``{{name}}`` filled in from *variables*.
+
+        The result is a string that remembers what it was made from
+        (:class:`RenderedPrompt`): this prompt, and any prompt among the
+        values. An ``LLMOp`` given it as an input records those on its run
+        row, the same as a prompt named in ``prompt=``.
+        """
         missing = [v for v in self.variables if v not in variables]
         if missing:
             raise KeyError(f"prompt {self.name!r}: no value for {', '.join(missing)}")
-        return _VAR.sub(lambda m: str(variables[m.group(1)]), self.text)
+        refs = [self.ref]
+        for name in self.variables:
+            refs += _refs_in(variables[name])
+        text = _VAR.sub(lambda m: _plain(variables[m.group(1)]), self.text)
+        return RenderedPrompt(text, refs=refs)
 
     # A deep copy or a pickle (a graph is copied when it is compiled; a trace
     # crosses a process) keeps what it is.
@@ -128,6 +139,49 @@ class PromptText(str):
 
     def __copy__(self) -> "PromptText":
         return self
+
+
+class RenderedPrompt(str):
+    """A prompt with its variables filled in: the text, and the prompts it
+    was made from (``refs`` — what a run records, outermost first)."""
+
+    refs: Tuple[Dict[str, Any], ...]
+
+    def __new__(cls, text: str, *, refs: Any = ()) -> "RenderedPrompt":
+        self = super().__new__(cls, text)
+        seen: List[Dict[str, Any]] = []
+        for ref in refs:
+            if ref not in seen:
+                seen.append(dict(ref))
+        self.refs = tuple(seen)
+        return self
+
+    def __reduce__(self) -> Tuple[Any, ...]:
+        return (_rebuild_rendered, (str(self), self.refs))
+
+    def __deepcopy__(self, memo: Dict[int, Any]) -> "RenderedPrompt":
+        return self
+
+    def __copy__(self) -> "RenderedPrompt":
+        return self
+
+
+def _rebuild_rendered(text: str, refs: Any) -> RenderedPrompt:
+    return RenderedPrompt(text, refs=refs)
+
+
+def _plain(value: Any) -> str:
+    """*value* as the text a prompt takes it as: a prompt gives its text as written."""
+    return value.text if isinstance(value, PromptText) else str(value)
+
+
+def _refs_in(value: Any) -> List[Dict[str, Any]]:
+    """The prompts a value came from: itself, or the ones it was rendered from."""
+    if isinstance(value, PromptText):
+        return [value.ref]
+    if isinstance(value, RenderedPrompt):
+        return list(value.refs)
+    return []
 
 
 def _rebuild(
@@ -281,12 +335,12 @@ def _include(base: Path, body: str, label: str, seen: Tuple[str, ...]) -> str:
 def prompt_refs(value: Any) -> List[Dict[str, Any]]:
     """The prompts in *value* — a ``prompt=`` template (a string or a
     ``{system, user}`` dict) or an agent's instructions — as what a run
-    records: each :attr:`PromptText.ref`, with the ``part`` it fills when
-    there are parts."""
-    if isinstance(value, PromptText):
-        return [value.ref]
+    records: each :attr:`PromptText.ref` (a rendered prompt gives the ones
+    it was made from), with the ``part`` it fills when there are parts."""
+    if isinstance(value, (PromptText, RenderedPrompt)):
+        return _refs_in(value)
     if isinstance(value, dict):
-        return [{"part": k, **v.ref} for k, v in value.items() if isinstance(v, PromptText)]
+        return [{"part": k, **ref} for k, v in value.items() for ref in _refs_in(v)]
     return []
 
 
