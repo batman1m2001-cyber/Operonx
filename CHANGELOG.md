@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `operonx init --template chat` keeps its system prompt in `prompts/chat/system.md` and asks for it by name, instead of a constant in `src/chat.py`.
+
+### Fixed
+- `operonx lint` C16 flagged `prompts/` at a project's root; it is part of the shape.
+
 ## [1.41.0] - 2026-11-21
 
 ### Added

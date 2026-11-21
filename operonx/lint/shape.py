@@ -35,7 +35,7 @@ __all__ = ["ROOT_ALLOWED", "lint_shape"]
 #: What a project's root may hold besides dotfiles, ``*.md`` and ``*.sh`` (C16).
 ROOT_ALLOWED = {
     # folders of the shape
-    "app", "src", "web", "tests", "data", "datasets", "out", "docs", "deploy", "scripts",
+    "app", "src", "web", "tests", "data", "datasets", "out", "docs", "deploy", "scripts", "prompts",
     "tools",
     # the project's files
     "operonx.toml", "resources.yaml", "pyproject.toml", "uv.lock", "requirements.txt",

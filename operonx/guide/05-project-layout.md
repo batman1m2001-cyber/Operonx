@@ -21,6 +21,7 @@ scorer/
 │   └── scoring.py        # one file per feature: its ops, then its graphs
 ├── tests/
 │   └── test_scoring.py
+├── prompts/              # prompt text, one .md per prompt: `prompt("name")` (01-ops.md)
 ├── datasets/             # eval cases, one .jsonl per dataset
 └── docs/brd/             # the requirements and their checklist (`--no-brd` skips it)
 ```
