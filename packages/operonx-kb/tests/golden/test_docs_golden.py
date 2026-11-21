@@ -78,7 +78,22 @@ def test_pdf_generators_are_reproducible():
 
     for name, make in GENERATORS.items():
         made, kept = _pdf_streams(make(None)), _pdf_streams((DOCS / name).read_bytes())
-        assert made == kept, f"{name} differs from its generator"
+        assert made == kept, f"{name} differs from its generator: {_first_difference(made, kept)}"
+
+
+def _first_difference(made: list, kept: list) -> str:
+    """Where two lists of streams part: which stream, at which byte, and the bytes around it."""
+    if len(made) != len(kept):
+        return f"{len(made)} streams made, {len(kept)} kept"
+    for n, (a, b) in enumerate(zip(made, kept)):
+        if a != b:
+            at = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+            lo = max(0, at - 60)
+            return (
+                f"stream {n} at byte {at} (lengths {len(a)} and {len(b)}): "
+                f"made {a[lo : at + 60]!r}, kept {b[lo : at + 60]!r}"
+            )
+    return "nothing"
 
 
 def _pdf_streams(pdf: bytes) -> list:
