@@ -180,7 +180,7 @@ class Agent:
             "instructions": {
                 "text": None if dynamic else getattr(self.instructions, "text", self.instructions),
                 # asked for by name (operonx.prompts): which prompt, which version
-                "prompt": getattr(self.instructions, "ref", None),
+                **({"prompt": self.instructions.ref} if hasattr(self.instructions, "ref") else {}),
                 "dynamic": dynamic,
                 "from": (
                     f"{self.instructions.__module__}:{self.instructions.__qualname__}"
