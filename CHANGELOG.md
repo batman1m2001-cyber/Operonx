@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `operonx init --template chat` keeps its system prompt in `prompts/chat/system.md` and asks for it by name, instead of a constant in `src/chat.py`.
 
 ### Fixed
+- **The files run store walked its root once per concurrent caller.** `list_runs`, `groups` and `rollups` each refreshed the index when it was more than `refresh_every` old, with nothing stopping several from doing it at once: a studio page that asks three things together walked 1,100 run folders three times in parallel (0.27 s for one call, 1.75 s for three, 4.9 s for five). One walk now serves every caller that arrives while it runs (0.32 s for five).
 - `operonx lint` C16 flagged `prompts/` at a project's root; it is part of the shape.
 
 ## [1.41.0] - 2026-11-21

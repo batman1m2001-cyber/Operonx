@@ -443,6 +443,29 @@ def test_files_delete_prunes_the_empty_day_folder(tmp_path):
     assert not day.exists()
 
 
+def test_files_callers_at_once_share_one_refresh(tmp_path):
+    """A page asks several things of the store at once: one walk of the
+    root serves them all (each walked it before: 5 callers, 5 walks)."""
+    import threading
+
+    store = FilesRunStore(root=tmp_path / "runs", refresh_every=60)
+    walks = []
+    real = store.refresh
+
+    def slow_refresh():
+        walks.append(1)
+        time.sleep(0.05)  # long enough for every caller to arrive
+        return real()
+
+    store.refresh = slow_refresh
+    callers = [threading.Thread(target=store.list_runs) for _ in range(5)]
+    for t in callers:
+        t.start()
+    for t in callers:
+        t.join()
+    assert len(walks) == 1
+
+
 def test_files_refresh_is_throttled(tmp_path):
     store = FilesRunStore(root=tmp_path / "runs", refresh_every=60)
     LocalConsumer(config={"root": tmp_path / "runs"}).consume(_calls()[0])

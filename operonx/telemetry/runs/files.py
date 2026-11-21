@@ -20,6 +20,7 @@ import json
 import os
 import shutil
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
@@ -77,6 +78,7 @@ class FilesRunStore(RunStore):
         self.refresh_every = float(refresh_every)
         self._writer = consumer or LocalConsumer(config={"root": str(self.root), "layout": layout})
         self._last_refresh = 0.0
+        self._refreshing = threading.Lock()
         # each indexed run's meta.json mtime, as last seen: a run written
         # again (a journalled run resumed under its own id) is read again
         self._seen_at: Dict[str, float] = {}
@@ -170,8 +172,14 @@ class FilesRunStore(RunStore):
         return added
 
     def _maybe_refresh(self) -> None:
-        if time.monotonic() - self._last_refresh >= self.refresh_every:
-            self.refresh()
+        if time.monotonic() - self._last_refresh < self.refresh_every:
+            return
+        # One walk for every caller that arrives while it runs: a page that
+        # asks three things at once walked the root three times at once
+        # (1,100 runs: 0.27 s for one call, 1.75 s for three, 4.9 s for five).
+        with self._refreshing:
+            if time.monotonic() - self._last_refresh >= self.refresh_every:
+                self.refresh()
 
     # -- read --------------------------------------------------------------
 
