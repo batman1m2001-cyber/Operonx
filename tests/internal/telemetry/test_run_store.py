@@ -537,7 +537,8 @@ def test_files_a_big_root_is_never_walked_on_a_readers_thread(tmp_path):
     assert store.get_run("call-2") is None  # a miss does not walk either
     assert time.monotonic() - t0 < 0.25
     for _ in range(100):
-        if len(store.index.locations()) == 2:
+        # the walk's thread sets its next turn after it has indexed: wait for both
+        if len(store.index.locations()) == 2 and store._next_walk:
             break
         time.sleep(0.05)
     assert walked_on == ["run-store-walk"] and len(store.list_runs().items) == 2

@@ -22,8 +22,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import threading
+import time
 import uuid
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
@@ -38,6 +41,19 @@ __all__ = ["Job", "ON_ERROR", "default_record_dir"]
 ON_ERROR = ("skip", "stop")
 
 KeyFn = Callable[[Any], Any]
+
+#: ``keep_runs=`` left unsaid: a job on a clock keeps :data:`KEEP_ON_A_CLOCK`
+#: runs, any other job every run.
+_UNSAID: Any = object()
+
+#: How many runs a job with a ``schedule=`` keeps when it does not say.
+#: A clock never stops: every 5 seconds is 17,000 runs a day, kept for ever.
+KEEP_ON_A_CLOCK = 1000
+
+#: The least time between two sweeps of one job's old traces. Removing the
+#: record of a run is one small folder; its traces may be a ``DELETE`` in a
+#: database, which a job on a 5-second clock must not send every 5 seconds.
+TRACE_SWEEP_S = 600.0
 
 
 def default_record_dir(folder: str = ".operonx/jobs") -> Path:
@@ -141,9 +157,11 @@ class Job:
             ``False`` for results too big to keep; ``reduce`` then has
             nothing to read and is refused.
         keep_runs: Keep only this job's newest N finished runs, removing
-            older ones after each run. Default: every run is kept. For a
-            job on a short clock (a worker polling every few seconds), whose
-            runs would otherwise pile up without end.
+            older ones after each run — the record, and the traces of those
+            runs wherever they were written (a sweep at most every
+            :data:`TRACE_SWEEP_S` seconds). Unsaid: a job with a
+            ``schedule=`` keeps :data:`KEEP_ON_A_CLOCK`, any other job every
+            run. ``None`` keeps every run.
         on_item: Called with each item's ``ItemResult`` as it is recorded
             (sync or async): progress lines, events for a host. It never
             breaks the run. ``run(on_item=...)`` replaces it for that run.
@@ -186,7 +204,7 @@ class Job:
         steps: Optional[Sequence["Job"]] = None,
         trace: Any = None,
         keep_results: bool = True,
-        keep_runs: Optional[int] = None,
+        keep_runs: Optional[int] = _UNSAID,
         record_dir: Union[str, Path, None] = None,
         on_item: Optional[Callable[[Any], Any]] = None,
         description: str = "",
@@ -255,6 +273,8 @@ class Job:
         self.preflight: List[str] = list(preflight or [])
         self.trace = trace
         self.keep_results = bool(keep_results)
+        if keep_runs is _UNSAID:
+            keep_runs = KEEP_ON_A_CLOCK if schedule is not None else None
         if keep_runs is not None and (isinstance(keep_runs, bool) or int(keep_runs) < 1):
             raise ValueError(f"job {name!r}: keep_runs= is at least 1 (or None: keep every run)")
         self.keep_runs: Optional[int] = int(keep_runs) if keep_runs is not None else None
@@ -268,6 +288,8 @@ class Job:
         self._engine: Any = None
         self._reducer: Any = None
         self._doors: Optional[bool] = None
+        self._swept_at = 0.0  # when this job's old traces were last swept
+        self._sweeping: Optional[threading.Thread] = None
 
     @staticmethod
     def _check_steps(steps: Any, **given: Any) -> None:
@@ -391,6 +413,7 @@ class Job:
                 run = await run_job(self, resume=resume)
             if self.keep_runs is not None:
                 prune(self.records(), self.name, self.keep_runs)
+                self._sweep_traces()
             return run
         finally:
             self.record_dir, self.on_item = kept
@@ -407,6 +430,55 @@ class Job:
         from operonx.cli.run import main_for
 
         return main_for(self, argv, doc=doc)
+
+    def _sweep_traces(self) -> Optional[threading.Thread]:
+        """Drop the traces of the runs ``keep_runs`` no longer keeps, from
+        every consumer this job's runs are traced to — everything older
+        than the oldest run still recorded, so traces left by an earlier
+        process go too. In a thread of its own (the first sweep may have a
+        year of runs to remove) and at most every :data:`TRACE_SWEEP_S`
+        seconds. Returns the thread when one was started."""
+        from operonx.core.loggings import LOGGER
+
+        from .record import runs_of
+
+        now = time.monotonic()
+        if self.steps is not None or (self._swept_at and now - self._swept_at < TRACE_SWEEP_S):
+            return None
+        if self._sweeping is not None and self._sweeping.is_alive():
+            return None
+        kept = runs_of(self.records(), self.name)
+        if not kept:
+            return None
+        try:
+            consumers = [
+                c for c in self.engine().trace_consumers if hasattr(c, "drop_job_runs_before")
+            ]
+        except Exception:  # noqa: BLE001 — a graph that will not compile is the run's to report
+            return None
+        self._swept_at = now
+        if not consumers:
+            return None
+        oldest = kept[0].name
+        try:
+            started = JobRun.load(kept[0]).started
+            since: Optional[float] = datetime.fromisoformat(started).timestamp()
+        except Exception:  # noqa: BLE001 — a record without its time: the folders still sort
+            since = None
+        name, origin = self.name, getattr(self, "origin", "job")
+
+        def sweep() -> None:
+            for consumer in consumers:
+                try:
+                    consumer.drop_job_runs_before(name, oldest, origin=origin, started_at=since)
+                except Exception as exc:  # noqa: BLE001 — a sink that cannot delete is not the job failing
+                    LOGGER.warning(
+                        "[job:%s] old traces not removed from %s: %s", name, consumer, exc
+                    )
+
+        self._sweeping = threading.Thread(target=sweep, name=f"job-traces:{name}", daemon=True)
+        self._sweeping.start()
+        return self._sweeping
 
     def records(self) -> Path:
         """Where this job's runs are recorded."""

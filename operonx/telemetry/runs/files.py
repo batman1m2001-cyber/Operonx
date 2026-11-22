@@ -181,12 +181,16 @@ class FilesRunStore(RunStore):
             return 0
         cut = data.rfind(b"\n") + 1  # a line still being written waits for its end
         batch: list = []
+        removed: list = []
         for loc in dict.fromkeys(data[:cut].decode("utf-8", "replace").split("\n")):
             if not loc or loc.startswith("/") or ".." in loc.split("/"):
                 continue
             run_dir = self.root / loc
             if not (run_dir / "nodes.jsonl").is_file():
-                continue  # written and removed since
+                # removed (a job's keep_runs, a hand): its row goes with it
+                self._seen_at.pop(loc, None)
+                removed.append(loc.rsplit("/", 1)[-1])
+                continue
             try:
                 written = (run_dir / "meta.json").stat().st_mtime
             except OSError:
@@ -199,6 +203,8 @@ class FilesRunStore(RunStore):
             except Exception:  # noqa: BLE001 — one bad directory is not the store failing
                 continue
         self.index.put_many(batch)
+        for i in range(0, len(removed), 500):
+            self.index.delete(RunFilter(trace_ids=removed[i : i + 500]))
         at += cut
         if at == size and size > _ROTATE:
             try:

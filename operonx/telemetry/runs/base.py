@@ -140,6 +140,17 @@ class RunStore(Consumer):
     def delete_runs(self, where: RunFilter) -> int:
         """Remove the runs *where* matches; return how many."""
 
+    def drop_job_runs_before(
+        self, job: str, job_run: str, origin: str = "job", started_at: Optional[float] = None
+    ) -> int:
+        """Delete the runs of *job* started before *started_at* (when its
+        oldest kept job run, *job_run*, started) — what
+        ``Job(keep_runs=)`` asks of every place its runs are traced to.
+        Returns how many runs went; ``0`` on a store that cannot delete."""
+        if not self.writable or started_at is None:
+            return 0
+        return self.delete_runs(RunFilter(origin=origin, name=job, until=float(started_at)))
+
     def count(self, where: Optional[RunFilter] = None) -> int:
         """How many runs *where* matches."""
         page = self.list_runs(where, limit=1)

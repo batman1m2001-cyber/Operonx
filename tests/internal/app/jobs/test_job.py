@@ -349,6 +349,52 @@ def test_keep_runs_keeps_the_newest_finished_runs_and_never_one_still_going(tmp_
         Job("j", graph=sq, keep_runs=0)
 
 
+def test_keep_runs_removes_the_traces_of_the_runs_it_removes(tmp_path):
+    """mr-finance: a worker every 5 seconds with keep_runs=500 kept 500
+    records and 528,000 trace folders. The traces go with the records —
+    from the local sink, and from the store that reads it."""
+    from operonx.app.jobs.record import runs_of
+    from operonx.telemetry.consumers.local import LocalConsumer
+    from operonx.telemetry.runs import RunFilter
+    from operonx.telemetry.runs.files import FilesRunStore
+
+    root = tmp_path / "runs"
+    job = Job("j", graph=sq, items=[{"n": 1}], key="n", keep_runs=2, record_dir=tmp_path / "rec",
+              trace=[LocalConsumer({"root": str(root)})])  # fmt: skip
+    store = FilesRunStore(root)
+    ids = [job.run_sync().run_id for _ in range(4)]
+    job._sweeping.join()  # the first run's sweep: nothing was old yet
+    assert len(list((root / "jobs" / "j").iterdir())) == 4
+    seen = store.list_runs(RunFilter(origin="job", name="j")).items
+    assert len(seen) == 4  # the store has indexed all four
+    job._swept_at = 0.0  # a real clock waits TRACE_SWEEP_S
+    job._sweep_traces().join()
+    assert sorted(p.name for p in (root / "jobs" / "j").iterdir()) == ids[-2:]
+    assert [p.name for p in runs_of(tmp_path / "rec", "j")] == ids[-2:]
+    store._next = 0.0
+    assert {s.job_run for s in store.list_runs(RunFilter(origin="job", name="j")).items} == set(
+        ids[-2:]
+    )
+    # a store given as the sink deletes by the oldest kept run's start
+    assert store.drop_job_runs_before("j", ids[-1], started_at=0.0) == 0
+    assert store.drop_job_runs_before("j", ids[-1], started_at=4e9) == 2
+
+
+def test_a_sweep_waits_its_turn_and_a_job_on_a_clock_keeps_a_thousand_runs(tmp_path):
+    from operonx.app.declare import schedule
+    from operonx.app.jobs.job import KEEP_ON_A_CLOCK
+
+    assert Job("j", graph=sq).keep_runs is None
+    assert Job("j", graph=sq, schedule=schedule(every="5s")).keep_runs == KEEP_ON_A_CLOCK == 1000
+    assert Job("j", graph=sq, schedule=schedule(every="5s"), keep_runs=None).keep_runs is None
+    assert Job("j", graph=sq, schedule=schedule(every="5s"), keep_runs=7).keep_runs == 7
+
+    job = Job("j", graph=sq, items=[{"n": 1}], key="n", keep_runs=1, record_dir=tmp_path / "rec")
+    job.run_sync()
+    assert job._swept_at > 0  # swept (nothing to drop from: no consumer keeps traces)
+    assert job._sweep_traces() is None  # and not again inside TRACE_SWEEP_S
+
+
 # -- failures -----------------------------------------------------------------
 
 
