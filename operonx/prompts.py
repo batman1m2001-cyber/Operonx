@@ -73,7 +73,6 @@ import hashlib
 import os
 import re
 import secrets
-import warnings
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -102,7 +101,8 @@ __all__ = [
 DEFAULT_LABEL = "production"
 
 _VAR = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
-_INCLUDE = re.compile(r"\{\{>\s*([A-Za-z0-9_./-]+)\s*\}\}")
+#: ``{{> other}}`` — the include that composites replaced; refused when a text loads.
+_INCLUDE = re.compile(r"\{\{>\s*([^}]*?)\s*\}\}")
 _NAME = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]*(/[A-Za-z0-9_][A-Za-z0-9_.-]*)*$")
 _ID = re.compile(r"^pr_[0-9a-f]{8}$")
 #: The file kinds a prompt can be: a text object, a composite.
@@ -127,14 +127,13 @@ class PromptFormatError(ValueError):
     kind, a link to itself — said with the file's name and the part."""
 
 
-class PromptText(str):
-    """A prompt, loaded: usable wherever a string is, and it knows its name.
+class PromptText:
+    """A text object, loaded: its name, id and version, and ``text`` — the
+    prompt as its file has it (what an agent's ``instructions`` are given).
 
-    As a ``str`` it is an ``LLMOp`` template: ``{{name}}`` became ``{name}``
-    and every other brace is doubled, so ``prompt=`` formats it as written
-    and a copy that lost this class (a checkpoint, a JSON round trip) still
-    formats the same. ``text`` is the prompt as its file has it — what an
-    agent's ``instructions`` are given — and ``render`` fills it in.
+    It is not a string: ``LLMOp(prompt=…)`` fills its ``{{x}}`` from the op's
+    values and leaves every other brace as written, ``render`` / ``fill`` do
+    the same in code, and ``str()`` is the text as written.
     """
 
     name: str
@@ -154,7 +153,7 @@ class PromptText(str):
         label: Optional[str] = None,
         meta: Optional[Dict[str, Any]] = None,
     ) -> "PromptText":
-        self = super().__new__(cls, _as_template(text))
+        self = super().__new__(cls)
         self.name = name
         self.version = version
         self.label = label
@@ -182,6 +181,22 @@ class PromptText(str):
             ref["id"] = self.id
         return ref
 
+    def __str__(self) -> str:
+        return self.text
+
+    def __repr__(self) -> str:
+        return f"<PromptText {self.name!r}>"
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, PromptText) and (self.name, self.version, self.text) == (
+            other.name,
+            other.version,
+            other.text,
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.name, self.version, self.hash))
+
     def fill(self, data: Dict[str, Any]) -> str:
         """The text with its ``{{x}}`` filled from *data* — strict: a prompt
         as a value is refused (link it in a composite)."""
@@ -196,28 +211,14 @@ class PromptText(str):
         """The text with every ``{{name}}`` filled in from *variables*.
 
         The result is a string that remembers what it was made from
-        (:class:`RenderedPrompt`): this prompt, and any prompt among the
-        values. An ``LLMOp`` given it as an input records those on its run
-        row, the same as a prompt named in ``prompt=``.
+        (:class:`RenderedPrompt`): this prompt. An ``LLMOp`` given it as an
+        input records it on its run row, the same as a prompt named in
+        ``prompt=``. A prompt as a value is refused — link it in a composite.
         """
         missing = [v for v in self.variables if v not in variables]
         if missing:
             raise KeyError(f"prompt {self.name!r}: no value for {', '.join(missing)}")
-        refs = [self.ref]
-        for name in self.variables:
-            refs += _refs_in(variables[name])
-            if isinstance(variables[name], (PromptText, RenderedPrompt)) and _refs_in(
-                variables[name]
-            ):
-                warnings.warn(
-                    f"prompt {self.name!r}: {{{{{name}}}}} was given a prompt; a variable is data. "
-                    "Link the prompt from a composite (prompts/<name>.yaml: use/pick/when) — "
-                    "a prompt as a variable's value goes in the next minor.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        text = _VAR.sub(lambda m: _plain(variables[m.group(1)]), self.text)
-        return RenderedPrompt(text, refs=refs)
+        return RenderedPrompt(self.fill(variables), refs=[self.ref])
 
     # A deep copy or a pickle (a graph is copied when it is compiled; a trace
     # crosses a process) keeps what it is.
@@ -264,11 +265,6 @@ def _rebuild_rendered(text: str, refs: Any, tree: Any = None) -> RenderedPrompt:
     return RenderedPrompt(text, refs=refs, tree=tree)
 
 
-def _plain(value: Any) -> str:
-    """*value* as the text a prompt takes it as: a prompt gives its text as written."""
-    return value.text if isinstance(value, PromptText) else str(value)
-
-
 def _refs_in(value: Any) -> List[Dict[str, Any]]:
     """The prompts a value came from: itself, or the ones it was rendered from."""
     if isinstance(value, PromptText):
@@ -282,18 +278,6 @@ def _rebuild(
     text: str, name: str, version: Optional[int], label: Optional[str], meta: Dict[str, Any]
 ) -> PromptText:
     return PromptText(text, name=name, version=version, label=label, meta=meta)
-
-
-def _as_template(text: str) -> str:
-    """*text* as a ``str.format`` template: ``{{name}}`` is ``{name}``, any other brace is literal."""
-    out: List[str] = []
-    at = 0
-    for m in _VAR.finditer(text):
-        out.append(text[at : m.start()].replace("{", "{{").replace("}", "}}"))
-        out.append("{" + m.group(1) + "}")
-        at = m.end()
-    out.append(text[at:].replace("{", "{{").replace("}", "}}"))
-    return "".join(out)
 
 
 # ── composite objects ────────────────────────────────────────────────────
@@ -911,14 +895,12 @@ def _load(base: Path, name: str, version: Optional[int], chosen: str, seen: Tupl
     if _path(base, name).suffix == ".yaml":
         return _composite(base, name, raw, version, used, chosen, seen)
     meta, body = _split(raw)
-    if _INCLUDE.search(body):
-        warnings.warn(
-            f"prompt {name!r} includes another with {{{{> …}}}}; link them from a composite "
-            "(prompts/<name>.yaml: use:) — {{> …}} goes in the next minor.",
-            DeprecationWarning,
-            stacklevel=3,
+    m = _INCLUDE.search(body)
+    if m:
+        raise PromptFormatError(
+            f"prompt {name!r}: {m.group(0)} is gone — a text object does not include another. "
+            f"Link both from a composite: prompts/<name>.yaml with parts: [{{use: …}}, {{use: {m.group(1)}}}]"
         )
-    body = _include(base, body, chosen, seen)
     return PromptText(body.strip("\n"), name=name, version=version, label=used, meta=meta)
 
 
@@ -938,19 +920,6 @@ def _labelled(base: Path, name: str, label: str) -> Tuple[Optional[int], str]:
             return got
     version = labels(base.parent).get(name, {}).get(label)
     return version, _read(base, name, version)
-
-
-def _include(base: Path, body: str, label: str, seen: Tuple[str, ...]) -> str:
-    """*body* with each ``{{> other}}`` replaced by that prompt's text (at the same label)."""
-
-    def put(m: "re.Match[str]") -> str:
-        other = m.group(1)
-        if other in seen:
-            raise PromptNotFound(f"prompts include each other: {' → '.join((*seen, other))}")
-        _, text = _split(_labelled(base, other, label)[1])
-        return _include(base, text, label, (*seen, other)).strip("\n")
-
-    return _INCLUDE.sub(put, body)
 
 
 def prompt_refs(value: Any) -> List[Dict[str, Any]]:
@@ -1078,8 +1047,8 @@ _LINK_LINE = re.compile(
 
 def move(old: str, new: str, root: Optional[Path] = None) -> List[Path]:
     """Rename prompt *old* to *new*: its file, its versions and labels, and
-    every link to it — in composites (``use``/``pick``/``when``), published
-    versions included, and in ``{{> old}}``. Its id does not change.
+    every link to it in composites (``use``/``pick``/``when``), published
+    versions included. Its id does not change.
     Returns the files rewritten."""
     base = prompts_dir(root)
     src = _path(base, old)
@@ -1100,13 +1069,12 @@ def move(old: str, new: str, root: Optional[Path] = None) -> List[Path]:
         table[new] = table.pop(old)
         _write_labels(base, table)
     changed: List[Path] = [dst]
-    include = re.compile(r"\{\{>\s*" + re.escape(old) + r"\s*\}\}")
     for path in sorted(base.rglob("*")):
         if not path.is_file() or path.suffix not in _SUFFIXES:
             continue
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".md":
-            out = include.sub("{{> " + new + "}}", text)
+            continue
         else:
             lines = []
             for line in text.split("\n"):

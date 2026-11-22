@@ -612,13 +612,17 @@ class LLMOp(BaseOp):
                 original_error=TypeError("prompt=list is not supported; use messages="),
             )
 
-        from operonx.prompts import CompositePrompt
+        from operonx.prompts import CompositePrompt, PromptText
 
         if isinstance(prompt, CompositePrompt):
             # a prompt object made of links: rendered here, from the op's values
             if prompt.kind == "chat":
                 return _render_composite(prompt, vars).messages
             return [{"role": "user", "content": str(_render_composite(prompt, vars))}]
+
+        if isinstance(prompt, PromptText):
+            # a text object: its {{x}} filled, every other brace as written
+            return [{"role": "user", "content": _fill_text(prompt, vars)}]
 
         if isinstance(prompt, str):
             content = _format_value(prompt, vars, prompt)
@@ -651,7 +655,9 @@ class LLMOp(BaseOp):
         raise PromptError(
             message="Invalid prompt type",
             prompt=prompt,
-            original_error=TypeError(f"Expected str or dict, got {type(prompt).__name__}"),
+            original_error=TypeError(
+                f"Expected str, dict or a prompt object, got {type(prompt).__name__}"
+            ),
         )
 
     def _extract_prompt_and_vars(self, kwargs: Dict[str, Any]) -> tuple:
@@ -1709,8 +1715,27 @@ class LLMOp(BaseOp):
 # =============================================================================
 
 
+def _fill_text(prompt: Any, vars: Dict[str, Any]) -> str:
+    """A text object's ``{{x}}`` filled from the op's values (its run-row ref
+    was recorded when the op was built)."""
+    try:
+        return prompt.fill(vars)
+    except KeyError as e:
+        raise PromptError(
+            message=f"Missing value(s) for prompt {prompt.name!r}: {e.args[0] if e.args else e}",
+            prompt=prompt.ref,
+            missing_vars=[v for v in prompt.variables if v not in vars],
+            original_error=e,
+        ) from e
+    except TypeError as e:  # a prompt given as a variable's value
+        raise PromptError(message=str(e), prompt=prompt.ref, original_error=e) from e
+
+
 def _format_part(value: Any, vars: Dict[str, Any], template: Any, role: str) -> Any:
-    from operonx.prompts import CompositePrompt
+    from operonx.prompts import CompositePrompt, PromptText
+
+    if isinstance(value, PromptText):
+        return _fill_text(value, vars)
 
     if isinstance(value, CompositePrompt):
         if value.kind == "chat":
@@ -1726,10 +1751,10 @@ def _format_part(value: Any, vars: Dict[str, Any], template: Any, role: str) -> 
 
 def _extract_template_variables(template: Any) -> set:
     """Find all ``{variable}`` names in a template (str, dict, or list);
-    of a composite prompt, the variables it needs."""
-    from operonx.prompts import CompositePrompt
+    of a prompt object, the variables it needs."""
+    from operonx.prompts import CompositePrompt, PromptText
 
-    if isinstance(template, CompositePrompt):
+    if isinstance(template, (CompositePrompt, PromptText)):
         return set(template.variables)
     if isinstance(template, str):
         return set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", template))
@@ -1821,9 +1846,11 @@ def _check_prompt_inputs(inputs: Dict[str, Any]) -> None:
     like a model setting (``{user}``) is knowable now, and one model call
     later is a much worse place to find out.
     """
+    from operonx.prompts import PromptText
+
     prompt = inputs.get("prompt")
     messages = inputs.get("messages")
-    if isinstance(prompt, (str, dict)):
+    if isinstance(prompt, (str, dict, PromptText)):
         shadowed = sorted(_extract_template_variables(prompt) & RESERVED_KEYS)
         if shadowed:
             raise PromptError(

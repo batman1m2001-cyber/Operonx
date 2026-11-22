@@ -167,9 +167,10 @@ table. Labels key on `id`.
 
 - An existing `.md` prompt loads as a text object (an id is written into its front
   matter the first time). `prompt("x")` keeps working.
-- For one minor, `PromptText` still behaves as a `str`, `{{> include}}` still
-  inlines, and a prompt passed as a variable still works. All three warn. The next
-  minor removes them, after the five projects below have moved.
+- For one minor (1.44), `PromptText` still behaved as a `str`, `{{> include}}`
+  still inlined, and a prompt passed as a variable still worked, with a warning.
+  1.45.0 removes all three (O6): `str()` is the text as written, an include is a
+  load error, a prompt as a value raises.
 
 ## Phases
 

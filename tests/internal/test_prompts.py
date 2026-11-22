@@ -7,7 +7,14 @@ import pickle
 import pytest
 
 from operonx import END, START, Operon, graph
-from operonx.prompts import PromptNotFound, PromptText, prompt, prompt_names, prompt_refs
+from operonx.prompts import (
+    PromptFormatError,
+    PromptNotFound,
+    PromptText,
+    prompt,
+    prompt_names,
+    prompt_refs,
+)
 from operonx.providers.ops import LLMOp
 from operonx.testing import fake_model
 
@@ -21,7 +28,8 @@ def project(tmp_path, monkeypatch):
     d.mkdir()
     (d / "guard.md").write_text('Answer with JSON only: {"ok": true}\n')
     (d / "intake.system.md").write_text(
-        "---\ndescription: the intake prompt\n---\nYou help {{ customer }}.\n{{> guard}}\n"
+        "---\ndescription: the intake prompt\n---\nYou help {{ customer }}.\n"
+        'Answer with JSON only: {"ok": true}\n'
     )
     (d / "ask.md").write_text("Q: {{question}}\n")
     monkeypatch.chdir(tmp_path)
@@ -33,7 +41,7 @@ def project(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_a_prompt_is_its_file_with_includes_and_it_knows_its_name(project):
+def test_a_prompt_is_its_file_and_it_knows_its_name(project):
     p = prompt("intake.system")
     assert p.text == 'You help {{ customer }}.\nAnswer with JSON only: {"ok": true}'
     assert (p.name, p.version, p.label) == ("intake.system", None, None)
@@ -42,11 +50,11 @@ def test_a_prompt_is_its_file_with_includes_and_it_knows_its_name(project):
     assert prompt_names() == ["ask", "guard", "intake.system"]
 
 
-def test_as_a_str_it_is_a_format_template_and_only_double_braces_are_variables(project):
+def test_only_double_braces_are_variables_and_str_is_the_text_as_written(project):
     p = prompt("intake.system")
-    assert str(p) == 'You help {customer}.\nAnswer with JSON only: {{"ok": true}}'
-    assert p.format_map({"customer": "Lan"}) == p.render(customer="Lan")
-    assert p.render(customer="Lan").endswith('{"ok": true}')
+    assert not isinstance(p, str) and str(p) == p.text
+    assert p.render(customer="Lan") == 'You help Lan.\nAnswer with JSON only: {"ok": true}'
+    assert p.fill({"customer": "Lan"}) == p.render(customer="Lan")
     with pytest.raises(KeyError, match="customer"):
         p.render()
 
@@ -58,10 +66,9 @@ def test_a_missing_name_says_what_the_project_has(project):
         prompt("../secrets")
 
 
-def test_prompts_that_include_each_other_are_refused(project):
-    (project / "prompts" / "a.md").write_text("{{> b}}")
-    (project / "prompts" / "b.md").write_text("{{> a}}")
-    with pytest.raises(PromptNotFound, match="a → b → a"):
+def test_an_include_is_refused_and_names_the_composite_way(project):
+    (project / "prompts" / "a.md").write_text("A\n{{> b}}")
+    with pytest.raises(PromptFormatError, match=r"\{\{> b\}\}.*composite"):
         prompt("a")
 
 
@@ -153,7 +160,7 @@ async def test_an_op_with_an_inline_prompt_records_nothing_new(project):
 
 async def test_a_prompt_rendered_upstream_is_named_on_the_llm_ops_row(project):
     """The prompt is chosen at run time (an op renders it); the LLM op that
-    is handed the text still says which prompt, and which included one."""
+    is handed the text still says which prompt."""
     import copy
     import pickle
 
@@ -161,8 +168,7 @@ async def test_a_prompt_rendered_upstream_is_named_on_the_llm_ops_row(project):
 
     @op
     def compose(customer: str):
-        inner = prompt("ask").render(question="why?")
-        return {"system": prompt("intake.system").render(customer=inner)}
+        return {"system": prompt("intake.system").render(customer=customer)}
 
     @graph
     def flow(customer):
@@ -177,12 +183,12 @@ async def test_a_prompt_rendered_upstream_is_named_on_the_llm_ops_row(project):
         await handle.result()
     sent = model.calls[0]
     sent = sent.get("messages", sent) if isinstance(sent, dict) else sent
-    assert sent[0]["content"] == 'You help Q: why?.\nAnswer with JSON only: {"ok": true}'
+    assert sent[0]["content"] == 'You help Lan.\nAnswer with JSON only: {"ok": true}'
     row = next(n for n in handle.trace.nodes if n.op_name == "s")
-    assert [(r["input"], r["name"]) for r in row.attrs["prompts"]] == [
-        ("sys", "intake.system"),
-        ("sys", "ask"),
-    ]
+    assert [(r["input"], r["name"]) for r in row.attrs["prompts"]] == [("sys", "intake.system")]
+    # a prompt is not a variable's value: link it in a composite
+    with pytest.raises(TypeError, match="composite"):
+        prompt("intake.system").render(customer=prompt("ask").render(question="why?"))
 
     r = prompt("ask").render(question="x")
     assert r == "Q: x" and r.refs == (prompt("ask").ref,)

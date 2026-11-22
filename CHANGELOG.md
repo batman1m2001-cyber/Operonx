@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **The old prompt ways, deprecated in 1.44.0** (PROMPT_OBJECTS_PLAN O6):
+  - `PromptText` is no longer a `str`. `str(p)` is the text as written (it was a `str.format` template, `{{x}}` turned into `{x}`); `LLMOp(prompt=p)` — alone or as `{system: p, user: …}` — fills its `{{x}}` from the op's values and leaves every other brace as written, as `.render` / `.fill` do. Code that used it as a string (`p.format_map`, `p + "…"`, `p.startswith`) uses `p.text` or `p.render(…)`.
+  - `{{> other}}` in a text object raises `PromptFormatError` when it loads; link the two from a composite (`parts: [{use: …}, {use: other}]`). `operonx prompt mv` no longer rewrites includes; lint C19 reports an include as an object that does not load.
+  - A prompt given as a variable's value (`.render(x=prompt("y"))`, or a rendered prompt) raises `TypeError` — link it from a composite. Lint C19 makes that an error.
+
 ### Added
 - **`cache: system` on a chat composite** sends its system message as a cached prefix — one text block marked `cache_control: {type: ephemeral}` — with the same text (PROMPT_OBJECTS_PLAN O5). qc-snatcher split each of five prompts at a `── DYNAMIC ──` line and sent the static half that way to Claude; a chat object could only send plain strings, so moving them to objects would have stopped the cache from hitting. Only `system`, only on `kind: chat`; anything else is refused when the file loads.
 
