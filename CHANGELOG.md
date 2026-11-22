@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.43.0] - 2026-11-22
+
 ### Fixed
 - **`Job(keep_runs=N)` removed the records of old runs and left their traces.** A worker on a 5-second clock with `keep_runs=500` kept 500 records and 528,000 trace folders (17 GB) in five weeks. The traces now go with the records, from every consumer the job's runs are traced to: the local sink removes the folders `jobs/<job>/<job_run>/` older than the oldest run still recorded (and notes each in `.changes`, so a store over the root forgets it), a run store deletes the job's runs started before it (`RunStore.drop_job_runs_before`). The sweep runs in a thread of its own and at most every ten minutes per job (`TRACE_SWEEP_S`), and takes what an earlier process left behind.
 - A `.changes` line for a run that is no longer there removes its row from the files store's index (it was skipped, and the row stayed until the next walk).
