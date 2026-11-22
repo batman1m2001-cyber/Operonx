@@ -1,6 +1,6 @@
 """``operonx lint``: check a project against the operonx conventions.
 
-    operonx lint [PATH]             the static rules (C3, C5–C18) and the manifest (C1)
+    operonx lint [PATH]             the static rules (C3, C5–C19) and the manifest (C1)
     operonx lint --build [PATH]     also load the application and build every graph offline (C1, C2)
     operonx lint --baseline [PATH]  record today's count per rule in operonx.toml
     operonx lint --all [PATH]       every finding, the baseline ignored
@@ -48,6 +48,7 @@ RULES = {
     "C16": "the root holds only the allow-list; what runs write goes in data/ or out/",
     "C17": "in web/, only web/lib/ calls fetch(): pages reach the server through web/lib/api.js",
     "C18": "a docs/brd/knowledge.md entry's where file exists (warning: stale knowledge)",
+    "C19": "prompts are objects in prompts/ that load; linked, never a variable's value or prose in code (warnings)",
 }
 
 _BASELINE_LINE = re.compile(r"^baseline\s*=.*$\n?", re.M)

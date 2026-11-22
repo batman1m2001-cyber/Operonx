@@ -1,13 +1,15 @@
 """``operonx prompt``: the project's prompts, their versions and labels.
 
-    operonx prompt list                      every prompt, its versions and labels
-    operonx prompt show NAME [--version N]   the text an op is given
+    operonx prompt list                      every prompt: its kind, id, versions and labels
+    operonx prompt show NAME [--version N]   a text object's text; a composite's tree of links
+    operonx prompt mv OLD NEW                rename a prompt and every link to it (its id stays)
     operonx prompt publish NAME [--label L]  freeze the working text as the next version
     operonx prompt label NAME LABEL VERSION  point a label at a version (the rollback)
     operonx prompt diff NAME [A] [B]         two versions; default: newest version → working text
     operonx prompt log NAME                  its versions, and which label is on each
 
-A prompt is ``prompts/NAME.md``; see ``operonx.prompts``. Versions are files
+A prompt is ``prompts/NAME.md`` (text) or ``prompts/NAME.yaml`` (a
+composite of links); see ``operonx.prompts``. Versions are files
 under ``prompts/.versions/`` and labels are ``prompts/labels.toml``: commit
 them, and the history is the repository's.
 """
@@ -60,6 +62,48 @@ def _pushed(root: Path, *, must: bool) -> List[str]:
     return lines
 
 
+def _tree(obj: object, depth: int = 0, seen: tuple = ()) -> List[str]:
+    """A composite as an indented tree: each part, what it links, every case of a pick."""
+    pad = "  " * depth
+    if isinstance(obj, P.PromptText):
+        vs = f"  {{{{{'}}, {{'.join(obj.variables)}}}}}" if obj.variables else ""
+        return [f"{pad}{obj.name}  text{'  ' + obj.id if obj.id else ''}{vs}"]
+    head = f"{pad}{obj.name}  {obj.kind if not obj.role else 'composite'}{'  ' + obj.id if obj.id else ''}"
+    out = [head] if depth == 0 or obj.name not in seen else [head + "  (linked above)"]
+    if depth and obj.name in seen:
+        return out
+    seen = (*seen, obj.name)
+    for role, parts in obj.roles.items():
+        inner = depth + 1
+        if obj.kind == "chat":
+            out.append(f"{'  ' * inner}{role}:")
+            inner += 1
+        ip = "  " * inner
+        for part in parts:
+            if part.kind == "text":
+                out.append(f"{ip}text {part.text!r}")
+            elif part.kind == "var":
+                out.append(f"{ip}var {part.var}")
+            elif part.kind == "use":
+                out += _tree(part.target, inner, seen)
+            elif part.kind == "when":
+                out.append(f"{ip}when {part.var}:")
+                out += _tree(part.target, inner + 1, seen)
+            else:
+                out.append(f"{ip}pick {part.var}:")
+                cases = list(part.cases.items())
+                if part.default is not P._NO_DEFAULT:
+                    cases.append(("else", part.default))
+                for case, target in cases:
+                    if target is None:
+                        out.append(f"{ip}  {case} → none")
+                    else:
+                        sub = _tree(target, inner + 1, seen)
+                        sub[0] = f"{ip}  {case} → {sub[0].strip()}"
+                        out += sub
+    return out
+
+
 def _text(name: str, version: Optional[str], root: Path) -> str:
     if version in (None, "working"):
         return P._read(P.prompts_dir(root), name, None)
@@ -81,6 +125,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     show.add_argument("name")
     show.add_argument("--version", default=None)
     show.add_argument("--label", default=None)
+    mv = sub.add_parser("mv")
+    mv.add_argument("old")
+    mv.add_argument("new")
     pub = sub.add_parser("publish")
     pub.add_argument("name")
     pub.add_argument(
@@ -109,15 +156,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             for name in names:
                 have, on = P.versions(name, root), _on(name, root)
                 marks = ", ".join(f"{label} = {v}" for v in sorted(on) for label in sorted(on[v]))
+                obj = P.prompt(name, root=root)
+                kind = obj.kind if isinstance(obj, P.CompositePrompt) else "text"
                 out.append(
-                    f"{name:<32} {len(have)} version{'' if len(have) == 1 else 's'}"
+                    f"{name:<32} {kind:<5} {obj.id or '(no id)':<12} {len(have)} version{'' if len(have) == 1 else 's'}"
                     + (f"   {marks}" if marks else "")
                 )
         elif args.cmd == "show":
             if args.version is not None:
-                out.append(P.prompt(args.name, version=int(args.version), root=root).text)
+                obj = P.prompt(args.name, version=int(args.version), root=root)
             else:
-                out.append(P.prompt(args.name, label=args.label, root=root).text)
+                obj = P.prompt(args.name, label=args.label, root=root)
+            if isinstance(obj, P.CompositePrompt):
+                out += _tree(obj)
+                need = obj.variables
+                if need:
+                    out += ["", "variables:"] + [f"  {v:<24} {need[v]}" for v in need]
+            else:
+                out.append(obj.text)
+        elif args.cmd == "mv":
+            for path in P.move(args.old, args.new, root):
+                out.append(f"  {path.relative_to(root)}")
+            out.insert(0, f"{args.old} → {args.new}")
         elif args.cmd == "publish":
             number, new = P.publish(args.name, root)
             out.append(
@@ -197,7 +257,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("\n".join(out), end="\n" if out else "")
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    except (P.PromptNotFound, ValueError) as exc:
+    except (P.PromptNotFound, P.PromptFormatError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print("\n".join(out))

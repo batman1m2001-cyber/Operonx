@@ -1,7 +1,23 @@
 # Prompt objects plan
 
-Status: proposed 2026-11-22 (replaces the first draft, "prompt layers", #306). Nothing
-is built yet; implementation waits for the owner's "go".
+Status: O0 and O1 built 2026-11-22 (operonx 1.44.0; "go" given the same day). O0's
+gate is met — the callbot's 28 golden prompts are byte-identical from
+`prompts/classifier.yaml` — and waits on the owner's OK of the file format. Next: O3
+(callbot on 1.44.0), O2 (studio graph), O4, O5, O6.
+
+Where the build differs from the text below, and why:
+
+- **Ids are written by `publish` / `ensure_id` / `mv`, not on first load.** A load
+  that writes files breaks read-only images and races between workers.
+- **The store is still keyed by name.** It gains `id` and `kind` columns; re-keying
+  on id waits until a store is deployed (none is). `mv` rewrites the names in
+  published versions, so history follows a rename in the files.
+- **The CLI is `operonx prompt …`** (the existing command), not `operonx prompts`.
+- **`PromptText` still behaves as a `str` without a warning.** Every `LLMOp(prompt=
+  prompt("x"))` of a text object relies on it; warning there would warn on the way
+  the guide teaches. O6 decides whether it goes.
+- **C19's style findings are warnings**, so a project's CI is not red before its own
+  O3–O5 move; an object that does not load is an error.
 
 ## What the owner asked for
 
