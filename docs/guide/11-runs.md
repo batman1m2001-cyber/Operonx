@@ -226,7 +226,8 @@ store.delete_runs(RunFilter(origin="playground", until=time.time() - 7 * 86400))
 
 `RunFilter` is a small data object, never a query language: `origin`,
 `name`, `status`, `since`/`until` (epoch seconds), `version`, `job_run`,
-`runbook_run`, `trace_ids`, exact `metadata` matches, and `search` (a
+`runbook_run`, `trace_ids`, `op` (the runs in which that op ran),
+exact `metadata` matches, and `search` (a
 case-insensitive substring over the id, the key and the metadata).
 `list_runs` pages with a cursor (`page.next_cursor`) and orders by
 `started_desc`, `started_asc`, `duration_desc`, `cost_desc` or

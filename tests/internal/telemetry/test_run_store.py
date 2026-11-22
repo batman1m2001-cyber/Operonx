@@ -289,6 +289,9 @@ def test_list_runs_newest_first_with_the_summary_fields(store):
         (RunFilter(job_run="R1"), ["item-a"]),
         (RunFilter(trace_ids=["call-1", "item-a"]), ["call-1", "item-a"]),
         (RunFilter(trace_ids=[]), []),
+        (RunFilter(op="check"), ["item-a"]),
+        (RunFilter(op="reply", origin="service", since=NOW - DAY), ["call-3", "call-2"]),
+        (RunFilter(op="nowhere"), []),
     ],
 )
 def test_filters(store, where, expected):

@@ -141,6 +141,7 @@ class SqlIndex:
             f"CREATE INDEX IF NOT EXISTS {self.runs}_by_time ON {self.runs} (started_at)",
             f"CREATE INDEX IF NOT EXISTS {self.runs}_by_job_run ON {self.runs} (job_run)",
             f"CREATE TABLE IF NOT EXISTS {self.ops} (\n  {ops},\n  PRIMARY KEY (trace_id, op)\n)",
+            f"CREATE INDEX IF NOT EXISTS {self.ops}_by_op ON {self.ops} (op)",
         ]
         with self._tx() as cur:
             for sql in statements:
@@ -312,6 +313,9 @@ class SqlIndex:
             safe = "".join(ch for ch in str(key) if ch.isalnum() or ch in "_-")
             clauses.append(f"{self._json_get('metadata', safe)} = {ph}")
             params.append(str(value))
+        if f.op:
+            clauses.append(f"trace_id IN (SELECT trace_id FROM {self.ops} WHERE op = {ph})")
+            params.append(f.op)
         if f.search:
             clauses.append(
                 f"LOWER(trace_id || ' ' || COALESCE(key, '') || ' ' || COALESCE(metadata, '')) LIKE {ph}"
