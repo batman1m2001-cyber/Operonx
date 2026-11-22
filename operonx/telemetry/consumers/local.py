@@ -46,6 +46,7 @@ Concurrency / safety:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, List, Optional
@@ -55,7 +56,15 @@ from operonx.core.workflow_trace import OpExecution, WorkflowTrace, format_ctx
 from operonx.telemetry.consumer import Consumer
 from operonx.telemetry.runs.model import meta_of_trace, row_of
 
-__all__ = ["LocalConsumer", "FORMATTERS", "default_arrow", "resolve_root", "run_path"]
+__all__ = [
+    "LocalConsumer",
+    "FORMATTERS",
+    "CHANGES",
+    "default_arrow",
+    "note_change",
+    "resolve_root",
+    "run_path",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +101,30 @@ def resolve_root(configured: Any = "") -> Path:
     if project is not None:
         return Path(project) / ".operonx" / "runs"
     return Path(_FALLBACK_ROOT)
+
+
+#: ``<root>/.changes`` — one line per run directory written, appended by
+#: whoever wrote it. A reader of the root (the files run store) learns of
+#: new and rewritten runs from here, at the cost of the lines added since
+#: it last looked, instead of walking every directory under the root.
+CHANGES = ".changes"
+
+
+def note_change(root: Path, location: str) -> None:
+    """Append *location* (a run directory, relative to *root*) to the
+    root's change journal. One ``write`` on an ``O_APPEND`` descriptor, so
+    lines from several processes never interleave; a root that cannot be
+    written to loses the note, not the run."""
+    try:
+        fd = os.open(str(root / CHANGES), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    except OSError:
+        return
+    try:
+        os.write(fd, (location + "\n").encode("utf-8"))
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _safe(part: Any) -> str:
@@ -240,6 +273,7 @@ class LocalConsumer(Consumer):
             shutil.rmtree(final)
         tmp.rename(final)
         self._update_latest_symlink(root, final.relative_to(root).as_posix())
+        note_change(root, final.relative_to(root).as_posix())
         return final
 
     # ------------------------------------------------------------------

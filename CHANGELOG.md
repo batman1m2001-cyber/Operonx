@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The files run store walked its whole root on every read.** A root is read every two seconds by whoever lists runs, and each read walked every directory under it and stat'ed every run: fine at a thousand runs, minutes at mr-finance's 780,000 (jobs that tick every five seconds), with every reader — the studio's Play, Runs, Review — waiting behind it. Now a reader's cost follows what *changed*: the writer (`LocalConsumer`) appends each run directory it writes to `<root>/.changes`, and the store indexes the lines added since it last looked. The walk is kept for what no line tells of (runs left by an older operonx, directories removed by hand), and on a big root (past 5,000 runs, or once a walk took 0.2 s) it never runs on a reader's thread: it runs in the background at most 5% of the time, opens no known run, and skips unread every directory of known runs that has not changed since the walk before. A small root is walked on read, as it always was.
+
 ## [1.42.1] - 2026-11-21
 
 ### Fixed

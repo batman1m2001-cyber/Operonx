@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import os
 import textwrap
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -466,12 +467,126 @@ def test_files_callers_at_once_share_one_refresh(tmp_path):
     assert len(walks) == 1
 
 
+def _unnoted(root, trace):
+    """A run directory left under *root* by a writer that keeps no journal
+    (an older operonx): the directory, and no line telling of it."""
+    journal = Path(root) / ".changes"
+    before = journal.read_bytes() if journal.exists() else None
+    out = LocalConsumer(config={"root": root}).consume(trace)
+    if before is None:
+        journal.unlink()
+    else:
+        journal.write_bytes(before)
+    return out
+
+
 def test_files_refresh_is_throttled(tmp_path):
     store = FilesRunStore(root=tmp_path / "runs", refresh_every=60)
-    LocalConsumer(config={"root": tmp_path / "runs"}).consume(_calls()[0])
+    _unnoted(tmp_path / "runs", _calls()[0])
     store._last_refresh = time.monotonic()
     assert store.list_runs().items == []  # within the window: no walk
     assert store.refresh() == 1 and len(store.list_runs().items) == 1
+
+
+def test_files_a_written_run_is_listed_without_a_walk(tmp_path):
+    """The writer notes each run directory in the root's journal; a reader
+    indexes the lines added since it last looked. No walk — so the cost is
+    what was written, not what the root holds."""
+    root = tmp_path / "runs"
+    store = FilesRunStore(root=root, refresh_every=60)
+    store._last_refresh = time.monotonic()
+    walks = []
+    real = store.refresh
+    store.refresh = lambda: walks.append(1) or real()
+    calls = _calls()
+    LocalConsumer(config={"root": root}).consume(calls[0])
+    assert [r.trace_id for r in store.list_runs().items] == ["call-1"]
+    LocalConsumer(config={"root": root}).consume(calls[1])
+    LocalConsumer(config={"root": root}).consume(calls[1])  # written again: one row still
+    assert sorted(r.trace_id for r in store.list_runs().items) == ["call-1", "call-2"]
+    assert walks == []
+    # another reader of the same root starts where the index is, not at the journal's top
+    other = FilesRunStore(root=root, refresh_every=60)
+    assert other._apply_journal() == 0
+    # a line still being written waits for its end; a line that leaves the root is not followed
+    with (root / ".changes").open("ab") as fh:
+        fh.write(b"../outside\nservices/call/half")
+    assert store._apply_journal() == 0 and len(store.list_runs().items) == 2
+
+
+def test_files_a_big_root_is_never_walked_on_a_readers_thread(tmp_path):
+    """Past a few thousand runs, or once a walk has taken a fifth of a
+    second, a read answers from the index and the walk runs behind it."""
+    root = tmp_path / "runs"
+    store = FilesRunStore(root=root, refresh_every=0)
+    calls = _calls()
+    store.put_trace(calls[0])
+    store._walk_cost = 30.0  # the last walk took half a minute
+    _unnoted(root, calls[1])
+    walked_on = []
+    real = store.refresh
+
+    def refresh():
+        walked_on.append(threading.current_thread().name)
+        time.sleep(0.3)
+        return real()
+
+    store.refresh = refresh
+    t0 = time.monotonic()
+    assert [r.trace_id for r in store.list_runs().items] == ["call-1"]
+    assert store.get_run("call-2") is None  # a miss does not walk either
+    assert time.monotonic() - t0 < 0.25
+    for _ in range(100):
+        if len(store.index.locations()) == 2:
+            break
+        time.sleep(0.05)
+    assert walked_on == ["run-store-walk"] and len(store.list_runs().items) == 2
+    assert (
+        store._next_walk - time.monotonic() > 25
+    )  # and not again for a while: 5% of the time at most
+
+
+def test_files_a_walk_skips_what_has_not_changed(tmp_path, monkeypatch):
+    """A walk after the first lists a directory of known runs only if it
+    changed: 780,000 runs in directories nobody touches cost one stat each
+    per directory, not a listing and a stat per run."""
+    root = tmp_path / "runs"
+    store = FilesRunStore(root=root, refresh_every=60)
+    for t in _calls():
+        _unnoted(root, t)
+    assert store.refresh() == 4
+    old = time.time() - 100
+    for d in sorted(p for p in root.rglob("*") if p.is_dir()):
+        os.utime(d, (old, old))
+    store._set_meta("walked_at", time.time() - 50)
+
+    listed = []
+    real = os.scandir
+    monkeypatch.setattr(os, "scandir", lambda p: listed.append(str(p)) or real(p))
+    assert store.refresh() == 0
+    held = {str((root / loc).parent) for loc in store.index.locations()}
+    assert held and not held & set(listed), "a directory of known runs, unchanged, was listed again"
+    assert not any((root / loc) == Path(p) for loc in store.index.locations() for p in listed)
+    assert len(store.list_runs().items) == 4
+
+    # a run added to one of them, and one removed from another: both are found
+    listed.clear()
+    new = _trace(
+        "call-9",
+        wall=NOW - 2 * DAY,
+        origin="service",
+        service="call",
+        nodes=[_exec("stt", 100.0, 40)],
+    )
+    _unnoted(root, new)
+    import shutil
+
+    gone = next(loc for loc, tid in store.index.locations().items() if tid == "call-2")
+    shutil.rmtree(root / gone)
+    assert store.refresh() == 1
+    assert sorted(r.trace_id for r in store.list_runs(limit=10).items) == sorted(
+        ["call-1", "call-3", "call-9"] + [t.trace_id for t in _calls()[3:]]
+    )
 
 
 def test_combine_rollups_counts_runs_not_rows():
