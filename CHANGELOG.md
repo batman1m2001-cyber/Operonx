@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`cache: system` on a chat composite** sends its system message as a cached prefix — one text block marked `cache_control: {type: ephemeral}` — with the same text (PROMPT_OBJECTS_PLAN O5). qc-snatcher split each of five prompts at a `── DYNAMIC ──` line and sent the static half that way to Claude; a chat object could only send plain strings, so moving them to objects would have stopped the cache from hitting. Only `system`, only on `kind: chat`; anything else is refused when the file loads.
+
 ## [1.44.0] - 2026-11-22
 
 ### Added

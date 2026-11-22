@@ -28,6 +28,10 @@ links to other objects, never text of its own beyond short separators::
     user:
       - use: classifier/user
 
+``cache: system`` on a chat object sends its system message as a cached
+prefix (one text block marked ``cache_control: ephemeral``), for a provider
+that caches what is marked; the text is the same.
+
 Parts are joined by ``join`` (default a blank line); a part that renders
 empty is left out, separators and all. ``{{x}}`` is always data, and a
 prompt is never a variable's value: link it with ``use``/``pick``/``when``.
@@ -303,7 +307,7 @@ _PART_KEYS = {
     "text": {"text"},
 }
 _ROLES = ("system", "user")
-_TOP_KEYS = {"id", "kind", "description", "join", "parts", *_ROLES}
+_TOP_KEYS = {"id", "kind", "description", "join", "cache", "parts", *_ROLES}
 _NO_DEFAULT = object()
 
 
@@ -372,8 +376,10 @@ class CompositePrompt:
         label: Optional[str],
         raw: str,
         role: Optional[str] = None,
+        cache: Optional[str] = None,
     ):
         self.name = name
+        self.cache = cache
         self.kind = kind
         self.roles = roles
         self.join = join
@@ -498,7 +504,7 @@ class CompositePrompt:
         each ``pick`` chose — and ``refs``, the same flattened."""
         if self.kind == "chat":
             got = {role: self[role].render(**data) for role in self.roles}
-            return RenderedChat(got, name=self.name, ref=self.ref)
+            return RenderedChat(got, name=self.name, ref=self.ref, cache=self.cache)
         refs: List[Dict[str, Any]] = [self.ref]
         text, nodes = _render_parts(self, self.roles["parts"], self.join, data, refs)
         return RenderedPrompt(
@@ -520,10 +526,19 @@ class CompositePrompt:
 class RenderedChat:
     """A chat composite, rendered: ``system`` and ``user`` (each a
     :class:`RenderedPrompt`), ``messages`` as a model takes them, ``tree``
-    and ``refs`` as a run row records them."""
+    and ``refs`` as a run row records them. ``cache`` names the role sent as
+    a cached prefix (``cache: system`` in the file), or is None."""
 
-    def __init__(self, roles: Dict[str, RenderedPrompt], *, name: str, ref: Dict[str, Any]):
+    def __init__(
+        self,
+        roles: Dict[str, RenderedPrompt],
+        *,
+        name: str,
+        ref: Dict[str, Any],
+        cache: Optional[str] = None,
+    ):
         self.roles = roles
+        self.cache = cache
         self.name = name
         self.system = roles.get("system")
         self.user = roles.get("user")
@@ -539,8 +554,15 @@ class RenderedChat:
         }
 
     @property
-    def messages(self) -> List[Dict[str, str]]:
-        return [{"role": role, "content": str(text)} for role, text in self.roles.items()]
+    def messages(self) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for role, text in self.roles.items():
+            if role == self.cache:
+                block = {"type": "text", "text": str(text), "cache_control": {"type": "ephemeral"}}
+                out.append({"role": role, "content": [block]})
+            else:
+                out.append({"role": role, "content": str(text)})
+        return out
 
 
 def _render_parts(
@@ -651,6 +673,11 @@ def _composite(
     join = doc.get("join", "\n\n")
     if not isinstance(join, str):
         raise PromptFormatError(f"{where}: join is a string")
+    cache = doc.get("cache")
+    if cache is not None and (kind != "chat" or cache != "system"):
+        raise PromptFormatError(
+            f"{where}: cache is `cache: system` on a chat composite (its system message, a cached prefix)"
+        )
 
     def link(target: Any, at: str) -> Any:
         if target is None or (isinstance(target, str) and target.lower() == "none"):
@@ -733,6 +760,7 @@ def _composite(
         version=version,
         label=used,
         raw=raw,
+        cache=cache,
     )
 
 

@@ -200,6 +200,52 @@ async def test_an_llm_op_given_a_composite_sends_its_roles_and_its_row_has_the_t
     assert row.attrs["prompt_tree"]["name"] == "chat"
 
 
+async def test_cache_system_sends_the_system_message_as_a_cached_prefix(project):
+    (project / "prompts" / "cached.yaml").write_text(
+        CHAT.replace("kind: chat", "kind: chat\ncache: system")
+    )
+    out = prompt("cached").render(**DATA)
+    assert out.system == prompt("chat").render(**DATA).system  # the same text
+    assert out.messages == [
+        {
+            "role": "system",
+            "content": [
+                {"type": "text", "text": out.system, "cache_control": {"type": "ephemeral"}}
+            ],
+        },
+        {"role": "user", "content": "Q: why?"},
+    ]
+
+    @graph
+    def flow(customer, tier, urgent, facts, question):
+        s = LLMOp.of(
+            resource="assistant",
+            prompt=prompt("cached"),
+            customer=customer,
+            tier=tier,
+            urgent=urgent,
+            facts=facts,
+            question=question,
+        )
+        START >> s >> END
+
+    with fake_model("fine") as model:
+        await Operon(flow, params={k: None for k in DATA}).start(DATA).result()
+    sent = model.calls[0]
+    sent = sent.get("messages", sent) if isinstance(sent, dict) else sent
+    assert sent[0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["cache: system\nparts: [ask]\n", "kind: chat\ncache: user\nuser: [ask]\n"],
+)
+def test_cache_is_only_a_chat_objects_system(project, body):
+    (project / "prompts" / "bad.yaml").write_text(body)
+    with pytest.raises(PromptFormatError, match="cache: system"):
+        prompt("bad")
+
+
 def test_ensure_id_mints_once_into_the_working_file(project):
     assert ensure_id("persona") == ("pr_00000001", False)
     new, written = ensure_id("ask")
