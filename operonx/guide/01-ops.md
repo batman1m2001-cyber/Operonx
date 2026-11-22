@@ -375,12 +375,14 @@ assert [r["name"] for r in row.attrs["prompts"]] == ["intake", "billing/rules", 
   working text; `hash` is of the text) — and, for a composite,
   `attrs.prompt_tree`: the objects as linked, and the value each `pick` and
   `when` was given.
-- **The old ways work for one minor, with a `DeprecationWarning`:**
-  `{{> other}}` inside a text object, and a prompt given as a value to
-  another's `.render(...)` (an op rendering one prompt into another). Both
-  become a composite. `operonx lint` (C19) lists them, with `<<x>>` and
-  single-brace `{x}` left in a text object, and prose written into
-  `LLMOp(prompt="…")` in the code.
+- **A prompt object is not a string.** `str(prompt("x"))` is its text as
+  written; `LLMOp(prompt=…)`, `.render(**data)` and `.fill(data)` fill its
+  `{{x}}` and leave every other brace as written. `{{> other}}` inside a text
+  object does not load — link the two from a composite.
+- `operonx lint` (C19): an object that does not load and a prompt given as a
+  value to `.render(...)` are errors; `<<x>>` and single-brace `{x}` left in
+  a text object, text built with `.format` / `.replace` on a prompt, and
+  prose written into `LLMOp(prompt="…")` in the code are warnings.
 
 ## Agents — a model that calls tools
 

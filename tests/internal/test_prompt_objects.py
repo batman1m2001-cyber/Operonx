@@ -4,7 +4,6 @@ data is ``{{x}}``, a prompt is never a variable's value."""
 
 import copy
 import pickle
-import warnings
 
 import pytest
 
@@ -154,12 +153,20 @@ def test_a_prompt_is_never_a_variables_value(project):
         prompt("ask").fill({"question": prompt("urgent")})
 
 
-def test_the_old_ways_still_work_with_a_deprecation_warning(project):
+def test_the_old_ways_are_gone(project):
+    """An include does not load, and a prompt as a variable's value is refused."""
     (project / "prompts" / "old.md").write_text("A\n{{> urgent}}\n")
-    with pytest.warns(DeprecationWarning, match="composite"):
-        assert prompt("old").text == "A\nIt is urgent."
-    with pytest.warns(DeprecationWarning):
+    with pytest.raises(PromptFormatError, match="composite"):
+        prompt("old")
+    with pytest.raises(TypeError, match="composite"):
         prompt("ask").render(question=prompt("urgent"))
+
+
+def test_a_text_object_is_not_a_string(project):
+    """str() is the text as written; it is not a format template any more."""
+    p = prompt("ask")
+    assert not isinstance(p, str)
+    assert str(p) == p.text and "{{question}}" in str(p)
 
 
 def test_a_copy_and_a_pickle_keep_a_composite(project):
@@ -273,15 +280,11 @@ def test_publishing_a_composite_versions_it_with_an_id(project):
 
 def test_mv_renames_a_prompt_and_every_link_to_it_and_keeps_its_id(project):
     publish("chat")
-    (project / "prompts" / "inc.md").write_text("X {{> tier/gold}}\n")
     changed = move("tier/gold", "tiers/gold")
     names = {p.relative_to(project / "prompts").as_posix() for p in changed}
-    assert {"tiers/gold.md", "chat.yaml", "inc.md"} <= names
+    assert {"tiers/gold.md", "chat.yaml"} <= names
     assert not (project / "prompts" / "tier" / "gold.md").exists()
     assert "gold: tiers/gold" in (project / "prompts" / "chat.yaml").read_text()
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        assert prompt("inc").text == "X Gold: be quick."
     assert prompt("chat").render(**DATA).system.startswith("You help Lan.\n\nGold")
     assert prompt("chat", version=1).render(**DATA).system.startswith("You help Lan.\n\nGold")
     before = prompt("persona").id
@@ -307,11 +310,14 @@ def test_the_command_line_shows_a_composites_tree_and_moves_a_prompt(project, ca
 
 
 def test_lint_c19_errors_on_a_broken_object_and_warns_on_the_old_ways(project):
+    """An object that does not load (a dead link, an include) and a prompt
+    given as a variable's value are errors; the rest are warnings."""
     from operonx.lint.rules import lint_path
 
     p = project / "prompts"
     (p / "broken.yaml").write_text("parts: [missing]\n")
-    (p / "old.md").write_text("{{> ask}}\nHi <<name>> and {name}\n")
+    (p / "inc.md").write_text("{{> ask}}\n")
+    (p / "old.md").write_text("\nHi <<name>> and {name}\n")
     (project / "src").mkdir()
     (project / "src" / "flow.py").write_text(
         "from operonx.prompts import prompt\n"
@@ -324,12 +330,14 @@ def test_lint_c19_errors_on_a_broken_object_and_warns_on_the_old_ways(project):
     got = [f for f in lint_path(project) if f.rule == "C19"]
     errors = [f for f in got if f.severity == "error"]
     warns = sorted((f.file.name, f.line, f.message[:12]) for f in got if f.severity == "warning")
-    assert [f.file.name for f in errors] == ["broken.yaml"]
-    assert [w[:2] for w in warns] == [
+    assert sorted((f.file.name, f.line) for f in errors) == [
+        ("broken.yaml", 1),
         ("flow.py", 3),
+        ("inc.md", 1),
+    ]
+    assert [w[:2] for w in warns] == [
         ("flow.py", 4),
         ("flow.py", 7),
-        ("old.md", 1),
         ("old.md", 2),
         ("old.md", 2),
     ]

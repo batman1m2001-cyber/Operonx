@@ -1,12 +1,13 @@
 """C19: a project's prompts are objects in ``prompts/``, linked, never glued in code.
 
 - An object that does not load is an **error**: a composite with an unknown
-  key or a link to a prompt that is not there fails here, not on a call.
-- The rest are **warnings** (the old ways, still working for one minor):
+  key, a link to a prompt that is not there, or a ``{{> other}}`` include in a
+  text object fails here, not on a call.
+- ``.render(x=prompt(...))`` — a prompt given as a variable's value — is an
+  **error** too: it raises when it runs; link the prompt from a composite.
+- The rest are **warnings**:
 
-  * ``{{> other}}`` in a text object: link the two from a composite;
   * ``<<x>>`` or a single-brace ``{x}`` in a text object: data is ``{{x}}``;
-  * ``.render(x=prompt(...))``: a prompt given as a variable's value;
   * ``prompt(...).format(…)`` / ``.replace`` / ``.format_map`` (also on
     ``.text``): text built in code; data is ``{{x}}``, ``.render`` fills it;
   * ``LLMOp(prompt="…")`` with prose in the literal (a line break, or
@@ -19,7 +20,6 @@ from __future__ import annotations
 
 import ast
 import re
-import warnings
 from pathlib import Path
 from typing import Iterable, Iterator, List
 
@@ -30,7 +30,6 @@ __all__ = ["INLINE_MAX", "lint_prompts"]
 #: The longest ``prompt=`` literal that is a template, not prose.
 INLINE_MAX = 160
 
-_INCLUDE = re.compile(r"\{\{>\s*[^}]+\}\}")
 _ANGLE = re.compile(r"<<\s*[A-Za-z_][A-Za-z0-9_]*\s*>>")
 _SINGLE = re.compile(r"(?<!\{)\{([A-Za-z_][A-Za-z0-9_]*)\}(?!\})")
 
@@ -57,9 +56,7 @@ def _objects(root: Path) -> Iterator[Finding]:
         name = path.relative_to(base).with_suffix("").as_posix()
         token = P._FILES_ONLY.set(True)
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", DeprecationWarning)
-                P.prompt(name, root=root)
+            P.prompt(name, root=root)
         except (P.PromptNotFound, P.PromptFormatError, ValueError) as exc:
             yield Finding("C19", path, 1, f"prompt {name!r} does not load: {exc}")
             continue
@@ -68,14 +65,6 @@ def _objects(root: Path) -> Iterator[Finding]:
         if path.suffix != ".md":
             continue
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if _INCLUDE.search(line):
-                yield Finding(
-                    "C19",
-                    path,
-                    i,
-                    "{{> …}} includes a prompt: link the two from a composite (prompts/<name>.yaml: use:)",
-                    "warning",
-                )
             m = _ANGLE.search(line)
             if m:
                 var = m.group(0).strip("<> ")
@@ -132,7 +121,6 @@ def _code(tree: ast.AST, path: Path) -> Iterator[Finding]:
                         path,
                         node.lineno,
                         f"{kw.arg}= is given a prompt: a variable is data; link the prompt from a composite (use / pick / when)",
-                        "warning",
                     )
         called = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else ""
         if called == "LLMOp":
