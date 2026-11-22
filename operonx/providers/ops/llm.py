@@ -170,6 +170,47 @@ def _note_rendered_prompts(inputs: Dict[str, Any]) -> None:
         frame.attrs = {**(frame.attrs or {}), "prompts": refs}
 
 
+def _note_composite(rendered: Any, role: Optional[str] = None) -> None:
+    """A composite prompt rendered in this call: the run row gets every object
+    it linked (``prompts``) and the tree of what each pick chose (``prompt_tree``)."""
+    from operonx.core.runtime import _current_frame
+
+    frame = _current_frame.get()
+    if frame is None:
+        return
+    attrs = dict(frame.attrs or {})
+    refs = [({"part": role, **r} if role and "part" not in r else r) for r in rendered.refs]
+    had = attrs.get("prompts") or []
+    attrs["prompts"] = had + [r for r in refs if r not in had]
+    tree = {"role": role, **rendered.tree} if role else rendered.tree
+    if "prompt_tree" in attrs:
+        trees = (
+            attrs["prompt_tree"]
+            if isinstance(attrs["prompt_tree"], list)
+            else [attrs["prompt_tree"]]
+        )
+        if tree not in trees:  # the messages are built more than once per call
+            attrs["prompt_tree"] = trees + [tree]
+    else:
+        attrs["prompt_tree"] = tree
+    frame.attrs = attrs
+
+
+def _render_composite(prompt: Any, vars: Dict[str, Any], role: Optional[str] = None) -> Any:
+    try:
+        rendered = prompt.render(**vars)
+    except KeyError as e:
+        missing = [v for v in prompt.variables if v not in vars]
+        raise PromptError(
+            message=f"Missing value(s) for prompt {prompt.name!r}: {e.args[0] if e.args else e}",
+            prompt=prompt.ref,
+            missing_vars=missing,
+            original_error=e,
+        ) from e
+    _note_composite(rendered, role)
+    return rendered
+
+
 class LLMOp(BaseOp):
     """Op that formats a prompt and calls a language model via ResourceHub.
 
@@ -571,6 +612,14 @@ class LLMOp(BaseOp):
                 original_error=TypeError("prompt=list is not supported; use messages="),
             )
 
+        from operonx.prompts import CompositePrompt
+
+        if isinstance(prompt, CompositePrompt):
+            # a prompt object made of links: rendered here, from the op's values
+            if prompt.kind == "chat":
+                return _render_composite(prompt, vars).messages
+            return [{"role": "user", "content": str(_render_composite(prompt, vars))}]
+
         if isinstance(prompt, str):
             content = _format_value(prompt, vars, prompt)
             return [{"role": "user", "content": content}]
@@ -579,11 +628,14 @@ class LLMOp(BaseOp):
             messages = []
             if "system" in prompt:
                 messages.append(
-                    {"role": "system", "content": _format_value(prompt["system"], vars, prompt)}
+                    {
+                        "role": "system",
+                        "content": _format_part(prompt["system"], vars, prompt, "system"),
+                    }
                 )
             if "user" in prompt:
                 messages.append(
-                    {"role": "user", "content": _format_value(prompt["user"], vars, prompt)}
+                    {"role": "user", "content": _format_part(prompt["user"], vars, prompt, "user")}
                 )
             if messages:
                 return messages
@@ -1657,8 +1709,28 @@ class LLMOp(BaseOp):
 # =============================================================================
 
 
+def _format_part(value: Any, vars: Dict[str, Any], template: Any, role: str) -> Any:
+    from operonx.prompts import CompositePrompt
+
+    if isinstance(value, CompositePrompt):
+        if value.kind == "chat":
+            raise PromptError(
+                message=f"prompt {value.name!r} is a chat prompt (system and user); pass it as prompt=, "
+                f"or one part of it as prompt[{role!r}]",
+                prompt=value.ref,
+                original_error=TypeError("chat composite inside a dict"),
+            )
+        return str(_render_composite(value, vars, role))
+    return _format_value(value, vars, template)
+
+
 def _extract_template_variables(template: Any) -> set:
-    """Find all ``{variable}`` names in a template (str, dict, or list)."""
+    """Find all ``{variable}`` names in a template (str, dict, or list);
+    of a composite prompt, the variables it needs."""
+    from operonx.prompts import CompositePrompt
+
+    if isinstance(template, CompositePrompt):
+        return set(template.variables)
     if isinstance(template, str):
         return set(re.findall(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}", template))
     if isinstance(template, dict):

@@ -72,7 +72,28 @@ _SCHEMA = (
         project TEXT NOT NULL, name TEXT NOT NULL, label TEXT NOT NULL,
         version INTEGER NOT NULL, moved_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         PRIMARY KEY (project, name, label))""",
+    # prompt objects (operonx 1.44): what each version is — its id stays when it is renamed
+    "ALTER TABLE operonx_prompt_versions ADD COLUMN IF NOT EXISTS id TEXT",
+    "ALTER TABLE operonx_prompt_versions ADD COLUMN IF NOT EXISTS kind TEXT",
 )
+
+
+def _identity(text: str, composite: bool) -> Tuple[Optional[str], str]:
+    """``(id, kind)`` of a version's text: ``text`` for a ``.md``, else the composite's kind."""
+    from operonx import prompts as P
+
+    if not composite:
+        got = P._split(text)[0].get("id")
+        return (got if isinstance(got, str) else None), "text"
+    import yaml
+
+    try:
+        doc = yaml.safe_load(text) or {}
+    except yaml.YAMLError:
+        doc = {}
+    doc = doc if isinstance(doc, dict) else {}
+    got = doc.get("id")
+    return (got if isinstance(got, str) else None), str(doc.get("kind", "text"))
 
 
 class StoreError(RuntimeError):
@@ -191,7 +212,9 @@ def push(root: Optional[Path] = None, *, dsn: Optional[str] = None) -> Dict[str,
         )
     key, base = project_key(root), P.prompts_dir(root)
     mine: Dict[Tuple[str, int], str] = {}
+    composite: Dict[str, bool] = {}
     for name in P.prompt_names(base.parent):
+        composite[name] = P._path(base, name).suffix == ".yaml"
         for version in P.versions(name, base.parent):
             mine[(name, version)] = P._read(base, name, version)
     marks = [
@@ -223,10 +246,11 @@ def push(root: Optional[Path] = None, *, dsn: Optional[str] = None) -> Dict[str,
             new = sorted(k for k in mine if k not in theirs)
             for name, version in new:
                 text = mine[(name, version)]
+                pid, kind = _identity(text, composite[name])
                 conn.execute(
-                    "INSERT INTO operonx_prompt_versions (project, name, version, text, hash) "
-                    "VALUES (%s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
-                    (key, name, version, text, _hash(text)),
+                    "INSERT INTO operonx_prompt_versions (project, name, version, text, hash, id, kind) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                    (key, name, version, text, _hash(text), pid, kind),
                 )
             was = {
                 (n, lab): v

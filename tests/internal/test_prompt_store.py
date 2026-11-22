@@ -91,7 +91,9 @@ def test_what_is_published_is_served_from_the_store(project, monkeypatch, capsys
     (project / "prompts" / "guard.md").write_text("Answer in one line.\n")
     assert cli.main(["publish", "guard", "--label", "production"]) == 0
     before = prompt_store.refresh(project)
-    (project / "prompts" / ".versions" / "guard" / "2.md").unlink()
+    v2 = project / "prompts" / ".versions" / "guard" / "2.md"
+    v2_text = v2.read_text()  # publishing gave it an id (front matter)
+    v2.unlink()
     (project / "prompts" / "labels.toml").write_text('["guard"]\nproduction = 1\n')
     got = P.prompt("guard")
     assert (got.text, got.version, got.label) == ("Answer in one line.", 2, "production")
@@ -101,7 +103,7 @@ def test_what_is_published_is_served_from_the_store(project, monkeypatch, capsys
     )  # a version asked for is the file's
 
     # rolling back is moving the label; the process sees it at its next read, and the generation says so
-    (project / "prompts" / ".versions" / "guard" / "2.md").write_text("Answer in one line.\n")
+    v2.write_text(v2_text)
     assert cli.main(["label", "guard", "production", "1"]) == 0
     assert prompt_store.refresh(project) == before + 1
     assert P.prompt("guard").version == 1 and prompt_store.refresh(project) == before + 1

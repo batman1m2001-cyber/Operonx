@@ -251,12 +251,26 @@ asyncio.run(main())
   other keywords are the resource's own, `chunk_size=` too); the old model
   is back after the block.
 
-## Prompts — a named file, asked for by name
+## Prompts — objects in `prompts/`, asked for by name
 
-A prompt that matters is a file: `prompts/<name>.md` in the project, the text
-as the model gets it. `{{name}}` is filled in; any other brace is text (the
-JSON a prompt shows needs no escaping); `{{> other}}` includes another prompt.
-Optional front matter (`---` … `---`) holds a `description`.
+A prompt that matters is an object in the project's `prompts/`, with an id
+(`pr_` and 8 hex digits) that stays when it is renamed. Two kinds:
+
+- **text** — `prompts/<name>.md`, the text as the model gets it. `{{x}}` is
+  data, filled in; any other brace is text (the JSON a prompt shows needs no
+  escaping). Front matter (`---` … `---`) holds `id` and `description`.
+- **composite** — `prompts/<name>.yaml`, links to other objects. `kind: chat`
+  has `system:` and `user:`; `kind: text` (the default) has `parts:`. A part
+  is one of:
+  - `use: <name>` (or the bare name) — that object;
+  - `pick: <var>` + `cases: {<value>: <name>}` + `else: <name> | none` — one
+    object, chosen by a value (no `else`: a value with no case raises);
+  - `when: <var>` + `use: <name>` — that object when the value is true;
+  - `var: <x>` — data, as given;
+  - `text: "…"` — literal text, kept as written.
+
+  Parts are joined with `join:` (default a blank line); a part that renders
+  empty drops out, with its join.
 
 ```python
 import asyncio
@@ -267,75 +281,106 @@ from operonx.prompts import prompt
 from operonx.providers.ops import LLMOp
 from operonx.testing import fake_model
 
-Path("prompts").mkdir(exist_ok=True)
+Path("prompts/billing").mkdir(parents=True, exist_ok=True)
 Path("prompts/guard.md").write_text('Reply with JSON only: {"intent": "..."}\n')
-Path("prompts/intake.system.md").write_text("You help {{customer}}.\n{{> guard}}\n")
+Path("prompts/billing/rules.md").write_text("Refunds within {{days}} days.\n")
+Path("prompts/intake.yaml").write_text(
+    """\
+kind: chat
+system:
+  - text: You help {{customer}}.
+  - pick: team
+    cases: {billing: billing/rules}
+    else: none
+  - guard
+user:
+  - var: message
+"""
+)
 
 
 @graph
-def intake(customer, message):
+def intake(customer, team, days, message):
     llm = LLMOp.of(
         resource="assistant",
-        prompt={"system": prompt("intake.system"), "user": "{message}"},
+        prompt=prompt("intake"),
         customer=customer,
+        team=team,
+        days=days,
         message=message,
     )
     START >> llm >> END
 
 
 async def main():
-    handle = Operon(intake, params={"customer": None, "message": None}).start(
-        {"customer": "Lan", "message": "money back please"}
+    params = {"customer": None, "team": None, "days": None, "message": None}
+    handle = Operon(intake, params=params).start(
+        {"customer": "Lan", "team": "billing", "days": 30, "message": "money back please"}
     )
     await handle.result()
     return handle.trace.nodes
 
 
-with fake_model('{"intent": "refund"}'):
+with fake_model('{"intent": "refund"}') as model:
     nodes = asyncio.run(main())
 
+sent = model.calls[0]
+sent = sent.get("messages", sent) if isinstance(sent, dict) else sent
+assert sent[0]["content"].startswith("You help {{customer}}.\n\nRefunds within 30 days.")
 row = next(n for n in nodes if n.op_name == "llm")
-# the run says which prompt, which version
-assert row.attrs["prompts"][0]["name"] == "intake.system"
+# the run says which objects, which versions, and what the pick chose
+assert [r["name"] for r in row.attrs["prompts"]] == ["intake", "billing/rules", "guard"]
 ```
 
 - `prompt("name")` is read when the graph is built: a name the project does
-  not have raises `PromptNotFound` there (so `operonx check` catches it).
-- It returns a `str` that `prompt=` formats as written; `.text` is the file's
-  text (what an `Agent(instructions=prompt("declare.agent"))` is given) and
-  `.render(customer="Lan")` fills it in yourself.
-- **Versions and labels.** `operonx prompt publish intake.system --label
-  production` freezes the working text as the next number
-  (`prompts/.versions/intake.system/1.md`) and points the label at it
-  (`prompts/labels.toml`). A process serves the label in
-  `OPERONX_PROMPT_LABEL` (default `production`); a prompt without that label
-  is served from its working text. Roll back by moving the label: `operonx
-  prompt label intake.system production 1`. Also `list`, `show`, `diff`,
-  `log`. Labels are read when the graph is built: a moved label takes a
-  restart. Commit `prompts/` — the history is the repository's.
+  not have, a link to one, or a malformed composite raises there (so
+  `operonx check` and `operonx lint` catch it). A composite given to
+  `prompt=` is rendered from the op's values; `prompt("intake")["system"]` is
+  one role of it, and `.render(**data)` renders it yourself (a chat gives
+  `.system`, `.user`, `.messages`).
+- A `text:` part is literal: `{{customer}}` in it stays as written. Data goes
+  in through `var:` or a text object's `{{x}}`.
+- **A variable is data, never a prompt.** Which text goes in is a link —
+  `use`, `pick`, `when` — so the run row and `operonx prompt show` can say
+  it. A prompt given as a composite's value raises `TypeError`.
+- `operonx prompt show intake` prints a composite's tree (every case of every
+  pick) and the variables it needs; `list` shows each object's kind and id;
+  `mv OLD NEW` renames an object and rewrites every link to it (published
+  versions included), keeping its id.
+- **Versions and labels.** `operonx prompt publish intake --label
+  production` gives the object an id if it has none, freezes the working
+  text as the next number (`prompts/.versions/intake/1.yaml`) and points the
+  label at it (`prompts/labels.toml`). A composite's links are loaded at the
+  same label. A process serves the label in `OPERONX_PROMPT_LABEL` (default
+  `production`); an object without that label is served from its working
+  text. Roll back by moving the label: `operonx prompt label intake
+  production 1`. Also `diff`, `log`. Labels are read when the graph is
+  built: a moved label takes a restart. Commit `prompts/` — the history is
+  the repository's.
 - **A service that runs from an older build.** Set a prompt store — a
   Postgres address, as a setting of the project:
   `[prompts]` `store = "${PROMPT_STORE_DSN}"` in `operonx.toml`, the address in
   the environment or `.env`. `operonx prompt publish` / `label` then also copy
-  the versions and labels there (`operonx prompt push` copies all of them,
-  `operonx prompt store` shows what it serves), and `prompt("name")` in a
-  process with the store set gives what the store's label points at — a
-  version published after the image was built included. One way only: the
-  files are where a prompt is written; a store that cannot be reached serves
-  the files. A process re-reads the store every 15 s in the background
-  (`OPERONX_PROMPT_STORE_EVERY`); code that builds its prompts once compares
-  `operonx.prompt_store.generation()` and builds them again when it went up.
-- Every run row of that op carries `attrs.prompts`: `[{part, name, version,
-  label, hash}]` (`version` is `None` for the working text; `hash` is of the
-  text).
-- **A prompt chosen at run time.** When which prompt to send is only known in
-  a call (one per agent, per state), an op renders it and hands the text on:
-  `return {"system": prompt(f"{agent}/analyzer").render(rules=rules)}`, then
-  `LLMOp.of(prompt={"system": "{system}", ...}, system=ctx["system"])`. What
-  `.render` returns is a string that remembers the prompts it was made from,
-  so the LLM op's row still says them: `attrs.prompts = [{input: "system",
-  name, version, label, hash}]`. A prompt given as a value to another's
-  `.render` is listed too.
+  the versions (with their id and kind) and labels there (`operonx prompt
+  push` copies all of them, `operonx prompt store` shows what it serves), and
+  `prompt("name")` in a process with the store set gives what the store's
+  label points at — a version published after the image was built included.
+  One way only: the files are where a prompt is written; a store that cannot
+  be reached serves the files. A process re-reads the store every 15 s in the
+  background (`OPERONX_PROMPT_STORE_EVERY`); code that builds its prompts once
+  compares `operonx.prompt_store.generation()` and builds them again when it
+  went up.
+- Every run row of that op carries `attrs.prompts` — `[{part, name, id,
+  version, label, hash}]`, each object it linked (`version` is `None` for the
+  working text; `hash` is of the text) — and, for a composite,
+  `attrs.prompt_tree`: the objects as linked, and the value each `pick` and
+  `when` was given.
+- **The old ways work for one minor, with a `DeprecationWarning`:**
+  `{{> other}}` inside a text object, and a prompt given as a value to
+  another's `.render(...)` (an op rendering one prompt into another). Both
+  become a composite. `operonx lint` (C19) lists them, with `<<x>>` and
+  single-brace `{x}` left in a text object, and prose written into
+  `LLMOp(prompt="…")` in the code.
 
 ## Agents — a model that calls tools
 

@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.44.0] - 2026-11-22
+
 ### Added
+- **A prompt is an object, not a string** (docs/PROMPT_OBJECTS_PLAN.md O1). Two kinds in `prompts/`: a **text** object (`<name>.md`, `{{x}}` is data) and a **composite** (`<name>.yaml`) of links — `kind: chat` (`system:` / `user:`) or `kind: text` (`parts:`), each part one of `use: <name>`, `pick: <var>` + `cases:` + `else: <name> | none`, `when: <var>` + `use:`, `var: <x>`, `text: "…"`, joined with `join:`. Which text goes in is a link the file says, never a variable's value or code that glues strings — the callbot's classifier was a system prompt rendered into another's variable, one per agent; it is now `prompts/classifier.yaml`, a `pick agent_name`, and its 28 per-state prompts are byte-identical. `prompt("x")` loads either kind (links at the same label, a cycle or a missing link raises when the graph is built); `LLMOp(prompt=prompt("classifier"))` renders a composite from the op's values; `.render(**data)` gives `RenderedChat` (`.system`, `.user`, `.messages`) or a `RenderedPrompt`, both with `.tree` (each object linked, its id and version, and what each `pick` / `when` was given) and `.refs`.
+- **Ids.** Every object has an `id` (`pr_` + 8 hex) that stays when it is renamed: `operonx prompt publish` writes one into the file when it has none (a file rewritten whole gets its last version's back), `operonx.prompts.ensure_id(name)` does it alone.
+- **`operonx prompt mv OLD NEW`** (`operonx.prompts.move`) renames an object, its versions and labels, and rewrites every link to it — composites, their published versions, `{{> old}}`. `operonx prompt show` prints a composite's tree (every case of every pick) and the variables it needs, each with where it comes from; `list` shows each object's kind and id.
+- **The run row says what was linked:** an LLM op given a composite records every object in `attrs.prompts` and the tree in `attrs.prompt_tree`.
+- **The prompt store** keeps each version's `id` and `kind` (two columns, added to an existing store on the next push).
+- **Lint C19.** A prompt object that does not load is an error. Warnings: `{{> other}}`, `<<x>>` and single-brace `{x}` in a text object; `.render(x=prompt(…))`; `prompt(…).format(…)` / `.replace` / `.format_map`; prose in `LLMOp(prompt="…")` (a line break, or past 160 characters).
 - **`RunFilter(op="llm_classify")`: the runs in which that op ran.** Finding an op's recent runs meant listing runs page by page and asking each page's rollups which ran it — the studio's Prompts page read 2,000 of the callbot's runs (44 queries, ~5 s) to find the 7 that called `llm_classify`. Every store now applies it in its own query (SQL and ClickHouse: `trace_id IN (SELECT trace_id FROM op_rollups WHERE op = …)`, with an index on `op` for SQL and Mongo; Langfuse filters the page it read).
+
+### Deprecated
+- `{{> other}}` inside a prompt, and a prompt given as a variable's value to another's `.render(...)`: both warn (`DeprecationWarning`) and go in the next minor. Link the two from a composite. A composite refuses a prompt as a value (`TypeError`).
 
 ## [1.43.0] - 2026-11-22
 
