@@ -146,6 +146,13 @@ class LangfuseRunStore(RunStore):
         )
         items = [self._summary_of_listing(t) for t in listing.get("data") or [] if t.get("id")]
         items = [s for s in items if where.matches(s)]
+        if where.op and items:  # Langfuse has no op index: this page's runs, read for their ops
+            ran = {
+                r.trace_id
+                for r in self.rollups(RunFilter(trace_ids=[s.trace_id for s in items]))
+                if r.op == where.op
+            }
+            items = [s for s in items if s.trace_id in ran]
         meta = listing.get("meta") or {}
         total_pages = meta.get("totalPages")
         nxt = str(page + 1) if total_pages and page < int(total_pages) else None

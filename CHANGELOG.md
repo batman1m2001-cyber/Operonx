@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`RunFilter(op="llm_classify")`: the runs in which that op ran.** Finding an op's recent runs meant listing runs page by page and asking each page's rollups which ran it — the studio's Prompts page read 2,000 of the callbot's runs (44 queries, ~5 s) to find the 7 that called `llm_classify`. Every store now applies it in its own query (SQL and ClickHouse: `trace_id IN (SELECT trace_id FROM op_rollups WHERE op = …)`, with an index on `op` for SQL and Mongo; Langfuse filters the page it read).
+
 ## [1.43.0] - 2026-11-22
 
 ### Fixed

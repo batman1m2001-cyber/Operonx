@@ -80,6 +80,7 @@ class MongoRunStore(RunStore):
         self.runs.create_index([("started_at", -1)])
         self.runs.create_index([("job_run", 1)])
         self.ops.create_index([("trace_id", 1)])
+        self.ops.create_index([("op", 1)])
 
     # -- write -----------------------------------------------------------------
 
@@ -237,6 +238,8 @@ class MongoRunStore(RunStore):
             safe = "".join(ch for ch in str(key) if ch.isalnum() or ch in "_-")
             # SQL compares the text form; match the value or its text
             parts.append({"$or": [{f"metadata.{safe}": value}, {f"metadata.{safe}": str(value)}]})
+        if f.op:
+            parts.append({"_id": {"$in": self.ops.distinct("trace_id", {"op": f.op})}})
         if f.search:
             parts.append({"search": {"$regex": re.escape(f.search.lower())}})
         if not parts:

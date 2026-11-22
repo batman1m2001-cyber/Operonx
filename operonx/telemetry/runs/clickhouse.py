@@ -1219,6 +1219,10 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
             clauses.append(
                 f"(JSONExtractString(metadata, {k}) = {v} OR JSONExtractRaw(metadata, {k}) = {v})"
             )
+        if f.op:
+            clauses.append(
+                f"trace_id IN (SELECT trace_id FROM {self.database}.op_rollups WHERE op = {bind(str(f.op), 'String')})"
+            )
         if f.search:
             q = bind(str(f.search), "String")
             clauses.append(

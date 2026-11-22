@@ -209,6 +209,9 @@ class RunFilter:
     ``metadata`` matches metadata keys exactly (``{"session_id": "0912"}``);
     ``search`` is a case-insensitive substring over the trace id, the key
     and the metadata. Times are epoch seconds, ``since`` inclusive.
+    ``op`` keeps the runs in which that op ran (its name in the run's op
+    rollups), so "the newest runs of ``llm_classify``" is one query, not a
+    walk over every run asking each one.
     """
 
     origin: Optional[str] = None
@@ -222,9 +225,11 @@ class RunFilter:
     trace_ids: Optional[Sequence[str]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     search: Optional[str] = None
+    op: Optional[str] = None
 
     def matches(self, s: RunSummary) -> bool:
-        """The filter in Python — for backends without a query engine."""
+        """The filter in Python — for backends without a query engine. A
+        summary does not list its ops, so ``op`` is the backend's to apply."""
         if self.origin and s.origin != self.origin:
             return False
         if self.name and s.name != self.name:
