@@ -168,10 +168,13 @@ One directory per run:
 ```
 
 Runs go under `.operonx/jobs` at the project root; `[jobs] dir` in
-`operonx.toml` or `record_dir=` moves them. Every run is kept unless the job
-says otherwise: a job on a short clock — a worker polling every few seconds —
-sets `keep_runs=N`, and after each run its oldest finished runs are removed so
-N remain (a run still going is never touched):
+`operonx.toml` or `record_dir=` moves them. `keep_runs=N` keeps a job's newest
+N finished runs (a run still going is never touched): after each run the older
+records are removed, and so are those runs' traces, wherever `[tracing]` wrote
+them (the traces in a sweep at most every ten minutes). A job with a
+`schedule=` that does not say keeps 1,000 — a clock never stops, and a worker
+polling every 5 seconds would leave 17,000 runs a day; any other job keeps
+every run, and `keep_runs=None` says so for a scheduled one:
 
 ```python
 Job("agent_worker", graph=worker, schedule=schedule(every="5s", port=8030), keep_runs=200)

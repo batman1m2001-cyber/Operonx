@@ -276,6 +276,40 @@ class LocalConsumer(Consumer):
         note_change(root, final.relative_to(root).as_posix())
         return final
 
+    def drop_job_runs_before(
+        self, job: str, job_run: str, origin: str = "job", started_at: Optional[float] = None
+    ) -> int:
+        """Remove the trace folders of *job*'s runs older than *job_run* —
+        what ``Job(keep_runs=)`` asks for when it removes those runs'
+        records, so a job on a short clock keeps as many traces as runs.
+        A job run's id sorts by when it started, and its traces are
+        ``<origin>s/<job>/<job_run>/``; another layout is left alone.
+        Returns how many job runs went. Each removed run is noted in the
+        change journal, so a store over the root forgets it too."""
+        cfg = {**self.DEFAULT_CONFIG, **self.config}
+        if cfg["layout"] != "origin":
+            return 0
+        root = resolve_root(cfg["root"])
+        folder = Path(ORIGIN_DIRS.get(origin, _safe(origin))) / _safe(job)
+        try:
+            with os.scandir(root / folder) as it:
+                old = sorted(
+                    e.name for e in it if e.name < job_run and e.is_dir(follow_symlinks=False)
+                )
+        except OSError:
+            return 0
+        for name in old:
+            path = root / folder / name
+            try:
+                with os.scandir(path) as it:
+                    traces = [e.name for e in it if not e.name.endswith(".tmp")]
+            except OSError:
+                traces = []
+            shutil.rmtree(path, ignore_errors=True)
+            for trace_id in traces:
+                note_change(root, (folder / name / trace_id).as_posix())
+        return len(old)
+
     # ------------------------------------------------------------------
     # Overridable render hook — CallbotLocalConsumer replaces this.
     # ------------------------------------------------------------------
