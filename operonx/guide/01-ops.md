@@ -529,6 +529,75 @@ asyncio.run(main())
 - A search on an index that holds no vectors logs a WARNING and sets
   `empty_index`; under a `filter`, no hits is just the answer.
 
+## Decisions — `DecisionOp`
+
+`DecisionOp` asks a `decision:` resource typed questions about a state and
+gets probabilities back, all questions in one request, with no text
+generated. The backend is TypeSafe's Jev, reached directly or through
+OpenRouter. The questions use Jev's own wire format: name → `{type,
+instructions, criteria}`, where `type` is `noul` (a yes/no probability),
+`choice`, `score` or `box`.
+
+```yaml file=resources.yaml
+decision:jev:
+  api_type: fake            # openrouter | typesafe for the real thing:
+  script:                   #   api_key: ${OPENROUTER_API_KEY}
+    - {refund: {noul: 0.93}, tone: {choice: angry}}   #   model: typesafe/jev-1.14
+```
+
+```python
+import asyncio
+
+import operonx
+from operonx import END, START, Operon, graph, op
+from operonx.providers.decisions import verdict
+from operonx.providers.ops import DecisionOp
+
+QUESTIONS = {
+    "refund": {"type": "noul", "instructions": "The customer asks for a refund."},
+    "tone": {
+        "type": "choice",
+        "instructions": "The customer's tone.",
+        "criteria": {"calm": None, "angry": None},
+    },
+}
+
+
+@op
+def route(answers: dict):
+    # True / False / None: None is "not sure", its own outcome
+    return {"refund": verdict(answers["refund"], at=0.7)}
+
+
+@graph
+def triage(message):
+    ask = DecisionOp.of(resource="jev", state=message, questions=QUESTIONS)
+    pick = route(answers=ask["answers"])
+    START >> ask >> pick >> END
+
+
+async def main():
+    operonx.bootstrap(resources="resources.yaml")
+    out = await Operon(triage, params={"message": None}).run(inputs={"message": "Money back, now!"})
+    assert out["refund"] is True
+
+
+asyncio.run(main())
+```
+
+- Outputs: `answers` (name → the server's answer, with `confidence`
+  added to a noul), `usage`, `cost_usd`, `model_used`. The run row counts
+  the call as a priced model call.
+- `state` may be a string, a dict or a list. A dict is sent as JSON, and
+  Jev reads structure well.
+- Keep thresholds in an `@op` (`verdict`), not in `if_()`.
+- Context: TypeSafe direct takes 64k tokens, or 262k with
+  `long_context: true`. OpenRouter takes up to 262k as it is. A request over
+  the limit is split by question and merged, unless you set
+  `split_on_overflow: false`.
+- 429 and 5xx are retried by the resource (`retry:`). A 4xx raises
+  `DecisionError` with the server's message.
+
 ## Doors — how a served graph meets its caller
 
 A served graph's parameters are what the caller sends and its outputs are

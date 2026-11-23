@@ -75,6 +75,7 @@ from operonx.app.jobs import Job
 from operonx.app.serve import current_session, egress, ingress
 from operonx.core.ops import if_
 from operonx.providers.ops import (
+    DecisionOp,
     EmbeddingOp,
     LLMOp,
     RerankOp,

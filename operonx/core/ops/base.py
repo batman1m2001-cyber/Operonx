@@ -287,6 +287,7 @@ _SLOW_EXEMPT = frozenset(
         "llm",
         "embedding",
         "rerank",
+        "decision",
         "vector-search",
         "vector-upsert",
         "vector-delete",
