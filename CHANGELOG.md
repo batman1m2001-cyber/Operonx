@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.46.1] - 2026-11-24
+
+### Fixed
+- **An op's outputs no longer depend on its file staying unchanged after import.** A graph builds its ops on its first run, and that build read each op's source from disk with `inspect.getsource`. If the file had been edited or pulled since import (a deploy before the restart), it read other lines at the old line numbers. The op then declared no outputs, and its first run failed with `(<op>, hits) not found in schema`. operonx-kb's graph search hit this on 2026-11-23.
+  - `@op` now keeps the file's lines when it decorates, and outputs are read from those lines.
+  - `tests/internal/core/ops/transform/test_func_op_source_snapshot.py` fails without the change.
+
 ## [1.46.0] - 2026-11-23
 
 ### Added

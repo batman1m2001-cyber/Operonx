@@ -3,6 +3,7 @@
 import ast
 import copy
 import inspect
+import linecache
 import textwrap
 import warnings
 import weakref
@@ -133,6 +134,7 @@ def op(
     _decl_exclude, _decl_include = _normalise_observability(exclude, include)
 
     def decorator(fn):
+        _snapshot_source(fn)
         module = fn.__module__ or ""
         if module in ("__main__", "") or "." not in module:
             fn._func_name = fn.__name__
@@ -202,6 +204,41 @@ def op(
         return decorator(func)
     # @op(bound="cpu") with parentheses
     return decorator
+
+
+def _snapshot_source(fn: Callable) -> None:
+    """Keep the lines of ``fn``'s file as they are now, when it is decorated.
+
+    An op's outputs are read from its source, but only when a graph first
+    builds the op — maybe long after import. ``inspect.getsource`` reads the
+    file on disk at that moment, at the line numbers the code was compiled
+    with: a file edited or pulled in between (a deploy before the restart)
+    gave the lines of some other code, the op declared no outputs, and its
+    first run failed with ``(<op>, <key>) not found in schema``. The lines
+    are linecache's list, shared by every op of the module, not a copy.
+    """
+    try:
+        filename = inspect.getsourcefile(fn)
+    except TypeError:
+        return
+    if not filename:
+        return
+    linecache.checkcache(filename)  # drop lines cached before the file changed
+    lines = linecache.getlines(filename, getattr(fn, "__globals__", None))
+    if lines:
+        try:
+            fn._op_source_lines = lines
+        except (AttributeError, TypeError):  # a builtin or a slotted callable
+            pass
+
+
+def _source_of(func: Callable) -> str:
+    """``inspect.getsource(func)``, from the lines kept at decoration when there are."""
+    lines = getattr(func, "_op_source_lines", None)
+    code = getattr(func, "__code__", None)
+    if lines and code is not None and 0 < code.co_firstlineno <= len(lines):
+        return "".join(inspect.getblock(lines[code.co_firstlineno - 1 :]))
+    return inspect.getsource(func)
 
 
 def _refuse_inside_op_body(fn: Callable) -> None:
@@ -400,7 +437,7 @@ def extract_return_schema(func: Callable) -> Dict[str, Param]:
     after keys are parsed for type hints and descriptions.
     """
     try:
-        source = inspect.getsource(func)
+        source = _source_of(func)
         source_lines = source.splitlines()
         cleaned_source = textwrap.dedent(source)
 
@@ -467,7 +504,7 @@ def static_output_keys(func: Callable) -> Optional[frozenset]:
     references to the op's outputs.
     """
     try:
-        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+        tree = ast.parse(textwrap.dedent(_source_of(func)))
     except (OSError, TypeError, SyntaxError):
         return None
     if not tree.body or not isinstance(tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -550,7 +587,7 @@ def _shape_of(code_fn: Callable) -> _FunctionShape:
     if not outputs and _returns_scalar(code_fn):
         scalar = Param(type=_return_annotation(code_fn))
     try:
-        source = inspect.getsource(code_fn)
+        source = _source_of(code_fn)
     except (OSError, TypeError):
         source = str(code_fn)
     shape = _FunctionShape(inputs, outputs, static_outputs, scalar, source)
