@@ -21,6 +21,7 @@ Note (1.0.0): the ``ask()`` helper was removed. Its behaviour lives in
 now does inline parsing + error-guided semantic retry in a single node.
 """
 
+from operonx.providers.ops.decision import DecisionOp
 from operonx.providers.ops.doc_fetch import DocFetchOp
 from operonx.providers.ops.embedding import EmbeddingOp
 from operonx.providers.ops.llm import LLMOp
@@ -32,6 +33,7 @@ __all__ = [
     "LLMOp",
     "EmbeddingOp",
     "RerankOp",
+    "DecisionOp",
     "VectorSearchOp",
     "VectorUpsertOp",
     "VectorDeleteOp",

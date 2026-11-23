@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`decision:` resources and `DecisionOp` — TypeSafe's Jev** (docs/JEV_PLAN.md). Typed questions about a state (`noul`, `choice`, `score`, `box`, in Jev's own wire format) are answered with probabilities in one request, with no text generated. `api_type: openrouter | typesafe | fake`.
+  - The op's outputs are `answers`, `usage`, `cost_usd` and `model_used`. The run row counts the call as a priced model call.
+  - A noul answer gets a `confidence`. `verdict(answer, at=0.7)` turns a noul or a choice into True, False, a label, or None when it is not sure enough.
+  - 429 and 5xx are retried by the resource. A request over the context is split by question and merged.
+  - Both error shapes, TypeSafe's `{"detail": …}` and OpenRouter's `{"error": {…}}`, raise `DecisionError` with the server's message.
+  - Checked live on OpenRouter: `typesafe/jev-1.14` and `jev-1.13`. OpenRouter took a 173k-token state without the long-context header.
+
 ## [1.45.0] - 2026-11-23
 
 ### Removed

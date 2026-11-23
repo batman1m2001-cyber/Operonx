@@ -378,3 +378,38 @@ class RerankError(OpError):
                 "document_count": document_count,
             },
         )
+
+
+class DecisionError(OpError):
+    """A typed decision (``decision:`` resource, :class:`DecisionOp`) failed.
+
+    ``status`` is the HTTP status when the server answered one, and
+    ``response`` the ``httpx.Response``: the transport retry reads both, so
+    a 429 or 529 is retried and its ``Retry-After`` honoured, while a 400,
+    a 401 or a 422 is not.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        resource: str,
+        questions: Any = (),
+        status: Optional[int] = None,
+        response: Any = None,
+        original_error: Optional[Exception] = None,
+    ):
+        self.resource = resource
+        self.questions = list(questions or ())
+        self.status = status
+        self.response = response
+        context: Dict[str, Any] = {"resource": resource}
+        if self.questions:
+            context["questions"] = ", ".join(map(str, self.questions))
+        if status is not None:
+            context["status"] = status
+        super().__init__(
+            message=message,
+            op_type="decision",
+            original_error=original_error,
+            context=context,
+        )
