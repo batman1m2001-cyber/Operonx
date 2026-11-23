@@ -29,7 +29,7 @@ def _user(text):
     return [{"role": "user", "content": text}]
 
 
-PUBLIC_LLMS = ["llm:or-claude-4-sonnet", "llm:gpt-4o"]
+PUBLIC_LLMS = ["llm:or-claude-sonnet-5-5", "llm:gpt-4o"]
 
 
 class TestTransportRetry:
@@ -37,7 +37,7 @@ class TestTransportRetry:
     whole reason resource-level retry exists."""
 
     async def test_policy_reaches_the_client(self, require_key):
-        llm = require_key("llm:or-claude-4-sonnet")
+        llm = require_key("llm:or-claude-sonnet-5-5")
         assert llm.config.max_retries >= 1
         assert llm.config.retry_base_delay > 0
         assert llm.config.retry_on_empty is True
@@ -46,7 +46,7 @@ class TestTransportRetry:
         """The path every graph takes, against a real endpoint."""
         from operonx.providers.ops.llm import LLMOp
 
-        llm = require_key("llm:or-claude-4-sonnet")
+        llm = require_key("llm:or-claude-sonnet-5-5")
         op = LLMOp.__new__(LLMOp)
         op.name = "live_probe"
         out = await op._call_with_retry(
@@ -67,7 +67,7 @@ class TestTransportRetry:
 
         from operonx.providers.ops.llm import LLMOp
 
-        llm = require_key("llm:or-claude-4-sonnet")
+        llm = require_key("llm:or-claude-sonnet-5-5")
         op = LLMOp.__new__(LLMOp)
         op.name = "live_probe"
 
@@ -119,7 +119,7 @@ class TestGenerationExtras:
         by declaring it null — the key must vanish, not arrive as null."""
         from operonx.providers.ops.llm import LLMOp
 
-        llm = require_key("llm:or-claude-4-sonnet")
+        llm = require_key("llm:or-claude-sonnet-5-5")
         merged = LLMOp._merge_generation_extras(llm, {"messages": _user("hi"), "top_p": None})
         params = llm._prepare_params(
             model=llm.config.model,

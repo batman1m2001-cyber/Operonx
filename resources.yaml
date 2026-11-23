@@ -13,13 +13,13 @@
 # re-prompt. This is also the public stand-in for the private gateways —
 # the retry layer is provider-agnostic, so it can be proven here without
 # reaching an internal network.
-llm:or-claude-4-sonnet:
+llm:or-claude-sonnet-5-5:
   api_type: openai
   api_key: ${OPENROUTER_API_KEY}
   base_url: https://openrouter.ai/api/v1
-  model: anthropic/claude-sonnet-4
-  cost_per_input_token: 0.000003
-  cost_per_output_token: 0.000015
+  model: anthropic/claude-sonnet-5.5
+  cost_per_input_token: 0.000002
+  cost_per_output_token: 0.00001
   max_retries: 5
   retry_base_delay: 5.0
   retry_min_delay: 1.0
