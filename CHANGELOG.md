@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.46.0] - 2026-11-23
+
 ### Added
 - **`decision:` resources and `DecisionOp` — TypeSafe's Jev** (docs/JEV_PLAN.md). Typed questions about a state (`noul`, `choice`, `score`, `box`, in Jev's own wire format) are answered with probabilities in one request, with no text generated. `api_type: openrouter | typesafe | fake`.
   - The op's outputs are `answers`, `usage`, `cost_usd` and `model_used`. The run row counts the call as a priced model call.
@@ -14,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 429 and 5xx are retried by the resource. A request over the context is split by question and merged.
   - Both error shapes, TypeSafe's `{"detail": …}` and OpenRouter's `{"error": {…}}`, raise `DecisionError` with the server's message.
   - Checked live on OpenRouter: `typesafe/jev-1.14` and `jev-1.13`. OpenRouter took a 173k-token state without the long-context header.
+
+### Changed
+- **The OpenRouter Claude resource is `llm:or-claude-sonnet-5-5`** (`anthropic/claude-sonnet-5.5`, $2/$10 per M tokens), replacing `llm:or-claude-4-sonnet`: OpenRouter answers 404 for `anthropic/claude-sonnet-4`.
 
 ## [1.45.0] - 2026-11-23
 
