@@ -14,6 +14,7 @@ from operonx_kb.errors import CatalogError
 from operonx_kb.ops._resources import blobs_of, catalog_of
 from operonx_kb.retrieval.citations import verify_citations
 from operonx_kb.retrieval.context import build_sources, render_sources
+from operonx_kb.retrieval.research import add_usage
 from operonx_kb.stores.catalog.base import Catalog
 
 __all__ = ["ANSWER_PROMPT", "build_context", "check_answer"]
@@ -81,6 +82,8 @@ def check_answer(
     answer: str,
     citations: Optional[list] = None,
     usage: Optional[dict] = None,
+    cost_usd: Optional[float] = None,
+    research: Optional[dict] = None,
 ) -> dict:
     """Verify every citation against its source and resolve the verified ones to
     span, elements, pages and boxes. Unverified citations are dropped and reported.
@@ -101,5 +104,9 @@ def check_answer(
         {k: s[k] for k in ("n", "key", "title", "version_id", "heading_path", "pages", "spans")}
         for s in passages
     ]
-    out.update(sources=shown, usage=usage or {})
+    total = add_usage(usage, {} if cost_usd is None else {"cost_usd": cost_usd})
+    if research is not None:
+        total = add_usage(total, research.get("usage"))
+        out["research"] = research
+    out.update(sources=shown, usage=total)
     return {"answer": out}

@@ -181,7 +181,8 @@ def _cmd_query(kb: KnowledgeBase, args) -> int:
     try:
         if args.answer:
             out = asyncio.run(kb.ask(args.collection, args.text, args.answer, filter=_filter(args),
-                                     k=args.k, mode=args.mode, reranker=args.rerank))  # fmt: skip
+                                     k=args.k, mode=args.mode, reranker=args.rerank,
+                                     searches=args.searches))  # fmt: skip
         else:
             out = asyncio.run(kb.search(args.collection, args.text, filter=_filter(args), k=args.k,
                                         mode=args.mode, reranker=args.rerank))  # fmt: skip
@@ -320,6 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--filter", help='a KBFilter as JSON, e.g. \'{"fields": {"dept": "hr"}}\'')
     p.add_argument("--rerank", help="reranking resource name")
     p.add_argument("--answer", metavar="LLM", help="answer with this llm resource, with citations")
+    p.add_argument("--searches", type=int, default=1, help="with --answer: searches it may make")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=_cmd_query)
 

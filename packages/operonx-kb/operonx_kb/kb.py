@@ -21,6 +21,7 @@ from operonx import Operon
 
 from operonx_kb.errors import CatalogError, IngestError, KBError, QueryError  # noqa: F401
 from operonx_kb.graphs.answer import answer as answer_graph
+from operonx_kb.graphs.answer import research_answer
 from operonx_kb.graphs.ingest import ingest_document
 from operonx_kb.graphs.maintenance import collect_garbage, delete_document, drop_index, drop_lexical
 from operonx_kb.graphs.maintenance import rebuild_index as rebuild_index_graph
@@ -39,7 +40,7 @@ from operonx_kb.model.ids import document_id
 from operonx_kb.ops._resources import blobs_of, catalog_of, full_key
 from operonx_kb.ops.settings import MODES, check_mode, search_mode
 
-__all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"]
+__all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE", "MAX_SEARCHES"]
 
 #: Retrieval modes of :meth:`KnowledgeBase.search`. ``tree`` needs the collection's
 #: ``tree`` spec (PLAN E7), ``graph`` its ``graph`` spec (PLAN G4); both are seeded
@@ -50,6 +51,9 @@ __all__ = ["KnowledgeBase", "IngestError", "QueryError", "MODES", "DEFAULT_MODE"
 #: sets (the PLAN gate asks for two of three; the table is in ``docs/bench/k2.md``).
 #: A collection with only one index uses that one (:meth:`KnowledgeBase.default_mode`).
 DEFAULT_MODE = "hybrid"
+
+#: The most searches one ``ask`` may make (``searches=``).
+MAX_SEARCHES = 10
 
 
 _EXCEPTION_LINE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception|Exit|Interrupt)\b.*")
@@ -295,29 +299,45 @@ class KnowledgeBase:
         rerank_depth: int = 30,
         budget_tokens: int = 1500,
         neighbours: int = 1,
+        searches: int = 1,
         trace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Answer a question from the collection with verified citations (track5 §10).
 
-        ``trace_id`` names the run (default: a new one), as in :meth:`search`.
+        Args:
+            searches: How many searches the answer may make. ``1`` (the default)
+                searches the question once. More runs a research loop: ``llm``
+                reads what the searches found and names the next search until the
+                passages answer the question, for a question in steps ("the team
+                that … : what does it …?"), a comparison, or a question worded
+                unlike the documents. At most :data:`MAX_SEARCHES`.
+            trace_id: The run's id (default: a new one), as in :meth:`search`.
 
         Returns:
             ``{"text", "citations", "dropped", "unsupported_sentences", "sources",
             "stats", "usage"}``. Every citation's quote was found in its source and
             carries its canonical span, pages and boxes; the rest are in ``dropped``.
+            ``usage`` totals every model call (with ``cost_usd`` when the model has a
+            price); with ``searches > 1``, ``research`` holds the searches made and
+            the research calls' usage.
 
         Raises:
-            QueryError: An op failed, or the model's reply did not parse.
+            QueryError: An op failed, the model's reply did not parse, or ``searches``
+                is out of range.
         """
         mode = self.check_mode(collection_id, mode)
+        if not 1 <= searches <= MAX_SEARCHES:
+            raise QueryError(f"searches must be 1 to {MAX_SEARCHES}, not {searches!r}")
         flt = KBFilter.of(filter).model_dump(mode="json", exclude_defaults=True) or None
-        return await self._run_graph(
-            answer_graph, collection_id,
-            {"query": question, "collection": collection_id, "filter": flt, "k": k, "mode": mode,
-             "reranker": reranker, "rerank_depth": rerank_depth, "llm": llm,
-             "budget_tokens": budget_tokens, "neighbours": neighbours},
-            "answer", error=QueryError, trace_id=trace_id,
-        )  # fmt: skip
+        inputs = {"query": question, "collection": collection_id, "filter": flt, "k": k,
+                  "mode": mode, "reranker": reranker, "rerank_depth": rerank_depth, "llm": llm,
+                  "budget_tokens": budget_tokens, "neighbours": neighbours}  # fmt: skip
+        if searches > 1:
+            return await self._run_graph(research_answer, collection_id,
+                                         {**inputs, "max_searches": searches}, "answer",
+                                         error=QueryError, trace_id=trace_id)  # fmt: skip
+        return await self._run_graph(answer_graph, collection_id, inputs, "answer",
+                                     error=QueryError, trace_id=trace_id)  # fmt: skip
 
     # maintenance ----------------------------------------------------------------------------
 
