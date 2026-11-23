@@ -1,6 +1,17 @@
-# The knowledge base as an LLM wiki — plan (proposal)
+# The knowledge base as an LLM wiki — plan (parked)
 
-**Status:** proposed 2026-11-15, not started. Nothing is built until the owner approves.
+**Status:** PARKED 2026-11-23 by the owner, nothing built. On the same 200 documents and 120 Vietnamese questions
+(corpus_vi), the kb as it is answered better and cheaper than llm-wiki-v2 1.0.5 run unchanged. Every system used the
+same answering model, deepseek-v4.1-flash:
+
+| | Right | Cited the right document | Cost | Ingest |
+|---|---|---|---|---|
+| kb: lexical (FTS5, `vi`+fold) + `kb.ask` | 119/120 | 119 | $0.02 | 38 s, no model |
+| llm-wiki-v2 CROW (Jev files the documents) | 117/120 | 113 | $1.32 | 48 min |
+| llm-wiki-v2 classic (the LLM files them; this plan's design) | 64/120 | 46 | $1.25 | 47 min |
+
+Each question asks for one fact of one unit, so a wiki brings nothing the search does not already give. Reopen
+this plan only for a question set the kb loses: questions that need several documents.
 **Owner's brief:** refactor the knowledge base on LLM Wiki v2: no RAG, no embeddings.
 **Sources read:** the CROW preprint (Cesarini, Sassarini, 2026, [zenodo 23260209](https://zenodo.org/records/23260209), CC BY 4.0)
 and the [crow-hq/llm-wiki-v2](https://github.com/crow-hq/llm-wiki-v2) README.
