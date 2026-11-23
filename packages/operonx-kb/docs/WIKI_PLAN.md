@@ -1,6 +1,6 @@
-# The knowledge base as an LLM wiki — plan (parked)
+# The knowledge base as an LLM wiki — plan (closed)
 
-**Status:** PARKED 2026-11-23 by the owner, nothing built. On the same 200 documents and 120 Vietnamese questions
+**Status:** CLOSED 2026-11-23 by the owner, nothing built and not to be built. On harder sets too (reworded questions, 60 multi-step ones) the answer was a search loop over the kb (`kb.ask(searches=N)`), not a wiki: CROW answered 39/60 multi-step questions, a kb search loop 57/60. On the same 200 documents and 120 Vietnamese questions
 (corpus_vi), the kb as it is answered better and cheaper than llm-wiki-v2 1.0.5 run unchanged. Every system used the
 same answering model, deepseek-v4.1-flash:
 
