@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.45.0] - 2026-11-23
+
 ### Removed
 - **The old prompt ways, deprecated in 1.44.0** (PROMPT_OBJECTS_PLAN O6):
   - `PromptText` is no longer a `str`. `str(p)` is the text as written (it was a `str.format` template, `{{x}}` turned into `{x}`); `LLMOp(prompt=p)` — alone or as `{system: p, user: …}` — fills its `{{x}}` from the op's values and leaves every other brace as written, as `.render` / `.fill` do. Code that used it as a string (`p.format_map`, `p + "…"`, `p.startswith`) uses `p.text` or `p.render(…)`.
