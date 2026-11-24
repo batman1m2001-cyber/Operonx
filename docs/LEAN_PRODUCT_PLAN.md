@@ -195,6 +195,26 @@ The 34 entries are 33 names: `steps` is registered for both the project scope an
   Markdown in each project; nothing deletes it. `.operonx/project/*.db` becomes unused and is the
   owner's to delete. P5 removes the generated AGENTS.md builder block and rewrites mr-finance's
   hand-written board section.
+- **D8 — a product's UI lives in its repo and is served with its API.** `web/` is optional; when a
+  project has one, it is in the same repo, `operonx serve` serves it at `/` on the same origin as
+  the routes, and the UI's backend is `app/`: the UI calls only `app/` routes, the logic stays in
+  `src/`. Three rules keep a later move cheap:
+  - `web/` is static files only; no page is rendered on the server;
+  - every call goes through `web/lib/api.js` (C17), which has one `BASE` constant, `""` (same
+    origin) by default;
+  - every route the UI calls is under `/api/`.
+
+  Moving the UI to its own repo and host later is then `git subtree split --prefix=web` plus either a
+  reverse proxy that sends `/api/` to `operonx serve` (still one origin; no code change), or `BASE`
+  set to the API's address plus CORS (`operonx serve` has no CORS today; it would be added then).
+  Session cookies only survive the second way with `SameSite=None; Secure`, so the proxy is the
+  default.
+
+  *Why:* one origin means no CORS, no base URL and no config key; lint and the Picture see the UI;
+  one deploy keeps the UI and the API at one version. Today only mr-finance has a `web/`, already
+  in this shape (`app/web.py`, static pages, `fetch("/api/…")`). A CDN in front of the same origin
+  still fits. A project whose client insists on a separate frontend is outside the standard: studio
+  has no button for it and lint does not check it.
 
 ## 3. Architecture after
 
@@ -271,7 +291,7 @@ a product (the standard, unchanged)
 my-product/
 ├── src/              features (core)       src/_shared/config.py reads the environment
 ├── app/              services, jobs (backend)
-├── web/              UI (frontend)         only web/lib/ calls fetch
+├── web/              UI (frontend, optional) static; served at / by operonx serve; only web/lib/api.js calls fetch (BASE = "")
 ├── prompts/  tests/  data/  out/  deploy/
 ├── operonx.toml      parts, stores, serve
 └── AGENTS.md         written once by `operonx init`
@@ -336,7 +356,12 @@ import.
       linked objects are pinned by their own names. Tests: a pinned prompt and an unpinned
       neighbour in one process; the run row names the pinned version
 - [ ] lint: drop C18 (`shape.py`, `cli/lint.py` table)
-- [ ] 05-project-layout: one line mapping core/backend/frontend to `src/`, `app/`, `web/` (D3)
+- [ ] 05-project-layout: one line mapping core/backend/frontend to `src/`, `app/`, `web/` (D3), and
+      D8's rule: same repo, served at `/`, static only, one `BASE` in `web/lib/api.js`, routes under
+      `/api/`; plus the two ways to move the UI out later (a reverse proxy, or `BASE` + CORS)
+- [ ] `operonx init --web`: `templates/_common/web/lib/api.js.tmpl` gets `export const BASE = "";`
+      and calls `fetch(BASE + path, …)`; the example route moves from `/greet` to `/api/greet`
+      (`cli/init.py:98`) with the template's tests and README
 - [ ] CI: drop the operonx-project job from `packages.yaml`; `bench/token_ab/run.py` stops importing it
 - [ ] operonx **1.47.0**: CHANGELOG; publishing to PyPI waits for the owner's OK
 - [ ] **Gate:** the full suite passes (3882 today, minus the removed tests); `grep -r operonx_project
@@ -348,6 +373,10 @@ import.
 Already there and reused as they are: Compare, Publish and Ship on Prompts; Add to dataset on Play
 and Review (§1.2). P3 adds only what is missing:
 - [ ] opening a project lands on the Picture
+- [ ] **Open app ↗** in the top bar, opening the project's running `operonx serve` at `/` in a new
+      tab (studio already knows each listener's host and port, `services.py`). It is always there:
+      greyed with "no web/ in this project" or "not running" (stable chrome). No iframe: the app
+      has its own login and cookies
 - [ ] on a Runs trace turn: **Add to eval**, the same dialog and row as Review's Add to dataset
       (`POST review/run/{run}/dataset`); no new route
 - [ ] on a prompt version: **Run eval on this version** → `POST jobs/{name}/run` takes
@@ -385,6 +414,9 @@ the assistant no longer needs, or is skipped.
       and `cycle`. Rewrite it to what is true after this plan: the board and the BRD are plain
       Markdown, edited directly. Work on a copy in the scratchpad, never run operonx CLIs inside
       ~/mr-finance; push origin only
+- [ ] mr-finance `web/`: move its `fetch` calls (`shell.js` ×4, `core/core.js` ×2, and
+      `pages/holdings.js`, `pages/risktest.js`) into `web/lib/api.js` with `BASE = ""` (D8, C17).
+      The pages keep working at the same URLs; check them in a browser against the live :8030 copy
 - [ ] callbot (educa-reminder-agent): on `refactor/operonx-studio` only
 - [ ] **Gate:** each project's tests and `operonx check` show no new failure against its own
       baseline; live mr-finance :8030 restarted on the bump
@@ -438,3 +470,9 @@ A second review the same day checked the revised plan against the code:
 | it "rewrote AGENTS.md during a read-only check" | `run`/`serve` from the wrong venv deleted 459 guide lines; lint was already exempt | `READ_ONLY` in `cli/main.py`; memory, 2026-10-17 |
 | check whether `env-health` belongs to envstatus | it stays: it is app.py's env-variable light | `app.py:1870`, `_env_status` |
 | the toolkit's 1.17.1 pin "found on the way" | raised in P1 | `operonx_studio_toolkit/templates.py:24` |
+
+Added after the second review, at the owner's request: D8, a product's UI in the same repo and
+served with its API, written so it can still move out later; guide 05 and `init --web` in P2, Open
+app ↗ in P3, mr-finance's `fetch` calls into `web/lib/` in P5. Evidence: of the 5 projects only
+mr-finance has `web/` (same origin, static, `fetch("/api/…")` in 4 files, no `web/lib/`);
+`operonx serve` has no CORS.
