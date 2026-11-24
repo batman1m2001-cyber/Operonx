@@ -23,25 +23,26 @@ scorer/
 │   └── test_scoring.py
 ├── prompts/              # prompt text, one .md per prompt: `prompt("name")` (01-ops.md)
 ├── datasets/             # eval cases, one .jsonl per dataset
-└── docs/brd/             # the requirements and their checklist (`--no-brd` skips it)
+└── web/                  # with --web: the pages, served at /
 ```
 
-`docs/brd/requirements/requirements_traceability.md` is the checklist: one
-row per requirement, with its status, the code that meets it and the test
-that shows it. Update a row when a change meets or alters its requirement.
-The board is `docs/brd/board.md`, in git: one card per task
-(`### C4 · title · todo|doing|needs you|done`, then `req`, `after`,
-`files`, `done`). The assistant moves the cards; the studio's Board shows
-them by lane, read from `files`. A card goes to `doing` before its first
-edit (one at a time), to `needs you` with the question when blocked, and to
-`done` only through its `done` tests.
+Core, backend and frontend are `src/` (the features: ops and graphs),
+`app/` (the application: its services and jobs) and `web/` (the pages).
 
-With `--web`, `web/` holds the pages, served at `/`: `index.html` loads one
+With `--web`, `web/` holds the pages, in the same repository, served at `/`
+by `operonx serve` on the API's own origin: `index.html` loads one
 `pages/<screen>.js` per screen; a page wires `components/` (functions that
 render and report what the user did) to the server through `lib/api.js`,
 the only file that calls `fetch` (`operonx lint` C17); styles and images
-go in `assets/`. More is in operonx-project's guide: `project/01-project.md`
-in `.operonx/guide/` when it is installed.
+go in `assets/`. The pages are static files only (no build server, no
+server code in `web/`). `web/lib/api.js` holds the one `BASE` every call
+starts with (`""`: the same origin), and every route lives under `/api/`,
+so a page path and a route never meet.
+
+Moving the UI out later (its own repository, deployed elsewhere) changes no
+page: split `web/` into its own repository and either put a reverse proxy in
+front that sends `/api/` to the service (`BASE` stays `""`), or set `BASE`
+to the service's address and allow that origin with CORS in front of it.
 
 ## The rules
 

@@ -1,7 +1,11 @@
 {{#web}}
-// The pages call the server only through here.
+// The pages call the server only through here. BASE is where the API is:
+// "" while web/ is served by the same `operonx serve` (every route is under
+// /api/); the API's address when the pages are deployed somewhere else.
+export const BASE = "";
+
 export async function post(path, body) {
-  const response = await fetch(path, {
+  const response = await fetch(BASE + path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

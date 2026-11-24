@@ -1,4 +1,4 @@
-"""The project's shape: six checks over the whole project, not one module.
+"""The project's shape: five checks over the whole project, not one module.
 
 - **C13** code in ``src/`` reaches another feature only through its
   top-level names (a split feature's ``__init__`` names) or its ``graph``:
@@ -12,8 +12,6 @@
   (kept) or ``out/`` (thrown away).
 - **C17** in ``web/``, only ``web/lib/`` calls ``fetch(``: pages and
   components reach the server through ``web/lib/api.js``.
-- **C18** (a warning) an entry of ``docs/brd/knowledge.md`` names a ``where``
-  file that is gone: the knowledge is stale.
 
 A feature is a module of ``src/`` whose name does not start with ``_``: one
 file, ``src/billing.py`` (the default), or a folder, ``src/billing/``. Tests
@@ -49,8 +47,6 @@ _ROUTE_CALLS = {"Route", "WebSocketRoute", "add_api_route", "add_route", "add_we
 _CONFIG = Path("src") / "_shared" / "config.py"
 _FETCH = re.compile(r"(?<![\w.$])fetch\s*\(")
 _WEB_SOURCES = {".js", ".mjs", ".ts", ".html"}
-_KNOWLEDGE = Path("docs") / "brd" / "knowledge.md"
-_ENTRY = re.compile(r"^### (K\d+) · ")
 
 
 def _features(root: Path) -> Set[str]:
@@ -189,35 +185,11 @@ def _c17(root: Path) -> Iterator[Finding]:
                 )
 
 
-def _c18(root: Path) -> Iterator[Finding]:
-    f = root / _KNOWLEDGE
-    if not f.is_file():
-        return
-    entry, fenced = "", False
-    for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
-        if line.startswith("```"):
-            fenced = not fenced
-        m = None if fenced else _ENTRY.match(line)
-        if m or (not fenced and line.startswith("#")):
-            entry = m.group(1) if m else ""
-        elif entry and line.startswith("where:"):
-            for ref in line[len("where:") :].split(","):
-                rel = ref.strip().split("::")[0].split(":")[0]
-                if rel and not (root / rel).exists():
-                    yield Finding(
-                        "C18",
-                        f,
-                        i,
-                        f"{entry}: {rel} is gone: edit the entry or mark it replaced",
-                        "warning",
-                    )
-
-
 def lint_shape(root: Path, files: Iterable[Path]) -> List[Finding]:
-    """C13–C18 for the project at *root*, over its Python *files*, ``web/`` and its knowledge."""
+    """C13–C17 for the project at *root*, over its Python *files* and ``web/``."""
     root = Path(root)
     features = _features(root)
-    out: List[Finding] = [*_c16(root), *_c17(root), *_c18(root)]
+    out: List[Finding] = [*_c16(root), *_c17(root)]
     for path in files:
         rel = path.relative_to(root)
         if _is_test_file(rel) or _is_script(rel):

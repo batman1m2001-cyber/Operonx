@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+import operonx
 from operonx.cli.main import main
 
 pytestmark = pytest.mark.unit
@@ -64,7 +65,7 @@ def test_a_new_project_checks_clean_and_its_tests_run(tmp_path):
     out = got.stdout
     assert "ok    lint" in out and "ok    build" in out
     assert "passed" in out.split("tests", 1)[1].splitlines()[0]  # pytest ran
-    assert "POST /greet            reaches service greet" in out
+    assert "POST /api/greet        reaches service greet" in out
     assert "GET  /                 200" in out
     assert out.rstrip().endswith("checks passed")
 
@@ -73,7 +74,7 @@ def test_call_calls_a_post_route_filling_what_the_door_says_is_missing(tmp_path)
     root = _project(tmp_path)
     got = _check(root, "--call", "--no-tests")
     assert got.returncode == 0, got.stdout + got.stderr
-    assert "POST /greet            200 with {'id': 'check'}" in got.stdout
+    assert "POST /api/greet        200 with {'id': 'check'}" in got.stdout
 
 
 def test_a_mount_at_root_listed_first_hides_every_route_after_it(tmp_path):
@@ -81,7 +82,7 @@ def test_a_mount_at_root_listed_first_hides_every_route_after_it(tmp_path):
     _main_py(root, "[WEB, *SERVICES]")
     got = _check(root, "--no-tests")
     assert got.returncode == 1
-    line = next(x for x in got.stdout.splitlines() if "POST /greet" in x)
+    line = next(x for x in got.stdout.splitlines() if "POST /api/greet" in x)
     assert line.split()[0] == "FAIL"
     assert "by StaticFiles at /, not service greet" in line
     assert "list it last in APP" in line
@@ -133,7 +134,7 @@ def test_a_get_route_reaches_a_fake_model_not_the_real_one(tmp_path):
     assert main(["init", str(root), "-t", "chat", "--http"]) == 0
     src = root / "src" / "chat.py"
     text = src.read_text()
-    text = text.replace('http("POST", "/chat"', 'http("GET", "/chat"')
+    text = text.replace('http("POST", "/api/chat"', 'http("GET", "/api/chat"')
     text = text.replace("def chat_flow(question):", 'def chat_flow(question="hi"):')
     text = text.replace(
         'return {"answer": None, "error": error or "the model gave no answer"}',
@@ -153,7 +154,7 @@ def test_a_get_route_reaches_a_fake_model_not_the_real_one(tmp_path):
         timeout=300,
     )
     assert got.returncode == 0, got.stdout + got.stderr
-    assert "GET  /chat             200" in got.stdout
+    assert "GET  /api/chat         200" in got.stdout
 
 
 def test_an_application_that_does_not_load_fails_the_build_and_skips_routes(tmp_path):
@@ -163,7 +164,7 @@ def test_an_application_that_does_not_load_fails_the_build_and_skips_routes(tmp_
     assert got.returncode == 1
     assert "FAIL  build                  the application:" in got.stdout
     assert "no_such_module" in got.stdout
-    assert "POST /greet" not in got.stdout
+    assert "POST /api/greet" not in got.stdout
 
 
 def test_no_project_is_exit_2(tmp_path):
@@ -174,3 +175,20 @@ def test_no_project_is_exit_2(tmp_path):
         timeout=60,
     )
     assert got.returncode == 2 and "no operonx.toml" in got.stderr
+
+
+def test_a_stale_guide_is_one_line_and_check_writes_nothing(tmp_path):
+    root = tmp_path / "p"
+    assert main(["init", str(root)]) == 0
+    assert "stale" not in _check(root, "--no-tests").stdout
+    page = root / ".operonx" / "guide" / "core" / "01-ops.md"
+    page.write_text("stale")
+    before = {p: p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    out = _check(root, "--no-tests").stdout
+    notes = [line for line in out.splitlines() if "stale" in line]
+    assert len(notes) == 1 and "pages changed" in notes[0] and "`operonx guide`" in notes[0]
+    assert operonx.__version__ in notes[0]
+    after = {
+        p: p.read_bytes() for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts
+    }
+    assert after == {p: b for p, b in before.items() if "__pycache__" not in p.parts}

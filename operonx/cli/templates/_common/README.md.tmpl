@@ -28,7 +28,7 @@ curl -s localhost:8000{{route_path}} -d '{{route_example}}'
 ```
 {{#agent}}
 
-`POST /ask/resume {"run_id", "approvals"}` answers a run that waits for a
+`POST /api/ask/resume {"run_id", "approvals"}` answers a run that waits for a
 human: a tool with `approval=` (see `src/assistant.py`).
 {{/agent}}
 {{/http}}
