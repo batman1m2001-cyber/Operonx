@@ -21,6 +21,10 @@ in this process and binds no port, so run it in the project's environment
   ``GET`` routes are called. Others are only resolved, because calling them
   writes what they write; ``--call`` calls them once with placeholder
   values.
+
+When ``.operonx/guide/`` is stale (an operonx package was added, removed or
+upgraded), one more line says so and names ``operonx guide``; check itself
+never writes it.
 """
 
 from __future__ import annotations
@@ -401,6 +405,24 @@ def _print(name: str, lines: List[Line]) -> None:
     print(f"FAIL: {failed} of {checked} checks" if failed else f"ok: {checked} checks passed")
 
 
+def guide_note(root: Path) -> str:
+    """One line when *root*'s guide copy is stale, else ``""``; reads only."""
+    from operonx import __version__, guide
+
+    if not (Path(root) / guide.COPY_DIR).is_dir():
+        return ""
+    try:
+        stale = guide.changes(root)
+    except Exception:  # a broken install: the checks still report
+        return ""
+    if not stale:
+        return ""
+    return (
+        f"note: .operonx/guide/ is stale ({', '.join(stale)}); "
+        f"operonx {__version__} is installed: run `operonx guide`"
+    )
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="operonx check",
@@ -425,4 +447,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     lines, rc = run_check(root, tests=not args.no_tests, call=args.call)
     _print(root.resolve().name, lines)
+    note = guide_note(root)
+    if note:
+        print(note)
     return rc

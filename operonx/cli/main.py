@@ -12,17 +12,15 @@
     operonx add route|job|llm|page  # a feature's wired code, then what to fill in (operonx.cli.add)
     operonx check [DIR] [--call]    # lint, tests, graphs, routes: one verdict (operonx.cli.check)
     operonx studio [DIR]            # open the project in operonx-studio (operonx.cli.studio)
-    operonx project ...             # build a project from its requirements (operonx-project)
 
-``run``, ``serve``, ``play``, ``eval``, ``lint``, ``add``, ``check``, ``studio`` and ``project`` are handed the rest of the
+``run``, ``serve``, ``play``, ``eval``, ``lint``, ``add``, ``check``, ``prompt`` and ``studio`` are handed the rest of the
 command line untouched: each is its module's own ``main(argv)`` (for the
 first three, the one the deprecated ``operonx-<name>`` alias calls too),
 so there is one parser per command and two spellings cannot differ.
 
-Inside a project whose ``.operonx/guide/`` is stale — an operonx package
-was added, removed or upgraded — any command first syncs it and says so
-in one line on stderr. ``lint``, ``check`` and ``project`` do not: a checker never
-writes, and the project engine changes a repo only through its own branches.
+No command but ``init`` and ``guide`` writes ``.operonx/guide/`` or the
+marked AGENTS.md blocks; ``operonx check`` says in one line when that copy
+is stale.
 """
 
 from __future__ import annotations
@@ -60,18 +58,7 @@ DELEGATED = {
         "the project's prompts: list them, publish a version, move a label, diff two",
     ),
     "studio": ("operonx.cli.studio", "open this project in operonx-studio (starts it if needed)"),
-    "project": (
-        "operonx.cli.project",
-        "a project's living BRD, its board and plans (operonx-project)",
-    ),
 }
-
-
-#: Delegated subcommands that never write to the project, not even its guide
-#: copy: a checker that changes what it checks (and, run from another
-#: environment, deletes the guide pages of packages that environment lacks);
-#: the project engine, which writes to a repo only on its own branches.
-READ_ONLY = {"lint", "check", "project", "prompt"}
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -113,15 +100,6 @@ def _parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="use the operonx checkout at PATH instead of PyPI (default inside a checkout)",
     )
-    brd = init.add_mutually_exclusive_group()
-    brd.add_argument(
-        "--brd",
-        dest="brd",
-        action="store_true",
-        default=None,  # a new project has none; an existing one keeps what it has
-        help="add docs/brd/ (the requirements checklist and board operonx-project builds from)",
-    )
-    brd.add_argument("--no-brd", dest="brd", action="store_false", help="no docs/brd/")
     tool = init.add_mutually_exclusive_group()
     tool.add_argument(
         "--uv",
@@ -172,7 +150,6 @@ def _init(args: argparse.Namespace) -> int:
             force=args.force,
             editable=Path(args.editable) if args.editable else None,
             toolchain=args.toolchain,
-            brd=args.brd,
         )
     except InitError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -235,26 +212,9 @@ def _guide(args: argparse.Namespace) -> int:
     return 0
 
 
-def _autosync() -> None:
-    """Sync a project's stale guide copy before a command; never fail it."""
-    try:
-        from operonx import guide
-
-        root = guide.find_project()
-        if root is None or not (root / guide.COPY_DIR).is_dir():
-            return
-        done = guide.sync(root) if guide.changes(root) else []
-        if done:
-            print(f"guide: {', '.join(done)}", file=sys.stderr)
-    except Exception:  # a read-only checkout, a broken install: the command still runs
-        pass
-
-
 def main(argv: Optional[Sequence[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] in DELEGATED:
-        if argv[0] not in READ_ONLY:
-            _autosync()
         return importlib.import_module(DELEGATED[argv[0]][0]).main(argv[1:])
     parser = _parser()
     args = parser.parse_args(argv)

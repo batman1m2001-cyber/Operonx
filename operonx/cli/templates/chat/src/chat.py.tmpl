@@ -60,7 +60,7 @@ JOBS = [
 SERVICES = [
     Service(
         "chat",
-        http("POST", "/chat", port=PORT),
+        http("POST", "/api/chat", port=PORT),
         graph=chat_flow,  # the JSON body fills its parameters
         description="POST {question}, get {answer, error}.",
     ),

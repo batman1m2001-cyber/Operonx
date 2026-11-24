@@ -35,7 +35,7 @@ def word_count(text: str) -> int:
 
 
 # A tool with side effects can wait for a human: the run ends
-# `interrupted`, and `POST /ask/resume` answers it (see README.md).
+# `interrupted`, and `POST /api/ask/resume` answers it (see README.md).
 #
 # @tool(idempotent=False, approval=lambda ctx, args: args["amount"] > 500)
 # def refund(order_id: str, amount: int) -> str:
@@ -80,7 +80,7 @@ JOBS = [
 SERVICES = [
     agent_service(
         ASSISTANT,
-        http("POST", "/ask", port=PORT),
+        http("POST", "/api/ask", port=PORT),
         # where a run that waits for an approval is kept until its resume
         store=SQLiteStateStore(".operonx/agent_runs.db"),
         description="POST {input}: the agent's reply. Accept: text/event-stream for "

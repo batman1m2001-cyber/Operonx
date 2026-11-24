@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_the_route_answers_and_refuses_a_field_it_does_not_take():
     app = Application.find(ROOT)  # loads operonx.toml, then the APP it names
     with TestClient(app.asgi()) as client:
-        ok = client.post("/greet", json={"id": "x", "full_name": "grace"})
-        bad = client.post("/greet", json={"id": "x", "nme": "grace"})
+        ok = client.post("/api/greet", json={"id": "x", "full_name": "grace"})
+        bad = client.post("/api/greet", json={"id": "x", "nme": "grace"})
 {{#web}}
         page = client.get("/")  # web/index.html
 {{/web}}

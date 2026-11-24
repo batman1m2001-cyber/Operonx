@@ -56,6 +56,10 @@ Versions and labels, as Langfuse has them, are files beside the text::
 label gives its working text. So nothing changes for a project that never
 publishes, and rolling back is moving a label.
 
+One process can try one prompt's version while every other prompt keeps its
+label: ``OPERONX_PROMPT_PINS="classifier=4,intake.system=2"`` pins those names
+to those versions (a composite's linked objects are pinned by their own names).
+
 A running service was built from files as they were. With a prompt store set
 (``[prompts] store`` in ``operonx.toml`` — a Postgres address), published
 versions and labels are also copied there and ``prompt(name)`` serves what the store's label
@@ -88,6 +92,7 @@ __all__ = [
     "move",
     "new_id",
     "labels",
+    "pins",
     "prompt",
     "prompt_names",
     "prompt_refs",
@@ -874,7 +879,8 @@ def prompt(
     :class:`PromptText` for ``<name>.md``, a :class:`CompositePrompt` for
     ``<name>.yaml`` (every object it links loaded with it, at the same label).
 
-    Without *version*, the version *label* points at — *label* defaults to
+    Without *version*, the version ``OPERONX_PROMPT_PINS`` pins *name* to
+    (:func:`pins`), else the one *label* points at — *label* defaults to
     ``OPERONX_PROMPT_LABEL``, else ``production`` — and, when the prompt has
     no such label, its working text. Raises :class:`PromptNotFound` for a
     name the project does not have (or a link to one), so a misspelt name
@@ -885,13 +891,31 @@ def prompt(
     return _load(base, name, version, chosen, (name,))
 
 
+def pins() -> Dict[str, int]:
+    """``OPERONX_PROMPT_PINS`` as ``{name: version}``: ``"classifier=4,ask=2"``
+    (commas or spaces between entries); ``{}`` when it is unset."""
+    out: Dict[str, int] = {}
+    for entry in re.split(r"[,\s]+", os.environ.get("OPERONX_PROMPT_PINS", "").strip()):
+        if not entry:
+            continue
+        name, eq, number = entry.partition("=")
+        if not eq or not number.strip().isdigit() or not name.strip():
+            raise PromptFormatError(
+                f"OPERONX_PROMPT_PINS: {entry!r} is not name=version (e.g. classifier=4)"
+            )
+        out[name.strip()] = int(number)
+    return out
+
+
 def _load(base: Path, name: str, version: Optional[int], chosen: str, seen: Tuple[str, ...]) -> Any:
     used: Optional[str] = None
     if version is None:
+        version = pins().get(name)
+    if version is not None:
+        raw = _read(base, name, version)
+    else:
         version, raw = _labelled(base, name, chosen)
         used = chosen if version is not None else None
-    else:
-        raw = _read(base, name, version)
     if _path(base, name).suffix == ".yaml":
         return _composite(base, name, raw, version, used, chosen, seen)
     meta, body = _split(raw)

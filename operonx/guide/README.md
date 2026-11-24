@@ -31,8 +31,7 @@ Other operonx packages ship their own guides beside this one, in the
 project's `.operonx/guide/` (its `README.md` indexes them all):
 **operonx-agents** (`agents/`: `Agent`, `Runner`, approvals,
 `agent_service`, trajectory evals), **operonx-kb** (`kb/`: ingest,
-search, citations, `kb_tools`, MCP) and **operonx-project** (`project/`:
-building a project from its `docs/brd/` checklist, its board of cards, `adopt`).
+search, citations, `kb_tools`, MCP).
 
 ## Install
 

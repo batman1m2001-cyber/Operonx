@@ -5,7 +5,7 @@ same seven tasks ([tasks.py](tasks.py)), each run as a fresh Claude session (Son
 
 | arm | starts from |
 |---|---|
-| A | `operonx init support --web --http --editable <Operon>`: the guide, AGENTS.md, knowledge.md, `operonx-project` on PATH |
+| A | `operonx init support --web --http --editable <Operon>`: the guide, AGENTS.md (it also had knowledge.md and `operonx-project` on PATH until operonx 1.47.0) |
 | B | an empty folder |
 
 After each task, a hidden black-box check ([accept.py](accept.py)) starts `./run.sh` with a fresh

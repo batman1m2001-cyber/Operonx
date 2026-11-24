@@ -41,7 +41,7 @@ JOBS = [
 SERVICES = [
     Service(
         "greet",
-        http("POST", "/greet", port=PORT),
+        http("POST", "/api/greet", port=PORT),
         graph=greet_flow,  # the JSON body fills its parameters
         description="POST {id, full_name}, get {id, greeting}.",
     ),

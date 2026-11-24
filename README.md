@@ -70,7 +70,7 @@ myapp/
 ├── .env.example         the secrets resources.yaml names; copy to .env
 ├── operonx.toml         points the operonx command at app/main.py
 ├── pyproject.toml       works with uv and with pip
-└── docs/brd/            the requirements and their checklist (`--no-brd` skips it)
+└── web/                 with --web: the pages, served at / (routes under /api/)
 ```
 
 ## What your assistant reads
@@ -80,13 +80,6 @@ myapp/
 | `AGENTS.md` | the project's rules: the layout, the ladder (op → graph → job or service → application), the commands, what never to do | you; start from what `init` wrote |
 | `.operonx/guide/` | how every operonx API is used; every example in it is tested against the installed version | operonx, never edit |
 | `app/main.py` | what the product runs | you and the assistant |
-
-`docs/brd/` is the project's living BRD: a checklist with one row per
-requirement, its status, and the test that proves it. The assistant keeps
-the rows true as it changes code. The board (`docs/brd/board.md`)
-holds one card per task, in four states (todo, doing, needs you, done);
-the studio's Board shows it and its assistant moves the cards
-(`packages/operonx-project/`).
 
 `AGENTS.md` tells the assistant to read the guide before it uses an operonx
 API, so it does not write operonx from memory or from an older version.

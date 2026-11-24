@@ -1,5 +1,5 @@
 """Run the token A/B (ENGINEERING_ENV_PLAN E7): the same seven tasks, arm A on ``operonx init`` (guide,
-AGENTS.md, knowledge.md, ``operonx-project``) and arm B on an empty folder, each task one fresh Claude
+AGENTS.md; ``operonx-project`` was on PATH until it left core in 1.47.0) and arm B on an empty folder, each task one fresh Claude
 session, a hidden acceptance check after it and at most one fix turn.
 
     python run.py OUT --tracks A1,A2,B1,B2 --cap 40
@@ -30,7 +30,6 @@ from tasks import E7B, FIX, GROWTH, TASKS  # noqa: E402
 
 OPERON = HERE.parent.parent
 OPERONX = OPERON / ".venv" / "bin" / "operonx"
-PROJECT_BIN = Path(os.environ.get("OPERONX_PROJECT_BIN", "/home/thanglq/operonx-studio/.venv/bin/operonx-project"))
 DOCS = (".operonx/", "AGENTS.md", "CLAUDE.md", "docs/brd/", "README.md")
 TIMEOUT = 25 * 60
 # arm L (COST_PLAN round 3): A' with AGENTS.md step 3 made lean, verifying the way arm B does
@@ -88,8 +87,6 @@ def session_env(track: str, ws: Path, bindir: Path, llm_port: int, port: int) ->
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("CLAUDE") and k not in ("AI_AGENT", "VIRTUAL_ENV", "PYTHONPATH")}
     path = [p for p in env.get("PATH", "").split(":") if "/.venv/" not in p]
-    if track[0] in "AL":
-        path.insert(0, str(bindir))  # operonx-project, which AGENTS.md tells the agent to use
     env.update(PATH=":".join(path), PORT=str(port), DATA_DIR=str(ws / ".data"),
                LLM_BASE_URL=f"http://127.0.0.1:{llm_port}/v1", LLM_MODEL="fake-model", LLM_API_KEY="test-key")
     return env
@@ -216,9 +213,6 @@ def main() -> None:
     args.tasks = [t for t in args.tasks.split(",") if t]
     out = Path(args.out)
     (out / "bin").mkdir(parents=True, exist_ok=True)
-    link = out / "bin" / "operonx-project"
-    if not link.exists():
-        link.symlink_to(PROJECT_BIN)
     budget, results, lock = Budget(args.cap), [], threading.Lock()
     threads = [threading.Thread(target=track, args=(n, i, args, budget, results, lock))
                for i, n in enumerate(args.tracks.split(","))]

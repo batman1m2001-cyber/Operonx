@@ -356,7 +356,9 @@ assert [r["name"] for r in row.attrs["prompts"]] == ["intake", "billing/rules", 
   text. Roll back by moving the label: `operonx prompt label intake
   production 1`. Also `diff`, `log`. Labels are read when the graph is
   built: a moved label takes a restart. Commit `prompts/` — the history is
-  the repository's.
+  the repository's. To try one version while every other prompt keeps its
+  label: `OPERONX_PROMPT_PINS="classifier=4"` (comma-separated; a
+  composite's links are pinned by their own names).
 - **A service that runs from an older build.** Set a prompt store — a
   Postgres address, as a setting of the project:
   `[prompts]` `store = "${PROMPT_STORE_DSN}"` in `operonx.toml`, the address in

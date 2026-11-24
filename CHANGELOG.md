@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.47.0] - 2026-11-24
+
+LEAN_PRODUCT_PLAN P2 (docs/LEAN_PRODUCT_PLAN.md, docs/lean_product_plan/P2.md). operonx standardises what an AI product looks like and helps improve it. How code gets written (the board, git, terminals, hooks) is left to the coding assistant and the team.
+
+### Removed
+- **`operonx project` and the `operonx-project` package.** It moved to its own frozen repo (batman1m2001-cyber/operonx-project), which pins `operonx>=1.46`. Gone with it: `operonx/cli/project.py`, the `_brd` template and `--brd`/`--no-brd` on `operonx init`.
+- **The AGENTS.md builder block.** `init` and `guide` no longer write it. A block already in a project stays there as the user's own text.
+- **Other commands no longer sync the guide (`_autosync`).** Only `operonx init` and `operonx guide` write `.operonx/guide/`.
+- **Lint rule C18** (the docs/brd knowledge entry).
+
+### Added
+- **`OPERONX_PROMPT_PINS="classifier=4,rules=2"`** serves those prompts at a fixed version and leaves every other prompt on its label. A pin wins over `label=`; an explicit `version=` wins over a pin. A malformed entry raises `PromptFormatError`.
+- **`operonx check` flags a stale guide copy in one line**: `note: .operonx/guide/ is stale (…)`. It only reads and writes nothing.
+
+### Changed
+- **`init --web` follows D8.** The app's routes are under `/api/` (`/api/greet`, `/api/chat`, `/api/ask`, `/api/ask/resume`). Pages call them through one `BASE` in `web/lib/api.js`, so the UI can move to another origin later by changing `BASE`.
+
 ## [1.46.1] - 2026-11-24
 
 ### Fixed

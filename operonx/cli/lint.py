@@ -47,7 +47,6 @@ RULES = {
     "C15": "the environment is read only in src/_shared/config.py",
     "C16": "the root holds only the allow-list; what runs write goes in data/ or out/",
     "C17": "in web/, only web/lib/ calls fetch(): pages reach the server through web/lib/api.js",
-    "C18": "a docs/brd/knowledge.md entry's where file exists (warning: stale knowledge)",
     "C19": "prompts are objects in prompts/ that load; linked, never a variable's value or prose in code (warnings)",
 }
 

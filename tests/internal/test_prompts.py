@@ -34,6 +34,7 @@ def project(tmp_path, monkeypatch):
     (d / "ask.md").write_text("Q: {{question}}\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPERONX_PROMPT_LABEL", raising=False)
+    monkeypatch.delenv("OPERONX_PROMPT_PINS", raising=False)
     # another test's Application may have left its project set
     from operonx.core import workflow_trace
 
@@ -96,6 +97,66 @@ def test_a_label_picks_the_version_and_moving_it_is_the_rollback(project, monkey
     assert prompt("ask").text == "v1 {{question}}"
     with pytest.raises(PromptNotFound, match="no version 9"):
         prompt("ask", version=9)
+
+
+def _two_versions(project, name="ask"):
+    d = project / "prompts" / ".versions" / name
+    d.mkdir(parents=True)
+    (d / "1.md").write_text("v1 {{question}}\n")
+    (d / "2.md").write_text("v2 {{question}}\n")
+    (project / "prompts" / "labels.toml").write_text(f"[{name}]\nproduction = 2\n")
+
+
+def test_a_pin_serves_one_prompt_and_its_neighbours_keep_their_label(project, monkeypatch):
+    _two_versions(project)
+    (project / "prompts" / ".versions" / "guard").mkdir(parents=True)
+    (project / "prompts" / ".versions" / "guard" / "1.md").write_text("guard v1\n")
+    with open(project / "prompts" / "labels.toml", "a") as f:
+        f.write("\n[guard]\nproduction = 1\n")
+    monkeypatch.setenv("OPERONX_PROMPT_PINS", "ask=1")
+    pinned, neighbour = prompt("ask"), prompt("guard")
+    assert (pinned.text, pinned.version, pinned.label) == ("v1 {{question}}", 1, None)
+    assert (neighbour.text, neighbour.version, neighbour.label) == ("guard v1", 1, "production")
+    assert prompt("ask", version=2).version == 2  # an explicit version wins
+    # a composite's link is pinned by its own name
+    (project / "prompts" / "both.yaml").write_text("parts: [guard, ask]\n")
+    both = str(prompt("both").render(question="x"))
+    assert "guard v1" in both and "v1 x" in both and "v2" not in both
+    monkeypatch.setenv("OPERONX_PROMPT_PINS", "ask=9")
+    with pytest.raises(PromptNotFound, match="no version 9"):
+        prompt("ask")
+    monkeypatch.setenv("OPERONX_PROMPT_PINS", "ask")
+    with pytest.raises(PromptFormatError, match="name=version"):
+        prompt("ask")
+
+
+async def test_the_run_row_names_the_pinned_version(project, monkeypatch):
+    _two_versions(project)
+    monkeypatch.setenv("OPERONX_PROMPT_PINS", "ask=1")
+
+    @graph
+    def flow(customer, question):
+        s = LLMOp.of(
+            resource="assistant",
+            prompt={"system": prompt("intake.system"), "user": prompt("ask")},
+            customer=customer,
+            question=question,
+        )
+        START >> s >> END
+
+    with fake_model("fine") as model:
+        handle = Operon(flow, params={"customer": None, "question": None}).start(
+            {"customer": "Lan", "question": "why?"}
+        )
+        await handle.result()
+    sent = model.calls[0]
+    sent = sent.get("messages", sent) if isinstance(sent, dict) else sent
+    assert sent[-1]["content"] == "v1 why?"
+    row = next(n for n in handle.trace.nodes if n.op_name == "s")
+    assert [(r["name"], r["version"]) for r in row.attrs["prompts"]] == [
+        ("intake.system", None),
+        ("ask", 1),
+    ]
 
 
 def test_a_copy_and_a_pickle_keep_what_it_is(project):

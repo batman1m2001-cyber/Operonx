@@ -37,8 +37,6 @@ from typing import Dict, List, Optional, Union
 __all__ = [
     "AGENTS_BEGIN",
     "AGENTS_END",
-    "BUILDER_BEGIN",
-    "BUILDER_END",
     "COMMANDS_BEGIN",
     "COMMANDS_END",
     "COPY_DIR",
@@ -66,44 +64,6 @@ AGENTS_END = "<!-- /operonx:guide -->"
 COMMANDS_BEGIN = "<!-- operonx:commands -->"
 COMMANDS_END = "<!-- /operonx:commands -->"
 _COMMANDS = re.compile(r"^## Commands\n(.*?)(?=^## |\Z)", re.M | re.S)
-#: The marked block on building with the BRD and the board; :func:`sync`
-#: rewrites it, and adds it to a project that has ``docs/brd/`` but not it.
-BUILDER_BEGIN = "<!-- operonx:builder -->"
-BUILDER_END = "<!-- /operonx:builder -->"
-_BUILDER = """## Building it: docs/brd and the board
-
-- `docs/brd/` is the living BRD: what the product must do, and how far it
-  is. `docs/brd/requirements/requirements_traceability.md` is the
-  checklist, the only place a requirement's status is stated (its code, the
-  test that shows it, by name, and the evidence). Questions are `Q-nn` in
-  `docs/brd/requirements/open_questions.md`, never deleted.
-- `docs/brd/board.md` is the board: one card per task
-  (`### C4 · title · todo|doing|needs you|done`, then `req`, `after`,
-  `files`, `done`). Move it with `operonx-project board C4 doing` before
-  its first edit, one card in `doing` at a time; to `needs you` with the
-  question as its note when you are blocked; to `done` only when its `done`
-  tests pass.
-- When a change meets or alters a requirement, update its row (status,
-  code, test) and add one line to `docs/brd/CHANGELOG.md`. The rules are in
-  `docs/brd/README.md`. The checklist's summary table is counted from
-  the rows by the engine: leave it.
-- `docs/brd/knowledge.md` is what the project learned: `### K3 · title ·
-  pattern|pitfall|replaced|decision`, then `where` (files), `use` (when; a
-  pitfall's symptom first; a decision's why), `instead` (for `replaced`).
-  Before writing something new, search it and `.operonx/catalog.md` (every
-  op, graph and job; `operonx guide` rewrites it). When a card is done, add
-  what is reusable or a pitfall; when the owner decides something, add a
-  `decision`; when a pattern is replaced, edit its entry, never add a second.
-- Search before reading a whole doc: `operonx-project search QUERY` ranks
-  the sections of the board, the BRD, the plans, knowledge and the guide
-  (heading, 3 lines, `path:line`); `operonx-project read PATH HEADING`
-  prints one section.
-- Work with more than one step gets a plan doc under `docs/` (why and
-  how) and a cycle on the board: `operonx-project cycle open ID TITLE
-  --plan docs/X_PLAN.md`, its phases as cards (`operonx-project put --title
-  T --cycle ID`). `cycle close ID` once every card in it is done; a card
-  left open moves to the Backlog first (`put C4 --cycle Backlog`)."""
-
 _HEADER = re.compile(r"<!--\s*operonx-guide\s*(.*?)\s*-->")
 
 
@@ -295,23 +255,6 @@ def _sync_commands(text: str, block: str) -> str:
     return text[: found.start(1)] + "\n" + block + "\n\n" + text[found.end(1) :]
 
 
-def builder_block() -> str:
-    """AGENTS.md's block on the BRD and the board, markers included."""
-    return f"{BUILDER_BEGIN}\n{_BUILDER}\n{BUILDER_END}"
-
-
-def _sync_builder(text: str, block: str, has_brd: bool) -> str:
-    begin, end = text.find(BUILDER_BEGIN), text.find(BUILDER_END)
-    if begin != -1 and end > begin:
-        return text[:begin] + block + text[end + len(BUILDER_END) :]
-    if not has_brd:
-        return text
-    at = text.find("\n## Commands\n")
-    if at == -1:
-        return text.rstrip("\n") + "\n\n" + block + "\n"
-    return text[: at + 1] + block + "\n\n" + text[at + 1 :]
-
-
 def _sync_agents_md(project: Path, block: str, commands: Optional[str] = None) -> bool:
     agents = project / "AGENTS.md"
     if not agents.is_file():
@@ -324,7 +267,6 @@ def _sync_agents_md(project: Path, block: str, commands: Optional[str] = None) -
         new = text.rstrip("\n") + "\n\n## operonx guides\n\n" + block + "\n"
     if commands is not None:
         new = _sync_commands(new, commands)
-    new = _sync_builder(new, builder_block(), (project / "docs" / "brd").is_dir())
     if new == text:
         return False
     agents.write_text(new, encoding="utf-8")
