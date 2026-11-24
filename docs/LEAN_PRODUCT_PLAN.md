@@ -1,6 +1,6 @@
 # Lean product plan: operonx builds AI products, how people work is theirs
 
-Status: **DONE** (2026-11-24): every part is built and merged; the P3 and P4 gates are the owner's own use, and live mr-finance's restart is the owner's (§9). Reviewed twice and revised the same day, see §8. Repositories: Operon (this one), operonx-studio, and a new
+Status: **DONE** (2026-11-24): every part is built and merged; the P4 gate passed the same day (5 real dock turns, $0.14, studio #275); the P3 gate is the owner's own use (§9). Reviewed twice and revised the same day, see §8. Repositories: Operon (this one), operonx-studio, and a new
 `operonx-project`. Follows [LEAN_PROJECT_PLAN.md](LEAN_PROJECT_PLAN.md), which slimmed the process
 layer. This plan takes that layer out of operonx entirely.
 
@@ -405,8 +405,10 @@ done"), so P4 was built without the week of use. Its gate is still the owner's.
 - [x] "Copy for Claude Code" on any answer that needs a code change; the assistant itself has no
       Edit/Write on `src/`
 - [x] budget: P3 + P4 together add at most 1/3 of the lines P1 removed
-- [ ] **Gate (the owner's):** one real question answered and acted on from the dock. Assistant
-      turns are Claude Code calls: about 10 turns, ~$3, only with the owner's OK at the phase start
+- [x] **Gate (the owner's):** one real question answered and acted on from the dock. Assistant
+      turns are Claude Code calls: about 10 turns, ~$3, only with the owner's OK at the phase start.
+      Passed 2026-11-24: 5 turns, $0.14. The labels miss was diagnosed, the Claude Code block applied,
+      and v3 drafted and run; cases a–e pass ([P4](https://github.com/batman1m2001-cyber/operonx-studio/blob/main/docs/lean_product_plan/P4.md#the-gate-five-real-turns))
 
 ### P5 — Projects: nothing breaks
 - [x] for each of the 5 projects (mr-finance, qc-snatcher, meeting-prep-operonx,
@@ -492,11 +494,10 @@ mr-finance has `web/` (same origin, static, `fetch("/api/…")` in 4 files, no `
 
 P3 + P4 add +406 lines against a budget of ~3,580 (1/3 of P1's cut).
 
-Still open, all the owner's:
+Still open, the owner's:
 
 - **P3 gate:** one real loop in studio (a bad turn → eval case → new version → eval → ship).
-- **P4 gate:** about 10 real dock turns (~$3).
-- **Live studio :8766** still runs P1. Restarting it on P3 and P4 needs the owner's OK.
-- **Live mr-finance :8030** still runs 1.45.0 and the old pages. `~/mr-finance` has uncommitted
-  edits, so the pull, `uv sync` and restart are left to the owner.
+
+Done since, on the owner's request (2026-11-24): live studio :8766 restarted on P3 + P4, and live
+mr-finance :8030 on mr-finance #91 + operonx 1.47.0.
 
