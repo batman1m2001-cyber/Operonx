@@ -1,6 +1,6 @@
 # Lean product plan: operonx builds AI products, how people work is theirs
 
-Status: **plan, not started** (2026-11-24; reviewed twice and revised the same day, see §8). Repositories: Operon (this one), operonx-studio, and a new
+Status: **DONE** (2026-11-24): every part is built and merged; the P3 and P4 gates are the owner's own use, and live mr-finance's restart is the owner's (§9). Reviewed twice and revised the same day, see §8. Repositories: Operon (this one), operonx-studio, and a new
 `operonx-project`. Follows [LEAN_PROJECT_PLAN.md](LEAN_PROJECT_PLAN.md), which slimmed the process
 layer. This plan takes that layer out of operonx entirely.
 
@@ -309,62 +309,62 @@ if the package left Operon first, the next pull of `~/Operon` would break the li
 import.
 
 ### P1 — Studio: cut the process (removes ~8.7k lines + app.py/assistant.py/mcp.py parts)
-- [ ] tag `pre-lean-product` on studio main and push the tag
-- [ ] delete the modules, JS and tests marked **drop** in §1.4, `vendor/xterm`, and the Project
+- [x] tag `pre-lean-product` on studio main and push the tag
+- [x] delete the modules, JS and tests marked **drop** in §1.4, `vendor/xterm`, and the Project
       hub and Settings › Environments in `project.html`
-- [ ] app.py: remove their `register(...)` calls and the routes only they used
+- [x] app.py: remove their `register(...)` calls and the routes only they used
       (`/api/boards/waiting`, `git`, the Environments ones). `GET env-health` stays: it is the
       resource files' env-variable light in app.py (`_env_status`), not the Environments module.
       `POST /api/new` stays as it is: it calls `init_project` without the BRD option
-- [ ] mcp.py: remove the 18 tools in §1.6
-- [ ] assistant.py: remove the live call watching (`_live_calls`, `_watch_*`, `stop_call`,
+- [x] mcp.py: remove the 18 tools in §1.6
+- [x] assistant.py: remove the live call watching (`_live_calls`, `_watch_*`, `stop_call`,
       `_progress_event`), card turns (`card_turns`, `_take`, `_plan`) and the stop/run hook wiring;
       its top-level `progress` and `testreport` imports go with them
-- [ ] chat.py: remove the card-worktree code (`card_worktrees`, `worktrees_since`, `remove_worktree`)
+- [x] chat.py: remove the card-worktree code (`card_worktrees`, `worktrees_since`, `remove_worktree`)
       and the gitpolicy environment for the assistant
-- [ ] `operonx_studio/guide/building.md` (the assistant's own guide): remove the
+- [x] `operonx_studio/guide/building.md` (the assistant's own guide): remove the
       `operonx-project brd check` / `adopt` instructions
-- [ ] pyproject: drop the operonx-project dependency and its editable source
-- [ ] `operonx_studio_toolkit/templates.py`: raise `OPERONX_PIN` from 1.17.1 to studio's own
+- [x] pyproject: drop the operonx-project dependency and its editable source
+- [x] `operonx_studio_toolkit/templates.py`: raise `OPERONX_PIN` from 1.17.1 to studio's own
       operonx floor, so an example project starts on a current operonx
-- [ ] the assistant stays where it is for now: the existing dock (`#chatdock`), opened from the
+- [x] the assistant stays where it is for now: the existing dock (`#chatdock`), opened from the
       top bar, since the Now page goes with the Project hub
-- [ ] **Gate:** studio tests green; `git grep operonx_project` in studio is empty; the tab bar is
+- [x] **Gate:** studio tests green; `git grep operonx_project` in studio is empty; the tab bar is
       the same on every screen (stable chrome); dark screenshots of the 4 hubs; the net line count
       is in the write-up. The live studio restarts on it only with the owner's OK
 
 ### P2 — Operon: operonx-project leaves, nothing writes behind your back (removes ~6.6k lines)
-- [ ] **before anything else:** the live studio :8766 runs P1's code, and `uv sync` in
+- [x] **before anything else:** the live studio :8766 runs P1's code, and `uv sync` in
       ~/operonx-studio has removed operonx-project from its venv (both with the owner's OK). Until
       then P2 does not merge: the live studio's venv still imports the package from
       `~/Operon/packages/operonx-project`, so the next pull of ~/Operon would break its next restart
-- [ ] `git subtree split --prefix=packages/operonx-project` → a new private GitHub repo
+- [x] `git subtree split --prefix=packages/operonx-project` → a new private GitHub repo
       `operonx-project` (needs the owner's OK)
-- [ ] **in the new repo first:** bring `templates/_brd/` and `brd_files` in from core
+- [x] **in the new repo first:** bring `templates/_brd/` and `brd_files` in from core
       (`operonx_project/brd/folder.py` imports `operonx.cli.init.brd_files` today), pin
       `operonx>=1.46` and `operonx-kb>=0.2.6`; its tests pass there against PyPI operonx
-- [ ] then in Operon: delete `packages/operonx-project/`, `operonx/cli/project.py`, the `project`
+- [x] then in Operon: delete `packages/operonx-project/`, `operonx/cli/project.py`, the `project`
       entry in `DELEGATED`
-- [ ] `init`: drop `--brd`, `templates/_brd/`, `brd_files`, `BRD_DIR`, and the builder block
+- [x] `init`: drop `--brd`, `templates/_brd/`, `brd_files`, `BRD_DIR`, and the builder block
       (`guide.builder_block`, `_sync_builder`, `BUILDER_*`)
-- [ ] remove `_autosync` from `cli/main.py`, plus `READ_ONLY` and its reason; `operonx guide`
+- [x] remove `_autosync` from `cli/main.py`, plus `READ_ONLY` and its reason; `operonx guide`
       becomes the only writer of `.operonx/guide/` and the marked AGENTS.md blocks
-- [ ] `operonx check`: one read-only line when `guide.changes(root)` is not empty, naming the
+- [x] `operonx check`: one read-only line when `guide.changes(root)` is not empty, naming the
       installed version and `operonx guide` (D4); a test that it writes nothing
-- [ ] prompts: a per-prompt pin, `OPERONX_PROMPT_PINS="classifier=4"`, read by `prompt()` when
+- [x] prompts: a per-prompt pin, `OPERONX_PROMPT_PINS="classifier=4"`, read by `prompt()` when
       no `version=` is given, so every prompt not named keeps its label (production). A composite's
       linked objects are pinned by their own names. Tests: a pinned prompt and an unpinned
       neighbour in one process; the run row names the pinned version
-- [ ] lint: drop C18 (`shape.py`, `cli/lint.py` table)
-- [ ] 05-project-layout: one line mapping core/backend/frontend to `src/`, `app/`, `web/` (D3), and
+- [x] lint: drop C18 (`shape.py`, `cli/lint.py` table)
+- [x] 05-project-layout: one line mapping core/backend/frontend to `src/`, `app/`, `web/` (D3), and
       D8's rule: same repo, served at `/`, static only, one `BASE` in `web/lib/api.js`, routes under
       `/api/`; plus the two ways to move the UI out later (a reverse proxy, or `BASE` + CORS)
-- [ ] `operonx init --web`: `templates/_common/web/lib/api.js.tmpl` gets `export const BASE = "";`
+- [x] `operonx init --web`: `templates/_common/web/lib/api.js.tmpl` gets `export const BASE = "";`
       and calls `fetch(BASE + path, …)`; the example route moves from `/greet` to `/api/greet`
       (`cli/init.py:98`) with the template's tests and README
-- [ ] CI: drop the operonx-project job from `packages.yaml`; `bench/token_ab/run.py` stops importing it
-- [ ] operonx **1.47.0**: CHANGELOG; publishing to PyPI waits for the owner's OK
-- [ ] **Gate:** the full suite passes (3882 today, minus the removed tests); `grep -r operonx_project
+- [x] CI: drop the operonx-project job from `packages.yaml`; `bench/token_ab/run.py` stops importing it
+- [x] operonx **1.47.0**: CHANGELOG; publishing to PyPI waits for the owner's OK
+- [x] **Gate:** the full suite passes (3882 today, minus the removed tests); `grep -r operonx_project
       operonx/` is empty; `operonx init` in a temp folder writes the tree in §4 and `operonx check`
       passes there; running `operonx lint` inside a project leaves `git status` clean; the new repo's
       tests pass against the 1.47.0 build
@@ -372,18 +372,18 @@ import.
 ### P3 — Studio: the missing step of the loop, no model (adds; needs operonx 1.47.0)
 Already there and reused as they are: Compare, Publish and Ship on Prompts; Add to dataset on Play
 and Review (§1.2). P3 adds only what is missing:
-- [ ] opening a project lands on the Picture
-- [ ] **Open app ↗** in the top bar, opening the project's running `operonx serve` at `/` in a new
+- [x] opening a project lands on the Picture
+- [x] **Open app ↗** in the top bar, opening the project's running `operonx serve` at `/` in a new
       tab (studio already knows each listener's host and port, `services.py`). It is always there:
       greyed with "no web/ in this project" or "not running" (stable chrome). No iframe: the app
       has its own login and cookies
-- [ ] on a Runs trace turn: **Add to eval**, the same dialog and row as Review's Add to dataset
+- [x] on a Runs trace turn: **Add to eval**, the same dialog and row as Review's Add to dataset
       (`POST review/run/{run}/dataset`); no new route
-- [ ] on a prompt version: **Run eval on this version** → `POST jobs/{name}/run` takes
+- [x] on a prompt version: **Run eval on this version** → `POST jobs/{name}/run` takes
       `{"prompts": {"<name>": <version>}}` and passes it as `OPERONX_PROMPT_PINS` (P2); names and
       versions are checked against the prompt store before the job starts. This is the one route
       change
-- [ ] the eval's pass rate shown next to each prompt version that has one, so Ship (the existing
+- [x] the eval's pass rate shown next to each prompt version that has one, so Ship (the existing
       "label production") is pressed knowing v3 41/50 and v4 47/50
 - [ ] **Gate (the owner's):** the owner does one real loop in studio: a bad turn → eval case → a
       new prompt version → eval → ship, on a project of their choice. No paid calls except the
@@ -394,35 +394,38 @@ After P3 the owner uses the loop for a week. P4 goes ahead only if something in 
 model: "why did this go wrong", or drafting the next version. If not, P4 shrinks to deleting what
 the assistant no longer needs, or is skipped.
 
+**Skipped (2026-11-24):** the owner asked for the whole plan in one go ("don't stop until the plan is
+done"), so P4 was built without the week of use. Its gate is still the owner's.
+
 ### P4 — Studio: the assistant keeps two jobs (adds; needs the stop point's answer)
-- [ ] the briefing (`app.py:_view_lines`) also names the open prompt id and version and the open eval
-- [ ] 2 new MCP tools: `prompt_draft` (save a new version of the open prompt) and `turn_to_case`
+- [x] the briefing (`app.py:_view_lines`) also names the open prompt id and version and the open eval
+- [x] 2 new MCP tools: `prompt_draft` (save a new version of the open prompt) and `turn_to_case`
       (the same row P3's button writes); it already has `run_eval` and `compare_runs`
-- [ ] its answers end with P3's buttons (the existing `/ui/actions` channel), not with text
-- [ ] "Copy for Claude Code" on any answer that needs a code change; the assistant itself has no
+- [x] its answers end with P3's buttons (the existing `/ui/actions` channel), not with text
+- [x] "Copy for Claude Code" on any answer that needs a code change; the assistant itself has no
       Edit/Write on `src/`
-- [ ] budget: P3 + P4 together add at most 1/3 of the lines P1 removed
+- [x] budget: P3 + P4 together add at most 1/3 of the lines P1 removed
 - [ ] **Gate (the owner's):** one real question answered and acted on from the dock. Assistant
       turns are Claude Code calls: about 10 turns, ~$3, only with the owner's OK at the phase start
 
 ### P5 — Projects: nothing breaks
-- [ ] for each of the 5 projects (mr-finance, qc-snatcher, meeting-prep-operonx,
+- [x] for each of the 5 projects (mr-finance, qc-snatcher, meeting-prep-operonx,
       meeting-prep-brd, educa-reminder-agent): remove the generated AGENTS.md builder block where
       present and bump to operonx 1.47.0 once it is on PyPI
-- [ ] mr-finance: its AGENTS.md also has a hand-written section, "Building it: docs/brd and the
+- [x] mr-finance: its AGENTS.md also has a hand-written section, "Building it: docs/brd and the
       board" (lines 121–151), that tells the agent to run `operonx-project board`, `search`, `read`
       and `cycle`. Rewrite it to what is true after this plan: the board and the BRD are plain
       Markdown, edited directly. Work on a copy in the scratchpad, never run operonx CLIs inside
       ~/mr-finance; push origin only
-- [ ] mr-finance `web/`: move its `fetch` calls (`shell.js` ×4, `core/core.js` ×2, and
+- [x] mr-finance `web/`: move its `fetch` calls (`shell.js` ×4, `core/core.js` ×2, and
       `pages/holdings.js`, `pages/risktest.js`) into `web/lib/api.js` with `BASE = ""` (D8, C17).
       The pages keep working at the same URLs; check them in a browser against the live :8030 copy
-- [ ] callbot (educa-reminder-agent): on `refactor/operonx-studio` only
+- [x] callbot (educa-reminder-agent): on `refactor/operonx-studio` only
 - [ ] **Gate:** each project's tests and `operonx check` show no new failure against its own
-      baseline; live mr-finance :8030 restarted on the bump
+      baseline (met); live mr-finance :8030 restarted on the bump (the owner's)
 
 ### P6 — Close
-- [ ] mark this plan DONE with each part's result; update HANDOFF.md; update memory
+- [x] mark this plan DONE with each part's result; update HANDOFF.md; update memory
 
 ## 6. What each move breaks
 
@@ -476,3 +479,24 @@ served with its API, written so it can still move out later; guide 05 and `init 
 app ↗ in P3, mr-finance's `fetch` calls into `web/lib/` in P5. Evidence: of the 5 projects only
 mr-finance has `web/` (same origin, static, `fetch("/api/…")` in 4 files, no `web/lib/`);
 `operonx serve` has no CORS.
+
+## 9. Results (2026-11-24)
+
+| Part | PR | Net lines | Result | Write-up |
+|---|---|---|---|---|
+| P1 studio cut | studio #272 | −10,739 (83 files) | Board, Project hub, Environments, terminals and 19 assistant tools gone; `git grep operonx_project` empty; the live studio :8766 restarted on it | [P1](https://github.com/batman1m2001-cyber/operonx-studio/blob/main/docs/lean_product_plan/P1.md) |
+| P2 operonx-project leaves | Operon #323 | −7,218 (102 files) | operonx 1.47.0 on PyPI; the package lives in the private `operonx-project` repo; no `_autosync`, no builder block, no C18; `operonx check` prints a stale-guide note; `OPERONX_PROMPT_PINS`; `init --web` with `web/lib/api.js` and `/api/` routes | [P2](lean_product_plan/P2.md) |
+| P3 the loop as buttons | studio #273 | +248 (13 files) | the Picture first; Open app ↗; Add to eval on a Runs trace; Run eval on vN; each version's pass rate beside Ship | [P3](https://github.com/batman1m2001-cyber/operonx-studio/blob/main/docs/lean_product_plan/P3.md) |
+| P4 the assistant's two jobs | studio #274 | +158 (17 files) | `prompt_draft` (saved, not served), `turn_to_case`; the briefing names the open prompt and eval; answers end with P3's buttons; Copy for Claude Code; no Edit/Write on `src/` | [P4](https://github.com/batman1m2001-cyber/operonx-studio/blob/main/docs/lean_product_plan/P4.md) |
+| P5 the projects | mr-finance #91, qc-snatcher #8, meeting-prep-projects #20, callbot `a38dca1` | — | all five on operonx 1.47.0 with no new test or check failure; mr-finance's AGENTS.md board section is plain Markdown and its pages reach the backend only through `web/lib/api.js` | [P5](lean_product_plan/P5.md) |
+
+P3 + P4 add +406 lines against a budget of ~3,580 (1/3 of P1's cut).
+
+Still open, all the owner's:
+
+- **P3 gate:** one real loop in studio (a bad turn → eval case → new version → eval → ship).
+- **P4 gate:** about 10 real dock turns (~$3).
+- **Live studio :8766** still runs P1. Restarting it on P3 and P4 needs the owner's OK.
+- **Live mr-finance :8030** still runs 1.45.0 and the old pages. `~/mr-finance` has uncommitted
+  edits, so the pull, `uv sync` and restart are left to the owner.
+
