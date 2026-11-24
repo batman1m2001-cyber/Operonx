@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Updated 29 Sep 2026 for **1.11.0**.
+Updated 24 Nov 2026 for **1.47.0**.
 
 ## State
 
@@ -10,6 +10,11 @@ Updated 29 Sep 2026 for **1.11.0**.
   record of the 31 findings of Aug 2026 and the sweeps after it; all are
   fixed in 1.11.0 (P1 and P2 were withdrawn with the package they lived
   in).
+- **operonx builds AI products; how people work is theirs.**
+  [LEAN_PRODUCT_PLAN](docs/LEAN_PRODUCT_PLAN.md) is DONE: the board, BRD
+  engine and cycles left core in 1.47.0 for the private `operonx-project`
+  repo, and nothing writes `.operonx/guide/` or AGENTS.md except
+  `operonx guide`. Its §9 lists what is still the owner's.
 - Tests: `uv run pytest tests/ -m "not integration"` (about 3 minutes,
   offline). `tests/guide/` runs every snippet in `operonx/guide/`.
 
@@ -19,6 +24,7 @@ Updated 29 Sep 2026 for **1.11.0**.
 |---|---|
 | How do I use operonx? | `operonx/guide/` (tested) |
 | What changed, and what breaks on upgrade? | `CHANGELOG.md` |
+| What does a project look like (`src/`, `app/`, `web/`)? | `operonx/guide/05-project-layout.md` |
 | How do contexts, cancellation, errors work? | `docs/architecture/execution-flow.md` |
 | What mistakes does this codebase keep making? | `docs/architecture/failure-modes.md` |
 | What was broken, and how was it proven? | `docs/design/OPEN_FINDINGS.md` |
