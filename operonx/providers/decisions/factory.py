@@ -15,15 +15,17 @@ def create_decision(config: DecisionConfig, name: str = "") -> BaseDecider:
         ValueError: An api_type with no backend, or a missing api_key.
         ImportError: httpx is not installed (``pip install operonx[providers]``).
     """
-    if config.api_type in (DecisionType.TYPESAFE, DecisionType.OPENROUTER):
+    if config.api_type in (DecisionType.TYPESAFE, DecisionType.OPENROUTER, DecisionType.RUN):
         try:
-            from operonx.providers.decisions.system_one import SystemOneDecider
+            from operonx.providers.decisions.system_one import RunDecider, SystemOneDecider
         except ImportError as e:
             raise ImportError(
                 "a decision: resource needs httpx.\n"
                 "  Install with: pip install operonx[providers]\n"
                 f"  Original error: {e}"
             ) from e
+        if config.api_type == DecisionType.RUN:
+            return RunDecider(config, name)
         return SystemOneDecider(config, name)
     if config.api_type == DecisionType.FAKE:
         from operonx.providers.decisions.fake import FakeDecider

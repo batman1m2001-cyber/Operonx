@@ -16,6 +16,7 @@ from operonx.providers.decisions.factory import create_decision
 
 _LAZY_BACKENDS = {
     "SystemOneDecider": "operonx.providers.decisions.system_one",
+    "RunDecider": "operonx.providers.decisions.system_one",
     "FakeDecider": "operonx.providers.decisions.fake",
 }
 
@@ -36,6 +37,7 @@ __all__ = [
     "DecisionConfig",
     "DecisionType",
     "FakeDecider",
+    "RunDecider",
     "SystemOneDecider",
     "check_questions",
     "create_decision",

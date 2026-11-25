@@ -598,7 +598,16 @@ asyncio.run(main())
   the limit is split by question and merged, unless you set
   `split_on_overflow: false`.
 - 429 and 5xx are retried by the resource (`retry:`). A 4xx raises
-  `DecisionError` with the server's message.
+  `DecisionError` with the server's message. Where a failed decision must
+  not fail the run (a model asked in shadow), route it: `ask.on_error(handler)`
+  (page 6).
+- A Jev model served on your own network: `api_type: run` with `base_url:`
+  the endpoint's whole URL (`https://jev.internal/api/run`). The request is
+  wrapped as `{model, request: {state, questions}}` and the answer read from
+  its envelope; a non-200 `status` or a `problem` there raises, and a 429 or
+  5xx in it is retried. A host that takes the System One body at another
+  path: `api_type: typesafe` with your `base_url:` and `path: /decisions`.
+  Off TypeSafe's and OpenRouter's own hosts `api_key` is optional.
 
 ## Doors — how a served graph meets its caller
 

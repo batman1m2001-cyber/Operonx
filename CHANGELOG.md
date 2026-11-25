@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.48.0] - 2026-11-25
+
+### Added
+- **`decision:` resources reach a self-hosted Jev.** `api_type: run` posts `{model, request: {state, questions}}` to `base_url` as it is, and reads the answers from the envelope `{status, problem, response: {answers, usage, model}}`. A non-200 `status` or a `problem` raises `DecisionError`. A 429 or 5xx `status` is retried like one on the wire. Assets are refused, because the envelope has no place for them. This replaces `JevOp` from the unreleased `feat/jev-op` branch: the same endpoint now goes through `DecisionOp`.
+- **`path:` on a `decision:` resource** sets what follows `base_url`. It defaults to `/systemone` on `typesafe` and `openrouter`, and to nothing on `run`. A host that takes the System One body at `/decisions` uses `api_type: typesafe`, its own `base_url` and `path: /decisions`.
+
+### Changed
+- **`api_key` is required only on TypeSafe's and OpenRouter's own hosts.** A resource with another `base_url`, or with `api_type: run`, may leave it out, and is then sent no `Authorization` header.
+
 ## [1.47.1] - 2026-11-25
 
 ### Fixed
