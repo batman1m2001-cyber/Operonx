@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Updated 25 Nov 2026 for **1.48.0**.
+Updated 25 Nov 2026 for **1.49.0**.
 
 ## State
 
@@ -15,6 +15,10 @@ Updated 25 Nov 2026 for **1.48.0**.
   engine and cycles left core in 1.47.0 for the private `operonx-project`
   repo, and nothing writes `.operonx/guide/` or AGENTS.md except
   `operonx guide`. Its §9 lists what is still the owner's.
+- **`src/` computes, `app/` exposes** ([APP_LAYOUT_PLAN](docs/APP_LAYOUT_PLAN.md)):
+  `operonx init` and `operonx add` put a feature's `JOBS`/`SERVICES` in
+  `app/<feature>.py`, and lint C20 keeps `Service`/`Job` out of `src/`.
+  L5 (mr-finance's 899-line `app/main.py`) is next.
 - Tests: `uv run pytest tests/ -m "not integration"` (about 3 minutes,
   offline). `tests/guide/` runs every snippet in `operonx/guide/`.
 
