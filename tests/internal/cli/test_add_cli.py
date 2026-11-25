@@ -130,7 +130,11 @@ def test_an_older_project_keeps_its_list_in_src_and_it_grows_there(tmp_path):
     main_py.write_text(main_py.read_text().replace(
         "from app.greeting import JOBS, SERVICES",
         "from app.greeting import JOBS\nfrom greeting import SERVICES"))  # fmt: skip
-    assert _check_call(root).returncode == 0  # the older layout serves as it is
+    first = _check_call(root)  # lint C20: src/ declares no Service; an older project...
+    assert first.returncode == 1 and "[C20] imports Service, http" in first.stdout
+    assert main(["lint", str(root), "--baseline"]) == 0  # ...records its baseline
+    assert "C20 = 1" in (root / "operonx.toml").read_text()
+    assert _check_call(root).returncode == 0  # and the older layout serves as it is
 
     assert (
         _add(root, "route", "farewell", "POST", "/bye", "--in", "id", "--feature", "greeting") == 0

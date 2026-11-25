@@ -1,6 +1,6 @@
 # App layout plan: `src/` computes, `app/` exposes
 
-Status: **L1 + L2 DONE** (2026-11-25, one PR: L1 alone left `operonx add` writing a `Service` into `src/`); L3–L5 not started. Repositories: Operon (this one), mr-finance. No runtime change:
+Status: **L1 + L2 DONE** (2026-11-25, #331: L1 alone left `operonx add` writing a `Service` into `src/`); **L3 DONE** (C20, which also flags `agent_service` from `operonx.agents`; 0 findings in the six projects); L4–L5 not started. Repositories: Operon (this one), mr-finance. No runtime change:
 `Application` already takes whatever lists `app/main.py` hands it. This changes the convention
 (guide, `operonx init`, `operonx add`, lint) and one project.
 
