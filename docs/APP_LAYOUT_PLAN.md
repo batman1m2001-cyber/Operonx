@@ -1,6 +1,6 @@
 # App layout plan: `src/` computes, `app/` exposes
 
-Status: **L1 + L2 DONE** (2026-11-25, #331: L1 alone left `operonx add` writing a `Service` into `src/`); **L3 DONE** (C20, which also flags `agent_service` from `operonx.agents`; 0 findings in the six projects, #332); **L4** 1.49.0 (this release); L5 not started. Repositories: Operon (this one), mr-finance. No runtime change:
+Status: **L1 + L2 DONE** (2026-11-25, #331: L1 alone left `operonx add` writing a `Service` into `src/`); **L3 DONE** (C20, which also flags `agent_service` from `operonx.agents`; 0 findings in the six projects, #332); **L4 DONE** (1.49.0 on PyPI, #333); **L5 DONE** (mr-finance #94, §5). The plan is complete. Repositories: Operon (this one), mr-finance. No runtime change:
 `Application` already takes whatever lists `app/main.py` hands it. This changes the convention
 (guide, `operonx init`, `operonx add`, lint) and one project.
 
@@ -125,3 +125,20 @@ next operonx bump.
 - Operon, expected: templates −50/+60 lines, `add.py` about −30/+40, C20 about +40 with tests.
 - mr-finance: line count about the same, moved across files. `describe()` is the proof that nothing
   else changed.
+
+## 5. Result: L5 (mr-finance #94, 2026-11-25)
+
+```text
+before                                   after
+app/main.py      899  every Service/Job  app/main.py        124  APP: collects, middleware, web mount, barrier
+src/<f>/bodies.py ×11  request contracts  app/<feature>.py    ×12  SERVICES, JOBS, request contracts
+                                         app/serve.py          PORT, the jobs' clock (MF_JOBS=off)
+```
+
+- `describe()`: the same 90 services, 24 jobs and 68 graphs, each identical. The lists are now ordered by
+  feature. No route has a path parameter, and `web` stays mounted last.
+- Suite: 1133 passed, the same as before. `operonx lint`: 0 errors, no C20.
+- Tests pin `OPERONX_TRACE=local` with a per-test `OPERONX_RUNS_DIR` in place of the
+  `replace(APP.manifest, tracing=None)` workaround. The one test that reads `operonx.toml`'s declared sinks
+  unsets the pin.
+- The live :8030 has not been restarted; that waits for the owner.
