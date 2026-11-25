@@ -335,3 +335,24 @@ def test_a_relative_root_gives_absolute_paths(tmp_path, monkeypatch):
     monkeypatch.chdir(root.parent)
     (s,) = project_stores("proj", env={})
     assert s.spec["root"] == str(root / ".operonx" / "runs")
+
+
+def test_operonx_trace_stands_for_tracing_sinks_as_the_writer_reads_it(tmp_path):
+    """The studio reads where runs are written: `OPERONX_TRACE` (shell or
+    `.env`) replaces `[tracing] sinks`; a per-name entry is still read."""
+    toml = '[tracing]\nsinks = ["run_store:default"]\n[tracing.services.x]\nsinks = ["local"]\n'
+    resources = "run_store:\n  default:\n    backend: sqlite\n    path: runs.db\n"
+    root = _project(tmp_path, toml, resources, env="OPERONX_TRACE=local\n")
+    assert [(s.sink, s.levels) for s in project_stores(root, env={})] == [
+        ("local", ("OPERONX_TRACE", "[tracing.services.x]"))
+    ]
+    stores = project_stores(root, env={"OPERONX_TRACE": "none"})  # the shell beats .env
+    assert [(s.sink, s.levels) for s in stores] == [("local", ("[tracing.services.x]",))]
+    assert [s.sink for s in project_stores(root, env={"OPERONX_TRACE": ""})] == [
+        "run_store:default",
+        "local",
+    ]  # empty: the file decides
+    (tmp_path / "bare").mkdir()
+    bare = _project(tmp_path / "bare", "", resources, env="OPERONX_TRACE=run_store:default\n")
+    (s,) = project_stores(bare, env={})
+    assert s.sink == "run_store:default" and s.levels == ("OPERONX_TRACE",)

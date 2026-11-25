@@ -37,6 +37,7 @@ sees the same trace id — the caller's ``?trace_id=`` included.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -45,10 +46,13 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from .manifest import ManifestError, ServeSpec
 
 __all__ = [
+    "ENV",
     "LOCAL",
     "Tracing",
     "check_names",
     "check_sinks",
+    "env_sinks",
+    "resettle",
     "parse_tracing",
     "pick",
     "project_sinks",
@@ -183,11 +187,46 @@ def pick(
             return list(sinks), label
     if own is not None:
         return list(own), own_label
+    env = env_sinks()
+    if env is not None:
+        return env, ENV
     if tracing is not None and tracing.sinks is not None:
         return list(tracing.sinks), "[tracing]"
     if app is not None:
         return list(app), "application"
     return None, "default"
+
+
+#: The environment variable that sets the project's sinks in place of
+#: ``[tracing] sinks``: ``local``, ``run_store:default``, a comma list of
+#: them, or ``none`` (trace nothing). Unset or empty: the file decides.
+ENV = "OPERONX_TRACE"
+
+
+def env_sinks(env: Optional[Any] = None) -> Optional[List[str]]:
+    """``OPERONX_TRACE`` as a list of sinks, or ``None`` when unset.
+
+    Read each time a service or job settles, so a ``.env`` or a test that
+    sets it before the start counts. It stands where ``[tracing] sinks``
+    does — a machine's override of the project's sinks, the way
+    ``${VAR:default}`` overrides a resource — so a
+    ``[tracing.services.<name>]`` entry or a job's own ``trace=`` still
+    beats it."""
+    raw = str((os.environ if env is None else env).get(ENV) or "").strip()
+    if not raw:
+        return None
+    if raw.lower() == "none":
+        return []
+    return list(_sinks([x.strip() for x in raw.split(",") if x.strip()], ENV))
+
+
+def resettle(manifest: Any) -> Any:
+    """*manifest* with its services settled again — after `.env` is loaded,
+    so an ``OPERONX_TRACE`` written there counts (:func:`env_sinks`)."""
+    from dataclasses import replace
+
+    serves = settle_serves(manifest.serves, manifest.project.get("trace"), manifest.tracing)
+    return replace(manifest, serves=serves)
 
 
 def settle_serves(

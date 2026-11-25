@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A run traces to one place however the application starts.** An `Application(...)` declared in Python now reads the `[tracing]` of the `operonx.toml` at its root when it is built. Before, only `Application.load`/`find` and `operonx serve` read it, so a test or script that imported `app.main:APP` traced to local files, while the same jobs under `operonx serve` went to the project's run store. A test that had loaded the file then changed where later tests' traces went.
+
+### Added
+- **`OPERONX_TRACE` sets the project's sinks from `.env` or the shell.** It takes `local`, a resource key such as `run_store:default`, a comma list, or `none`. It stands where `[tracing] sinks` does: it beats that and `Application(trace=...)`, while a `[tracing.services.<name>]` / `[tracing.jobs.<name>]` entry or a service's or job's own `trace=` still wins. Unset or empty, the file decides. `describe()` and `--list` show `sinks_from: OPERONX_TRACE`. Services settle again in `bootstrap()`, after `.env` is loaded, so a value written there counts.
+- **`project_stores()` reads `OPERONX_TRACE` too** (the process env, then the project's `.env`), in place of `[tracing] sinks`, so the studio reads the store the runs are written to.
+
 ## [1.48.0] - 2026-11-25
 
 ### Added

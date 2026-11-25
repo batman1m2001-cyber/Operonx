@@ -514,10 +514,12 @@ operonx-run --list          # each job, the same
 ```
 
 Most specific wins: `[tracing.<services|jobs>.<name>]`, then the service's or
-job's own `trace=`, then `[tracing] sinks`, then `Application(trace=...)`,
+job's own `trace=`, then `OPERONX_TRACE` (`.env`: `local`, a resource key,
+a comma list or `none`), then `[tracing] sinks`, then `Application(trace=...)`,
 then the default (a job records locally; a service is not traced). A
 script's `Operon(flow, trace="project")` uses the same `[tracing]` sinks
 (local when none are set); `Operon()` without `trace=` records nothing. Every
 sink of one run gets the same trace id, including a caller's `?trace_id=`.
-A typo in `[tracing]` fails at load; a sink missing from `resources.yaml`
+An `Application` declared in Python reads its file's `[tracing]` when built,
+so importing it traces where `operonx serve` does. A typo in `[tracing]` fails at load; a sink missing from `resources.yaml`
 fails when the service or job starts.
