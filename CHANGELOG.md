@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.49.0] - 2026-11-25
+
 ### Fixed
 - **A run traces to one place however the application starts.** An `Application(...)` declared in Python now reads the `[tracing]` of the `operonx.toml` at its root when it is built. Before, only `Application.load`/`find` and `operonx serve` read it, so a test or script that imported `app.main:APP` traced to local files, while the same jobs under `operonx serve` went to the project's run store. A test that had loaded the file then changed where later tests' traces went.
 
