@@ -32,9 +32,7 @@ operonx run --list
 `init` writes the commands of the toolchain you use into the project's
 `AGENTS.md` and `README.md`: uv when it is installed, else pip; `--uv` or
 `--pip` chooses. The project's `pyproject.toml` works with both: its test
-tools are the `test` extra, which uv's `dev` group includes. `init` also
-writes `docs/brd/`, the project's requirements checklist that
-operonx-project builds from. `--no-brd` leaves it out.
+tools are the `test` extra, which uv's `dev` group includes.
 
 | Template | What the first feature is |
 |---|---|
@@ -44,7 +42,7 @@ operonx-project builds from. `--no-brd` leaves it out.
 
 | Flag | What it adds |
 |---|---|
-| `--http` | `routes.py`: the feature as a POST service, and `operonx serve` |
+| `--http` | `SERVICES` in `app/<feature>.py`: the feature as a POST service, and `operonx serve` |
 | `--web` | `web/`: a page that calls the service (brings `--http`) |
 | `--deploy` | `deploy/`: a Dockerfile and a compose file |
 
@@ -59,19 +57,22 @@ file you edited prints the lines to add; `--force` overwrites.
 myapp/
 ├── AGENTS.md            the rules your assistant reads first (CLAUDE.md is `@AGENTS.md`)
 ├── .operonx/guide/      the operonx API guide, for the version installed here
-├── app/main.py          the map: every service and job, in one Application
-├── src/greeting/        one feature, one folder
-│   ├── graph.py         the wiring
-│   ├── ops.py           the logic
-│   └── jobs.py          the job (routes.py: the service, with --http)
+├── src/greeting.py      the feature's logic: its ops and the graph that wires them
+├── app/greeting.py      how it is exposed: its job (and its route, with --http)
+├── app/main.py          the map: every feature's jobs and services, in one Application
 ├── tests/greeting/      the feature's tests; no test calls a real model
 ├── data/                what jobs run over (.jsonl); out/ is what they write
 ├── resources.yaml       models and stores, by key; secrets as ${VAR}
 ├── .env.example         the secrets resources.yaml names; copy to .env
 ├── operonx.toml         points the operonx command at app.main:APP
 ├── pyproject.toml       works with uv and with pip
-└── docs/brd/            the requirements, their checklist, and the board (`--no-brd` skips it)
+└── web/                 with --web: the pages, served at / (routes under /api/)
 ```
+
+`src/` computes, `app/` exposes: nothing in `src/` declares a `Service` or a
+`Job` (`operonx lint` C20). A feature grows past ~300 lines into a folder,
+`src/greeting/` with `ops.py` and `graph.py` (`.operonx/guide/05-project-layout.md`
+in the project says how).
 
 ## What the assistant reads
 

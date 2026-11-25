@@ -59,11 +59,9 @@ assistant model, and a job that runs it nightly"*.
 myapp/
 ├── AGENTS.md            the rules your assistant reads first (CLAUDE.md is `@AGENTS.md`)
 ├── .operonx/guide/      the operonx API guide, for the version installed here
-├── app/main.py          the map: every service and job, in one Application
-├── src/greeting/        one feature, one folder
-│   ├── graph.py         the wiring: which op runs after which, what feeds what
-│   ├── ops.py           the logic: plain Python functions
-│   └── jobs.py          the job over data/ (routes.py: the service, with --http)
+├── src/greeting.py      the feature's logic: its ops (plain Python functions) and the graph that wires them
+├── app/greeting.py      how it is exposed: its job over data/ (and its route, with --http)
+├── app/main.py          the map: every feature's jobs and services, in one Application
 ├── tests/greeting/      the feature's tests; no test calls a real model
 ├── data/                what jobs run over (.jsonl); out/ is what they write
 ├── resources.yaml       models and stores, by key (`llm:assistant`)
