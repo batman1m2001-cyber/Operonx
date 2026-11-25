@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
 
 from ..jobs.record import ITEM_EMPTY, ITEM_OK, JobRun
 from .dataset import Dataset
-from .evaluators import judge_all, prepare
+from .evaluators import checkable, judge_all, prepare
 from .fingerprint import case_hash
 from .job import case_verdict, numbers, trial_of
 from .traceview import TraceView
@@ -122,7 +122,10 @@ async def rescore(
         if item.status in (ITEM_OK, ITEM_EMPTY):
             for key in ("passed", "checks", "judge_cost_usd", "error"):
                 verdict.pop(key, None)
-            verdict.update(await _again(item, old, rows, prepared, store if wants_trace else None))
+            again = await _again(item, old, rows, prepared, store if wants_trace else None)
+            if again is None:
+                continue  # no expected value and no check that runs without one: not a trial
+            verdict.update(again)
         verdicts[item.key] = verdict
         trials.append(trial_of(item.key, verdict, item.ms))
     nums, _, _ = numbers(trials, int(ev_meta.get("repeats") or 1))
@@ -172,8 +175,9 @@ async def _again(
     rows: Mapping[str, Dict[str, Any]],
     prepared: Sequence[Any],
     store: Any,
-) -> Dict[str, Any]:
-    """One item's new ``passed``/``checks`` (or the error that stops it)."""
+) -> Optional[Dict[str, Any]]:
+    """One item's new ``passed``/``checks`` (or the error that stops it);
+    None when no check runs on its case (see :func:`checkable`)."""
     case = str(old.get("case", item.key))
     row = rows.get(case)
     if row is None:
@@ -196,6 +200,9 @@ async def _again(
             "error": "the record holds only a clipped preview of this output; "
             "run the eval again to judge it",
         }
+    runs = checkable(prepared, row.get("expected"))
+    if prepared and not runs:
+        return None
     output = old.get("output")
     avail: Dict[str, Any] = {
         "input": row.get("input"),
@@ -209,4 +216,4 @@ async def _again(
             avail["trace"] = await asyncio.to_thread(TraceView.from_store, store, item.trace_id)
         except LookupError as exc:
             return {"passed": False, "checks": {}, "error": str(exc)}
-    return case_verdict(await judge_all(prepared, avail))
+    return case_verdict(await judge_all(runs, avail))

@@ -208,6 +208,45 @@ def test_a_broken_case_or_evaluator_fails_its_case_only(tmp_path):
     assert not check["passed"] and check["error"] == "RuntimeError: judge down"
 
 
+def test_a_case_without_expected_is_not_checked_by_a_comparison(tmp_path):
+    """A row added before its answer (Add to eval, turn_to_case): `exact`
+    has nothing to compare with, so the case is not a trial — not a
+    failure — and the summary names it."""
+    from operonx.app.evals import trajectory
+
+    rows = CASES[:2] + [{"id": "new", "input": "I want my money back"}]
+    run = _eval(tmp_path, [exact("label")], rows=rows).run_sync()
+    ev = run.meta["eval"]
+    assert run.status == "ok" and (ev["cases"], ev["passed"], ev["failed"]) == (2, 2, 0)
+    assert ev["unchecked"] == ["new"]
+    assert any("no expected value" in w and "new" in w for w in ev["gate"]["warnings"])
+    items = {i.key: i for i in run.items}
+    assert not items["new"].verdict  # recorded as run, with no verdict
+
+    # a check that needs no expected still runs on it: the case is judged by that one
+    def confident(output=None):
+        return output["confidence"] > 0.5
+
+    run = _eval(tmp_path, [exact("label"), confident], rows=rows).run_sync()
+    ev = run.meta["eval"]
+    assert (ev["cases"], ev["passed"]) == (3, 3) and "unchecked" not in ev
+    assert set({i.key: i for i in run.items}["new"].verdict["checks"]) == {"confident"}
+    assert contains("refund").needs_expected is False and contains().needs_expected is True
+    assert trajectory.op_output("classify", fuzzy(0.9, "label")).needs_expected is True
+    assert trajectory.op_output("classify", confident).needs_expected is False
+
+
+def test_a_rescore_skips_a_case_without_expected(tmp_path):
+    import asyncio
+
+    from operonx.app.evals import rescore
+
+    rows = CASES[:2] + [{"id": "new", "input": "hello"}]
+    run = _eval(tmp_path, [exact("label")], rows=rows).run_sync()
+    again = asyncio.run(rescore(run, [exact("label")]))
+    assert set(again.verdicts) == {"a", "b"} and again.summary["pass_rate"] == 1.0
+
+
 @graph
 def door_flow():
     src = ingress()

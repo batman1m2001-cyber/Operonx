@@ -41,6 +41,13 @@ in [0, 1], or `{"passed", "score", "reason"}`. Built-ins: `exact`,
 and over the run: `trajectory.ops`, `trajectory.tool_calls`,
 `trajectory.op_output`, `budget`.
 
+A row without `expected` (added before its answer, e.g. by `turn_to_case`)
+is skipped by the checks that compare with it: `exact`, `fuzzy`,
+`json_match`, `contains()` with no needles, and `op_output` around one of
+them. Other checks still judge it. If no check is left, the case is not a
+trial: it is not counted as passed or failed. The summary lists it under
+`unchecked`, and a gate warning names it.
+
 ## Run it: repeats, metrics, the fingerprint
 
 ```python

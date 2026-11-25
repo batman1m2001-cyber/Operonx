@@ -66,6 +66,25 @@ class Prepared:
             return dict(avail)
         return {k: v for k, v in avail.items() if k in self.params}
 
+    @property
+    def needs_expected(self) -> bool:
+        """It compares the output with ``expected``: a case without one has
+        nothing for it to check (``exact``, ``fuzzy``, ``json_match``,
+        ``contains`` with no needles, and ``op_output`` around one of them)."""
+        return bool(
+            getattr(self.ev, "needs_expected", False) or getattr(self.fn, "needs_expected", False)
+        )
+
+
+def checkable(prepared: Sequence[Prepared], expected: Any) -> List[Prepared]:
+    """The checks that run on a case: all of them, or — when the case has
+    no ``expected`` (a row added to the dataset before its answer) — the
+    ones that do not compare with it. An empty list means the case is not
+    checked: no trial, neither passed nor failed."""
+    if expected is not None:
+        return list(prepared)
+    return [p for p in prepared if not p.needs_expected]
+
 
 def prepare(ev: Any) -> Prepared:
     """Read *ev*'s signature once (an ``@op`` is called for its body; a
@@ -185,6 +204,7 @@ def exact(field: Optional[str] = None) -> Callable:
         return {"passed": ok, "reason": None if ok else f"got {got!r}, expected {want!r}"}
 
     exact_match.eval_name = f"exact({field})" if field else "exact"
+    exact_match.needs_expected = True
     return exact_match
 
 
@@ -213,6 +233,7 @@ def contains(*needles: str, field: Optional[str] = None, case: bool = False) -> 
         }
 
     contains_all.eval_name = "contains"
+    contains_all.needs_expected = not needles
     return contains_all
 
 
@@ -225,6 +246,7 @@ def fuzzy(threshold: float = 0.8, field: Optional[str] = None) -> Callable:
         return {"passed": score >= threshold, "score": round(score, 4)}
 
     fuzzy_match.eval_name = f"fuzzy({threshold:g})"
+    fuzzy_match.needs_expected = True
     return fuzzy_match
 
 
@@ -246,4 +268,5 @@ def json_match(keys: Optional[Sequence[str]] = None) -> Callable:
         }
 
     json_agree.eval_name = "json_match"
+    json_agree.needs_expected = True
     return json_agree
