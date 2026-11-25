@@ -1,0 +1,33 @@
+"""How the chat feature is exposed: its job{{#http}} and its route{{/http}}.
+
+The logic is src/chat.py; this file only says who runs it."""
+
+{{#http}}
+from operonx.app import Service, http
+{{/http}}
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}
+from chat import chat_flow
+
+JOBS = [
+    Job(
+        "answer_questions",
+        graph=chat_flow,
+        items=DATA / "questions.jsonl",  # one graph run per line
+        key="question",  # resumable: `--resume` skips the questions already answered
+        output=OUT / "answers.jsonl",
+        description="An answer to every question in data/questions.jsonl.",
+    ),
+]
+{{#http}}
+
+SERVICES = [
+    Service(
+        "chat",
+        http("POST", "/api/chat", port=PORT),
+        graph=chat_flow,  # the JSON body fills its parameters
+        description="POST {question}, get {answer, error}.",
+    ),
+]
+{{/http}}

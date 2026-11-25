@@ -60,7 +60,7 @@ PARTS = ("http", "web", "deploy")
 class Template:
     name: str
     summary: str
-    #: The one feature: ``src/<feature>.py``.
+    #: The one feature: ``src/<feature>.py`` (logic) and ``app/<feature>.py`` (its job, its route).
     feature: str
     #: Its job, and what the job does (README's comment).
     job: str

@@ -2,9 +2,9 @@
 
 A product built on operonx looks like this. The files below are a complete,
 working project. `operonx init` writes the same layout with a feature of its
-own (its `JOBS`, and its `SERVICES` with `--http`, at the bottom of the
-feature's file), `src/_shared/config.py`, `data/` for what jobs read and
-`tests/<feature>/`.
+own (its ops and graph in `src/<feature>.py`; its `JOBS`, and its `SERVICES`
+with `--http`, in `app/<feature>.py`), `src/_shared/config.py`, `data/` for
+what jobs read and `tests/<feature>/`.
 
 ```text
 scorer/
@@ -17,6 +17,7 @@ scorer/
 ├── app/
 │   ├── __init__.py
 │   └── main.py           # APP = Application(...): read this file first
+│                         # (a bigger app: app/<feature>.py per feature, collected here)
 ├── src/
 │   └── scoring.py        # one file per feature: its ops, then its graphs
 ├── tests/
@@ -46,22 +47,28 @@ to the service's address and allow that origin with CORS in front of it.
 
 ## The rules
 
+- **`src/` computes, `app/` exposes.** Nothing in `src/` declares a
+  `Service` or a `Job`: a graph is importable and testable with nothing
+  serving it, and `app/` is the one place that says what the product
+  exposes.
 - **One file per feature: `src/<feature>.py`.** Its ops (the logic) come
-  first, then the graphs that wire them, then its `JOBS` and `SERVICES` when
-  it declares them (what `operonx init` writes; this page's `app/main.py`
-  declares them inline instead). A graph function only creates ops, reads
-  their outputs and draws `>>` edges. No computation, no I/O, no
+  first, then the graphs that wire them. A graph function only creates ops,
+  reads their outputs and draws `>>` edges. No computation, no I/O, no
   conditionals in Python: branch with `if_()`.
+- **Its jobs and routes: `app/<feature>.py`.** The feature's `JOBS`, its
+  `SERVICES` and their request bodies (what `operonx init` writes). A small
+  app may declare them inline in `app/main.py`, as this page does.
 - **Past ~300 lines, split the file into a folder** `src/<feature>/`:
-  `ops.py` (the logic), `graph.py` (wiring only), `jobs.py`, `routes.py`,
-  private helpers as `_<name>.py`, and an `__init__.py` that re-exports what
-  other code imports (`JOBS`, `SERVICES`, the graphs), so no import outside
-  the folder changes. `operonx add` writes into either shape.
+  `ops.py` (the logic), `graph.py` (wiring only), private helpers as
+  `_<name>.py`, and an `__init__.py` that re-exports the graphs, so no
+  import outside the folder changes. `app/<feature>.py` splits into
+  `app/<feature>/` the same way. `operonx add` writes into either shape.
 - **Imports go one way:** `app/` → `src/<feature>` → `src/_shared/`;
   inside a split feature, `graph.py` → `ops.py` → `_helpers.py`. Nothing in
   `src/` imports `app/`.
-- **`app/main.py` is the map of the product:** every service and job,
-  with the graph each runs.
+- **`app/main.py` is the map of the product:** it collects every
+  feature's services and jobs, plus what belongs to the whole app (the
+  `web/` mount, middleware, startup).
 - **Resources by key.** Ops reach models and stores through
   `resources.yaml` keys (`LLMOp.of(resource="assistant")`), never by
   building clients. Secrets are `${VAR}` there and live in `.env`.
@@ -238,7 +245,8 @@ goes up.
 ## Growing it
 
 - **A second feature** is a second file under `src/` with its own ops and
-  graphs, and one more entry in `app/main.py`.
+  graphs, its jobs and routes in `app/<feature>.py`, and one more import in
+  `app/main.py`.
 - **A model** is an `llm:` entry in `resources.yaml` and an
   `LLMOp.of(resource=...)` in the feature's graph; its key goes in `.env`.
   Its provider's limits go on the entry, for the whole process:
