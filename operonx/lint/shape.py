@@ -1,4 +1,4 @@
-"""The project's shape: five checks over the whole project, not one module.
+"""The project's shape: six checks over the whole project, not one module.
 
 - **C13** code in ``src/`` reaches another feature only through its
   top-level names (a split feature's ``__init__`` names) or its ``graph``:
@@ -12,6 +12,11 @@
   (kept) or ``out/`` (thrown away).
 - **C17** in ``web/``, only ``web/lib/`` calls ``fetch(``: pages and
   components reach the server through ``web/lib/api.js``.
+- **C20** ``src/`` declares no ``Service`` or ``Job``: what a feature
+  exposes is ``app/<feature>.py``. It finds an import of ``Service``,
+  ``Job``, ``http``, ``asgi``, ``websocket`` (``operonx.app``) or
+  ``agent_service`` (``operonx.agents``), and a call through the module
+  (``app.Service(...)``). Helpers such as ``last_run`` stay allowed.
 
 A feature is a module of ``src/`` whose name does not start with ``_``: one
 file, ``src/billing.py`` (the default), or a folder, ``src/billing/``. Tests
@@ -47,6 +52,9 @@ _ROUTE_CALLS = {"Route", "WebSocketRoute", "add_api_route", "add_route", "add_we
 _CONFIG = Path("src") / "_shared" / "config.py"
 _FETCH = re.compile(r"(?<![\w.$])fetch\s*\(")
 _WEB_SOURCES = {".js", ".mjs", ".ts", ".html"}
+#: What declares a service or a job (C20), and the modules it comes from.
+_DECLARES = {"Service", "Job", "http", "asgi", "websocket", "agent_service"}
+_DECLARE_FROM = ("operonx.app", "operonx.agents", "operonx_agents")
 
 
 def _features(root: Path) -> Set[str]:
@@ -152,6 +160,40 @@ def _c15(tree: ast.AST, path: Path) -> Iterator[Finding]:
             )
 
 
+def _from_operonx(module: str) -> bool:
+    return any(module == m or module.startswith(m + ".") for m in _DECLARE_FROM)
+
+
+def _c20(tree: ast.AST, path: Path) -> Iterator[Finding]:
+    hint = (
+        "src/ declares no Service or Job: put it in app/<feature>.py, beside the feature's others"
+    )
+    modules = set()  # local names bound to an operonx module: ``app`` in ``app.Service(...)``
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Import):
+            modules |= {a.asname for a in n.names if a.asname and _from_operonx(a.name)}
+        elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
+            if n.module == "operonx":
+                modules |= {a.asname or a.name for a in n.names if a.name in ("app", "agents")}
+            elif _from_operonx(n.module):
+                names = sorted({a.name for a in n.names} & _DECLARES)
+                if names:
+                    yield Finding("C20", path, n.lineno, f"imports {', '.join(names)}: {hint}")
+    for n in ast.walk(tree):
+        f = n.func if isinstance(n, ast.Call) else None
+        if not isinstance(f, ast.Attribute) or f.attr not in _DECLARES:
+            continue
+        base = f.value
+        dotted = []
+        while isinstance(base, ast.Attribute):
+            dotted.append(base.attr)
+            base = base.value
+        if isinstance(base, ast.Name):
+            module = ".".join([base.id, *reversed(dotted)])
+            if base.id in modules or _from_operonx(module):
+                yield Finding("C20", path, n.lineno, f"calls {f.attr}(): {hint}")
+
+
 def _c16(root: Path) -> Iterator[Finding]:
     for p in sorted(root.iterdir()):
         if p.name.startswith(".") or p.name in ROOT_ALLOWED or p.name.startswith("LICENSE"):
@@ -186,7 +228,7 @@ def _c17(root: Path) -> Iterator[Finding]:
 
 
 def lint_shape(root: Path, files: Iterable[Path]) -> List[Finding]:
-    """C13–C17 for the project at *root*, over its Python *files* and ``web/``."""
+    """C13–C17 and C20 for the project at *root*, over its Python *files* and ``web/``."""
     root = Path(root)
     features = _features(root)
     out: List[Finding] = [*_c16(root), *_c17(root)]
@@ -200,6 +242,8 @@ def lint_shape(root: Path, files: Iterable[Path]) -> List[Finding]:
         except (SyntaxError, UnicodeDecodeError):
             continue  # E00 is reported by the module rules
         found = [*_c13(tree, rel, path, features), *_c14(tree, path)]
+        if rel.parts[0] == "src":
+            found += _c20(tree, path)
         if rel != _CONFIG:
             found += _c15(tree, path)
         allow = _allowed(source)

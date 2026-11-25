@@ -1,4 +1,4 @@
-"""C13–C17, the project's shape, and ``operonx lint --baseline``."""
+"""C13–C17, C20, the project's shape, and ``operonx lint --baseline``."""
 
 from __future__ import annotations
 
@@ -46,7 +46,9 @@ def project(tmp_path) -> Path:
 
 
 def _rules(root: Path) -> list:
-    return sorted(f.rule for f in lint_path(root) if f.rule in {"C13", "C14", "C15", "C16", "C17"})
+    return sorted(
+        f.rule for f in lint_path(root) if f.rule in {"C13", "C14", "C15", "C16", "C17", "C20"}
+    )
 
 
 def test_a_clean_project_has_no_shape_findings(project):
@@ -74,6 +76,53 @@ def test_each_rule_finds_its_case(project):
         },
     )
     assert _rules(project) == ["C13", "C13", "C14", "C14", "C15", "C15", "C16", "C16", "C17", "C17"]
+
+
+def test_src_declares_no_service_or_job(project):
+    """C20: what a feature exposes is app/<feature>.py; src/ only computes."""
+    _write(
+        project,
+        {
+            "src/billing/routes.py": (
+                "from operonx.app import Service, http\n"
+                "from operonx.app.jobs import Job, last_run\n"
+                'S = [Service("bill", http("POST", "/bill"), graph=g)]\n'
+            ),
+            "src/report/__init__.py": (
+                "import operonx.app as oa\n"
+                "from operonx import agents\n"
+                "from operonx.agents import agent_service\n"
+                'S = oa.Service("r", oa.http("GET", "/r"), graph=g)\n'
+                "A = agents.agent_service(X)\n"
+            ),
+        },
+    )
+    found = sorted((Path(f.file).name, f.line) for f in lint_path(project) if f.rule == "C20")
+    assert found == [
+        ("__init__.py", 3),  # from operonx.agents import agent_service
+        ("__init__.py", 4),  # oa.Service(
+        ("__init__.py", 4),  # oa.http(
+        ("__init__.py", 5),  # agents.agent_service(
+        ("routes.py", 1),  # Service, http
+        ("routes.py", 2),  # Job (last_run alone would be fine)
+    ]
+
+
+def test_c20_allows_helpers_in_src_and_anything_in_app(project):
+    _write(
+        project,
+        {
+            "src/billing/ops.py": (
+                "from operonx.app.jobs import last_run\nfrom operonx.app import env\n"
+            ),
+            "src/billing/models.py": "class Job: ...\nJ = Job()\n",  # its own Job, not operonx's
+            "app/billing.py": (
+                "from operonx.app import Service, http\nfrom operonx.app.jobs import Job\n"
+                'SERVICES = [Service("bill", http("POST", "/bill"), graph=g)]\n'
+            ),
+        },
+    )
+    assert _rules(project) == []
 
 
 def test_an_opt_out_holds_one_line(project):

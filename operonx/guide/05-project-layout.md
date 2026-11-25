@@ -50,7 +50,7 @@ to the service's address and allow that origin with CORS in front of it.
 - **`src/` computes, `app/` exposes.** Nothing in `src/` declares a
   `Service` or a `Job`: a graph is importable and testable with nothing
   serving it, and `app/` is the one place that says what the product
-  exposes.
+  exposes (`operonx lint` C20).
 - **One file per feature: `src/<feature>.py`.** Its ops (the logic) come
   first, then the graphs that wire them. A graph function only creates ops,
   reads their outputs and draws `>>` edges. No computation, no I/O, no

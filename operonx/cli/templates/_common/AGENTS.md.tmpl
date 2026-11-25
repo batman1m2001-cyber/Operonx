@@ -32,8 +32,8 @@ read it first.
   is the only file that reads the environment (`ROOT`, `DATA`, `OUT`{{#http}}, `PORT`{{/http}});
   a new setting is one more line there: `LIMIT = env("LIMIT", 10)`.
 - `app/<feature>.py`: the feature's `JOBS`{{#http}}, `SERVICES` and their request bodies{{/http}}.
-  Nothing in `src/` declares a `Service` or a `Job`: `src/` computes, `app/`
-  exposes.
+  Nothing in `src/` declares a `Service` or a `Job` (lint C20): `src/`
+  computes, `app/` exposes.
 - `app/main.py`: `APP = Application(...)` collects every job{{#http}} and service{{/http}} from
   `app/<feature>.py`{{#web}}, plus the `web/` mount{{/web}}.
 - Models and stores by key in `resources.yaml`; secrets in `.env` as
