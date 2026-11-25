@@ -164,7 +164,7 @@ The package is `operonx/providers/decisions/`, laid out like `rerankers/`:
 |---|---|
 | `config.py` | `DecisionType`, `DecisionConfig` |
 | `base.py` | `BaseDecider`, plus the shared helpers: answer normalising, `verdict`, the error-message reader |
-| `system_one.py` | `SystemOneDecider`, for typesafe and openrouter, over httpx (the `providers` extra) |
+| `system_one.py` | `SystemOneDecider`, for typesafe and openrouter, over httpx (the `providers` extra); `RunDecider`, `api_type: run`, a self-hosted endpoint's envelope (1.48) |
 | `fake.py` | `FakeDecider`: scripted answers, no network, for tests and templates. Like `llm` `api_type: fake`. |
 | `factory.py` | `create_decision`, with lazy imports and a missing-extra hint |
 

@@ -1,12 +1,19 @@
-"""``api_type: typesafe | openrouter`` — the System One API over HTTP.
+"""``api_type: typesafe | openrouter | run`` — the System One API over HTTP.
 
-    POST {base_url}/systemone
+    POST {base_url}{path}                       (path: /systemone by default)
     {"model": ..., "state": ..., "questions": {...}, "assets"?: {...}}
 
 TypeSafe (``https://api.typesafe.ai/v1``) and OpenRouter
 (``https://openrouter.ai/api/v1``) take the same body; OpenRouter adds
 ``usage.cost`` to the answer, and wraps a provider's error in its own
 ``{"error": {...}}``. Facts and probes: docs/JEV_PLAN.md.
+
+``run`` is a Jev model served on your own network, the same questions in an
+envelope (:class:`RunDecider`)::
+
+    POST {base_url}
+    {"model": ..., "request": {"state": ..., "questions": {...}}}
+    -> {"status": 200, "problem": null, "response": {"answers": {...}, "usage": {...}, "model": ...}}
 """
 
 from __future__ import annotations
@@ -37,16 +44,17 @@ OVERFLOW_MARK = "max_tokens_exceeded"
 
 
 class SystemOneDecider(BaseDecider):
-    """One ``decision:`` resource on TypeSafe or OpenRouter."""
+    """One ``decision:`` resource on TypeSafe or OpenRouter — or on any host
+    that takes the System One body (``base_url`` and ``path``)."""
 
     def __init__(self, config: DecisionConfig, name: str = "") -> None:
         super().__init__(config, name)
-        if not config.api_key:
+        if not config.api_key and config.needs_key:
             raise ValueError(
                 f"decision resource {name or config.api_type.value!r} has no api_key "
                 f"(api_key: ${{{_key_env(config)}}} in resources.yaml)"
             )
-        self.url = f"{config.base_url.rstrip('/')}/systemone"
+        self.url = config.url
         self.retry = resource_retry(config, **RETRY_DEFAULTS)
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -88,14 +96,29 @@ class SystemOneDecider(BaseDecider):
         )
         return first.merged(second)
 
-    async def _ask(
+    def _body(
         self, state: Any, questions: Dict[str, Any], assets: Optional[Dict[str, Any]]
-    ) -> Decision:
+    ) -> Dict[str, Any]:
+        """The request body: the System One wire format."""
         body: Dict[str, Any] = {"model": self.config.model, "state": state, "questions": questions}
         if assets:
             body["assets"] = assets
+        return body
+
+    def _unwrap(self, data: Dict[str, Any], questions: Dict[str, Any]) -> Dict[str, Any]:
+        """The part of a reply that holds ``answers``, ``usage`` and ``model``."""
+        return data
+
+    async def _ask(
+        self, state: Any, questions: Dict[str, Any], assets: Optional[Dict[str, Any]]
+    ) -> Decision:
+        body = self._body(state, questions, assets)
+
+        async def once() -> Dict[str, Any]:
+            return self._unwrap(await self._post(body, questions, images=bool(assets)), questions)
+
         data = await retry_call(
-            lambda: self._post(body, questions, images=bool(assets)),
+            once,
             self.retry,
             label=f"decision:{self.name}" if self.name else "decision",
         )
@@ -116,7 +139,7 @@ class SystemOneDecider(BaseDecider):
     async def _post(
         self, body: Dict[str, Any], questions: Dict[str, Any], images: bool
     ) -> Dict[str, Any]:
-        headers = {"Authorization": f"Bearer {self.config.api_key}"}
+        headers = {"Authorization": f"Bearer {self.config.api_key}"} if self.config.api_key else {}
         if self.config.long_context:
             headers[LONG_CONTEXT_HEADER] = "true"
         if images:
@@ -165,6 +188,47 @@ class SystemOneDecider(BaseDecider):
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+
+
+class RunDecider(SystemOneDecider):
+    """``api_type: run`` — a Jev model on your own network. The questions are
+    System One's; the request is wrapped as ``{model, request: {state,
+    questions}}`` and the answer comes back in an envelope, whose ``status``
+    and ``problem`` are checked: a 429 or a 5xx there is retried like one
+    on the wire."""
+
+    def _body(
+        self, state: Any, questions: Dict[str, Any], assets: Optional[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        if assets:
+            raise DecisionError(
+                "api_type: run sends no assets: the self-hosted endpoint's envelope has no place "
+                "for them",
+                resource=self.name,
+                questions=list(questions),
+            )
+        return {"model": self.config.model, "request": {"state": state, "questions": questions}}
+
+    def _unwrap(self, data: Dict[str, Any], questions: Dict[str, Any]) -> Dict[str, Any]:
+        inner = data.get("response")
+        if not isinstance(inner, Mapping):
+            return data  # an endpoint that answers flat
+        status = data.get("status")
+        if isinstance(status, int) and not isinstance(status, bool) and status != 200:
+            raise DecisionError(
+                f"{self.url} answered status {status} in its envelope: "
+                f"{str(data.get('problem') or inner)[:300]}",
+                resource=self.name,
+                questions=list(questions),
+                status=status,
+            )
+        if data.get("problem"):
+            raise DecisionError(
+                f"{self.url} reported a problem: {str(data['problem'])[:300]}",
+                resource=self.name,
+                questions=list(questions),
+            )
+        return dict(inner)
 
 
 def _int(value: Any) -> int:

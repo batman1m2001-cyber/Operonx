@@ -386,3 +386,137 @@ class TestOp:
         summary, _ = summarize("t", [row_of(n, trace) for n in trace.nodes])
         assert summary.llm_calls == 1 and summary.tokens_in == 100
         assert summary.cost_usd == pytest.approx(0.0001)
+
+
+# ---------------------------------------------------------------- self-hosted
+
+
+def _envelope(body, status=200, problem=None):
+    inner = {
+        "answers": _answer(body["request"]),
+        "usage": {"input_tokens": 50, "output_tokens": 1},
+        "model": "glide-2b-v2",
+    }
+    return httpx.Response(
+        200,
+        json={"status": status, "ms": 12.5, "problem": problem, "req_id": "r1", "response": inner},
+    )
+
+
+def _run_config(**over):
+    base = dict(api_type="run", base_url="https://jev.internal/api/run", model="glide-2b-v2")
+    base.update(over)
+    base.setdefault("retry", {"max_attempts": 3, "initial": 0.0, "max_interval": 0.0})
+    return DecisionConfig(**base)
+
+
+class TestRun:
+    def test_the_envelope_goes_to_base_url_with_no_key(self, wire):
+        wire["reply"] = [_envelope]
+        d = _decide(create_decision(_run_config(), "glide"))
+        req = wire["requests"][0]
+        assert req["url"] == "https://jev.internal/api/run"
+        assert req["body"] == {
+            "model": "glide-2b-v2",
+            "request": {"state": "I want my money back!", "questions": QUESTIONS},
+        }
+        assert "authorization" not in req["headers"]
+        assert d.answers["refund"]["noul"] == 0.9 and d.answers["refund"][
+            "confidence"
+        ] == pytest.approx(0.8)
+        assert d.usage["prompt_tokens"] == 50 and d.model == "glide-2b-v2" and d.cost_usd is None
+
+    def test_a_key_is_sent_when_given(self, wire):
+        wire["reply"] = [_envelope]
+        _decide(create_decision(_run_config(api_key="k"), "glide"))
+        assert wire["requests"][0]["headers"]["authorization"] == "Bearer k"
+
+    def test_a_429_in_the_envelope_is_retried(self, wire):
+        wire["reply"] = [lambda b: _envelope(b, status=429, problem="busy"), _envelope]
+        d = _decide(create_decision(_run_config(), "glide"))
+        assert len(wire["requests"]) == 2 and d.answers["refund"]["noul"] == 0.9
+
+    def test_a_400_in_the_envelope_is_not_retried(self, wire):
+        wire["reply"] = [lambda b: _envelope(b, status=400, problem="bad question")]
+        with pytest.raises(DecisionError, match="bad question") as e:
+            _decide(create_decision(_run_config(), "glide"))
+        assert e.value.status == 400 and len(wire["requests"]) == 1
+
+    def test_a_problem_with_status_200_raises(self, wire):
+        wire["reply"] = [lambda b: _envelope(b, problem="model not loaded")]
+        with pytest.raises(DecisionError, match="model not loaded"):
+            _decide(create_decision(_run_config(), "glide"))
+
+    def test_a_missing_answer_in_the_envelope_names_base_url(self, wire):
+        wire["reply"] = [
+            httpx.Response(200, json={"status": 200, "problem": None, "response": {"answers": {}}})
+        ]
+        with pytest.raises(DecisionError, match="base_url"):
+            _decide(create_decision(_run_config(), "glide"))
+
+    def test_assets_are_refused_before_sending(self, wire):
+        with pytest.raises(DecisionError, match="assets"):
+            _decide(create_decision(_run_config(), "glide"), assets={"img": {"url": "data:,"}})
+        assert wire["requests"] == []
+
+    def test_base_url_is_required(self):
+        with pytest.raises(ValueError, match="base_url"):
+            DecisionConfig(api_type="run", model="glide-2b-v2")
+
+
+class TestPath:
+    def test_a_system_one_body_at_another_url_needs_no_key(self, wire):
+        cfg = _config(
+            api_type="typesafe",
+            api_key=None,
+            model="sl-4b",
+            base_url="http://10.0.0.7/v1",
+            path="/decisions",
+        )
+        _decide(create_decision(cfg, "sl"))
+        req = wire["requests"][0]
+        assert req["url"] == "http://10.0.0.7/v1/decisions"
+        assert req["body"] == {
+            "model": "sl-4b",
+            "state": "I want my money back!",
+            "questions": QUESTIONS,
+        }
+        assert "authorization" not in req["headers"]
+
+    def test_the_default_path_is_systemone(self):
+        assert _config().url == "https://openrouter.ai/api/v1/systemone"
+        assert _config(base_url="https://openrouter.ai/api/v1/", path="decisions").url == (
+            "https://openrouter.ai/api/v1/decisions"
+        )
+
+    def test_typesafes_own_host_still_needs_a_key(self):
+        with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
+            create_decision(_config(api_type="typesafe", api_key=None, model="jev-1.14.0"))
+
+
+RUN_RESOURCES = """
+decision:glide:
+  api_type: run
+  base_url: https://jev.internal/api/run
+  model: glide-2b-v2
+"""
+
+
+def test_a_run_resource_in_a_graph(wire, tmp_path):
+    path = tmp_path / "resources.yaml"
+    path.write_text(RUN_RESOURCES)
+    saved = ResourceHub._instance
+    ResourceHub.set_instance(ResourceHub.from_yaml(path))
+    try:
+
+        @graph
+        def ask(message):
+            d = DecisionOp.of(resource="glide", state=message, questions=QUESTIONS)
+            START >> d >> END
+
+        wire["reply"] = [_envelope]
+        out = asyncio.run(Operon(ask, params={"message": None}).run({"message": "refund now"}))
+    finally:
+        ResourceHub._instance = saved
+    assert out["answers"]["refund"]["noul"] == 0.9 and out["model_used"] == "glide-2b-v2"
+    assert wire["requests"][0]["body"]["request"]["state"] == "refund now"
