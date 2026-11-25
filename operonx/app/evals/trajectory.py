@@ -248,6 +248,7 @@ def op_output(op: str, check: Any, *, at: str = "last", name: Optional[str] = No
         return {**verdict_of(result), "op": found.op_id}
 
     op_output_check.eval_name = name or f"op_output({op}:{_name(check)})"
+    op_output_check.needs_expected = inner.needs_expected
     return op_output_check
 
 

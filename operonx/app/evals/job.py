@@ -30,7 +30,7 @@ from ..jobs.record import (
     runs_of,
 )
 from .dataset import Dataset, dataset_path
-from .evaluators import _name, judge_all, prepare
+from .evaluators import _name, checkable, judge_all, prepare
 from .experiments import git_ref
 from .fingerprint import case_hash, dataset_version, evaluators_version, fingerprint
 from .gate import (
@@ -211,6 +211,7 @@ class Eval(Job):
         self._experiment: Optional[Experiment] = None
         self._rows: Dict[str, Dict[str, Any]] = {}
         self._verdicts: List[Dict[str, Any]] = []
+        self._unchecked: List[str] = []  # no expected, no check left: not trials
         self._fingerprint: Optional[Dict[str, Any]] = None
         self._code: Optional["Future[Dict[str, Any]]"] = None
         self._baseline: Optional[Tuple[str, Dict[str, CaseOutcome], Optional[Dict]]] = None
@@ -285,6 +286,7 @@ class Eval(Job):
         cases instead of sinking one. The fingerprint and the baseline are
         fixed here, before any case runs (git answers while they run)."""
         self._verdicts, self._complete, self._baseline = [], False, None
+        self._unchecked = []
         rows = await asyncio.to_thread(self.dataset.rows)
         self._rows = {row["id"]: row for row in rows}
         if self._from_git is not None:
@@ -360,6 +362,11 @@ class Eval(Job):
         if result.status not in (ITEM_OK, ITEM_EMPTY):
             verdict = {"passed": False, "error": result.error or result.status, "checks": {}}
         else:
+            prepared = checkable(self._prepared, row.get("expected"))
+            if self._prepared and not prepared:  # not a trial; the summary's warnings name it
+                if case not in self._unchecked:
+                    self._unchecked.append(case)
+                return
             avail = {
                 "input": row.get("input"),
                 "output": output,
@@ -377,7 +384,7 @@ class Eval(Job):
                 avail["judging"] = self._judging.for_case(
                     key=result.key, case=case, judged_trace=result.trace_id
                 )
-            checks = await judge_all(self._prepared, avail)
+            checks = await judge_all(prepared, avail)
             self._count_judges(checks)
             verdict = case_verdict(checks)
         result.verdict = recorded_verdict(
@@ -518,12 +525,15 @@ class Eval(Job):
         the gate decides (see :mod:`operonx.app.evals.gate`).
         """
         vs, self._verdicts = self._verdicts, []
+        unchecked, self._unchecked = self._unchecked, []
         nums, cases, metrics = numbers(vs, self.repeats)
         summary: Dict[str, Any] = {
             "dataset": str(self.dataset.path),
             "threshold": self.threshold,
             **nums,
         }
+        if unchecked:
+            summary["unchecked"] = unchecked
         if self.variant:
             summary["variant"] = self.variant
         if self.dataset.selection:
@@ -551,6 +561,11 @@ class Eval(Job):
             fingerprint=fp,
             baseline_ref=self._from_git[3] if self._from_git is not None else None,
         )
+        if unchecked:  # not a failure: a row added without its answer yet
+            shown = ", ".join(unchecked[:10]) + (" …" if len(unchecked) > 10 else "")
+            summary["gate"]["warnings"] = list(summary["gate"].get("warnings") or []) + [
+                f"{len(unchecked)} case(s) have no expected value, so nothing checked them: {shown}"
+            ]
         if self._judges:
             summary["judges"], warned = self._judge_report(fp)
             if warned:  # loud, but not a verdict: an unvalidated judge can still gate (T4)
