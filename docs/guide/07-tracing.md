@@ -119,13 +119,26 @@ The most specific setting wins:
 |---|---|---|
 | 1 | `[tracing.services.<name>]` / `[tracing.jobs.<name>]` | the operator, for one service or job |
 | 2 | `Service(trace=...)` / `Job(trace=...)`, or `trace =` on a (deprecated) `[[serve]]` block | the code, for one service or job |
-| 3 | `[tracing] sinks` | the operator, for the project |
+| 3 | `OPERONX_TRACE`, else `[tracing] sinks` | the machine (`.env` or the shell), else the operator, for the project |
 | 4 | `Application(trace=...)` (or `[project] trace`) | the code, for the project |
 | 5 | the built-in default | a job records locally; a service is not traced |
 
 An explicit `sinks = []` (or `trace=[]`) means "not traced" at its level;
 it does not fall through. A steps job's entry, `[tracing.jobs.<name>]`,
 reaches each of its steps; a step can still be named on its own.
+
+`OPERONX_TRACE` is one machine's override of the project's sinks, the way
+`${VAR:default}` overrides a resource: `local`, `run_store:default`, a
+comma list (`local,run_store:default`) or `none` (trace nothing); unset or
+empty, the file decides. It sits at level 3, so a per-name entry —
+`[tracing.services.dashboard] sinks = []` — still holds. Set it in `.env`
+or the shell; a test suite sets `OPERONX_TRACE=local` to keep its runs in
+its own folder.
+
+The file's `[tracing]` holds however the application starts: an
+`Application(...)` declared in Python reads the `operonx.toml` at its root
+when it is built, so importing `app.main:APP` in a test or script traces
+where `operonx serve` and `Application.load` do.
 
 `[project] trace` and `[tracing] sinks` cannot both be set: they sit at
 different levels (`Application(trace=...)` beats the first and loses to

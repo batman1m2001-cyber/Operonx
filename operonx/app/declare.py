@@ -38,6 +38,7 @@ from operonx.core.loggings import LOGGER
 
 from .doors import body_contract
 from .manifest import (
+    MANIFEST_FILENAME,
     SESSION_MODES,
     STREAM_KINDS,
     ManifestError,
@@ -476,6 +477,16 @@ def manifest_from(
     if trace is not None:
         project["trace"] = list(trace)
         specs = with_default_trace(specs, project["trace"])
+    # The project's `[tracing]` is the file's, however the application is
+    # started: declared here, `Application.load`, or `operonx serve` — so a
+    # run traces to one place, not to whichever way it came in.
+    tracing = _file_tracing(root)
+    if tracing is not None:
+        from .tracing import check_names, settle_serves
+
+        where = str(root / MANIFEST_FILENAME)
+        check_names(tracing, where, specs, _job_names(jobs))
+        specs = settle_serves(specs, project.get("trace"), tracing)
     return Manifest(
         project=project,
         serves=specs,
@@ -487,7 +498,24 @@ def manifest_from(
         middleware=tuple(middleware),
         src=tuple(src),
         base=root,
+        tracing=tracing,
     )
+
+
+def _file_tracing(root: Path) -> Any:
+    """The ``[tracing]`` of the ``operonx.toml`` at *root*, or ``None``
+    when there is no file or it has no such table."""
+    from .manifest import _toml
+    from .tracing import parse_tracing
+
+    path = root / MANIFEST_FILENAME
+    if not path.is_file():
+        return None
+    try:
+        raw = _toml.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise ManifestError(f"{path}: not valid TOML — {exc}") from exc
+    return parse_tracing(raw.get("tracing"), str(path))
 
 
 def _doors_of(s: ServeSpec) -> Optional[bool]:

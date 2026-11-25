@@ -197,14 +197,22 @@ def _resources(path: Path) -> Dict[str, Any]:
     return flatten_resources(yaml.safe_load(path.read_text(encoding="utf-8")) or {})
 
 
-def _sinks_in_use(raw: Dict[str, Any], where: str) -> List[Tuple[str, str]]:
-    """``(sink, level)`` for every sink the file has a run go to."""
-    from operonx.app.tracing import parse_tracing
+def _sinks_in_use(
+    raw: Dict[str, Any], where: str, env: Optional[Mapping[str, str]] = None
+) -> List[Tuple[str, str]]:
+    """``(sink, level)`` for every sink the file has a run go to —
+    ``OPERONX_TRACE``, when set, in place of ``[tracing] sinks``."""
+    from operonx.app.tracing import ENV, Tracing, env_sinks, parse_tracing
 
     tracing = parse_tracing(raw.get("tracing"), where)
-    if tracing is None:
+    override = env_sinks(env or {})
+    if tracing is None and override is None:
         return []
-    out: List[Tuple[str, str]] = [(s, "[tracing]") for s in tracing.sinks or ()]
+    tracing = tracing or Tracing()
+    if override is not None:
+        out: List[Tuple[str, str]] = [(s, ENV) for s in override]
+    else:
+        out = [(s, "[tracing]") for s in tracing.sinks or ()]
     for kind, table in (("services", tracing.services), ("jobs", tracing.jobs)):
         for name, sinks in table.items():
             out.extend((s, f"[tracing.{kind}.{name}]") for s in sinks)
@@ -353,12 +361,13 @@ def project_stores(root: Any, env: Optional[Mapping[str, str]] = None) -> List[S
 
     ``env`` is the environment to resolve ``${VAR}`` in (default: this
     process's); the project's ``.env`` fills in what it lacks. An empty
-    list when there is no manifest or no ``[tracing]`` table. A malformed
+    list when there is no manifest, or neither a ``[tracing]`` table nor an
+    ``OPERONX_TRACE`` (which stands for ``[tracing] sinks``). A malformed
     ``[tracing]`` raises :class:`~operonx.app.manifest.ManifestError`."""
     raw, resolver = project_files(root, env)
-    if raw is None or raw.get("tracing") is None:
+    if raw is None:
         return []
-    used = _sinks_in_use(raw, str(resolver.root / "operonx.toml"))
+    used = _sinks_in_use(raw, str(resolver.root / "operonx.toml"), resolver.env)
     if not used:
         return []
     levels: Dict[str, List[str]] = {}

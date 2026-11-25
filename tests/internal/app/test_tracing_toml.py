@@ -12,7 +12,11 @@ The gates:
   ``resources.yaml`` fails when the app starts, not as a run with no trace;
 * every sink of one run receives the same trace id, including one a caller
   passed as ``?trace_id=``;
-* ``--list`` and ``describe()`` show the sinks each service and job will use.
+* ``--list`` and ``describe()`` show the sinks each service and job will use;
+* a Python application reads its file's ``[tracing]`` when imported, so
+  every way in traces to the same place;
+* ``OPERONX_TRACE`` (``.env`` or the shell) stands where ``[tracing] sinks``
+  does: a machine's override of the project's sinks.
 """
 
 from __future__ import annotations
@@ -279,6 +283,73 @@ def test_tracing_reaches_the_services_and_jobs_that_declare_nothing(
     assert app.service("call").options["trace"] == S  # its own
     assert app.service("plain").options["trace"] == ["local"]  # [tracing] beats the app's
     assert app.job("backfill").trace == ["local"]
+
+
+def test_a_python_application_traces_where_its_file_says_before_any_load(
+    tmp_path, monkeypatch, unimport
+):
+    """Imported, not loaded: the object still reads its project's
+    `[tracing]`, so a test or script that imports `app.main:APP` traces
+    where `operonx serve` would."""
+    import importlib
+
+    name = _project(tmp_path, monkeypatch, tracing=_tracing(OV, T))
+    app = importlib.import_module(name).APP
+    assert app.manifest.tracing.sinks == tuple(T)
+    assert app.service("plain").options["trace"] == T
+    assert app.service("call").options["trace"] == OV
+    assert app.job("backfill").trace == OV
+    (member,) = app.job("nightly").steps
+    assert member.trace == T
+    assert Application.find(tmp_path) is app  # the same answer once loaded
+    assert app.service("plain").options["trace"] == T
+
+
+def test_operonx_trace_stands_where_tracing_sinks_does(tmp_path, monkeypatch, unimport):
+    """The machine's override of the project's sinks: it beats `[tracing]
+    sinks` and the application's, not a per-name entry or a thing's own."""
+    monkeypatch.setenv("OPERONX_TRACE", "local, trace_t:e")
+    _project(tmp_path, monkeypatch, tracing=_tracing(OV, T), svc=S, app=A)
+    app = Application.find(tmp_path)
+    assert app.service("plain").options["trace"] == ["local", "trace_t:e"]
+    assert app.service("call").options["trace"] == OV
+    d = {s["name"]: s for s in app.describe()["services"]}
+    assert d["plain"]["sinks_from"] == "OPERONX_TRACE"
+    (member,) = app.job("nightly").steps
+    assert member.trace == ["local", "trace_t:e"]
+    assert app.job("backfill").trace == OV
+
+
+@pytest.mark.parametrize(
+    "value,want", [("none", []), ("", ["trace_t:t"]), ("  ", ["trace_t:t"]), ("local", ["local"])]
+)
+def test_operonx_trace_none_traces_nothing_and_empty_is_unset(
+    tmp_path, monkeypatch, unimport, value, want
+):
+    monkeypatch.setenv("OPERONX_TRACE", value)
+    _project(tmp_path, monkeypatch, tracing=_tracing(None, T))
+    app = Application.find(tmp_path)
+    assert app.service("plain").options["trace"] == want
+    assert app.job("backfill").trace == want
+
+
+def test_a_bad_operonx_trace_fails_naming_the_variable(tmp_path, monkeypatch, unimport):
+    monkeypatch.setenv("OPERONX_TRACE", "clickhouse")
+    _project(tmp_path, monkeypatch, tracing=_tracing(None, T))
+    with pytest.raises(ManifestError, match=r"OPERONX_TRACE: 'clickhouse' is neither"):
+        Application.find(tmp_path)
+
+
+def test_operonx_trace_set_before_the_start_reaches_the_services(tmp_path, monkeypatch, unimport):
+    """`.env` is loaded by `bootstrap()`, after the manifest was built: the
+    services settle again then, so the value counts for them too."""
+    _project(tmp_path, monkeypatch, tracing=_tracing(None, T))
+    app = Application.find(tmp_path)
+    assert app.service("plain").options["trace"] == T
+    monkeypatch.setenv("OPERONX_TRACE", "local")
+    app.bootstrap()
+    assert app.service("plain").options["trace"] == ["local"]
+    assert app.job("backfill").trace != T  # jobs settle as they are read
 
 
 def test_a_steps_override_reaches_its_steps(tmp_path, monkeypatch, unimport):

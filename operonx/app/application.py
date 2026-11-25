@@ -41,7 +41,7 @@ from .declare import (
 )
 from .manifest import Manifest, ManifestError, ServeSpec
 from .origin import stamp_process
-from .tracing import check_sinks
+from .tracing import check_sinks, resettle
 
 __all__ = ["Application", "GraphRef"]
 
@@ -152,7 +152,8 @@ class Application:
 
             operonx.bootstrap(resources=self.root / overlay)
         stamp_process(self.root, self.name)  # every run: project + code version
-        self._bootstrapped = True
+        # `.env` is loaded now: an OPERONX_TRACE written there counts
+        self.manifest, self._bootstrapped = resettle(self.manifest), True
 
     # -- the three lists ---------------------------------------------------
 
