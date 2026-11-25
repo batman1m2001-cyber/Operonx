@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.47.1] - 2026-11-25
+
+### Fixed
+- **A dataset row without `expected` no longer fails its eval.** A row added before its answer (studio **Add to eval**, `turn_to_case`) was compared with `None` by `exact` and failed on every run. Now the checks that compare with `expected` skip it: `exact`, `fuzzy`, `json_match`, `contains()` with no needles, and `op_output` around one of them. Other checks still judge the row. A row with no check left is not a trial: it is neither passed nor failed. The summary lists it under `unchecked`, and a gate warning names it. `rescore` follows the same rule (#326).
+
 ## [1.47.0] - 2026-11-24
 
 LEAN_PRODUCT_PLAN P2 (docs/LEAN_PRODUCT_PLAN.md, docs/lean_product_plan/P2.md). operonx standardises what an AI product looks like and helps improve it. How code gets written (the board, git, terminals, hooks) is left to the coding assistant and the team.
