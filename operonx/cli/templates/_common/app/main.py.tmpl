@@ -1,4 +1,4 @@
-"""{{name}}: every job{{#http}} and service{{/http}} of the project, declared once.
+"""{{name}}: every job{{#http}} and service{{/http}} of the project, collected from app/{{feature}}.py.
 
 `operonx run {{job}}` runs the job{{#http}}; `operonx serve` serves POST {{route_path}}{{#web}}
 and the pages in web/{{/web}}{{/http}}.
@@ -15,7 +15,7 @@ from _shared.config import PORT, ROOT
 from operonx.app import Application
 
 {{/web}}
-from {{feature}} import JOBS{{#http}}, SERVICES{{/http}}
+from app.{{feature}} import JOBS{{#http}}, SERVICES{{/http}}
 {{#web}}
 
 # web/index.html at /, beside the routes on the same port

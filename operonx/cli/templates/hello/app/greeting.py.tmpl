@@ -1,0 +1,33 @@
+"""How the greeting feature is exposed: its job{{#http}} and its route{{/http}}.
+
+The logic is src/greeting.py; this file only says who runs it."""
+
+{{#http}}
+from operonx.app import Service, http
+{{/http}}
+from operonx.app.jobs import Job
+
+from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}
+from greeting import greet_flow
+
+JOBS = [
+    Job(
+        "greet_people",
+        graph=greet_flow,
+        items=DATA / "people.jsonl",  # one graph run per line
+        key="id",  # resumable: `operonx run greet_people --resume` skips done ids
+        output=OUT / "greetings.jsonl",
+        description="A greeting for every person in data/people.jsonl.",
+    ),
+]
+{{#http}}
+
+SERVICES = [
+    Service(
+        "greet",
+        http("POST", "/api/greet", port=PORT),
+        graph=greet_flow,  # the JSON body fills its parameters
+        description="POST {id, full_name}, get {id, greeting}.",
+    ),
+]
+{{/http}}

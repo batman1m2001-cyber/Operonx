@@ -1,18 +1,13 @@
-"""The chat feature in one file: its logic (ops), its wiring (a graph),
-its job{{#http}} and its route{{/http}}.
+"""The chat feature: its logic (ops) and its wiring (a graph).
 
-Split it into a src/chat/ folder only when it passes ~300 lines
-(AGENTS.md says how)."""
+app/chat.py says who runs it (a job{{#http}}, a route{{/http}}). Split this file into a
+src/chat/ folder only when it passes ~300 lines (AGENTS.md says how)."""
 
 from operonx import END, START, graph, op
-{{#http}}
-from operonx.app import Service, http
-{{/http}}
-from operonx.app.jobs import Job
 from operonx.prompts import prompt
 from operonx.providers.ops import LLMOp
 
-from _shared.config import DATA, OUT{{#http}}, PORT{{/http}}, ROOT
+from _shared.config import ROOT
 
 # the text is prompts/chat/system.md; `operonx prompt publish chat/system` keeps its versions
 SYSTEM = prompt("chat/system", root=ROOT)
@@ -43,26 +38,3 @@ def chat_flow(question):  # a job item or a request body fills it; the reply is 
     )
     r = reply(content=llm["content"], error=llm["error"])
     START >> q >> llm >> r >> END
-
-
-JOBS = [
-    Job(
-        "answer_questions",
-        graph=chat_flow,
-        items=DATA / "questions.jsonl",  # one graph run per line
-        key="question",  # resumable: `--resume` skips the questions already answered
-        output=OUT / "answers.jsonl",
-        description="An answer to every question in data/questions.jsonl.",
-    ),
-]
-{{#http}}
-
-SERVICES = [
-    Service(
-        "chat",
-        http("POST", "/api/chat", port=PORT),
-        graph=chat_flow,  # the JSON body fills its parameters
-        description="POST {question}, get {answer, error}.",
-    ),
-]
-{{/http}}

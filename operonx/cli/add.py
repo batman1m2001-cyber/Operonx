@@ -6,11 +6,14 @@
     operonx add page NAME [--data /path]
 
 ``route``, ``job`` and ``llm`` write an op and the graph that wires it into
-the feature's file, ``src/F.py`` (created when missing), above its lists.
-``route`` also adds a ``Service`` to its ``SERVICES``, and ``job`` a ``Job``
-to its ``JOBS``. A feature split into a ``src/F/`` folder gets them in
-``ops.py``, ``graph.py``, ``routes.py`` and ``jobs.py``. The feature's list
-is wired into ``APP``, ahead of a mount at ``/``. With ``--llm`` a model call on ``llm:assistant`` comes before the op,
+the feature's file, ``src/F.py`` (created when missing); a feature split into
+a ``src/F/`` folder gets them in ``ops.py`` and ``graph.py``. ``route`` also
+adds a ``Service`` to the feature's ``SERVICES``, and ``job`` a ``Job`` to its
+``JOBS``, in ``app/F.py`` (``src/`` computes, ``app/`` exposes:
+APP_LAYOUT_PLAN), or in ``routes.py`` / ``jobs.py`` of an ``app/F/`` folder.
+A list is grown where it already is, so an older project's ``SERVICES`` in
+``src/F.py`` stays there. The feature's list is wired into ``APP``, ahead of
+a mount at ``/``. With ``--llm`` a model call on ``llm:assistant`` comes before the op,
 and the op gets its ``answer``. ``llm`` is that model call on its own, as a
 graph to run from a job, a route or ``invoke``. Whatever calls a model turns
 the resource on: ``resources.yaml``, the ``.env.example`` names, and the
@@ -264,21 +267,43 @@ def _toolchain(root: Path) -> str:
 
 
 def _feature_files(root: Path, feature: str) -> Dict[str, Path]:
-    """Where each part of a feature lives: all of it in ``src/F.py`` (COST_PLAN
-    K4), or, once the project split it into a ``src/F/`` folder, its
-    ``ops.py``, ``graph.py``, ``routes.py`` and ``jobs.py``."""
+    """Where each part of a feature lives. Its ops and graphs: ``src/F.py``
+    (COST_PLAN K4), or ``ops.py`` and ``graph.py`` once the project split it
+    into a ``src/F/`` folder. Its routes and jobs: :func:`_list_home`."""
+    if feature == "main":
+        raise AddError("a feature cannot be named main: app/main.py is the application")
     pkg = root / "src" / feature
-    if not pkg.is_dir():
-        return dict.fromkeys(("ops", "graph", "routes", "jobs"), pkg.with_suffix(".py"))
-    return {
-        "init": pkg / "__init__.py",
-        **{p: pkg / f"{p}.py" for p in ("ops", "graph", "routes", "jobs")},
-    }
+    files = (
+        {"init": pkg / "__init__.py", "ops": pkg / "ops.py", "graph": pkg / "graph.py"}
+        if pkg.is_dir()
+        else dict.fromkeys(("ops", "graph"), pkg.with_suffix(".py"))
+    )
+    files["routes"] = _list_home(root, feature, "routes", "SERVICES")
+    files["jobs"] = _list_home(root, feature, "jobs", "JOBS")
+    return files
+
+
+def _list_home(root: Path, feature: str, part: str, list_name: str) -> Path:
+    """The file that holds the feature's *list_name*, where it already is:
+    ``app/F.py`` (or ``app/F/<part>.py`` of a folder), or, in a project older
+    than APP_LAYOUT_PLAN, ``src/F.py`` (or ``src/F/<part>.py``). A new list
+    goes in the ``app/`` one. Code it did not write is never moved."""
+    app, src = root / "app" / feature, root / "src" / feature
+    homes = [
+        app / f"{part}.py" if app.is_dir() else app.with_suffix(".py"),
+        src / f"{part}.py" if src.is_dir() else src.with_suffix(".py"),
+    ]
+    for path in homes:
+        if path.is_file() and _list_value(ast.parse(path.read_text()), list_name) is not None:
+            return path
+    return homes[0]
 
 
 def _module_of(root: Path, path: Path) -> str:
-    """``src/billing.py`` → ``billing``; ``src/billing/routes.py`` → ``billing.routes``."""
-    return ".".join(path.relative_to(root / "src").with_suffix("").parts)
+    """``src/billing.py`` → ``billing``; ``src/billing/graph.py`` → ``billing.graph``;
+    ``app/billing.py`` → ``app.billing`` (``src`` and the root are both on the path)."""
+    base = root / "src" if path.is_relative_to(root / "src") else root
+    return ".".join(path.relative_to(base).with_suffix("").parts)
 
 
 def _wire(root: Path, feature: str, kind: str, wrote: Dict[Path, str]) -> None:
@@ -468,7 +493,7 @@ def _start(root: Path, feature: str, files: Dict[str, Path], wrote: Dict[Path, s
     """A new feature's first file: ``src/F.py``, or a folder's ``__init__.py``."""
     first = files.get("init", files["ops"])
     if not first.is_file():
-        what = "in one file: its ops, the graphs that wire them, its jobs and routes"
+        what = "in one file: its ops, then the graphs that wire them"
         doc = f"The {feature} feature." if "init" in files else f"The {feature} feature {what}."
         _write(first, f'"""{doc}"""\n', wrote)
 
@@ -493,6 +518,11 @@ def _add_llm_graph(
     src = _add_imports(src, [("operonx", "END"), ("operonx", "START"), ("operonx", "graph"),
                              ("operonx.providers.ops", "LLMOp")])  # fmt: skip
     _write(files["graph"], _above_lists(src, "\n".join(lines) + "\n"), wrote)
+
+
+def _exposed(feature: str) -> str:
+    """The docstring of a new ``app/F.py``."""
+    return f"How the {feature} feature is exposed: its routes and jobs. The logic is src/{feature}."
 
 
 def _add_to_list(root: Path, feature: str, part: str, list_name: str, doc: str, imports, item: str,
@@ -530,7 +560,7 @@ def add_route(root, name, method, path, inputs, llm, feature) -> Dict[Path, str]
         f'Service(\n    "{name}",\n    http("{method}", "{path}", port=PORT),\n    graph={flow},\n'
         f'    description="TODO {name}: what a caller sends and gets back.",\n)'
     )
-    _add_to_list(root, feature, "routes", "SERVICES", f"The {feature} feature's routes: its graphs behind HTTP.",
+    _add_to_list(root, feature, "routes", "SERVICES", _exposed(feature),
                  [("operonx.app", "Service"), ("operonx.app", "http"), ("_shared.config", "PORT"),
                   (_module_of(root, _feature_files(root, feature)["graph"]), flow)], item, wrote)  # fmt: skip
     _wire(root, feature, "routes", wrote)
@@ -565,7 +595,7 @@ def add_job(root, name, inputs, llm, feature, every=None, at=None) -> Dict[Path,
         f'Job(\n    "{name}",\n    graph={flow},\n    {items}{clock}'
         f'    description="TODO {name}: what one run does.",\n)'
     )
-    _add_to_list(root, feature, "jobs", "JOBS", f"The {feature} feature's jobs: its graphs, run per item.",
+    _add_to_list(root, feature, "jobs", "JOBS", _exposed(feature),
                  imports, item, wrote)  # fmt: skip
     _wire(root, feature, "jobs", wrote)
     return wrote

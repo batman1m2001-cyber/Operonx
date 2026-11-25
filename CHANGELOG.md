@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`OPERONX_TRACE` sets the project's sinks from `.env` or the shell.** It takes `local`, a resource key such as `run_store:default`, a comma list, or `none`. It stands where `[tracing] sinks` does: it beats that and `Application(trace=...)`, while a `[tracing.services.<name>]` / `[tracing.jobs.<name>]` entry or a service's or job's own `trace=` still wins. Unset or empty, the file decides. `describe()` and `--list` show `sinks_from: OPERONX_TRACE`. Services settle again in `bootstrap()`, after `.env` is loaded, so a value written there counts.
 - **`project_stores()` reads `OPERONX_TRACE` too** (the process env, then the project's `.env`), in place of `[tracing] sinks`, so the studio reads the store the runs are written to.
 
+### Changed
+- **`src/` computes, `app/` exposes (APP_LAYOUT_PLAN).** `operonx init` writes a feature's ops and graph in `src/<feature>.py` and its `JOBS` and `SERVICES` in `app/<feature>.py`. `app/main.py` collects them (`from app.<feature> import JOBS, SERVICES`). The guide (05-project-layout.md), AGENTS.md and README say the same, and a split `src/<feature>/` no longer has `jobs.py` or `routes.py`. Nothing changes at runtime: `Application` takes the lists from wherever `app/main.py` imports them.
+- **`operonx add route|job` puts the `Service`/`Job` in `app/F.py`.** The op and graph still go to `src/F.py` (or `ops.py`/`graph.py` of a split `src/F/`). A list is grown where it already is, so a project that keeps `SERVICES` in `src/F.py` keeps it there and gets no second list. A feature named `main` is refused, since `app/main.py` is the application.
+
 ## [1.48.0] - 2026-11-25
 
 ### Added

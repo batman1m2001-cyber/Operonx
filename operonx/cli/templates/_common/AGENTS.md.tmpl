@@ -24,15 +24,18 @@ read it first.
 ## Layout
 
 - `src/<feature>.py`: one file per feature, in this order: its ops (the
-  logic), the graphs that wire them (wiring only: no logic, no I/O, no Python
-  `if`), `JOBS`{{#http}}, `SERVICES`{{/http}}. Past ~300 lines, split it into a folder
-  `src/<feature>/`: `ops.py`, `graph.py`, `jobs.py`{{#http}}, `routes.py`{{/http}}, and an
-  `__init__.py` that re-exports `JOBS`{{#http}} and `SERVICES`{{/http}}, so `app/main.py` keeps
-  its import; `operonx add` writes into either shape. Guide:
+  logic), then the graphs that wire them (wiring only: no logic, no I/O, no
+  Python `if`). Past ~300 lines, split it into a folder `src/<feature>/`:
+  `ops.py`, `graph.py`, and an `__init__.py` that re-exports the graphs, so no
+  import changes; `operonx add` writes into either shape. Guide:
   `05-project-layout.md` (the rules, a worked project). Shared code is `src/_shared/`; `src/_shared/config.py`
   is the only file that reads the environment (`ROOT`, `DATA`, `OUT`{{#http}}, `PORT`{{/http}});
   a new setting is one more line there: `LIMIT = env("LIMIT", 10)`.
-- `app/main.py`: `APP = Application(...)` lists every job{{#http}} and service{{/http}}.
+- `app/<feature>.py`: the feature's `JOBS`{{#http}}, `SERVICES` and their request bodies{{/http}}.
+  Nothing in `src/` declares a `Service` or a `Job`: `src/` computes, `app/`
+  exposes.
+- `app/main.py`: `APP = Application(...)` collects every job{{#http}} and service{{/http}} from
+  `app/<feature>.py`{{#web}}, plus the `web/` mount{{/web}}.
 - Models and stores by key in `resources.yaml`; secrets in `.env` as
   `${VAR}`, every name also in `.env.example`. Never build a client in code.
 - `data/` is kept, `out/` is throwaway. Tests: `tests/<feature>/`.{{#web}}
@@ -98,7 +101,7 @@ A flaky op: `@op(retry=Retry(max_attempts=3))`. A whole project: `[retry]` in
 `operonx.toml`. Guide: `06-failures.md` (also timeouts and error edges).
 
 **A job**: `Job("name", graph=g, items=DATA / "x.jsonl", key="id",
-output=OUT / "x.jsonl")`. `items` can also be a list or a function that yields
+output=OUT / "x.jsonl")` in the feature's `JOBS` in `app/<feature>.py`. `items` can also be a list or a function that yields
 dicts. `operonx run name --resume` skips done ids. Add
 `schedule=schedule(at="07:00"{{#http}}, port=PORT{{/http}})` (or `every="5m"`) to run it on a clock
 inside `operonx serve`{{#http}} (`port=PORT`: on the routes' server; without it the
@@ -106,7 +109,7 @@ clock is a listener of its own on 8000){{/http}}. Guide: `02-composition.md` § 
 {{#http}}
 
 **A route**: `Service("name", http("POST", "/path", port=PORT), graph=g)` in
-the feature's `SERVICES`. The JSON body fills the graph's parameters by name, and so does
+the feature's `SERVICES` in `app/<feature>.py`. The JSON body fills the graph's parameters by name, and so does
 the path: `http("GET", "/tickets/{id}")` passes `id`. An unknown field is
 answered `400 {"field": ...}`. The reply is the graph's answer with `200`,
 unless an op outputs `"$status"` (the key is not sent):

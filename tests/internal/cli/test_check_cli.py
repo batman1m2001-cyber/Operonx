@@ -50,7 +50,7 @@ def _main_py(root: Path, services: str, extra: str = "") -> None:
         "from operonx.app import Application, Service, asgi\n"
         "from starlette.staticfiles import StaticFiles\n\n"
         "from _shared.config import PORT, ROOT\n"
-        "from greeting import JOBS, SERVICES\n"
+        "from app.greeting import JOBS, SERVICES\n"
         f"{extra}\n"
         'WEB = Service("web", asgi("/", port=PORT), '
         'app=StaticFiles(directory=ROOT / "web", html=True))\n\n'
@@ -132,9 +132,12 @@ def test_a_get_route_reaches_a_fake_model_not_the_real_one(tmp_path):
     not call the real one (no key here, an address nothing listens on)."""
     root = tmp_path / "q"
     assert main(["init", str(root), "-t", "chat", "--http"]) == 0
+    exposed = root / "app" / "chat.py"
+    exposed.write_text(
+        exposed.read_text().replace('http("POST", "/api/chat"', 'http("GET", "/api/chat"')
+    )
     src = root / "src" / "chat.py"
     text = src.read_text()
-    text = text.replace('http("POST", "/api/chat"', 'http("GET", "/api/chat"')
     text = text.replace("def chat_flow(question):", 'def chat_flow(question="hi"):')
     text = text.replace(
         'return {"answer": None, "error": error or "the model gave no answer"}',
