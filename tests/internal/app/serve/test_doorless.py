@@ -305,6 +305,46 @@ def test_input_hands_the_whole_body_to_one_parameter():
     assert SEEN == [body]
 
 
+@op
+def edit_ticket(tid: str, patch: dict) -> dict:
+    SEEN.append((tid, patch))
+    return {"tid": tid, "keys": sorted(patch)}
+
+
+@graph
+def ticket_edit(tid, patch):
+    e = edit_ticket(tid=tid, patch=patch)
+    START >> e >> END
+
+
+def test_input_keeps_the_paths_parameters():
+    """``input=`` hands the body over whole; the path's parameters still fill
+    their own (they used to ride in the body, and the graph's ``tid`` was missing)."""
+    service = Service("edit", http("POST", "/tickets/{tid}", port=8913), graph=ticket_edit, input="patch")
+    with TestClient(_app(service)) as client:
+        ok = client.post("/tickets/t1", json={"title": "x", "tid": "the body's own"})
+        both = client.post("/tickets/t1?tid=t2", json={})
+    assert ok.status_code == 200 and ok.json() == {"tid": "t1", "keys": ["tid", "title"]}
+    assert both.status_code == 400 and both.json()["field"] == "tid"
+    assert SEEN == [("t1", {"title": "x", "tid": "the body's own"})]
+
+
+def test_a_refusal_is_one_log_line_not_a_traceback(caplog):
+    """A 4xx ``http_status`` is the caller's fault: one log line, no traceback;
+    an exception without one is still an error, with its traceback."""
+    service = Service("g", http("POST", "/g", port=8914), graph=guarded_flow)
+    from operonx.core.loggings import LOGGER
+
+    with caplog.at_level("INFO", logger=LOGGER.name), TestClient(_app(service)) as client:
+        client.post("/g", json={"question": "secret"})
+        refused = caplog.text
+        caplog.clear()
+        client.post("/g", json={"question": "odd"})
+        bug = caplog.text
+    assert "refused the request (403): only the owner reads this" in refused and "Traceback" not in refused
+    assert "Error in op" in bug and "Traceback" in bug
+
+
 def test_input_on_a_webhook_skips_the_field_check_before_the_202():
     service = Service("mail", webhook("/mail", port=8912), graph=on_mail, input="payload")
     with TestClient(_app(service)) as client:

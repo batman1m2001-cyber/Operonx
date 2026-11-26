@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`input=` keeps a path's parameters.** `http("POST", "/tickets/{id}")` with `input="patch"` merged `id` into the body and handed it all to `patch`, so the graph's `id` was refused as missing (`400`). The body now goes whole to `patch` and the path's parameters fill their own, beside the query's; a name in both the path and the query is refused `400`, as without `input=`.
+- **A refusal is one log line.** An op raising an exception with a 4xx `http_status` (a `404` for a ticket that is not there) is answered with that status and recorded as the caller's fault, but was logged as `Error in op` with its traceback. It is now one `INFO` line, `Op <name> refused the request (404): <message>`; any other exception still logs its traceback.
+
 ## [1.49.0] - 2026-11-25
 
 ### Fixed

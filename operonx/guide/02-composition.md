@@ -316,7 +316,9 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   (with its `$status`, if any).
 - `input="payload"` hands the whole body to that one parameter instead: for a
   payload someone else shapes (a mail server's webhook), whose fields the
-  graph does not declare.
+  graph does not declare. A path's parameters still fill their own
+  (`http("POST", "/tickets/{id}")` with `input="patch"` gives `id` and
+  `patch`); a name in both the path and the query is refused `400`.
 - With doors, the body is the one ingress item (an empty body is `None`)
   and the reply is the egress item(s).
 - `websocket(path, port=...)` needs `max_inflight=N` and a graph with

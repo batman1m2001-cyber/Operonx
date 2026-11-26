@@ -663,6 +663,23 @@ def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse)
     return None, JSONResponse(body, status_code=400)
 
 
+def _path_params_given(meta: Dict[str, Any], request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, Any]:
+    """With ``input=``, the body goes whole to that one parameter, so the
+    path's parameters cannot ride in it: they fill their own parameters
+    beside the query's (``POST /hotfix/{hid}`` with ``input="edit"`` gives
+    ``hid`` and ``edit``). A name in both the path and the query is refused."""
+    params = dict(request.path_params)
+    if not params:
+        return meta, None
+    query = dict(meta.get("query") or {})
+    both = sorted(set(query) & set(params))
+    if both:
+        body = {"endpoint": spec.name, "field": both[0],
+                "error": f"{both[0]!r} is in both the path and the query"}
+        return None, JSONResponse(body, status_code=400)
+    return {**meta, "query": {**query, **params}}, None
+
+
 def _reply_status(reply: Any) -> Tuple[Any, int]:
     """A reply carrying ``"$status": 404`` (an op's output) is answered with
     that code, without the key; any other reply is a ``200``. A reply
@@ -686,11 +703,16 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
         if stream and "run_id" in request.query_params:
             return _reconnect(spec, transport, request, JSONResponse)
         payload, refusal = await _read_body(request, spec, JSONResponse)
-        if refusal is None:
+        whole = spec.options.get("input") is not None  # the body is one parameter's, as it came
+        if refusal is None and not whole:
             payload, refusal = _with_path_params(payload, request, spec, JSONResponse)
         if refusal is not None:
             return refusal
         meta = _meta_from_request(request)
+        if whole:
+            meta, refusal = _path_params_given(meta, request, spec, JSONResponse)
+            if refusal is not None:
+                return refusal
         if stream:
             return await _stream_reply(spec, transport, payload, meta, JSONResponse)
 
