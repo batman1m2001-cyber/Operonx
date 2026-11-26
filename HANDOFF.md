@@ -1,6 +1,6 @@
 # Handoff — read this first
 
-Updated 25 Nov 2026 for **1.49.0**.
+Updated 26 Nov 2026 for **1.50.0**.
 
 ## State
 

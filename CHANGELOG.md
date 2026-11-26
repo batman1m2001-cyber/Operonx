@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.50.0] - 2026-11-26
+
 ### Added
 - **Replies that are not JSON.** An http door's op answers bytes (`"$body": b"..."`), text with its media type (`"$body": diff, "$type": "text/plain"`), or a file from its path (`"$file"`); `"$name"` makes it a download of that name and `"$headers"` adds headers — `{"$status": 303, "$headers": {"location": "/runs"}}` is a redirect. An xlsx export or a diff no longer needs an `asgi` app beside the Services.
 - **`codec="bytes"`** hands an http body over undecoded, for an upload: with `input="data"`, `data` is the bytes and the query fills the other parameters.
