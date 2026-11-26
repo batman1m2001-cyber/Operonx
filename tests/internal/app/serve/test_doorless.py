@@ -305,6 +305,107 @@ def test_input_hands_the_whole_body_to_one_parameter():
     assert SEEN == [body]
 
 
+@op
+def edit_ticket(tid: str, patch: dict) -> dict:
+    SEEN.append((tid, patch))
+    return {"tid": tid, "keys": sorted(patch)}
+
+
+@graph
+def ticket_edit(tid, patch):
+    e = edit_ticket(tid=tid, patch=patch)
+    START >> e >> END
+
+
+def test_input_keeps_the_paths_parameters():
+    """``input=`` hands the body over whole; the path's parameters still fill
+    their own (they used to ride in the body, and the graph's ``tid`` was missing)."""
+    service = Service("edit", http("POST", "/tickets/{tid}", port=8913), graph=ticket_edit, input="patch")
+    with TestClient(_app(service)) as client:
+        ok = client.post("/tickets/t1", json={"title": "x", "tid": "the body's own"})
+        both = client.post("/tickets/t1?tid=t2", json={})
+    assert ok.status_code == 200 and ok.json() == {"tid": "t1", "keys": ["tid", "title"]}
+    assert both.status_code == 400 and both.json()["field"] == "tid"
+    assert SEEN == [("t1", {"title": "x", "tid": "the body's own"})]
+
+
+def test_a_refusal_is_one_log_line_not_a_traceback(caplog):
+    """A 4xx ``http_status`` is the caller's fault: one log line, no traceback;
+    an exception without one is still an error, with its traceback."""
+    service = Service("g", http("POST", "/g", port=8914), graph=guarded_flow)
+    from operonx.core.loggings import LOGGER
+
+    with caplog.at_level("INFO", logger=LOGGER.name), TestClient(_app(service)) as client:
+        client.post("/g", json={"question": "secret"})
+        refused = caplog.text
+        caplog.clear()
+        client.post("/g", json={"question": "odd"})
+        bug = caplog.text
+    assert "refused the request (403): only the owner reads this" in refused and "Traceback" not in refused
+    assert "Error in op" in bug and "Traceback" in bug
+
+
+@op
+def download(kind: str) -> dict:
+    if kind == "file":
+        return {"$file": __file__, "$type": "text/x-python", "$name": "tests é.py"}
+    if kind == "bytes":
+        return {"$body": b"\x00\x01", "$name": "a.bin"}
+    if kind == "text":
+        return {"$body": "--- a\n+++ b\n", "$type": "text/plain"}
+    if kind == "moved":
+        return {"$status": 303, "$headers": {"location": "/elsewhere"}}
+    return {"$file": "/no/such/file"}
+
+
+@graph
+def downloads(kind):
+    d = download(kind=kind)
+    START >> d >> END
+
+
+def test_a_reply_can_be_a_file_bytes_text_or_a_redirect():
+    service = Service("dl", http("GET", "/dl/{kind}", port=8915), graph=downloads)
+    with TestClient(_app(service)) as client:
+        file = client.get("/dl/file")
+        data = client.get("/dl/bytes")
+        text = client.get("/dl/text")
+        moved = client.get("/dl/moved", follow_redirects=False)
+        gone = client.get("/dl/gone")
+    with open(__file__, "rb") as f:
+        assert file.status_code == 200 and file.content == f.read()
+    assert file.headers["content-type"].startswith("text/x-python")
+    assert "attachment" in file.headers["content-disposition"]
+    assert data.content == b"\x00\x01" and data.headers["content-type"] == "application/octet-stream"
+    assert data.headers["content-disposition"] == "attachment; filename*=utf-8''a.bin"
+    assert text.text == "--- a\n+++ b\n" and text.headers["content-type"].startswith("text/plain")
+    assert moved.status_code == 303 and moved.headers["location"] == "/elsewhere"
+    assert "x-operonx-trace-id" in moved.headers
+    assert gone.status_code == 500 and "is not a file" in gone.json()["error"]
+
+
+@op
+def save_upload(name: str, data: bytes) -> dict:
+    SEEN.append((name, data))
+    return {"name": name, "bytes": len(data)}
+
+
+@graph
+def upload(name, data):
+    s = save_upload(name=name, data=data)
+    START >> s >> END
+
+
+def test_a_bytes_door_hands_the_body_over_as_it_came():
+    service = Service(
+        "up", http("POST", "/up", port=8916, codec="bytes"), graph=upload, input="data"
+    )
+    with TestClient(_app(service)) as client:
+        ok = client.post("/up?name=a.png", content=b"\x89PNG\xff")
+    assert ok.status_code == 200 and ok.json() == {"name": "a.png", "bytes": 5}
+    assert SEEN == [("a.png", b"\x89PNG\xff")]
+
+
 def test_input_on_a_webhook_skips_the_field_check_before_the_202():
     service = Service("mail", webhook("/mail", port=8912), graph=on_mail, input="payload")
     with TestClient(_app(service)) as client:

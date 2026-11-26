@@ -1741,19 +1741,33 @@ class BaseOp(ABC):
 
             import sys
 
-            error_msg = (
-                traceback.format_exc()
-                if LOGGER.isEnabledFor(ERROR)
-                else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
-            )
-            LOGGER.error(
-                format_event(
-                    "op_error",
-                    request_id=state.request_id or "unknown",
-                    name=self.name,
-                    error=error_msg.rstrip(),
-                ),
-            )
+            said = getattr(sys.exc_info()[1], "http_status", None)
+            if isinstance(said, int) and not isinstance(said, bool) and 400 <= said < 500:
+                # The project refusing the caller (a 404, a 409), answered with that status: one
+                # line, no traceback — the same rule `record_op_error` applies.
+                LOGGER.info(
+                    format_event(
+                        "op_refused",
+                        request_id=state.request_id or "unknown",
+                        name=self.name,
+                        status=said,
+                        error=str(sys.exc_info()[1]),
+                    ),
+                )
+            else:
+                error_msg = (
+                    traceback.format_exc()
+                    if LOGGER.isEnabledFor(ERROR)
+                    else f"{type(sys.exc_info()[1]).__name__}: {sys.exc_info()[1]}"
+                )
+                LOGGER.error(
+                    format_event(
+                        "op_error",
+                        request_id=state.request_id or "unknown",
+                        name=self.name,
+                        error=error_msg.rstrip(),
+                    ),
+                )
             # an error edge takes it: seen, but it does not fail the run
             state.record_op_error(
                 self.full_name, sys.exc_info()[1], ctx_for_end, handled=bool(self._error_routes)

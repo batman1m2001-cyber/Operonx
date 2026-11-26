@@ -16,6 +16,8 @@ import inspect
 import json
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import quote
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from operonx.app.declare import ref_name
@@ -638,8 +640,15 @@ def _reconnect(spec: ServeSpec, transport: HttpTransport, request: Any, JSONResp
 
 #: The output an http door's run sets its reply's status code with.
 STATUS_KEY = "$status"
-#: The output that is the whole body of the reply: a list, a string, any JSON.
+#: The output that is the whole body of the reply: a list, a string, any JSON
+#: — or bytes, or text with a ``$type``, answered as they are.
 BODY_KEY = "$body"
+#: A reply that is not JSON: a file served from its path (``"$file"``), the
+#: media type of the body or file (``"$type"``), the name it downloads as
+#: (``"$name"``), and headers added to the reply (``"$headers"``: a redirect's
+#: ``location``).
+FILE_KEY, TYPE_KEY, NAME_KEY, HEADERS_KEY = "$file", "$type", "$name", "$headers"
+_RAW_KEYS = (FILE_KEY, TYPE_KEY, NAME_KEY, HEADERS_KEY)
 
 
 def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, Any]:
@@ -663,6 +672,23 @@ def _with_path_params(payload: Any, request: Any, spec: ServeSpec, JSONResponse)
     return None, JSONResponse(body, status_code=400)
 
 
+def _path_params_given(meta: Dict[str, Any], request: Any, spec: ServeSpec, JSONResponse) -> Tuple[Any, Any]:
+    """With ``input=``, the body goes whole to that one parameter, so the
+    path's parameters cannot ride in it: they fill their own parameters
+    beside the query's (``POST /hotfix/{hid}`` with ``input="edit"`` gives
+    ``hid`` and ``edit``). A name in both the path and the query is refused."""
+    params = dict(request.path_params)
+    if not params:
+        return meta, None
+    query = dict(meta.get("query") or {})
+    both = sorted(set(query) & set(params))
+    if both:
+        body = {"endpoint": spec.name, "field": both[0],
+                "error": f"{both[0]!r} is in both the path and the query"}
+        return None, JSONResponse(body, status_code=400)
+    return {**meta, "query": {**query, **params}}, None
+
+
 def _reply_status(reply: Any) -> Tuple[Any, int]:
     """A reply carrying ``"$status": 404`` (an op's output) is answered with
     that code, without the key; any other reply is a ``200``. A reply
@@ -680,17 +706,74 @@ def _reply_status(reply: Any) -> Tuple[Any, int]:
     return {"error": f"{STATUS_KEY}={status!r} is not an HTTP status"}, 500
 
 
+def _raw_reply_error(media: Any, name: Any, extra: Any, file: Any) -> Optional[str]:
+    if not isinstance(extra, Mapping):
+        return f"{HEADERS_KEY} is not a mapping"
+    if media is not None and not isinstance(media, str):
+        return f"{TYPE_KEY}={media!r} is not a media type"
+    if name is not None and not isinstance(name, str):
+        return f"{NAME_KEY}={name!r} is not a file name"
+    if file is not None and not (isinstance(file, (str, Path)) and Path(file).is_file()):
+        return f"{FILE_KEY}={str(file)!r} is not a file"
+    return None
+
+
+def _http_reply(reply: Any, headers: Dict[str, str], JSONResponse) -> Any:
+    """The response for a run's reply: JSON, unless it says otherwise —
+    ``"$body"`` bytes, or text with a ``"$type"``, answered as they are; a
+    ``"$file"`` path served as the file; ``"$name"`` the download's name;
+    ``"$headers"`` added. A reply that cannot be answered is a ``500``."""
+    raw = isinstance(reply, dict) and (
+        any(k in reply for k in _RAW_KEYS) or isinstance(reply.get(BODY_KEY), (bytes, bytearray))
+    )
+    if not raw:
+        body, status = _reply_status(reply)
+        return JSONResponse(body, status_code=status, headers=headers)
+    from starlette.responses import FileResponse, Response
+
+    reply = dict(reply)
+    media, name = reply.pop(TYPE_KEY, None), reply.pop(NAME_KEY, None)
+    extra, file = reply.pop(HEADERS_KEY, None) or {}, reply.pop(FILE_KEY, None)
+    body, status = _reply_status(reply)
+    wrong = _raw_reply_error(media, name, extra, file)
+    if wrong is not None:
+        LOGGER.error(f"[serve] {wrong}; answering 500")
+        return JSONResponse({"error": wrong}, status_code=500, headers=headers)
+    headers = {**headers, **{str(k): str(v) for k, v in extra.items()}}
+    if file is not None:
+        return FileResponse(
+            Path(file), status_code=status, media_type=media, filename=name, headers=headers
+        )
+    if name is not None:
+        headers["content-disposition"] = "attachment; filename*=utf-8''" + quote(name)
+    if isinstance(body, (bytes, bytearray)):
+        return Response(
+            bytes(body),
+            status_code=status,
+            media_type=media or "application/octet-stream",
+            headers=headers,
+        )
+    if isinstance(body, str) and media is not None:
+        return Response(body, status_code=status, media_type=media, headers=headers)
+    return JSONResponse(body, status_code=status, headers=headers)
+
+
 def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
     async def endpoint(request):
         stream = bool(spec.options.get("sse")) or wants_stream(request)
         if stream and "run_id" in request.query_params:
             return _reconnect(spec, transport, request, JSONResponse)
         payload, refusal = await _read_body(request, spec, JSONResponse)
-        if refusal is None:
+        whole = spec.options.get("input") is not None  # the body is one parameter's, as it came
+        if refusal is None and not whole:
             payload, refusal = _with_path_params(payload, request, spec, JSONResponse)
         if refusal is not None:
             return refusal
         meta = _meta_from_request(request)
+        if whole:
+            meta, refusal = _path_params_given(meta, request, spec, JSONResponse)
+            if refusal is not None:
+                return refusal
         if stream:
             return await _stream_reply(spec, transport, payload, meta, JSONResponse)
 
@@ -701,8 +784,7 @@ def _http_endpoint(spec: ServeSpec, transport: HttpTransport, JSONResponse):
             return JSONResponse(session.refusal[1], status_code=session.refusal[0], headers=headers)
         if not session.replies:
             return _no_output(spec, session.trace_id, JSONResponse)
-        reply, status = _reply_status(session.reply)
-        return JSONResponse(reply, status_code=status, headers=headers)
+        return _http_reply(session.reply, headers, JSONResponse)
 
     return endpoint
 

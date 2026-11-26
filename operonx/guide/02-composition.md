@@ -314,9 +314,19 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   code between 200 and 599 answers `500`. An op that outputs `"$body"`
   answers that value alone, any JSON: `{"$body": tickets}` is a bare array
   (with its `$status`, if any).
+- A reply that is not JSON: `"$body"` bytes, or text with its `"$type"`
+  (`{"$body": diff, "$type": "text/plain"}`), is answered as it is;
+  `"$file"` serves a file from its path; `"$name"` makes either a download
+  of that name; `"$headers"` adds headers (a redirect:
+  `{"$status": 303, "$headers": {"location": "/runs"}}`).
+- `http(..., codec="bytes")` hands the body over undecoded, for an upload:
+  `Service(..., input="data")` gives it to `data`, the query fills the rest
+  (`POST /upload?name=a.png`).
 - `input="payload"` hands the whole body to that one parameter instead: for a
   payload someone else shapes (a mail server's webhook), whose fields the
-  graph does not declare.
+  graph does not declare. A path's parameters still fill their own
+  (`http("POST", "/tickets/{id}")` with `input="patch"` gives `id` and
+  `patch`); a name in both the path and the query is refused `400`.
 - With doors, the body is the one ingress item (an empty body is `None`)
   and the reply is the egress item(s).
 - `websocket(path, port=...)` needs `max_inflight=N` and a graph with

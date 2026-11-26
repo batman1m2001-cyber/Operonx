@@ -41,14 +41,18 @@ def decode_payload(raw: Union[str, bytes], codec: str, what: str = "body") -> An
     """One payload — an HTTP body, a websocket text frame — as the item the
     graph receives, the same way at every door.
 
-    ``codec="json"`` parses it; ``"text"`` passes text through. An empty
-    HTTP body is ``None``, no payload, under either codec.
+    ``codec="json"`` parses it; ``"text"`` passes text through; ``"bytes"``
+    hands it over as bytes, undecoded (an upload). An empty HTTP body is
+    ``None``, no payload, under every codec.
 
     Raises:
         DoorDecodeError: the payload is not JSON (``"json"``) or not UTF-8
             text. The door refuses it before a run is minted; it used to
             run the graph with the raw string instead.
     """
+    if codec == "bytes":
+        data = bytes(raw) if isinstance(raw, (bytes, bytearray)) else raw.encode("utf-8")
+        return data or None
     if isinstance(raw, (bytes, bytearray)):
         if not raw:
             return None

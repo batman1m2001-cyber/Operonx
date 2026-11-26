@@ -86,10 +86,11 @@ SESSION_MODES = frozenset({"per_request", "per_connection", "per_message"})
 
 
 #: How a door reads what its caller sends (``codec =``): ``"json"`` decodes
-#: every body and text frame, ``"text"`` passes text through. Bytes frames
-#: are bytes either way. One rule for every door, so a graph served on
-#: HTTP and on a websocket receives the same item for the same payload.
-DOOR_CODECS = ("json", "text")
+#: every body and text frame, ``"text"`` passes text through, ``"bytes"``
+#: hands the body over as it came (an upload; a text frame as its UTF-8).
+#: Bytes frames are bytes either way. One rule for every door, so a graph
+#: served on HTTP and on a websocket receives the same item for the same payload.
+DOOR_CODECS = ("json", "text", "bytes")
 
 #: The kinds whose payload a codec reads.
 CODEC_KINDS = frozenset({"http", "websocket", "webhook"})
@@ -111,7 +112,8 @@ def check_codec(codec: Any, label: str) -> None:
     if codec not in DOOR_CODECS:
         raise ManifestError(
             f"{label} has codec {codec!r}; expected one of {', '.join(DOOR_CODECS)} "
-            '("json" decodes each body and text frame, "text" passes text through)'
+            '("json" decodes each body and text frame, "text" passes text through, '
+            '"bytes" hands the body over as it came)'
         )
 
 
