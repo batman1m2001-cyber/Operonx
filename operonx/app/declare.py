@@ -138,8 +138,15 @@ def http(
     sse: bool = False,
 ) -> Listener:
     """An HTTP door: the body is the one ingress item, decoded by ``codec``
-    — ``"json"`` (the default) or ``"text"``. An empty body is ``None``; a
-    body the codec cannot read is answered ``400`` and starts no run.
+    — ``"json"`` (the default), ``"text"``, or ``"bytes"``, the body as it
+    came (an upload: give it to one parameter with ``Service(input=...)``).
+    An empty body is ``None``; a body the codec cannot read is answered
+    ``400`` and starts no run.
+
+    A reply is JSON. An op answers anything else with ``"$body"`` bytes or
+    text and its ``"$type"``, or ``"$file"``, a path served as it is;
+    ``"$name"`` makes it a download of that name, ``"$headers"`` adds
+    headers (``{"$status": 303, "$headers": {"location": "/runs"}}``).
 
     ``sse=True`` always answers server-sent events, whatever the caller's
     ``Accept``: one event per item the run sends with ``egress`` (a string

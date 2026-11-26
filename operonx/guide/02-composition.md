@@ -314,6 +314,14 @@ with TestClient(Application("demo", services=[score_service, echo_service]).asgi
   code between 200 and 599 answers `500`. An op that outputs `"$body"`
   answers that value alone, any JSON: `{"$body": tickets}` is a bare array
   (with its `$status`, if any).
+- A reply that is not JSON: `"$body"` bytes, or text with its `"$type"`
+  (`{"$body": diff, "$type": "text/plain"}`), is answered as it is;
+  `"$file"` serves a file from its path; `"$name"` makes either a download
+  of that name; `"$headers"` adds headers (a redirect:
+  `{"$status": 303, "$headers": {"location": "/runs"}}`).
+- `http(..., codec="bytes")` hands the body over undecoded, for an upload:
+  `Service(..., input="data")` gives it to `data`, the query fills the rest
+  (`POST /upload?name=a.png`).
 - `input="payload"` hands the whole body to that one parameter instead: for a
   payload someone else shapes (a mail server's webhook), whose fields the
   graph does not declare. A path's parameters still fill their own

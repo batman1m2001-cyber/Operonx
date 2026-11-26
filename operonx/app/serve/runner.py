@@ -35,6 +35,11 @@ from operonx.core.workflow_trace import unhandled
 from .protocol import SESSION_KEY, RunRequest, Session
 from .registry import resolve_ref, resolve_transport
 
+#: The outputs an http door's reply is shaped with, kept whatever the graph's
+#: declared outputs: its status, its body, and what makes it not JSON (a file,
+#: a media type, a download's name, headers) — `app._http_reply` reads them.
+REPLY_KEYS = ("$status", "$body", "$file", "$type", "$name", "$headers")
+
 #: Sessions this process is running a run for, across its listeners: what
 #: a run's `metadata["worker"]` reports, so a trace shows how loaded the
 #: worker that served it was (and an uneven spread over workers shows).
@@ -563,7 +568,7 @@ class ServeRunner:
                 # a graph that sends with `egress` has answered already
                 reply=doorless and not sends(engine),
                 resume=resume,
-                keep=("$status", "$body") if self.spec.kind == "http" else (),
+                keep=REPLY_KEYS if self.spec.kind == "http" else (),
             )
             failed = bool(unhandled(handle.errors))
         except Exception as exc:  # noqa: BLE001
