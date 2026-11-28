@@ -1,6 +1,7 @@
 # Project source plan: the folder comes from git, the `.env` from studio's state
 
-Status: **not started** (written 2026-11-28). Repository: operonx-studio. Nothing changes in Operon.
+Status: **S1, S2, S3 DONE** (2026-11-28: studio #278, #279, #280; write-ups in the studio repo,
+`docs/project_source_plan/`). **S4 is the owner's call**, see §3.1. Repository: operonx-studio. Nothing changes in Operon.
 Pictures: [the flow](https://claude.ai/artifact/YVWrqt8zP2bnnnBF85TUSR) (older: it shows secrets in
 Postgres and a deploy screen; this document is the current one), [the screens](https://claude.ai/artifact/CtANVWpQJdUGfNbaoKxBzq).
 
@@ -77,6 +78,23 @@ Each phase ships on its own and leaves studio working.
 | **S2** | Add a project by repo URL. Clone into `workspaces/`, record the URL in `studio.json`, show the missing secrets. | callbot added from its URL on an empty state dir runs a graph. |
 | **S3** | Pull and Push, two buttons. Pull brings the clone up to date. Push commits what was edited in studio and sends it to one branch, `studio/<project>`, never the default one, then links to open a pull request (GitHub) or merge request (GitLab). | An edit made in studio arrives on the remote as that branch, only after Push. |
 | **S4** | Move the current projects over: add each by URL, copy its `.env` to `secrets/` once (callbot: its four `.env_<name>` files, then untrack them and rotate the two secrets that were committed). Fix the test that writes `projects.json` into the real state dir. | The six projects open from `workspaces/`; the old folders are no longer read. |
+
+### 3.1 S4 was not run
+
+- On this server the six projects' folders are the working copies: people and Claude Code edit
+  them, and the studio shows those edits live. Moving the studio to clones under `workspaces/`
+  would show a copy that is only as new as the last Pull. S4 fits a studio on a server where
+  nobody edits; here it would be a step back. Decide per server.
+- What S4 wanted for secrets already happens: since S1, opening a project copies its `.env` to
+  `secrets/<id>/dev.env`.
+- It needs a token per host in `secrets/git-tokens.env`, which only the owner can make.
+- callbot's tracked `.env_<name>` files and the two committed secrets (§1) are still to untrack
+  and rotate.
+- `~/.operonx/projects.json` was last written on 2026-11-11 by operonx-project, which left core
+  in 1.47.0. Nothing writes it now: there is no test to fix, and the file can be deleted.
+
+Changed while building: the project id stays the digest of the folder's path (S2 write-up);
+Pull and Push are not shown under 1100 px; `.operonx/` is never pushed.
 
 An environment here is only a named set of secrets (`dev.env`, `staging.env`). A new project has
 one, `dev`.
