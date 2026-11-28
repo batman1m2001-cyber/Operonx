@@ -1,8 +1,8 @@
 # Project source plan: the folder comes from git, the `.env` from studio's state
 
-Status: **not started** (written 2026-11-28). Repositories: operonx-studio (most of it), Operon (S5 only).
-Pictures: [the flow](https://claude.ai/artifact/YVWrqt8zP2bnnnBF85TUSR) (it still shows secrets in
-Postgres; this document is the current one), [the screens](https://claude.ai/artifact/CtANVWpQJdUGfNbaoKxBzq).
+Status: **not started** (written 2026-11-28). Repository: operonx-studio. Nothing changes in Operon.
+Pictures: [the flow](https://claude.ai/artifact/YVWrqt8zP2bnnnBF85TUSR) (older: it shows secrets in
+Postgres and a deploy screen; this document is the current one), [the screens](https://claude.ai/artifact/CtANVWpQJdUGfNbaoKxBzq).
 
 ## 0. The rule
 
@@ -37,6 +37,10 @@ No new database. Studio's state stays one folder (`OPERONX_STUDIO_STATE_DIR`, de
 | Projects are not all on GitHub: callbot is on `gitlab.tguru.vn` | `git remote` |
 | callbot has one env file per environment, and they are **tracked in git**: `.env_dev`, `.env_staging`, `.env_prod`, `.env_test`. Two secret names hold a value in them (`LANGFUSE_SECRET_KEY`, `CH_TRACES_PASSWORD`) | `git ls-files` |
 
+LEAN_PRODUCT_PLAN (2026-11-24, studio #272) took the git view, Environments and deploy out of
+studio: git and deploying are the team's tools. This plan keeps that. It adds no branch picker, no
+commit screen and no deploy status; only what a clone on a server cannot do without.
+
 Three decisions follow:
 
 - **`resources.yaml` stays in the project.** It is code: it says which model and store a graph uses.
@@ -49,14 +53,13 @@ Three decisions follow:
 
 ```text
 git remote: org/callbot                  the standard layout, unchanged
-├── operonx.toml                         + [environments.<name>] url = "…"   (S5, optional)
-├── resources.yaml  pyproject.toml
+├── operonx.toml  resources.yaml  pyproject.toml
 ├── app/  src/  prompts/  datasets/  tests/
 └── .env.example                         key names only
 
 ~/.operonx/
 ├── studio.json                          each project: a folder path, or a repo URL
-├── workspaces/<project-id>/<branch>/    a clone per branch; its .env is a copy
+├── workspaces/<project-id>/             the clone; its .env is a copy
 └── secrets/<project-id>/<environment>.env     0600; dev.env by default
 ```
 
@@ -72,18 +75,18 @@ Each phase ships on its own and leaves studio working.
 |---|---|---|
 | **S1** | Secrets outside the project. The existing env screen saves to `secrets/<id>/<environment>.env` and copies it into the project as `.env`; an environment picker; a "used by" column and missing names from `resources.yaml` and `.env.example`. | A secret set in studio survives deleting the project folder. Values never appear in a response or a log. |
 | **S2** | Add a project by repo URL. Clone into `workspaces/`, record the URL in `studio.json`, show the missing secrets. | callbot added from its URL on an empty state dir runs a graph. |
-| **S3** | Branches. Branch picker, Pull, Save (local commit on a work branch), Push (a button; never the default branch), link to open a pull request (GitHub) or merge request (GitLab). | An edit made in studio arrives on the remote as a branch, only after Push. |
+| **S3** | Pull and Push, two buttons. Pull brings the clone up to date. Push commits what was edited in studio and sends it to one branch, `studio/<project>`, never the default one, then links to open a pull request (GitHub) or merge request (GitLab). | An edit made in studio arrives on the remote as that branch, only after Push. |
 | **S4** | Move the current projects over: add each by URL, copy its `.env` to `secrets/` once (callbot: its four `.env_<name>` files, then untrack them and rotate the two secrets that were committed). Fix the test that writes `projects.json` into the real state dir. | The six projects open from `workspaces/`; the old folders are no longer read. |
-| **S5** | Deployment status, read only. Operon: `describe()` reports the git commit and the version; `operonx.toml` may name a URL per environment. Studio: asks each URL and shows commit, age, health. | `callbot · staging · <commit> · healthy` is shown; an environment with no URL shows "not deployed". |
 
-Defaults: a new project has one environment, `dev`, with no URL, and runs inside studio. No branch
-is assumed to mean an environment.
+An environment here is only a named set of secrets (`dev.env`, `staging.env`). A new project has
+one, `dev`.
 
 ## 4. Not in this plan
 
 - **Secrets in Postgres.** Worth it when there is a second studio server, a need to record who
   changed a secret, or users who must not have shell access to the server. None holds today.
-- Studio does not deploy. Each project's CI/CD does; a standard deploy template is a later plan.
+- A branch picker, a commit screen, history: git is the team's tool (LEAN_PRODUCT_PLAN).
+- Deploying and deploy status. Each project's pipeline does that.
 - A GitHub App or OAuth. One token per host is enough for one team.
 - A Postgres backend for the resource hub.
 
