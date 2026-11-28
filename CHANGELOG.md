@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.51.0] - 2026-11-28
+
+### Added
+- **A run says which deployment made it.** Set `OPERONX_ENVIRONMENT=production` (or `staging`, `dev`: 1-32 of `a-z 0-9 _ -`) in a deployment's environment or its `.env`, and every run it makes carries the name: `RunSummary.environment`, a column of every run store, `RunFilter(environment=...)` (`""` keeps the runs that name none) and `groups(by=("environment",))`. Several deployments of one project can now share a store and still be told apart. A name operonx cannot file stops the process at start. `docs/RUN_ENVIRONMENT_PLAN.md`.
+- **ClickHouse schema 6** adds `runs.environment`, applied when a store opens. It changes the table's description only: no part is rewritten, and a deployment still on an older operonx keeps writing to the same database, its runs with no environment.
+
 ## [1.50.0] - 2026-11-26
 
 ### Added

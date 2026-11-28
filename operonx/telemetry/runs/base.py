@@ -34,6 +34,7 @@ GROUP_FIELDS = (
     "name",
     "status",
     "version",
+    "environment",
     "job_run",
     "runbook",
     "runbook_run",

@@ -260,7 +260,14 @@ def test_schema_is_created_once_and_versioned(tmp_path):
     assert client.commands[0] == "CREATE DATABASE IF NOT EXISTS ox"
     assert client.versions == ALL_VERSIONS
     alters = [c for c in client.commands if c.startswith("ALTER TABLE")]
-    assert [c.split()[8] for c in alters] == ["attempt", "attrs", "inputs_from", "input", "output"]
+    assert [c.split()[8] for c in alters] == [
+        "attempt",
+        "attrs",
+        "inputs_from",
+        "input",
+        "output",
+        "environment",
+    ]
     # a second process finding version 1 creates nothing new
     again = _store(tmp_path, client=client)
     again.put_trace(_trace("t-3"))
@@ -976,3 +983,60 @@ def test_live_a_v2_database_with_runs_upgrades_to_v3_and_another_host_reads_it(r
     finally:
         host_a.close()
         host_b.close()
+
+
+def test_live_an_older_writer_keeps_writing_to_a_database_a_newer_one_migrated(request, tmp_path):
+    """RUN_ENVIRONMENT_PLAN E1. Staging moves to the operonx that knows a run's environment and
+    migrates the database production still writes to on the previous one: the older writer names
+    its columns, so its runs land with no environment, before the migration and after it."""
+    from operonx.telemetry.runs import RunFilter
+    from operonx.telemetry.runs import clickhouse as chmod
+    from operonx.telemetry.runs.clickhouse import ClickHouseRunStore
+    from tests.internal.telemetry._clickhouse import clickhouse_spec
+
+    older = open_store(request, tmp_path)
+    at = chmod.RUN_COLUMNS.index("environment")
+    old_columns = chmod.RUN_COLUMNS[:at] + chmod.RUN_COLUMNS[at + 1 :]
+
+    def older_put(trace_id):
+        _, run, nodes, rollups = older.build(_trace(trace_id))
+        older._insert("nodes", nodes, chmod.NODE_COLUMNS)
+        older._insert("op_rollups", rollups, chmod.ROLLUP_COLUMNS)
+        older._insert("runs", [run[:at] + run[at + 1 :]], old_columns)
+
+    real = chmod.MIGRATIONS
+    chmod.MIGRATIONS = real[:5]
+    try:
+        assert older.schema_version() == 5
+        # the table as the previous operonx made it: without the column
+        older._client().command(f"ALTER TABLE {older.database}.runs DROP COLUMN environment")
+        older_put("old-before")
+    finally:
+        chmod.MIGRATIONS = real
+
+    newer = ClickHouseRunStore(
+        database=older.database, media_dir=tmp_path / "media2", ttl_days=0, flush_interval=0.05,
+        **clickhouse_spec(),
+    )  # fmt: skip
+    try:
+        newer.put_trace(_trace("new-staging", environment="staging"))
+        assert newer.schema_version() == NEWEST
+        older_put("old-after")
+
+        def ids(where):
+            return sorted(s.trace_id for s in newer.list_runs(where).items)
+
+        assert ids(RunFilter(environment="staging")) == ["new-staging"]
+        assert ids(RunFilter(environment="")) == ["old-after", "old-before"]
+        assert ids(None) == ["new-staging", "old-after", "old-before"]
+        assert newer.get_run("old-before").summary.environment is None
+        assert newer.get_run("new-staging").summary.environment == "staging"
+        envs = {g["environment"] or "": g["runs"] for g in newer.groups(by=("environment",))}
+        assert envs == {"staging": 1, "": 2}
+        # Monitor's numbers follow the same filter: they read op_rollups through the runs
+        assert {o.runs for o in newer.op_stats(RunFilter(environment="staging"))} == {
+            1
+        }  # one run per op
+        assert {o.runs for o in newer.op_stats(None)} == {3}
+    finally:
+        newer.close()

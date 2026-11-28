@@ -1,6 +1,6 @@
 # Run environment plan: every run says which environment made it
 
-Status: **PLAN, not started** (2026-11-28). Repositories: Operon (E1), operonx-studio (E2), callbot (E3).
+Status: **E1 DONE** (2026-11-28, write-up `docs/run_environment_plan/E1.md`); E2, E3 not started. Repositories: Operon (E1), operonx-studio (E2), callbot (E3).
 
 ## 0. The rule
 
@@ -34,9 +34,9 @@ In `callbot_traces` today: 103 runs before production moved to operonx (2026-11-
 all with a development commit as version; 1,896 after, from containers, production and staging
 mixed.
 
-Why a column and not a key in `metadata`: `RunFilter.metadata` would filter the Runs list with
-no schema change, but Monitor reads `op_rollups`, which has no metadata. A column, as for
-`version`, serves both.
+Why a column and not a key in `metadata`: `RunFilter.metadata` would filter with no schema
+change, but by reading JSON in every row, and it cannot list the names a store holds. A column,
+as for `version`, is filtered and grouped like the others.
 
 ## 2. After
 
@@ -45,8 +45,7 @@ OPERONX_ENVIRONMENT=staging        on the service (env file, compose, shell)
         │
 stamp_process()                    once per process: project, version, environment
         │
-runs.environment                   LowCardinality(String), '' when not set
-op_rollups.environment             the same, for Monitor
+runs.environment                   NULL when not set (Monitor's op_rollups are chosen through runs)
         │
 RunFilter(environment="staging")   every backend
         │
@@ -62,7 +61,7 @@ Each phase ships alone and leaves what runs working.
 
 | | What | Done when |
 |---|---|---|
-| **E1** operonx | `OPERONX_ENVIRONMENT` read in `stamp_process`; `environment` on `RunSummary`, in `SUMMARY_COLUMNS`, `RunFilter`, and every run store (ClickHouse migration 6: `ADD COLUMN` on `runs` and `op_rollups`; SQL stores; files; Mongo); a way to list the environments a store holds. A minor version. | Two processes with different names write to one database, and a filtered list returns each one's runs only. Rows written before read as `''`. A writer on the previous operonx still writes to the migrated database. |
+| **E1** operonx | `OPERONX_ENVIRONMENT` read in `stamp_process`; `environment` on `RunSummary`, in `SUMMARY_COLUMNS`, `RunFilter`, and every run store (ClickHouse migration 6: `ADD COLUMN` on `runs`; SQL stores; files; Mongo); a way to list the environments a store holds. A minor version. | Two processes with different names write to one database, and a filtered list returns each one's runs only. Rows written before read as `''`. A writer on the previous operonx still writes to the migrated database. |
 | **E2** studio | A picker "Any environment / production / staging / …" on Runs and on Monitor, always present, filled from what the store holds; the choice is kept per project. | On a store with two environments, each screen shows one, both, and the unset ones. Screens at 1280, 800 and 400 px. |
 | **E3** callbot | `OPERONX_ENVIRONMENT` in the four env files (`production`, `staging`, `dev`, `test`); operonx bumped; the 103 early runs labelled `dev`; the tests stop writing to the shared database. | After a staging deploy, new staging runs carry `staging`, and production's after its deploy. |
 

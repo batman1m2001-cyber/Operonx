@@ -57,6 +57,7 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
     "tokens_cached",
     "version",
     "version_dirty",
+    "environment",
     "service",
     "transport",
     "variant",
@@ -74,6 +75,7 @@ SUMMARY_COLUMNS: Tuple[str, ...] = (
 )
 _TEXT = {
     "trace_id", "workflow", "origin", "name", "status", "first_error", "input", "output", "version",
+    "environment",
     "service", "transport", "variant", "job", "job_run", "key", "runbook",
     "runbook_run", "project", "session_id", "user_id", "request_id", "metadata",
     "location",
@@ -296,6 +298,12 @@ class SqlIndex:
             if value:
                 clauses.append(f"{col} = {ph}")
                 params.append(value)
+        if f.environment is not None:
+            if f.environment:
+                clauses.append(f"environment = {ph}")
+                params.append(f.environment)
+            else:  # the runs that carry none
+                clauses.append("(environment IS NULL OR environment = '')")
         if f.since is not None:
             clauses.append(f"started_at >= {ph}")
             params.append(float(f.since))

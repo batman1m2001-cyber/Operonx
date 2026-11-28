@@ -533,3 +533,14 @@ sink of one run gets the same trace id, including a caller's `?trace_id=`.
 An `Application` declared in Python reads its file's `[tracing]` when built,
 so importing it traces where `operonx serve` does. A typo in `[tracing]` fails at load; a sink missing from `resources.yaml`
 fails when the service or job starts.
+
+**Which deployment made a run.** Several deployments of one project can share a store. Each
+names itself once, in its environment or its `.env`, and every run it makes carries the name:
+
+```text
+OPERONX_ENVIRONMENT=production      # 1-32 of a-z 0-9 _ -; staging, dev, test
+```
+
+`RunFilter(environment="staging")` keeps that deployment's runs, `RunFilter(environment="")` the
+runs that name none, and `store.groups(by=("environment",))` lists the names a store holds. A name
+operonx cannot file (a space, a slash) stops the process at start.

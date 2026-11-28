@@ -225,6 +225,12 @@ class MongoRunStore(RunStore):
             value = getattr(f, col)
             if value:
                 parts.append({col: value})
+        if f.environment is not None:
+            parts.append(
+                {"environment": f.environment}
+                if f.environment
+                else {"environment": {"$in": [None, ""]}}
+            )
         span: Dict[str, Any] = {}
         if f.since is not None:
             span["$gte"] = float(f.since)

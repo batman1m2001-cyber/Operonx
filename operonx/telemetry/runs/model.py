@@ -63,6 +63,7 @@ _NAMED = (
     "runbook",
     "runbook_run",
     "version",
+    "environment",
     "project",
     "session_id",
     "user_id",
@@ -104,6 +105,9 @@ class RunSummary:
     tokens_cached: int = 0
     version: Optional[str] = None
     version_dirty: Optional[bool] = None
+    #: Which deployment made the run ("production", "staging"): the process's
+    #: ``OPERONX_ENVIRONMENT`` (``operonx.app.origin``); ``None`` when it set none.
+    environment: Optional[str] = None
     service: Optional[str] = None
     transport: Optional[str] = None
     variant: Optional[str] = None
@@ -220,6 +224,8 @@ class RunFilter:
     since: Optional[float] = None
     until: Optional[float] = None
     version: Optional[str] = None
+    #: An environment's name; ``""`` keeps the runs that carry none.
+    environment: Optional[str] = None
     job_run: Optional[str] = None
     runbook_run: Optional[str] = None
     trace_ids: Optional[Sequence[str]] = None
@@ -241,6 +247,8 @@ class RunFilter:
         if self.until is not None and s.started_at >= self.until:
             return False
         if self.version and s.version != self.version:
+            return False
+        if self.environment is not None and (s.environment or "") != self.environment:
             return False
         if self.job_run and s.job_run != self.job_run:
             return False

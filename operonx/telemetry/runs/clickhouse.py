@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS {db}.runs (
   tokens_cached UInt64,
   version LowCardinality(Nullable(String)),
   version_dirty Nullable(Bool),
+  environment LowCardinality(Nullable(String)),
   service LowCardinality(Nullable(String)),
   transport LowCardinality(Nullable(String)),
   variant LowCardinality(Nullable(String)),
@@ -385,6 +386,15 @@ MIGRATIONS: List[Tuple[int, str, List[str]]] = [
         [
             "ALTER TABLE {db}.runs ADD COLUMN IF NOT EXISTS input Nullable(String) CODEC(ZSTD(3)) AFTER first_error",
             "ALTER TABLE {db}.runs ADD COLUMN IF NOT EXISTS output Nullable(String) CODEC(ZSTD(3)) AFTER input",
+        ],
+    ),
+    (
+        # a new column with no default is a change of the table's description only: no part is
+        # rewritten, and a writer that does not name it (an older operonx) leaves it NULL
+        6,
+        "runs: environment",
+        [
+            "ALTER TABLE {db}.runs ADD COLUMN IF NOT EXISTS environment LowCardinality(Nullable(String)) AFTER version_dirty",
         ],
     ),
 ]
@@ -1207,6 +1217,11 @@ class ClickHouseRunStore(ClickHouseConnection, RunStore):
             value = getattr(f, col)
             if value:
                 clauses.append(f"{col} = {bind(str(value), 'String')}")
+        if f.environment is not None:
+            if f.environment:
+                clauses.append(f"environment = {bind(str(f.environment), 'String')}")
+            else:  # the runs that carry none
+                clauses.append("(environment IS NULL OR environment = '')")
         if f.since is not None:
             clauses.append(f"started_at >= {bind(float(f.since), 'Float64')}")
         if f.until is not None:
