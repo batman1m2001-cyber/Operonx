@@ -2,8 +2,8 @@
 
 Status: **S1, S2, S3 DONE** (2026-11-28: studio #278, #279, #280; write-ups in the studio repo,
 `docs/project_source_plan/`). **S4 is the owner's call**, see §3.1. Repository: operonx-studio. Nothing changes in Operon.
-Pictures: [the flow](https://claude.ai/artifact/YVWrqt8zP2bnnnBF85TUSR) (older: it shows secrets in
-Postgres and a deploy screen; this document is the current one), [the screens](https://claude.ai/artifact/CtANVWpQJdUGfNbaoKxBzq).
+Pictures: [the flow](https://claude.ai/artifact/YVWrqt8zP2bnnnBF85TUSR) (as built),
+[the screens](https://claude.ai/artifact/CtANVWpQJdUGfNbaoKxBzq) (the mock-ups reviewed before building).
 
 ## 0. The rule
 
@@ -87,7 +87,7 @@ Each phase ships on its own and leaves studio working.
   nobody edits; here it would be a step back. Decide per server.
 - What S4 wanted for secrets already happens: since S1, opening a project copies its `.env` to
   `secrets/<id>/dev.env`.
-- It needs a token per host in `secrets/git-tokens.env`, which only the owner can make.
+- It needs a token per host, which only the owner can make (set in Settings › Project › Git access).
 - callbot's tracked `.env_<name>` files and the two committed secrets (§1) are still to untrack
   and rotate.
 - `~/.operonx/projects.json` was last written on 2026-11-11 by operonx-project, which left core
@@ -95,6 +95,10 @@ Each phase ships on its own and leaves studio working.
 
 Changed while building: the project id stays the digest of the folder's path (S2 write-up);
 Pull and Push are not shown under 1100 px; `.operonx/` is never pushed.
+
+Added after S3 (studio #283, #284): a viewer sees secret names and set/missing only; an admin sets,
+replaces, removes and tests a host's git token in Settings › Project › Git access, so a wrong or
+expired token needs no shell (write-up: studio `docs/project_source_plan/git-access.md`).
 
 An environment here is only a named set of secrets (`dev.env`, `staging.env`). A new project has
 one, `dev`.
