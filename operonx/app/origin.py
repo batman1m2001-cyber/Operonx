@@ -22,6 +22,8 @@ its run → its steps' runs → their items → their traces is one path.
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -37,6 +39,7 @@ __all__ = [
     "ORIGIN_SERVICE",
     "code_version",
     "current_runbook",
+    "environment",
     "in_runbook",
     "origin_metadata",
     "stamp_process",
@@ -120,11 +123,34 @@ def code_version(root: Union[str, Path]) -> Dict[str, Any]:
     }
 
 
+#: The variable a deployment names itself with; every run it makes carries the name.
+ENVIRONMENT_VAR = "OPERONX_ENVIRONMENT"
+_ENVIRONMENT = re.compile(r"[a-z0-9][a-z0-9_-]{0,31}")
+
+
+def environment() -> Optional[str]:
+    """This process's environment, from ``OPERONX_ENVIRONMENT`` ("production",
+    "staging", …), lowercased; ``None`` when it is not set.
+
+    Read once per process at bootstrap, with the version. A name that is
+    not 1-32 of ``a-z 0-9 _ -`` raises: a deployment whose runs would be
+    filed under a name nobody can filter by should not start."""
+    name = os.environ.get(ENVIRONMENT_VAR, "").strip().lower()
+    if not name:
+        return None
+    if not _ENVIRONMENT.fullmatch(name):
+        raise ValueError(
+            f"{ENVIRONMENT_VAR}={name!r}: an environment's name is 1-32 of a-z, 0-9, '_' and '-', "
+            "starting with a letter or a digit (production, staging, dev)"
+        )
+    return name
+
+
 def stamp_process(root: Union[str, Path], project: str) -> None:
-    """What every run this process makes carries — the project and the
-    code's version — and where consumers resolve relative directories.
+    """What every run this process makes carries — the project, the
+    code's version and the environment — and where consumers resolve relative directories.
     Called by `Application.bootstrap()`, once."""
     from operonx.core.workflow_trace import set_project_root, set_run_metadata
 
     set_project_root(Path(root))
-    set_run_metadata(project=project, **code_version(root))
+    set_run_metadata(project=project, environment=environment(), **code_version(root))

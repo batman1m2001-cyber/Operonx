@@ -112,6 +112,7 @@ def _calls():
             origin="service",
             service="call",
             session_id="0912",
+            environment="production",
             nodes=[_exec("stt", 100.0, 40), _llm(100.1, 300, 0.002), _exec("tts", 100.5, 80)],
         ),
         _trace(
@@ -120,6 +121,7 @@ def _calls():
             origin="service",
             service="call",
             session_id="0999",
+            environment="staging",
             nodes=[
                 _exec("stt", 100.0, 60),
                 _llm(100.1, 500, None),
@@ -292,6 +294,11 @@ def test_list_runs_newest_first_with_the_summary_fields(store):
         (RunFilter(op="check"), ["item-a"]),
         (RunFilter(op="reply", origin="service", since=NOW - DAY), ["call-3", "call-2"]),
         (RunFilter(op="nowhere"), []),
+        # the deployment that made the run (OPERONX_ENVIRONMENT); "" is the runs that name none
+        (RunFilter(environment="production"), ["call-1"]),
+        (RunFilter(environment="staging", status="error"), ["call-2"]),
+        (RunFilter(environment=""), ["call-3", "item-a"]),
+        (RunFilter(environment="nowhere"), []),
     ],
 )
 def test_filters(store, where, expected):
@@ -714,6 +721,9 @@ def test_groups_count_runs_errors_and_cost_per_origin_and_name(store):
             "duration_ms": pytest.approx(20.0),
         }
     ]
+    # which environments a store holds: what a picker lists
+    envs = {g["environment"] or "": g["runs"] for g in store.groups(by=("environment",))}
+    assert envs == {"production": 1, "staging": 1, "": 2}
     with pytest.raises(ValueError):
         store.groups(by=("metadata; DROP TABLE runs",))
 
@@ -785,3 +795,29 @@ def test_a_failed_run_stays_failed_when_cancelled_steps_are_not_a_stop():
     rows = [{"op_id": "g.a#main", "op_name": "a", "status": STATUS_CANCELLED, "duration_ms": 1}]
     summary, _ = summarize("t", rows, {"status": "ok"})
     assert (summary.status, summary.errors) == ("error", 1)
+
+
+def test_a_process_names_its_environment_once_and_every_run_carries_it(monkeypatch, tmp_path):
+    """OPERONX_ENVIRONMENT, read by stamp_process at bootstrap (operonx.app.origin)."""
+    from operonx.app import origin
+    from operonx.core.workflow_trace import run_metadata, set_run_metadata
+
+    monkeypatch.delenv(origin.ENVIRONMENT_VAR, raising=False)
+    assert origin.environment() is None
+    monkeypatch.setenv(origin.ENVIRONMENT_VAR, "  Production ")
+    assert origin.environment() == "production"
+    for bad in ("prod uction", "-prod", "x" * 33, "prod/eu"):
+        monkeypatch.setenv(origin.ENVIRONMENT_VAR, bad)
+        with pytest.raises(ValueError, match="OPERONX_ENVIRONMENT"):
+            origin.environment()
+    before = run_metadata()
+    try:
+        monkeypatch.setenv(origin.ENVIRONMENT_VAR, "staging")
+        origin.stamp_process(tmp_path, "demo")
+        assert run_metadata()["environment"] == "staging"
+        monkeypatch.delenv(origin.ENVIRONMENT_VAR)
+        origin.stamp_process(tmp_path, "demo")  # a process that names none carries none
+        assert "environment" not in run_metadata()
+    finally:
+        set_run_metadata(**{k: None for k in run_metadata()})
+        set_run_metadata(**before)
