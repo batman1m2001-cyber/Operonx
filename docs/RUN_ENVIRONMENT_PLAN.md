@@ -1,6 +1,6 @@
 # Run environment plan: every run says which environment made it
 
-Status: **E1 DONE** (2026-11-28, write-up `docs/run_environment_plan/E1.md`); E2, E3 not started. Repositories: Operon (E1), operonx-studio (E2), callbot (E3).
+Status: **E1, E2, E3 DONE** (2026-11-28). E1: operonx 1.51.0 (#343), write-up `docs/run_environment_plan/E1.md`. E2: operonx-studio #285, write-up there in `docs/run_environment/README.md` — the picker is on Runs and Monitor, one choice per project shared by both; score trends on Monitor are not filtered (a score does not carry its run's environment). E3: callbot `refactor/operonx-studio` `0e59f37` — the four env files name their environment, operonx >= 1.51.0, `pytest` records locally (`OPERONX_TRACE=local`) and says `test`. **Left to the owner:** deploy (staging first; the first start on 1.51 adds the column), then run the callbot's `scripts/label_trace_environment.py .env_prod --apply` once (labels the older checkout runs `dev`; tested on a throwaway ClickHouse), and drop the three empty `callbot_traces_{prod,staging,dev}` databases.
 
 ## 0. The rule
 
