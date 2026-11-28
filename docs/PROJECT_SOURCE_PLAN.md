@@ -1,4 +1,4 @@
-# Project source plan: the folder comes from GitHub, the `.env` from studio's state
+# Project source plan: the folder comes from git, the `.env` from studio's state
 
 Status: **not started** (written 2026-11-28). Repositories: operonx-studio (most of it), Operon (S5 only).
 Pictures: [the flow](https://claude.ai/artifact/YVWrqt8zP2bnnnBF85TUSR) (it still shows secrets in
@@ -11,7 +11,7 @@ the layout changes, and every CLI keeps working on it. What changes is where the
 `.env` come from on a hosted studio:
 
 ```text
-code        GitHub repo                        studio clones it
+code        a git remote (any host)            studio clones it
 .env        ~/.operonx/secrets/, outside it    studio copies it into the clone
 run data    ClickHouse / Postgres              as today
 ```
@@ -34,6 +34,8 @@ No new database. Studio's state stays one folder (`OPERONX_STUDIO_STATE_DIR`, de
 | Other code reads the project's `.env` from disk | `operonx/prompt_store.py` `dsn_of`, `operonx.bootstrap()` |
 | Studio already keeps git worktrees per task | `~/.operonx/worktrees/` |
 | `~/.operonx/projects.json` in the live state holds `/tmp/pytest-…` paths | a test writes to the real state dir |
+| Projects are not all on GitHub: callbot is on `gitlab.tguru.vn` | `git remote` |
+| callbot has one env file per environment, and they are **tracked in git**: `.env_dev`, `.env_staging`, `.env_prod`, `.env_test`. Two secret names hold a value in them (`LANGFUSE_SECRET_KEY`, `CH_TRACES_PASSWORD`) | `git ls-files` |
 
 Three decisions follow:
 
@@ -46,7 +48,7 @@ Three decisions follow:
 ## 2. After
 
 ```text
-GitHub: org/callbot                      the standard layout, unchanged
+git remote: org/callbot                  the standard layout, unchanged
 ├── operonx.toml                         + [environments.<name>] url = "…"   (S5, optional)
 ├── resources.yaml  pyproject.toml
 ├── app/  src/  prompts/  datasets/  tests/
@@ -58,8 +60,8 @@ GitHub: org/callbot                      the standard layout, unchanged
 └── secrets/<project-id>/<environment>.env     0600; dev.env by default
 ```
 
-One setting, an env var of the studio process: `OPERONX_STUDIO_GITHUB_TOKEN` (clone and push over
-HTTPS). The project id of a cloned project is a digest of the repo URL, so it is the same on any
+Access is one token per git host, in `~/.operonx/secrets/git-tokens.env` (0600): a line
+`github.com=…`, a line `gitlab.tguru.vn=…`. Studio clones and pushes over HTTPS with it. The project id of a cloned project is a digest of the repo URL, so it is the same on any
 server.
 
 ## 3. Phases
@@ -70,8 +72,8 @@ Each phase ships on its own and leaves studio working.
 |---|---|---|
 | **S1** | Secrets outside the project. The existing env screen saves to `secrets/<id>/<environment>.env` and copies it into the project as `.env`; an environment picker; a "used by" column and missing names from `resources.yaml` and `.env.example`. | A secret set in studio survives deleting the project folder. Values never appear in a response or a log. |
 | **S2** | Add a project by repo URL. Clone into `workspaces/`, record the URL in `studio.json`, show the missing secrets. | callbot added from its URL on an empty state dir runs a graph. |
-| **S3** | Branches. Branch picker, Pull, Save (local commit on a work branch), Push (a button; never the default branch), link to open a pull request. | An edit made in studio arrives on GitHub as a branch, only after Push. |
-| **S4** | Move the current projects over: add each by URL, copy its `.env` to `secrets/` once. Fix the test that writes `projects.json` into the real state dir. | The six projects open from `workspaces/`; the old folders are no longer read. |
+| **S3** | Branches. Branch picker, Pull, Save (local commit on a work branch), Push (a button; never the default branch), link to open a pull request (GitHub) or merge request (GitLab). | An edit made in studio arrives on the remote as a branch, only after Push. |
+| **S4** | Move the current projects over: add each by URL, copy its `.env` to `secrets/` once (callbot: its four `.env_<name>` files, then untrack them and rotate the two secrets that were committed). Fix the test that writes `projects.json` into the real state dir. | The six projects open from `workspaces/`; the old folders are no longer read. |
 | **S5** | Deployment status, read only. Operon: `describe()` reports the git commit and the version; `operonx.toml` may name a URL per environment. Studio: asks each URL and shows commit, age, health. | `callbot · staging · <commit> · healthy` is shown; an environment with no URL shows "not deployed". |
 
 Defaults: a new project has one environment, `dev`, with no URL, and runs inside studio. No branch
@@ -82,13 +84,13 @@ is assumed to mean an environment.
 - **Secrets in Postgres.** Worth it when there is a second studio server, a need to record who
   changed a secret, or users who must not have shell access to the server. None holds today.
 - Studio does not deploy. Each project's CI/CD does; a standard deploy template is a later plan.
-- A GitHub App. One token is enough for one team.
+- A GitHub App or OAuth. One token per host is enough for one team.
 - A Postgres backend for the resource hub.
 
 ## 5. Risks
 
 | Risk | Answer |
 |---|---|
-| Secrets are plain files on the server | As today, but in one 0600 folder outside every repo. S2 refuses a repo whose `.gitignore` does not cover `.env`. |
+| Secrets are plain files on the server | As today, but in one 0600 folder outside every repo. S2 warns when a repo tracks a `.env*` file other than `.env.example`. |
 | The state folder is lost | It is small: back up `studio.json` and `secrets/`. Clones are not backed up. |
 | Two people edit the same branch in studio | They share the clone, as they share the folder today. Not solved here. |
